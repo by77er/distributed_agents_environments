@@ -69,6 +69,7 @@ const LABELS: Record<string, string> = {
   "trainer.segments_per_step": "segments a step",
   "trainer.tokens_per_step": "tokens a step",
   "limits.spend": "spend limit",
+  group_size: "episodes a group",
   "objective.preset": "objective",
   self_judging: "self-judging",
 };
@@ -78,7 +79,7 @@ const OWN = new Set(["kind", "name", "environment", "start", "bookmark", "groups
 
 /** Run settings' defaults, as the schema has them: a setting at its default is left out. */
 export const DEFAULTS: Record<string, unknown> = {
-  groups: 100, groups_per_step: 4, seed: 0, episodes_at_once: 6, max_lag: 1, "evals.every": 1, "evals.episodes": null,
+  groups: 100, groups_per_step: 4, group_size: null, seed: 0, episodes_at_once: 6, max_lag: 1, "evals.every": 1, "evals.episodes": null,
   "limits.spend": null, self_judging: false, "objective.preset": "default", "trainer.channel": "policy",
 };
 

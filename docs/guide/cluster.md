@@ -158,7 +158,10 @@ what was sampled) or per `hour`. Where the price depends on the model, `costs` g
 (`spend_of`) is one step's on its metered parts: every trained token at a metered trainer's price for the model, and
 the sampled and prompt tokens at the dearest metered provider's prices, prompts uncached. An eval's is the whole
 eval's: every episode of the suite's starts, each turn's thinking and answer budgets sampled and its prompt read at the
-dearest metered provider of the channel it plays.
+dearest metered provider of the channel it plays. Their tokens are the episodes (for a step, the groups it waits for times
+the episodes of a group), times the turns an episode plays and the samples a turn takes, as the environment's
+description says them (`turns`, `samples_per_turn`: every agent of a team samples each turn), each sample its
+thinking and answer budgets and its `prompt_tokens`.
 
 **Metered or scheduled.** Each inference provider and trainer says how it is allocated (`allocation`), by default as
 its kind is: `tinker` and `api` are `metered`; `vllm`, `vllm-servers`, `runpod-inference`, `runpod-trainer`, `lora` and
@@ -336,6 +339,7 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `name` | | The run's name (never kept in a preset) |
 | `environment` | | `module:name` |
 | `groups`, `seed`, `episodes_at_once` | 100, 0, 6 | |
+| `group_size` | the objective's | Episodes of each group a training run plays |
 | `start`, `bookmark` | | The checkpoint it starts from; a bookmark it carries |
 | `trainer.provider`, `trainer.channel`, `trainer.model` | , `policy`, the trained channel's model | The trainer, the trained channel, what it trains over |
 | `weights` | what the trainer makes | `lora` or `full`: whether it trains a LoRA or full weights. It decides which trainers (Tinker trains LoRAs only), which providers (a LoRA needs adapters at the run's rank; full weights need full-weight reload, never Tinker's sampler) and which bridges fit |

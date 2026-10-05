@@ -60,8 +60,11 @@ def test_training_never_draws_an_eval_start() -> None:
         train_start(coins, rows[0], random.Random(0), held | {start_key({"row": "heads-first", "face": "tails"})})
 
 
-def test_a_description_says_what_results_say() -> None:
+def test_a_description_says_what_results_say_and_what_an_episode_samples() -> None:
     said = Description(rewards=(0.0, None), saturated=True, duration="turns").to_json()
     assert said == {
         "rewards": [0.0, None], "solved": True, "saturated": True, "duration": "turns", "observations": None,
+        "turns": None, "samples_per_turn": 1.0, "prompt_tokens": None,
     }  # fmt: skip
+    team = Description(turns=40.0, samples_per_turn=3.0, prompt_tokens=1500).to_json()
+    assert (team["turns"], team["samples_per_turn"], team["prompt_tokens"]) == (40.0, 3.0, 1500)

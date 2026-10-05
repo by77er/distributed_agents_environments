@@ -228,12 +228,12 @@ function Form({ offers, system }: { offers: Offers; system: System }) {
       <Card title="Budgets">
         <div className="field-row">
           {([
-            ["Groups", "groups"], ["Groups a step", "groups_per_step"], ["Episodes at once", "episodes_at_once"],
+            ["Groups", "groups"], ["Groups a step", "groups_per_step"], ["Episodes a group", "group_size"], ["Episodes at once", "episodes_at_once"],
             ["Thinking tokens", `channels.${trained}.thinking_tokens`], ["Answer tokens", `channels.${trained}.answer_tokens`], ["Max lag", "max_lag"],
           ] as const).map(([label, key]) => (
             <Field key={key} label={label} keys={[key]} refusals={refusals} marked={marked(key)}>
               <input type="number" min={key === "max_lag" ? 0 : 1} value={text(settings[key])} placeholder={shown(defaultOf(offers, key.replace(/^channels\.[^.]+\./, "channels.*."))) || "none"}
-                onChange={event => set({ [key]: key.endsWith("_tokens") && !event.target.value.trim() ? null : asNumber(event.target.value) })} />
+                onChange={event => set({ [key]: (key.endsWith("_tokens") || key === "group_size") && !event.target.value.trim() ? null : asNumber(event.target.value) })} />
             </Field>
           ))}
         </div>

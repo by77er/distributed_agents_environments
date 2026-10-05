@@ -113,6 +113,10 @@ def _description(environment: Environment) -> Finding:
     says = " and ".join(name for name in ("solved", "saturated") if getattr(description, name)) or "neither"
     took = f"duration in {description.duration}" if description.duration else "no duration"
     shown = f"; observations shown as {description.observations}" if description.observations else ""
+    if description.turns is not None:
+        prompts = f" of {description.prompt_tokens} prompt tokens" if description.prompt_tokens else ""
+        shown += (f"; up to {description.turns:g} turns an episode, {description.samples_per_turn:g} samples{prompts} "
+                  "a turn")  # fmt: skip
     said = f"version {version}; rewards in {_range(description)}; results say {says}; {took}{shown}"
     return Finding("description", True, said)
 

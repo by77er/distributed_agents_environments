@@ -812,6 +812,16 @@ def test_only_the_metered_parts_are_spent_by_the_step() -> None:
     assert spend_of(acceptance, CLUSTER, grouped) == spend_of(acceptance, CLUSTER, ENVIRONMENT)
 
 
+def test_every_slot_that_samples_a_turn_and_the_runs_group_size_are_spent() -> None:
+    settings = RunSettings({**ACCEPTANCE, "channels.policy.provider": "tinker"})
+    one = spend_of(settings, CLUSTER, ENVIRONMENT)
+    team = spend_of(settings, CLUSTER, dataclasses.replace(ENVIRONMENT, samples_per_turn=3))  # (three agents a turn)
+    assert team.parts == {name: pytest.approx(3 * dollars) for name, dollars in one.parts.items()}
+    eight = spend_of(RunSettings({**ACCEPTANCE, "channels.policy.provider": "tinker", "group_size": 8}), CLUSTER,
+                     dataclasses.replace(ENVIRONMENT, samples_per_turn=3))  # fmt: skip
+    assert eight.dollars == pytest.approx(2 * (team.dollars or 0.0)), "the run's group size over the environment's"
+
+
 def test_a_run_on_metered_parts_with_no_spend_limit_is_told_so() -> None:
     assert noted("spend", findings(without=("limits.spend",))) == [
         "tinker-lora is metered, and no limits.spend bounds what the run spends"

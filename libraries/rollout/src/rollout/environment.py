@@ -67,7 +67,8 @@ class Start:
 
 @dataclass(frozen=True)
 class Description:
-    """What an environment's results say, for whatever shows or compares them."""
+    """What an environment's results say, for whatever shows or compares them; and how much an episode samples, for
+    estimating a run's spend (`turns`, `samples_per_turn`, `prompt_tokens`)."""
 
     rewards: tuple[float | None, float | None] = (0.0, 1.0)
     """The range an episode's reward falls in (None: no bound on that side)."""
@@ -79,6 +80,12 @@ class Description:
     """What a result's `duration` counts (`turns`, `minutes of game time`); None: its results say no duration."""
     observations: str | None = None
     """How its observations are shown (`minecraft`, say); None: as text."""
+    turns: float | None = None
+    """The turns an episode plays, at most, on average (its turn budgets, say); None: not said."""
+    samples_per_turn: float = 1.0
+    """The samples a turn takes, on average: one for each model slot that samples in it (each agent of a team)."""
+    prompt_tokens: int | None = None
+    """A sample's prompt tokens, on average; None: not said."""
 
     def to_json(self) -> dict[str, JsonValue]:
         said = asdict(self)

@@ -187,7 +187,7 @@ export const defaultOf = (offers: Offers, key: string): unknown => offers.schema
 /** The settings of a channel the form shows a field for. */
 const CHANNEL_FIELDS = ["provider", "providers", "model", "renderer", "mode", "follows", "lag", "thinking_tokens", "answer_tokens"];
 const OWN = new Set([
-  "environment", "weights", "trainer.provider", "trainer.model", "start", "bookmark", "name", "groups", "groups_per_step",
+  "environment", "weights", "trainer.provider", "trainer.model", "start", "bookmark", "name", "groups", "groups_per_step", "group_size",
   "episodes_at_once", "max_lag", "evals.suite", "evals.every", "evals.episodes", "limits.spend", "self_judging", "objective.preset",
 ]);
 

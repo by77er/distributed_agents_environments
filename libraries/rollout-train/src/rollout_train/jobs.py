@@ -846,6 +846,7 @@ async def ran(run: Run) -> None:
 
 
 async def _train(run: Run) -> None:
+    from rollout_train.algorithm import algorithm_for
     from rollout_train.evals import Schedule, environments_of, suite_of
     from rollout_train.loop import train
     from rollout_train.settings import desired_settings_of
@@ -888,7 +889,8 @@ async def _train(run: Run) -> None:
                 environment, live.trainer, run.checkpoints, start=live.origin, channel=live.channel,
                 base=str(run.settings.get(f"channels.{live.channel}.model")), directory=live.directory / "checkpoints",
                 publish=live.publish, groups=int(cast(int, run.settings["groups"])),
-                groups_per_step=int(cast(int, run.settings["groups_per_step"])),
+                groups_per_step=int(cast(int, run.settings["groups_per_step"])), algorithm=algorithm_for(
+                    objective_of(live.trainer), cast(int | None, run.settings["group_size"])),
                 max_lag=int(cast(int, run.settings["max_lag"])), seed=int(cast(int, run.settings["seed"])),
                 episodes_at_once=int(cast(int, run.settings["episodes_at_once"])), binding=live.binding(environment),
                 run=run.run.id, started=run.started, hooks=[live.feed], kept=live.bookmarked, made=live.made,

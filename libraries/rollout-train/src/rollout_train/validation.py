@@ -140,8 +140,10 @@ class EnvironmentFacts:
     """Those of its slots that judge: bound to a channel serving the run's own checkpoints only with `self_judging`."""
     episodes_per_group: int | None = None
     turns_per_episode: float | None = None
+    samples_per_turn: float = 1.0
+    """Samples a turn takes: one for each model slot that samples in it (each agent of a team)."""
     prompt_tokens: int | None = None
-    """Prompt tokens of a turn, on average: with the two above, what a step's spend is estimated from."""
+    """Prompt tokens of a sample, on average: with the three above, what a step's spend is estimated from."""
 
 
 @dataclass(frozen=True)
@@ -1041,7 +1043,8 @@ def _eval_spend(
     thinking, answer = settings[f"channels.{channel}.thinking_tokens"], settings[f"channels.{channel}.answer_tokens"]
     sampled = prompts = 0.0
     for entry in suite.entries:
-        turns = entry.starts * (asked if isinstance(asked, int) else entry.episodes) * environment.turns_per_episode
+        episodes = entry.starts * (asked if isinstance(asked, int) else entry.episodes)
+        turns = episodes * environment.turns_per_episode * environment.samples_per_turn  # (each a sample)
         think = entry.thinking_tokens if entry.thinking_tokens is not None else thinking
         reply = entry.answer_tokens if entry.answer_tokens is not None else answer
         if not isinstance(think, int) and not isinstance(reply, int):
@@ -1065,7 +1068,8 @@ def spend_of(
     """A run's estimated spend (`Spend`), or why it cannot be estimated: one step of a training run, or a whole eval
     (from the suite's starts in `ledger`); not for other runs; for a training run, not without a trainer; not where the
     environment's numbers or the budgets are unknown, or a metered part is priced by the hour. Episodes a group are
-    the environment's, else the objective's group size."""
+    the run's `group_size`, else the environment's, else the objective's group size; each turn of an episode is as many
+    samples as the environment says (`samples_per_turn`: every agent of a team samples each turn)."""
     if settings.kind == "eval":
         return _eval_spend(settings, cluster, environment, ledger)
     trained = settings.trained
@@ -1081,7 +1085,8 @@ def spend_of(
         return Spend(0.0)
     if environment is None:
         return Spend(None, why="the environment's numbers are not known here")
-    episodes = environment.episodes_per_group
+    size = settings["group_size"]
+    episodes = size if isinstance(size, int) else environment.episodes_per_group
     if episodes is None:
         try:
             episodes = algorithm_for(objective_in(settings)).group_size
@@ -1093,9 +1098,10 @@ def spend_of(
     if not isinstance(thinking, int) and not isinstance(answer, int):
         return Spend(None, why=f"channel {trained} has no thinking or answer budget")
     groups = settings["groups_per_step"]
-    turns = (groups if isinstance(groups, int) else 4) * episodes * environment.turns_per_episode
-    sampled = turns * ((thinking if isinstance(thinking, int) else 0) + (answer if isinstance(answer, int) else 0))
-    prompts = turns * (environment.prompt_tokens or 0)
+    episodes_per_step = (groups if isinstance(groups, int) else 4) * episodes
+    samples = episodes_per_step * environment.turns_per_episode * environment.samples_per_turn
+    sampled = samples * ((thinking if isinstance(thinking, int) else 0) + (answer if isinstance(answer, int) else 0))
+    prompts = samples * (environment.prompt_tokens or 0)
     parts: dict[str, float] = {}
     if trainer.allocation == "metered":
         priced = trainer.cost_of(str(settings.get("trainer.model") or model))

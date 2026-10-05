@@ -130,9 +130,10 @@ def declared(environment: "Environment") -> tuple[frozenset[str], EnvironmentFac
 async def environment_facts(
     environment: str | None, cluster: Cluster, ledger: Ledger, *, loaded: "Environment | None" = None
 ) -> EnvironmentFacts | None:
-    """What validation reads of an environment: imported here (`loaded`, where the caller has it), its sandboxes and
-    slots; a published one's sandboxes as its version recorded them, or that there is no such version. None where it is
-    not known here: an environment whose Python is a project of its own, which this process does not import."""
+    """What validation reads of an environment: imported here (`loaded`, where the caller has it), its sandboxes, slots
+    and what an episode samples (its description's `turns`, `samples_per_turn`, `prompt_tokens`); a published one's
+    sandboxes and what an episode samples as its version recorded them, or that there is no such version. None where it
+    is not known here: an environment whose Python is a project of its own, which this process does not import."""
     if not environment:
         return None
     if is_published(environment):
@@ -146,7 +147,8 @@ async def environment_facts(
         kinds = (
             frozenset(str(each) for each in cast(list[Any], listed)) if isinstance(listed, list) else frozenset[str]()
         )
-        return EnvironmentFacts(environment, sandboxes=kinds)
+        said = version.description.get("description")
+        return EnvironmentFacts(environment, sandboxes=kinds, **_sampling(said if isinstance(said, dict) else {}))
     python = cluster.environments.get(environment)
     if loaded is None and (python is None or python.project is not None):
         return None
@@ -167,7 +169,19 @@ def _facts(name: str, environment: "Environment") -> EnvironmentFacts:
     except Exception as error:  # (a program that cannot be made: it does not load)
         return EnvironmentFacts(name, loads=False, why=f"{type(error).__name__}: {error}")
     return EnvironmentFacts(name, sandboxes=facts.sandboxes, slots=facts.slots, untrained=facts.untrained,
-                            judges=facts.judges)  # fmt: skip
+                            judges=facts.judges, **_sampling(environment.description.to_json()))  # fmt: skip
+
+
+def _sampling(description: Mapping[str, Any]) -> dict[str, Any]:
+    """What an episode samples, as an environment's description says it (`Description.to_json`): what a step's spend
+    is estimated from."""
+    turns, samples, prompt = (description.get(key) for key in ("turns", "samples_per_turn", "prompt_tokens"))
+    number = (int, float)
+    return {
+        "turns_per_episode": float(turns) if isinstance(turns, number) else None,
+        "samples_per_turn": float(samples) if isinstance(samples, number) else 1.0,
+        "prompt_tokens": int(prompt) if isinstance(prompt, number) else None,
+    }
 
 
 async def ledger_facts(

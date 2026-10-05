@@ -140,6 +140,7 @@ KEYS: tuple[Key, ...] = (
     Key("name", _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"),
     Key("environment", _S + _N, None, False, SAMPLING, "The environment, `module:name`"),
     Key("groups", _I, 100, False, TRAINED | {"check"}, "Groups it plays", least=1),
+    Key("group_size", _I + _N, None, False, TRAINED, "Episodes of each group; none: its objective's", least=1),
     Key("seed", _I, 0, False, EVERY, "The seed its draws start from", least=0),
     Key("start", _S + _N, None, False, EVERY, "The checkpoint it trains from or evaluates; none: the base model"),
     Key("bookmark", _S + _N, None, False, TRAINING, "A bookmark it moves to each checkpoint it makes"),
