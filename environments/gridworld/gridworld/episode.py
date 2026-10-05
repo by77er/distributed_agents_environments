@@ -3,11 +3,13 @@
 Each agent is a model slot of its own (`agent-1` to `agent-4`, of which the first as many as the start has agents
 play) and plays under a name the start's seed draws. Each turn every agent is shown the system prompt and its latest
 observation, all agents sample at once (`run.gather`), and the game plays the first tool call of each reply. The
-episode ends when every final plate is pressed at once (solved, reward 1 for every agent) or when the turn budget is
-spent (reward 0).
+episode ends when every final plate is pressed at once (solved) or when the turn budget is spent. Every agent gets the
+same reward, from 0 to 1 (`gridworld.scoring`): half for solving, half for progress through the level's stages (its
+doors that open for good, then the share of its final plates pressed at once).
 
-The episode's result says `solved`, `duration` (turns played), how it ended, which doors opened and when, the actions
-taken by kind (and the moves that failed), and the chat.
+The episode's result says `solved`, `saturated` (solved: nothing was left to earn), `duration` (turns played), how it
+ended, the reward's parts (`reward_parts`, `progress`), the most final plates pressed at once (`most_pressed`), which
+doors opened and when, the actions taken by kind (and the moves that failed), and the chat.
 """
 
 from collections.abc import Mapping
@@ -18,6 +20,7 @@ from pydantic import JsonValue
 from gridworld.game import Game, names_for
 from gridworld.level import generate
 from gridworld.prompts import TOOLS, observe, parse, system_prompt
+from gridworld.scoring import scored
 from rollout.contracts import Message
 from rollout.harness import ModelSlot, Program, RunContext
 
@@ -64,17 +67,21 @@ class GridEpisode(Program):
                 )
             )
             game.step([parse(reply) for reply in replies])
-        reward = 1.0 if game.solved else 0.0
+        score = scored(game)
         for slot in self.team:  # the team is rewarded together
-            run.reward(reward, slot=slot)
+            run.reward(score.reward, slot=slot)
         result: dict[str, JsonValue] = {
             "solved": game.solved,
+            "saturated": game.solved,
             "duration": game.turn,
             "ended": "every final plate pressed" if game.solved else "turns",
             "layout": self.layout,
             "agents": self.agents,
             "seed": self.seed,
             "team": list(self.names),
+            "progress": score.progress,
+            "reward_parts": dict(score.parts),
+            "most_pressed": game.most_pressed,
             "opened": dict(game.opened),
             "actions": dict(game.counts),
             "chat": [[line.turn, self.names[line.speaker], line.message] for line in game.chat],

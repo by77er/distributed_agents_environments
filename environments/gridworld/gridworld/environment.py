@@ -47,8 +47,8 @@ ROWS = [
 @dataclass(frozen=True)
 class Gridworld:
     program: ProgramReference = field(default_factory=lambda: ProgramReference(program=register(GridEpisode)))
-    version = "1"
-    description = Description(rewards=(0.0, 1.0), solved=True, duration="turns")
+    version = "2"
+    description = Description(rewards=(0.0, 1.0), solved=True, saturated=True, duration="turns")
 
     def rows(self) -> Sequence[Row]:
         return ROWS

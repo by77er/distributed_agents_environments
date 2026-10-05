@@ -6,7 +6,8 @@ one of them gets there, chosen by the level's seed and the turn, and the others 
 square whose occupant stays put, and two agents cannot pass through each other. Then the world answers what the
 agents are standing on: a lever stepped on is pulled and opens its door for good, a door's plates all pressed at once
 open it for good, and a gate is open while one of its plates is pressed or someone stands in it. The team wins when
-every final plate is pressed at the end of a turn.
+every final plate is pressed at the end of a turn; the most final plates pressed at once at the end of a turn is kept
+(`most_pressed`), for the reward's progress (`gridworld.scoring`).
 """
 
 import random
@@ -76,6 +77,8 @@ class Game:
     counts: Counter[str] = field(default_factory=Counter[str])
     """Actions taken, by kind, and moves that failed (`blocked`)."""
     solved: bool = False
+    most_pressed: int = 0
+    """The most final plates pressed at once at the end of a turn."""
 
     def __post_init__(self) -> None:
         if len(self.names) != len(self.level.starts):
@@ -179,7 +182,9 @@ class Game:
                 outcomes[index] += " Only your first call counted."
         self.outcomes = outcomes
         self.events = self._world(gates)
-        self.solved = bool(self.level.final) and all(map(self.pressed, self.level.final))
+        pressed = sum(map(self.pressed, self.level.final))
+        self.most_pressed = max(self.most_pressed, pressed)
+        self.solved = bool(self.level.final) and pressed == len(self.level.final)
 
     def _world(self, gates: dict[str, bool]) -> list[str]:
         """Pull the levers stepped on and open the doors whose plates are all pressed; what changed."""

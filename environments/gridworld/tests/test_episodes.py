@@ -1,5 +1,6 @@
 """Whole episodes through the real program on the local runner: the scripted team solves a start of every row and
-every agent is rewarded, a team that never acts runs out of turns, and `rollout env check` passes."""
+every agent is rewarded in full, a team that never acts runs out of turns with nothing, and `rollout env check`
+passes."""
 
 import random
 
@@ -45,8 +46,12 @@ async def play(
 async def test_the_scripted_team_solves_every_row_and_every_agent_is_rewarded(row: Row) -> None:
     result, rewards, events = await play(row, ScriptedTeam())
     agents = int(str(row.parameters["agents"]))
-    assert result["solved"] is True and result["ended"] == "every final plate pressed"
+    assert result["solved"] is True and result["saturated"] is True and result["ended"] == "every final plate pressed"
     assert rewards == dict.fromkeys(TEAM[:agents], 1.0)
+    assert result["progress"] == 1.0 and result["most_pressed"] == agents
+    parts = result["reward_parts"]
+    assert isinstance(parts, dict) and parts["solved"] == 0.5
+    assert sum(float(str(value)) for value in parts.values()) == pytest.approx(1.0, abs=1e-3)
     duration = result["duration"]
     assert isinstance(duration, int) and 0 < duration <= int(str(row.parameters["turns"]))
     doors = {"open": 0, "door": 1, "gate": 1, "vault": 2}[str(row.parameters["layout"])]  # (opened for good: not gates)
@@ -63,6 +68,7 @@ async def test_a_team_that_never_acts_runs_out_of_turns_unrewarded() -> None:
     result, rewards, _ = await play(row, endpoint)
     assert result["solved"] is False and result["ended"] == "turns" and result["duration"] == turns
     assert rewards == {"agent-1": 0.0, "agent-2": 0.0}
+    assert result["saturated"] is False and result["progress"] == 0.0 and result["most_pressed"] == 0
     assert result["actions"] == {"none": 2 * turns, "blocked": 0}
     assert len(endpoint.requests) == 2 * turns
     first = endpoint.requests[0]
