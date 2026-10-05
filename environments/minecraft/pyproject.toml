@@ -12,6 +12,9 @@ dependencies = [
 [project.scripts]
 minecraft-team = "minecraft_team.cli:main"
 
+[project.entry-points."rollout.environments"]  # what an import from git takes (docs/guide/publishing.md)
+minecraft-team = "minecraft_team.environment:environment"
+
 [tool.uv.sources]
 rollout = { workspace = true }
 

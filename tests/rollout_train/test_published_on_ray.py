@@ -1,6 +1,7 @@
 """An environment imported from git, on the session's own Ray: checked in a job in its runtime environment (its source
 fetched by Ray, its module imported from it, `rollout` and `rollout-train` the platform's), then trained on by a run
-submitted by its settings as a Ray job in that runtime environment, whose start records the version."""
+submitted by its settings as a Ray job in that runtime environment, whose start records the version; and the
+workspace's Minecraft team, imported from a repository of its files and checked there."""
 
 import asyncio
 from pathlib import Path
@@ -18,6 +19,9 @@ from rollout_train.stores import Stores
 from rollout_train.submitting import followed, submit
 from tests.local_ray import LocalRay
 from tests.rollout_train.sources import repository, tiny
+
+MINECRAFT = Path(__file__).resolve().parents[2] / "environments" / "minecraft"
+LEFT_OUT = {"node_modules", "__pycache__", ".pytest_cache", ".ruff_cache"}
 
 CLUSTER = """
 name = "test"
@@ -88,3 +92,28 @@ async def test_an_imported_environment_is_checked_and_trained_on_by_settings_in_
     assert start["environment"] == version.reference and start["launch"] == launch.id
     assert start["published"]["version"] == version.version and start["published"]["commit"] == version.commit
     assert len(await stores.ledger.read(table(launch.run, RESULTS))) == 2
+
+
+async def test_the_minecraft_team_is_imported_from_git_and_checked_in_its_runtime_environment(
+    tmp_path: Path, local_ray: LocalRay
+) -> None:
+    files = {
+        path.relative_to(MINECRAFT).as_posix(): path.read_text()
+        for path in sorted(MINECRAFT.rglob("*"))
+        if path.is_file() and not LEFT_OUT & set(path.relative_to(MINECRAFT).parts) and path.suffix != ".pyc"
+    }
+    source = repository(tmp_path / "source", files, under="environments/minecraft")
+    path = tmp_path / "cluster.toml"
+    path.write_text(CLUSTER.format(root=tmp_path, address=local_ray.address, jobs=local_ray.dashboard))
+    versions = environment_versions_of(Stores.open(load(path)).ledger)
+    assert versions is not None
+    made = await publish(
+        Source(str(source), "main", "environments/minecraft"), versions=versions,
+        blobs=FileBlobStore(tmp_path / "blobs"), jobs=local_ray.dashboard, scratch=tmp_path / "scratch",
+    )  # fmt: skip
+    version = made.version
+    assert (version.name, version.entry_point) == ("minecraft-team", "minecraft_team.environment:environment")
+    assert all(each["passed"] for each in version.check) and "uv" not in version.runtime_env
+    (episode,) = [each for each in version.check if each["check"] == "episode"]
+    assert episode["flagged"] and "minecraft sandboxes" in str(episode["said"])  # (its worlds are the cluster's pool)
+    assert version.description["sandboxes"] == ["minecraft"]

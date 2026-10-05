@@ -35,8 +35,8 @@ it sees (the map included), what it thinks, what it does and what comes back
 ([monitor](../libraries/rollout-train/monitor.md)).
 
 Servers need `java` on the path and episodes need `node` and `npm`. Paper, a JDK to compile the plugin if there is no
-`javac`, and the harness's packages are downloaded on first use. Starting a server accepts the Minecraft EULA for a
-local, offline server.
+`javac`, and the harness's packages are downloaded on first use ([where they are kept](#imported-from-git)). Starting a
+server accepts the Minecraft EULA for a local, offline server.
 
 ## The pieces
 
@@ -392,6 +392,31 @@ sleeps, the trainer) is kept inside it by these:
 | Disk, not memory | Servers, templates and downloads are under `~/.cache/rollout/minecraft` (a JDK, if one is downloaded, under `~/.cache/rollout/jdk`), and a run's directory under the cluster config's `[scratch]`, on disk (`/tmp` may be memory) |
 | Listening ports | A server's ports are chosen just before Java starts, from outside the range the system gives outgoing connections, and never one this process has given to a server that has yet to listen. A server must answer its health check by its own name; a start that fails is tried once more with other ports |
 | Evidence | In a run of two consecutive updates, logged every two seconds, available memory never fell below 7.2 GiB |
+
+## Imported from git
+
+The project declares its environment as an entry point, `minecraft-team` (`minecraft_team.environment:environment`),
+so a cluster can import it from a git repository like any other ([import an environment from
+git](../guide/publishing.md)): the repository's URL, a ref, and the subdirectory `environments/minecraft`. Its
+dependencies (`rollout`, `httpx`, `pyyaml`) are the platform's, so a version runs in the platform's Python with
+nothing built. The import's checks build its rows, starts and eval data; its episode is not played there, as its
+program declares a `minecraft` sandbox: that finding passes, flagged.
+
+A run on a version plays in the cluster's `[sandboxes.minecraft]` pool. Its job starts in the version's files, which
+come first on its path, so the provider the pool names (`minecraft_team.worlds:worlds`) is the version's own, with its
+plugin, configuration and harness. What those need beyond the version's files is made where the run runs, the first
+time an episode needs it, under `~/.cache/rollout` (the state volume, on the chart's cluster), each under a file lock
+so that episodes starting together make it once:
+
+| What | Where | Made |
+|---|---|---|
+| The harness's packages | `minecraft/harness/DIGEST/node_modules` | `npm ci` once per `package-lock.json` (DIGEST covers it and `package.json`): 470 MB, in seconds where npm's own cache holds them. Where the harness's own `node_modules` is installed beside its sources (a checkout after `npm ci`, the platform image's built-in copy), that is used |
+| Paper | `minecraft/paper/` | Downloaded once per version and build, checked against its SHA-256 |
+| A JDK, for `javac` | `jdk/` | Downloaded once where no `javac` is on the path (the platform image has a Java runtime only) |
+| The plugin | `minecraft/plugin/` | Compiled from the version's `plugin/` once per digest of its sources and the Paper version |
+| A template per world seed | `minecraft/templates/` | Generated once per seed and digest of `config/`: half a minute on 20 cores |
+
+The network is needed for the first three: the npm registry, PaperMC's downloads and Adoptium's.
 
 ## Reporting
 

@@ -107,6 +107,22 @@ def test_the_workspaces_gridworld_is_imported_by_the_environment_it_declares() -
     assert missing(found.dependencies) == []  # (it runs in the platform's Python: nothing to build)
 
 
+def test_the_workspaces_minecraft_team_is_imported_and_checked_without_playing_its_worlds() -> None:
+    environments = Path(__file__).resolve().parents[2] / "environments"
+    found = project_of(environments, "minecraft", None)
+    assert (found.name, found.entry_point, found.root) == (
+        "minecraft-team",
+        "minecraft_team.environment:environment",
+        "",
+    )
+    assert missing(found.dependencies) == []
+    said = report(found.entry_point)
+    assert said["loaded"] and all(each["passed"] for each in said["findings"]), said["findings"]
+    (episode,) = [each for each in said["findings"] if each["check"] == "episode"]
+    assert episode["flagged"] and "minecraft sandboxes" in episode["said"]  # (an import serves no worlds)
+    assert said["described"]["sandboxes"] == ["minecraft"] and len(said["described"]["rows"]) == 100
+
+
 def test_a_project_needing_another_python_is_refused(tmp_path: Path) -> None:
     files = {**TINY, "pyproject.toml": TINY["pyproject.toml"].replace(">=3.13", ">=4")}
     with pytest.raises(Refused, match="requires Python >=4"):

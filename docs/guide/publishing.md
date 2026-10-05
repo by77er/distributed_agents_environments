@@ -44,6 +44,18 @@ times and modes, so that the same files are the same bytes. It leaves out `.git`
 caches of pytest, mypy and ruff, compiled bytecode, and symbolic links; it holds 256 MiB at most. Data an environment
 reads goes in the project, read relative to its module (`Path(__file__).parent`).
 
+## What a version makes where it runs
+
+A version is its files: nothing built from them is in the zip (a repository does not hold `node_modules`, compiled
+jars or downloads). An environment that needs more than its Python makes it the first time it needs it, on the machine
+where it runs, into a cache keyed by what it is made from (a digest of its sources or its lock file), under a file lock
+so that episodes starting together make it once. On the chart's cluster that cache is on the state volume, which every
+pod mounts as `~/.cache/rollout`: it is made once per cluster, and versions made from the same sources share it.
+
+The [Minecraft team](../products/minecraft-team.md#imported-from-git) works so: its Node harness's packages are
+installed with `npm ci` once per `package-lock.json`, its plugin is compiled from the version's sources once per
+digest of them, and Paper's jar, a JDK and each world seed's template are made once.
+
 ## Dependencies on the platform
 
 The project's code runs beside the platform's: the run's training loop and runners import it in the same process. So
