@@ -24,7 +24,7 @@ import torch
 from torch import nn
 
 from rollout_lora.models import COPIED, local, multimodal
-from rollout_lora.policy import body, scored_with_entropy
+from rollout_lora.policy import body, scored_among, scored_with_entropy
 
 
 @dataclass
@@ -81,6 +81,16 @@ class FullPolicy:
         with torch.autocast("cuda", dtype=torch.bfloat16):
             hidden = body(self.model)(input_ids=ids).last_hidden_state[0]
             return scored_with_entropy(self.model, hidden, ids, positions, entropy=entropy)
+
+    def logprobs_among(
+        self, tokens: Sequence[int], positions: Sequence[int], candidates: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """`logprobs`, and the logprobs of `candidates[i]` (a row of token ids) at the i-th of `positions`."""
+        device = next(iter(self.model.parameters())).device
+        ids = torch.tensor([list(tokens)], device=device)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            hidden = body(self.model)(input_ids=ids).last_hidden_state[0]
+            return scored_among(self.model, hidden, ids, positions, candidates)
 
     def reference(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
         """`logprobs` under the frozen copy of the model trained over (no gradient)."""

@@ -21,7 +21,8 @@ A **policy gradient** (`policy_gradient`) of one segment: each token's surrogate
 from the advantage; less the entropy bonus. Its loss is the negative surrogate, reduced by `aggregate` (`reduced`)
 and divided by the minibatch's `units`. A **likelihood** (`likelihood`) is the advantage times the logprob, reduced
 likewise. A **preference** loss (`pair`, `labelled`) is a function of each side's sums (or means) of logprobs, a
-mean over the minibatch's items.
+mean over the minibatch's items. A **distillation** is `rollout_objectives.distillation`'s, which weighs tokens with the
+same importance weight (`importance_weight`) and KL penalty.
 """
 
 from collections.abc import Sequence
@@ -30,12 +31,14 @@ from dataclasses import dataclass
 import torch
 from torch.nn import functional
 
-from rollout_train.objectives import LIKELIHOOD, PREFERENCE, Objective
+from rollout_train.objectives import DISTILLATION, LIKELIHOOD, PREFERENCE, Objective
 
 __all__ = [
     "SUMS",
+    "TALLIED",
     "Scored",
     "Terms",
+    "importance_weight",
     "kl_estimate",
     "labelled",
     "likelihood",
@@ -78,6 +81,17 @@ class Terms:
     chosen: float = 0.0
     rejected: float = 0.0
     """Sums of each pair's `rho_chosen` and `rho_rejected`."""
+    distilled: float = 0.0
+    """Sampled tokens of distilled segments."""
+    scored: float = 0.0
+    """Of those, the tokens a teacher scored."""
+    gap: float = 0.0
+    """The sum, over the scored tokens, of the policy's logprob now less the teacher's: an estimate of KL(policy ||
+    teacher) on the sampled tokens, times their number, where the policy sampled them."""
+    divergence: float = 0.0
+    """The sum of the top-k divergence over the scored tokens."""
+    advantage_clipped: float = 0.0
+    """Scored tokens whose distillation advantage was clipped."""
 
 
 def units(objective: Objective, tokens: int) -> float:
@@ -107,6 +121,30 @@ def kl_estimate(estimator: str, logprobs: torch.Tensor, target: torch.Tensor) ->
     return torch.exp(log_r) - 1 - log_r
 
 
+def importance_weight(
+    objective: Objective, old: torch.Tensor, behavior: torch.Tensor | None
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Each sampled token's importance weight as `importance.correction` makes it (a constant), and the weight before
+    truncation or masking; none for no correction. A mask (masked importance sampling; NeMo's `icepop`) zeroes a token
+    whose weight is outside `floor` .. `cap`, keeping the weight of those within."""
+    importance = objective.importance
+    if importance.correction == "none":
+        return None, None
+    if behavior is None:
+        raise ValueError("an importance correction needs each sampled token's behaviour logprob")
+    old, behavior = old.detach(), behavior.detach()
+    if importance.level == "token":
+        raw = torch.exp(old - behavior)
+    else:  # (one for the segment: the geometric mean of its tokens')
+        raw = torch.exp((old - behavior).mean()).expand_as(old)
+    if importance.correction == "untruncated":
+        return raw, raw
+    if importance.correction == "truncate":
+        return raw.clamp(max=importance.cap), raw
+    kept = (raw >= importance.floor) & (raw <= importance.cap)
+    return torch.where(kept, raw, torch.zeros_like(raw)), raw
+
+
 def policy_gradient(
     objective: Objective,
     logprobs: torch.Tensor,
@@ -121,25 +159,8 @@ def policy_gradient(
     and each position's entropy (for an entropy bonus)."""
     tokens = float(logprobs.numel())
     old = old.detach()
-    importance, clip, kl = objective.importance, objective.clip, objective.kl
-
-    weight: torch.Tensor | None = None
-    raw: torch.Tensor | None = None
-    if importance.correction != "none":
-        if behavior is None:
-            raise ValueError("an importance correction needs each sampled token's behaviour logprob")
-        behavior = behavior.detach()
-        if importance.level == "token":
-            raw = torch.exp(old - behavior)
-        else:  # (one for the segment: the geometric mean of its tokens')
-            raw = torch.exp((old - behavior).mean()).expand_as(logprobs)
-        if importance.correction == "untruncated":
-            weight = raw
-        elif importance.correction == "truncate":
-            weight = raw.clamp(max=importance.cap)
-        else:
-            kept = (raw >= importance.floor) & (raw <= importance.cap)
-            weight = torch.where(kept, raw, torch.zeros_like(raw))
+    clip, kl = objective.clip, objective.kl
+    weight, raw = importance_weight(objective, old, behavior)
 
     ratio: torch.Tensor | None = None
     if objective.ratio == "token":
@@ -217,6 +238,8 @@ def terms(
         return likelihood(objective, logprobs, advantage)
     if objective.family == PREFERENCE:
         raise ValueError("a preference loss is of pairs or labelled examples, not of weighted segments")
+    if objective.family == DISTILLATION:
+        raise ValueError("a distillation is of segments a teacher scored, not of weighted segments")
     if old is None:
         raise ValueError("a policy gradient needs each sampled token's logprob at the step's start")
     return policy_gradient(objective, logprobs, advantage, old, behavior, reference, entropy)
@@ -316,10 +339,12 @@ def labelled(objective: Objective, examples: Sequence[tuple[Scored, bool]]) -> l
     return found
 
 
-SUMS: tuple[str, ...] = (
-    "loss", "units", "clipped", "truncated", "tokens", "ratio", "weight", "moved", "segments", "kl", "entropy",
-    "items", "pairs", "accurate", "margin", "chosen", "rejected",
+TALLIED = (
+    "clipped", "truncated", "tokens", "ratio", "weight", "moved", "kl", "entropy", "items", "pairs", "accurate",
+    "margin", "chosen", "rejected", "distilled", "scored", "gap", "divergence", "advantage_clipped",
 )  # fmt: skip
+"""The counts and sums of `Terms` a minibatch adds up."""
+SUMS: tuple[str, ...] = ("loss", "units", "segments", *TALLIED)
 """What a minibatch's `Terms` add up to, for its statistics and the step's."""
 
 
@@ -329,6 +354,5 @@ def tally(sums: dict[str, float], found: Terms, objective: Objective, *, segment
     sums["loss"] += float(found.loss.detach())
     sums["units"] += units(objective, int(found.tokens))
     sums["segments"] += segments
-    for key in ("clipped", "truncated", "tokens", "ratio", "weight", "moved", "kl", "entropy", "items", "pairs",
-                "accurate", "margin", "chosen", "rejected"):  # fmt: skip
+    for key in TALLIED:
         sums[key] += getattr(found, key)

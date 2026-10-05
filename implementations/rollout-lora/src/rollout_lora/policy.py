@@ -5,8 +5,9 @@ LoRA on its linear layers.
 
 `Policy.logprobs` computes the logprobs of sampled tokens. It runs the transformer over the whole sequence but the
 output layer (the vocabulary projection, the largest activation by far) only at the positions being scored.
-`Policy.logprobs_and_entropy` adds each position's entropy; `Policy.reference` gives the logprobs of the model trained
-over, the adapter switched off.
+`Policy.logprobs_and_entropy` adds each position's entropy, `Policy.logprobs_among` the logprobs of given tokens at
+each position (a teacher's top-k, for distillation); `Policy.reference` gives the logprobs of the model trained over,
+the adapter switched off.
 
 Only what training text needs is kept on the GPU: a vision tower is dropped, and the token embedding table (as
 large as the output layer, and used only to look up a sequence's rows) is read from the checkpoint file as needed.
@@ -116,6 +117,38 @@ def scored_with_entropy(
     return torch.cat([part[0] for part in parts]), torch.cat([part[1] for part in parts])
 
 
+def scored_among(
+    model: nn.Module, hidden: torch.Tensor, ids: torch.Tensor, positions: Sequence[int], candidates: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """`scored`, and the logprobs of `candidates[i]` (token ids) at the i-th of `positions`, a chunk of rows at a time
+    as `scored_with_entropy` runs them."""
+    device = hidden.device
+    index = torch.tensor([position - 1 for position in positions], device=device)
+    rows = hidden.index_select(0, index)
+    targets = ids[0].index_select(0, torch.tensor(list(positions), device=device))
+    wanted = candidates.to(device)
+    head = cast(Any, model).lm_head
+
+    def chunk(rows: torch.Tensor, targets: torch.Tensor, wanted: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        logged = torch.log_softmax(head(rows).float(), dim=-1)
+        return logged.gather(-1, targets.unsqueeze(-1)).squeeze(-1), logged.gather(-1, wanted)
+
+    parts = [
+        cast(
+            tuple[torch.Tensor, torch.Tensor],
+            checkpoint(
+                chunk,
+                rows[start : start + LOGIT_ROWS],
+                targets[start : start + LOGIT_ROWS],
+                wanted[start : start + LOGIT_ROWS],
+                use_reentrant=False,
+            ),
+        )
+        for start in range(0, len(positions), LOGIT_ROWS)
+    ]
+    return torch.cat([part[0] for part in parts]), torch.cat([part[1] for part in parts])
+
+
 @dataclass
 class Policy:
     model: nn.Module
@@ -177,14 +210,25 @@ class Policy:
         self, tokens: Sequence[int], positions: Sequence[int], *, entropy: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """`logprobs`, and the entropy of the policy's distribution at each of `positions`."""
+        ids, hidden = self._hidden(tokens)
+        return scored_with_entropy(self.model, hidden, ids, positions, entropy=entropy)
+
+    def logprobs_among(
+        self, tokens: Sequence[int], positions: Sequence[int], candidates: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """`logprobs`, and the logprobs of `candidates[i]` (a row of token ids) at the i-th of `positions`: what the
+        top-k form of distillation reads at the teacher's top tokens."""
+        ids, hidden = self._hidden(tokens)
+        return scored_among(self.model, hidden, ids, positions, candidates)
+
+    def _hidden(self, tokens: Sequence[int]) -> tuple[torch.Tensor, torch.Tensor]:
+        """The sequence's ids, and the last hidden state at each position."""
         device = next(iter(self.model.buffers())).device
         ids = torch.tensor([list(tokens)], device=device)
         if self.embedding is None:
-            hidden = body(self.model)(input_ids=ids).last_hidden_state[0]
-        else:
-            embedded = self.embedding(tokens, device).unsqueeze(0).requires_grad_(True)  # (for checkpointing)
-            hidden = body(self.model)(inputs_embeds=embedded).last_hidden_state[0]
-        return scored_with_entropy(self.model, hidden, ids, positions, entropy=entropy)
+            return ids, body(self.model)(input_ids=ids).last_hidden_state[0]
+        embedded = self.embedding(tokens, device).unsqueeze(0).requires_grad_(True)  # (for checkpointing)
+        return ids, body(self.model)(inputs_embeds=embedded).last_hidden_state[0]
 
     def reference(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
         """`logprobs` under the reference: the model trained over, the adapter switched off (no gradient)."""

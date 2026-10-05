@@ -11,12 +11,13 @@ import pytest
 import torch
 from torch.nn import functional
 
+from rollout_objectives.distillation import distilled
 from rollout_objectives.step import preference_terms
 from rollout_objectives.terms import terms, units
-from rollout_train.algorithm import advantages_of
+from rollout_train.algorithm import advantages_of, algorithm_for
 from rollout_train.objectives import PRESETS, Objective
-from rollout_train.recorder import Segment, Span
-from rollout_train.trainer import Labelled, Pair
+from rollout_train.recorder import Segment, Span, TeacherScores
+from rollout_train.trainer import Distilled, Labelled, Pair
 
 REWARDS = [1.0, 0.0, 0.0, 1.0, 0.5]
 LENGTHS = [3, 5, 2, 4, 6]
@@ -98,7 +99,8 @@ def ppo_term(each: Sampled, advantage: float, low: float, high: float) -> torch.
 def test_the_presets_are_the_papers() -> None:
     p = {name: preset.objective for name, preset in PRESETS.items()}
     assert set(p) == {"default", "reinforce", "rloo", "ppo_clip", "grpo", "dr_grpo", "dapo", "gspo", "cispo", "sft",
-                      "dpo", "ipo", "simpo", "kto", "orpo"}  # fmt: skip
+                      "dpo", "ipo", "simpo", "kto", "orpo", "on_policy_distillation", "distillation", "mopd",
+                      "mopd_top_k"}  # fmt: skip
     # Schulman et al. 2017, Sec. 3 and Table 1: epsilon 0.2.
     assert (p["ppo_clip"].clip.kind, p["ppo_clip"].clip.low, p["ppo_clip"].clip.high) == ("ratio", 0.2, 0.2)
     # DeepSeekMath, Eq. 3 and 4, Sec. 4.2: beta 0.04, the k3 estimator in the loss, 1/G sum 1/|o| sum_t. (Epsilon is
@@ -370,3 +372,157 @@ def test_a_preference_preset_is_of_the_preference_family(name: str) -> None:
     assert objective.family == "preference" and objective.labelled == (name == "kto")
     assert objective.needs_reference == (name in ("dpo", "ipo", "kto")) and not objective.needs_behaviour
     assert math.isfinite(objective.preference.beta)
+
+
+# Distillation: segments of the group's lengths over a vocabulary of 80, the student's logits a leaf, the teacher's
+# fixed, the sampled tokens fixed. Each composed loss reads only what a distilled segment carries (the teacher's logprob
+# of each sampled token and its top-k) and what the step computes (the policy's logprobs now and at the step's start,
+# and of the teacher's top-k tokens); each transcription reads the full distributions.
+
+VOCABULARY = 80
+
+
+@dataclass
+class Studied:
+    """One segment: the student's logits now (a leaf), the logprobs of its sampled tokens at the step's start, the
+    teacher's logprobs over the vocabulary, and the sampled tokens."""
+
+    logits: torch.Tensor
+    old: torch.Tensor
+    teacher: torch.Tensor
+    sampled: torch.Tensor
+
+    @property
+    def logged(self) -> torch.Tensor:
+        return torch.log_softmax(self.logits, -1)
+
+    @property
+    def now(self) -> torch.Tensor:
+        return self.logged.gather(-1, self.sampled.unsqueeze(-1)).squeeze(-1)
+
+    @property
+    def teacher_sampled(self) -> torch.Tensor:
+        return self.teacher.gather(-1, self.sampled.unsqueeze(-1)).squeeze(-1)
+
+
+def studied(seed: int = 0) -> list[Studied]:
+    """A group whose teacher disagrees with the student, by more than 5 nats on some sampled tokens."""
+    generator = torch.Generator().manual_seed(seed)
+    made: list[Studied] = []
+    for length in LENGTHS:
+        logits = torch.randn(length, VOCABULARY, generator=generator, dtype=torch.float64)
+        start = logits + torch.randn(length, VOCABULARY, generator=generator, dtype=torch.float64) * 0.2
+        teacher = torch.log_softmax(torch.randn(length, VOCABULARY, generator=generator, dtype=torch.float64) * 3, -1)
+        sampled = torch.randint(0, VOCABULARY, (length,), generator=generator)
+        old = torch.log_softmax(start, -1).gather(-1, sampled.unsqueeze(-1)).squeeze(-1)
+        made.append(Studied(logits.requires_grad_(True), old, teacher, sampled))
+    return made
+
+
+def scores_of(each: Studied, top_k: int) -> TeacherScores:
+    """What a teacher's scores of the segment carry: its logprob of each sampled token, and its top-k there."""
+    top = each.teacher.topk(top_k, dim=-1) if top_k else None
+    return TeacherScores(
+        "teacher",
+        each.teacher_sampled.tolist(),
+        top.indices.tolist() if top is not None else [],
+        top.values.tolist() if top is not None else [],
+    )
+
+
+def composed_distillation(objective: Objective, group: Sequence[Studied]) -> torch.Tensor:
+    """The minibatch's loss as the step takes it, from distilled segments."""
+    total_units = sum(units(objective, int(each.sampled.numel())) for each in group)
+    loss = torch.zeros((), dtype=torch.float64)
+    for each in group:
+        length = int(each.sampled.numel())
+        segment = Segment(list(range(length + 1)), [Span(1, length + 1, 0)], [0.0] * length)
+        item = Distilled(segment, scores_of(each, objective.needs_top))
+        among = None
+        if objective.needs_distribution:
+            candidates = torch.tensor(item.scores.top_tokens)
+            among = each.logged.gather(-1, candidates)
+        loss = loss + distilled(objective, item, each.now, each.old, among=among).loss
+    return loss / total_units
+
+
+def same_distillation(objective: Objective, transcribed: Callable[[list[Studied]], torch.Tensor]) -> None:
+    ours, theirs = studied(), studied()
+    mine = composed_distillation(objective, ours)
+    paper = transcribed(theirs)
+    mine.backward()
+    paper.backward()
+    torch.testing.assert_close(mine, paper, rtol=1e-12, atol=1e-12)
+    for a, b in zip(ours, theirs, strict=True):
+        assert a.logits.grad is not None and b.logits.grad is not None
+        torch.testing.assert_close(a.logits.grad, b.logits.grad, rtol=1e-10, atol=1e-12)
+
+
+def test_the_distillation_presets_are_the_papers() -> None:
+    p = {name: preset.objective for name, preset in PRESETS.items()}
+    # GKD (Agarwal et al. 2024, Sec. 3, on-policy with the reverse KL) and Thinking Machines (2025): the student
+    # samples, the teacher scores each sampled token, the per-token reverse KL is the advantage; a mean over the tokens.
+    on = p["on_policy_distillation"]
+    assert (on.family, on.distillation.divergence, on.distillation.form, on.distillation.top_k) == (
+        "distillation", "reverse_kl", "policy_gradient", 0)  # fmt: skip
+    assert (on.distillation.advantage_clip, on.importance.correction, on.kl.target, on.aggregate) == (
+        0.0, "none", "none", "token_mean")  # fmt: skip
+    # Hinton et al. 2015 (soft targets) and Kim and Rush 2016 (word-level KD on the teacher's outputs): the forward KL
+    # to the teacher's distribution, here its top 20 (vLLM's default most logprobs), renormalized; temperature 1.
+    off = p["distillation"]
+    assert (off.distillation.divergence, off.distillation.form, off.distillation.top_k) == ("forward_kl", "top_k", 20)
+    assert (off.distillation.temperature, off.importance.correction, off.aggregate) == (1.0, "none", "token_mean")
+    # MOPD (Ma et al. 2026), Eq. 3 and 4: A = clip(sg[log pi_teacher - log pi], -A_max, A_max) with A_max = 5, the
+    # loss -1/|y| sum_t A log pi; Eq. 5 the top-k form with k = 64; N = 1 rollout a prompt (the algorithm's group);
+    # no importance sampling, no KL.
+    mopd, top = p["mopd"], p["mopd_top_k"]
+    assert (mopd.distillation.form, mopd.distillation.advantage_clip, mopd.aggregate, mopd.importance.correction) == (
+        "policy_gradient", 5.0, "segment_mean", "none")  # fmt: skip
+    assert (top.distillation.form, top.distillation.divergence, top.distillation.top_k, top.aggregate) == (
+        "top_k", "reverse_kl", 64, "segment_mean")  # fmt: skip
+    assert algorithm_for(mopd).group_size == 1 and mopd.kl.target == "none" and mopd.distills
+    for name in ("on_policy_distillation", "distillation", "mopd", "mopd_top_k"):
+        assert p[name].family == "distillation" and not p[name].needs_reference and not p[name].needs_behaviour
+
+
+def test_on_policy_distillation() -> None:  # -(1/T) sum_t sg(log pi_T(y_t) - log pi_old(y_t)) log pi(y_t)
+    def paper(g: list[Studied]) -> torch.Tensor:
+        tokens = sum(each.sampled.numel() for each in g)
+        return -total(((e.teacher_sampled - e.old).detach() * e.now).sum() for e in g) / tokens
+
+    same_distillation(PRESETS["on_policy_distillation"].objective, paper)
+
+
+def test_mopd() -> None:  # MOPD Eq. 4: -(1/G) sum_i (1/|y_i|) sum_t clip(sg[log pi_T - log pi_old], -5, 5) log pi
+    def paper(g: list[Studied]) -> torch.Tensor:
+        clipped = [(e.teacher_sampled - e.old).detach().clamp(-5.0, 5.0) for e in g]
+        assert any(bool(((e.teacher_sampled - e.old).abs() > 5).any()) for e in g)  # (the clip acts here)
+        return -total((a * e.now).mean() for a, e in zip(clipped, g, strict=True)) / len(g)
+
+    same_distillation(PRESETS["mopd"].objective, paper)
+
+
+def test_mopd_top_k() -> None:  # MOPD Eq. 5: (1/G) sum_i (1/|y_i|) sum_t sum_{v in top-64} [p log(p/q) - p + q]
+    def paper(g: list[Studied]) -> torch.Tensor:
+        losses: list[torch.Tensor] = []
+        for e in g:
+            top = e.teacher.topk(64, dim=-1).indices
+            p, q = torch.exp(e.logged).gather(-1, top), torch.exp(e.teacher).gather(-1, top)
+            losses.append((p * torch.log(p / q) - p + q).sum(-1).mean())
+        return total(losses) / len(g)
+
+    same_distillation(PRESETS["mopd_top_k"].objective, paper)
+
+
+def test_distillation() -> None:  # (1/T) sum_t sum_{v in top-20} q_T(v) log(q_T(v) / q_pi(v)), renormalized over top-20
+    def paper(g: list[Studied]) -> torch.Tensor:
+        tokens = sum(each.sampled.numel() for each in g)
+        losses: list[torch.Tensor] = []
+        for e in g:
+            top = e.teacher.topk(20, dim=-1).indices
+            q_teacher = torch.softmax(e.teacher.gather(-1, top), -1)
+            q_student = torch.softmax(e.logged.gather(-1, top), -1)
+            losses.append((q_teacher * torch.log(q_teacher / q_student)).sum())
+        return total(losses) / tokens
+
+    same_distillation(PRESETS["distillation"].objective, paper)

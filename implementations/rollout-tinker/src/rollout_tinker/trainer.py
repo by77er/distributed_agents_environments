@@ -24,15 +24,17 @@ scale and the minibatch's units folded into the advantages, is one of them in va
 | token ratio, unclipped | several | a forward pass for `old`, then `importance_sampling` | old; A·w·s/U |
 | anything else | any | (a forward pass for `old` if several) then a custom loss | — |
 
-Anything else is a segment ratio, dual clipping, a mask, a KL penalty or a preference loss, and its custom loss is the
-objective itself. `ppo` and `cispo` are clipped to 1 - `clip.low` .. 1 + `clip.high`. `w` is the importance weight, `s`
-the aggregation's scale of each token (1 for a token mean or a sum, one over the segment's tokens for a segment mean,
-one over `constant_tokens` for `constant`) and `U` the minibatch's units. With one update `old` is the logprob now: a
-ratio is 1 and unclipped, so every clipped surrogate's gradient is the weighted advantage's, the forward-backward's own
-output is `old`, and no forward pass is needed. The custom loss (Tinker computes logprobs, the objective is computed
-here with its gradient, and Tinker takes a pass on a linear stand-in with that gradient) costs a forward pass more than
-a built-in loss. Tinker gives no reference logprobs and no entropies here, so an objective that reads either is refused
-(validation says so before a run starts).
+Anything else is a segment ratio, dual clipping, a mask, a KL penalty, a preference loss or a distillation (alone, or as
+a policy gradient's term: the teacher's scores are in the distilled items, and the student's logprobs are the sampled
+tokens'), and its custom loss is the objective itself. `ppo` and `cispo` are clipped to 1 - `clip.low` .. 1 +
+`clip.high`. `w` is the importance weight, `s` the aggregation's scale of each token (1 for a token mean or a sum, one
+over the segment's tokens for a segment mean, one over `constant_tokens` for `constant`) and `U` the minibatch's units.
+With one update `old` is the logprob now: a ratio is 1 and unclipped, so every clipped surrogate's gradient is the
+weighted advantage's, the forward-backward's own output is `old`, and no forward pass is needed. The custom loss (Tinker
+computes logprobs, the objective is computed here with its gradient, and Tinker takes a pass on a linear stand-in with
+that gradient) costs a forward pass more than a built-in loss. Tinker gives no reference logprobs, no entropies and no
+logprobs of tokens other than the sampled ones here, so an objective that reads any of them (the last: the top-k form
+of distillation) is refused (validation says so before a run starts).
 
 Each minibatch's statistics are the objective's terms of the logprobs the forward-backward returns (the policy before
 that update), so a step's metrics are `PolicyStep`'s (`rollout_objectives.step.metrics`). A minibatch that finds the
@@ -52,15 +54,27 @@ import torch
 from pydantic import JsonValue
 from tinker import AdamParams, Datum, ForwardBackwardOutput
 
+from rollout_objectives.distillation import distilled
 from rollout_objectives.step import MINIBATCHES, Plan, line, metrics, preference_terms
-from rollout_objectives.terms import SUMS, tally, terms, units
+from rollout_objectives.terms import SUMS, Terms, tally, terms, units
 from rollout_tinker.data import datum, rows
 from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of, unpaid
 from rollout_tinker.settings import TinkerSettings
 from rollout_tinker.weights import checkpoint_name, pointer, write_pointer
 from rollout_train.objectives import LIKELIHOOD, PREFERENCE, Objective
 from rollout_train.recorder import Segment
-from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Item, Step, StepFailed, Weighted, segments_of
+from rollout_train.trainer import (
+    STATE,
+    WEIGHTS,
+    Budget,
+    Distilled,
+    Files,
+    Item,
+    Step,
+    StepFailed,
+    Weighted,
+    segments_of,
+)
 
 __all__ = ["TinkerTrainer", "route"]
 
@@ -78,7 +92,9 @@ def route(objective: Objective, single: bool) -> str:
     Tinker's losses (`cross_entropy`, `importance_sampling`, `ppo`, `cispo`), `BEHAVIOUR_CISPO`, or `CUSTOM`."""
     if objective.family == LIKELIHOOD:
         return "cross_entropy"
-    if objective.family == PREFERENCE or objective.kl.target != "none" or objective.entropy.coefficient != 0.0:
+    if objective.family == PREFERENCE or objective.distills:
+        return CUSTOM
+    if objective.kl.target != "none" or objective.entropy.coefficient != 0.0:
         return CUSTOM
     correction = objective.importance.correction
     if objective.ratio == "segment" or objective.clip.kind == "dual" or correction == "mask":
@@ -108,7 +124,7 @@ class TinkerTrainer:
     default a session the SDK opens with the key it finds; `module:name` of what makes another (a profile names a fake
     one so). `settings` are `TinkerSettings`' (its `objective` among them); those in `CHANGEABLE`, and the changeable
     components of its objective, it takes between steps (`rollout_train.trainer.Changeable`). Raises `ValueError` for
-    an objective that reads the reference or the entropy, which Tinker does not give here."""
+    an objective that reads the reference, the entropy or the top-k form's logprobs, which Tinker does not give here."""
 
     weights = "lora"
 
@@ -219,7 +235,11 @@ class TinkerTrainer:
             if objective.family == PREFERENCE:
                 count = float(len(minibatch))
             else:
-                count = sum(units(objective, item.segment.sampled) for item in minibatch if isinstance(item, Weighted))
+                count = sum(
+                    units(objective, item.segment.sampled)
+                    for item in minibatch
+                    if isinstance(item, Weighted | Distilled)
+                )
             rate = settings.rate(len(lines), fresh=fresh)
             pending = await self._sent(client, minibatch, parts, count, way)
             billed += sum(len(part.segment.tokens) - 1 for part in parts) * (2 if way == CUSTOM else 1)
@@ -312,10 +332,10 @@ class TinkerTrainer:
                 found_terms = preference_terms(objective, minibatch, now, {})
                 return torch.stack([each.loss for _, each in found_terms]).sum() / count, {}
             total = torch.zeros((), dtype=torch.float64)
-            for item, part in zip([each for each in minibatch if isinstance(each, Weighted)], parts, strict=True):
+            for item, part in zip(_segmented(minibatch), parts, strict=True):
                 logprob = now[id(part.segment)]
                 old = part.old if part.old is not None else logprob.detach()
-                total = total + terms(objective, logprob, item.advantage, old, part.behavior).loss / count
+                total = total + _terms(objective, item, logprob, old, part.behavior).loss / count
             return total, {}
 
         return loss
@@ -339,9 +359,10 @@ class TinkerTrainer:
                 )
                 sums["tokens"] = sum(float(now[id(part.segment)].numel()) for part in parts)
                 return sums
-            for item, part in zip([each for each in minibatch if isinstance(each, Weighted)], parts, strict=True):
+            for item, part in zip(_segmented(minibatch), parts, strict=True):
                 logprob = now[id(part.segment)]
-                tally(sums, terms(objective, logprob, item.advantage, part.old, part.behavior), objective)
+                old = part.old if part.old is not None else logprob
+                tally(sums, _terms(objective, item, logprob, old, part.behavior), objective)
         return sums
 
     def _datum(self, part: _Segment, **values: Sequence[float]) -> Datum:
@@ -368,8 +389,8 @@ class TinkerTrainer:
 
 def refused(objective: Objective) -> None:
     """Raises `ValueError` for an objective Tinker cannot take here: one that reads the reference (Tinker's SDK offers
-    prompt logprobs from a sampler of the base model, not yet confirmed by a live test) or the entropy (Tinker returns
-    the sampled tokens' logprobs only)."""
+    prompt logprobs from a sampler of the base model, not yet confirmed by a live test), the entropy, or the logprobs
+    of tokens not sampled (the top-k form of distillation; Tinker returns the sampled tokens' logprobs only)."""
     if objective.needs_reference:
         raise ValueError(
             "Tinker gives no reference logprobs here (its SDK's prompt logprobs from a sampler of the base model are "
@@ -377,6 +398,25 @@ def refused(objective: Objective) -> None:
         )
     if objective.needs_entropy:
         raise ValueError("Tinker returns the sampled tokens' logprobs only, not the entropy: entropy.coefficient = 0")
+    if objective.needs_distribution:
+        raise ValueError(
+            "Tinker returns the sampled tokens' logprobs only, not the student's logprobs of the teacher's top-k "
+            "tokens: distillation.form = policy_gradient"
+        )
+
+
+def _segmented(minibatch: Sequence[Item]) -> list[Weighted | Distilled]:
+    """A minibatch's weighted or distilled segments, in order."""
+    return [each for each in minibatch if isinstance(each, Weighted | Distilled)]
+
+
+def _terms(
+    objective: Objective, item: Weighted | Distilled, logprobs: torch.Tensor, old: torch.Tensor, behavior: torch.Tensor
+) -> Terms:
+    """A weighted or distilled segment's terms, of its sampled tokens' logprobs."""
+    if isinstance(item, Distilled):
+        return distilled(objective, item, logprobs, old, behavior)
+    return terms(objective, logprobs, item.advantage, old, behavior)
 
 
 def _segments(minibatch: Sequence[Item]) -> list[Segment]:

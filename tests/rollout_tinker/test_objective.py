@@ -13,8 +13,11 @@ from rollout_objectives.settings import StepSettings
 from rollout_objectives.step import PolicyStep
 from rollout_tinker import TinkerTrainer
 from rollout_tinker.testing import FakeService
+from rollout_tinker.trainer import CUSTOM, route
 from rollout_tinker.weights import pointer
-from rollout_train.trainer import STATE, WEIGHTS, Files, Labelled, Pair
+from rollout_train.objectives import resolved
+from rollout_train.recorder import TeacherScores
+from rollout_train.trainer import STATE, WEIGHTS, Distilled, Files, Labelled, Pair
 from tests.rollout_tinker.support import Bigram, segments
 
 SAME = ("loss", "clip_fraction", "mean_ratio", "kl_floor", "mean_mismatch", "mean_weight", "truncated_fraction",
@@ -292,6 +295,56 @@ async def test_a_preference_loss_without_a_reference_trains_on_tinker_as_the_lor
     for key in ("loss", "items", "preference_accuracy", "preference_margin", "chosen_log_ratio", "kl_moved",
                 "optimizer_steps", "segments", "tokens"):  # fmt: skip
         assert taken.metrics[key] == pytest.approx(expected[key], rel=1e-6, abs=1e-7), key
+
+
+def distilled_segments(service: FakeService, count: int) -> list[Distilled]:
+    """`segments`, each scored by a teacher: a bigram table of its own, a few nats from the student's on some tokens."""
+    teacher = torch.randn_like(service.base, generator=torch.Generator().manual_seed(11)) * 2
+    made: list[Distilled] = []
+    for each in segments(service, count):
+        segment = each.segment
+        positions = [p for span in segment.spans for p in range(span.start, span.end)]
+        scored = service.logprobs(teacher, [segment.tokens[p - 1] for p in positions],
+                                  [segment.tokens[p] for p in positions])  # fmt: skip
+        logprobs: list[float | None] = [float(value) for value in scored]
+        logprobs[-1] = None  # (beyond the teacher's context)
+        made.append(Distilled(segment, TeacherScores("teacher", logprobs), each.advantage, each.source))
+    return made
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "mopd",
+        {"preset": "on_policy_distillation", "importance.correction": "mask", "importance.floor": 0.5},
+        {"preset": "dapo", "distillation.coefficient": 0.3, "distillation.advantage_clip": 2.0},
+    ],
+)
+@pytest.mark.parametrize("tokens_per_step", [10**6, 40])
+async def test_a_distillation_trains_on_tinker_through_its_custom_loss_as_the_lora_step_does(
+    objective: Any, tokens_per_step: int, tmp_path: Path
+) -> None:
+    service = FakeService(vocabulary=24, seed=3)
+    settings = ours({"objective": objective, "tokens_per_step": tokens_per_step})
+    trainer = TinkerTrainer("tiny", service=service, **settings)
+    taken = await trainer.step(distilled_segments(service, 10), seed=7, parent=None, into=tmp_path / "made")
+    assert "custom" in service.calls and ("forward" in service.calls) == (tokens_per_step == 40)
+    policy = Bigram(service)
+    expected = PolicyStep(policy, StepSettings(**settings)).step(distilled_segments(service, 10), seed=7)
+    state = pointer(tmp_path / "made" / WEIGHTS, "state")
+    assert state is not None
+    moved = service.table(state)
+    assert float(moved.abs().max()) > 0.01  # (it trained)
+    torch.testing.assert_close(moved, policy.table.detach(), rtol=RTOL, atol=ATOL)
+    for key in ("loss", "teacher_gap", "advantage_clip_fraction", "unscored_fraction", "truncated_fraction",
+                "kl_moved", "optimizer_steps", "segments", "tokens"):  # fmt: skip
+        assert taken.metrics[key] == pytest.approx(expected[key], rel=1e-6, abs=1e-7), key
+
+
+def test_tinker_refuses_the_top_k_form_of_distillation() -> None:
+    with pytest.raises(ValueError, match=r"distillation\.form = policy_gradient"):
+        TinkerTrainer("tiny", service=FakeService(vocabulary=24), objective="mopd_top_k")
+    assert route(resolved("mopd"), single=True) == CUSTOM
 
 
 def test_tinker_refuses_an_objective_that_reads_the_reference_or_the_entropy() -> None:

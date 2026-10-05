@@ -5,12 +5,12 @@ name (`rollout_objectives.terms`).
 
 First every sampled token's logprob is computed on the weights the step starts from, without a gradient (`old`), and
 the reference's where the objective reads it (`reference`: an adapter switched off, or a frozen copy). Then the batch's
-items (weighted segments, pairs or labelled examples) are taken in shuffled minibatches of about `tokens_per_step`
-sampled tokens, an optimizer step each. The pass stops early if a minibatch finds the policy further than `max_kl`
-from where the step began (a likelihood step reads no `old`, and does not stop). A step takes `passes` passes, each
-shuffled anew; a fresh optimizer's rate is warmed up over its first `warmup_updates` updates. Only tokens the policy
-sampled are trained on. The numbers are `StepSettings`'; which items, and with what advantages, is the algorithm's
-business (`rollout_train.algorithm`).
+items (weighted segments, pairs, labelled examples or distilled segments) are taken in shuffled minibatches of about
+`tokens_per_step` sampled tokens, an optimizer step each. The pass stops early if a minibatch finds the policy further
+than `max_kl` from where the step began (a likelihood step reads no `old`, and does not stop). A step takes `passes`
+passes, each shuffled anew; a fresh optimizer's rate is warmed up over its first `warmup_updates` updates. Only tokens
+the policy sampled are trained on. The numbers are `StepSettings`'; which items, and with what advantages, is the
+algorithm's business (`rollout_train.algorithm`).
 
 A preference loss is a function of each side's whole log-likelihood, so a minibatch's gradient is taken in two parts,
 which hold one segment's activations at a time: the loss of the logprobs computed without a gradient (on the weights
@@ -30,11 +30,12 @@ from typing import Protocol
 import torch
 from torch import nn
 
+from rollout_objectives.distillation import Taught, distilled
 from rollout_objectives.settings import StepSettings
 from rollout_objectives.terms import SUMS, Scored, Terms, labelled, pair, tally, terms, units
 from rollout_train.objectives import LIKELIHOOD, PREFERENCE, Objective
 from rollout_train.recorder import Segment
-from rollout_train.trainer import Item, Labelled, Pair, Weighted, segments_of
+from rollout_train.trainer import Distilled, Item, Labelled, Pair, Weighted, segments_of
 
 __all__ = [
     "MINIBATCHES",
@@ -55,7 +56,9 @@ MINIBATCHES = "minibatches.jsonl"
 
 class TrainablePolicy(Protocol):
     """What the step needs of a policy (`rollout_lora.policy.Policy` is one). An objective with a KL to the reference
-    or a preference loss against it needs `reference` too, and one with an entropy bonus `logprobs_and_entropy`."""
+    or a preference loss against it needs `reference` too, one with an entropy bonus `logprobs_and_entropy`, and a
+    distillation over the teacher's top-k tokens `logprobs_among` (the logprobs of given tokens at each position,
+    beside the sampled ones')."""
 
     model: nn.Module
 
@@ -190,6 +193,15 @@ class PolicyStep:
         found, entropies = scoring(segment.tokens, positions(segment))
         return found, entropies
 
+    def _among(self, segment: Segment, candidates: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """A segment's sampled tokens' logprobs now, and those of `candidates` (one row of token ids for each sampled
+        position)."""
+        scoring = getattr(self.policy, "logprobs_among", None)
+        if scoring is None:
+            raise ValueError("the top_k form of distillation needs a policy that gives the logprobs of given tokens")
+        found, among = scoring(segment.tokens, positions(segment), candidates)
+        return found, among
+
     def _reference(self, segment: Segment) -> torch.Tensor:
         scoring = getattr(self.policy, "reference", None)
         if scoring is None:
@@ -302,18 +314,48 @@ class PolicyStep:
         """A minibatch of weighted segments' gradient, accumulated; how far it found the policy from the step's start
         (per token)."""
         objective = self.settings.loss
-        for weighted in batch:
-            if not isinstance(weighted, Weighted):
-                raise ValueError(f"a {objective.family} loss is of weighted segments, not pairs or examples")
-            segment = weighted.segment
-            logprobs, entropy = self._scored(segment, entropy=objective.needs_entropy)
-            key = id(segment)
-            found = terms(
-                objective, logprobs, weighted.advantage, old.get(key), behaviors.get(key), references.get(key), entropy
-            )
+        for item in batch:
+            if isinstance(item, Distilled):
+                found = self._distilled(item, old, behaviors, references)
+            elif isinstance(item, Weighted) and not objective.distills:
+                segment = item.segment
+                logprobs, entropy = self._scored(segment, entropy=objective.needs_entropy)
+                key = id(segment)
+                found = terms(
+                    objective, logprobs, item.advantage, old.get(key), behaviors.get(key), references.get(key), entropy
+                )
+            else:
+                takes = "distilled segments" if objective.distills else "weighted segments"
+                raise ValueError(f"a {objective.family} loss is of {takes}, not {type(item).__name__} items")
             (found.loss / units).backward()
             tally(sums, found, objective)
         return sums["moved"] / max(sums["tokens"], 1.0)
+
+    def _distilled(
+        self,
+        item: Distilled,
+        old: Mapping[int, torch.Tensor],
+        behaviors: Mapping[int, torch.Tensor],
+        references: Mapping[int, torch.Tensor],
+    ) -> Terms:
+        """A distilled segment's terms, its logprobs computed now (and those of the teacher's top-k tokens, for the
+        top-k form)."""
+        objective = self.settings.loss
+        segment, key = item.segment, id(item.segment)
+        among: torch.Tensor | None = None
+        entropy: torch.Tensor | None = None
+        if objective.needs_distribution:
+            if objective.needs_entropy:
+                raise ValueError("an entropy bonus beside the top_k form of distillation is not computed")
+            candidates = Taught.of(item.scores, objective.needs_top).top_tokens
+            assert candidates is not None
+            logprobs, among = self._among(segment, candidates)
+        else:
+            logprobs, entropy = self._scored(segment, entropy=objective.needs_entropy)
+        start = old.get(key)
+        if start is None:
+            raise ValueError("a distillation needs each sampled token's logprob at the step's start")
+        return distilled(objective, item, logprobs, start, behaviors.get(key), references.get(key), entropy, among)
 
     def _preference(
         self,
@@ -356,14 +398,14 @@ class PolicyStep:
 
 
 def _units(objective: Objective, item: Item) -> float:
-    return units(objective, item.segment.sampled) if isinstance(item, Weighted) else 1.0
+    return units(objective, item.segment.sampled) if isinstance(item, Weighted | Distilled) else 1.0
 
 
 def line(sums: Mapping[str, float], units: float, rate: float) -> dict[str, float]:
     """What a minibatch that was stepped on did (its `SUMS`, over `units`, stepped at `rate`), as `MINIBATCHES` keeps
     it."""
     tokens = max(sums["tokens"], 1.0)
-    return {
+    said = {
         "segments": sums["segments"],
         "tokens": sums["tokens"],
         "loss": sums["loss"] / units,
@@ -371,6 +413,9 @@ def line(sums: Mapping[str, float], units: float, rate: float) -> dict[str, floa
         "kl": sums["moved"] / tokens,
         "learning_rate": rate,
     }
+    if sums["distilled"]:
+        said["teacher_gap"] = sums["gap"] / max(sums["scored"], 1.0)
+    return said
 
 
 def metrics(
@@ -431,4 +476,14 @@ def metrics(
     if totals["pairs"]:
         said |= {"chosen_log_ratio": totals["chosen"] / totals["pairs"]}
         said |= {"rejected_log_ratio": totals["rejected"] / totals["pairs"]}
+    if totals["distilled"]:
+        # The policy's logprob of each sampled token less the teacher's, as each minibatch found it before its update:
+        # on the policy's own samples, an estimate of KL(policy || teacher) per token.
+        scored = max(totals["scored"], 1.0)
+        said |= {
+            "teacher_gap": totals["gap"] / scored,
+            "teacher_divergence": totals["divergence"] / scored,
+            "advantage_clip_fraction": totals["advantage_clipped"] / scored,
+            "unscored_fraction": 1.0 - totals["scored"] / totals["distilled"],
+        }
     return said
