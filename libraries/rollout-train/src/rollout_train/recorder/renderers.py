@@ -3,14 +3,15 @@
 A `Renderer` turns canonical messages and tool specifications into prompt tokens, says how thinking is delimited,
 and parses sampled tokens back into a canonical message (reasoning, text, tool calls). The gateway and trainers
 depend only on this protocol; a model family is supported by a function that makes its renderer from a checkpoint's
-name (`rollout_qwen` has two), usually a `ChatTemplateRenderer` (the tokenizer's chat template) with that family's
-`ToolCallFormat` and `ThinkingFormat`. A deployment's profile names the function.
+name (`rollout_qwen` has two), usually a `ChatTemplateRenderer` (the tokenizer's chat template, `tokenizer_of`) with
+that family's `ToolCallFormat` and `ThinkingFormat`. A deployment's profile names the function. The function may say
+which models it renders (`renders`): a launcher offers a profile's evals only the models its channel's renderer renders.
 """
 
 import json
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -57,6 +58,34 @@ class Tokenizer(Protocol):
     def convert_tokens_to_ids(self, tokens: str) -> Any: ...
 
 
+RENDERS = "renders"
+"""The attribute a renderer's function holds its models' pattern in (`renders`)."""
+
+
+def renders[F: Callable[..., object]](pattern: str) -> Callable[[F], F]:
+    """Say which models a function that makes renderers renders: those whose name matches `pattern` anywhere, case
+    ignored (`r"qwen3\\.5"`: `Qwen/Qwen3.5-9B`, `cyankiwi/Qwen3.5-9B-AWQ-4bit`)."""
+
+    def said(factory: F) -> F:
+        setattr(factory, RENDERS, re.compile(pattern, re.IGNORECASE))
+        return factory
+
+    return said
+
+
+def rendered(factory: object, model: str) -> bool | None:
+    """Whether a function that makes renderers renders `model`, as it says (`renders`); none where it says nothing."""
+    pattern = getattr(factory, RENDERS, None)
+    return bool(cast(re.Pattern[str], pattern).search(model)) if isinstance(pattern, re.Pattern) else None
+
+
+def tokenizer_of(model: str) -> Tokenizer:
+    """The tokenizer of a checkpoint, by its name or path."""
+    from transformers import AutoTokenizer
+
+    return cast(Tokenizer, AutoTokenizer.from_pretrained(model))  # pyright: ignore[reportUnknownMemberType]
+
+
 class Renderer(Protocol):
     name: str
     thinking: ThinkingFormat | None
@@ -99,7 +128,7 @@ class XmlFunctionCalls:
             name, body = match.group(1), match.group(2)
             schema = _properties(tools, name)
             arguments = {key: _typed(value, schema.get(key)) for key, value in self.PARAMETER.findall(body)}
-            calls.append(ToolCall(call_id=_call_id(), name=name, arguments=arguments))
+            calls.append(ToolCall(call_id=call_id(), name=name, arguments=arguments))
         start = text.find("<tool_call>")
         return (text if start < 0 else text[:start]).strip(), calls
 
@@ -122,7 +151,7 @@ class JsonToolCalls:
             name, arguments = call.get("name"), call.get("arguments")
             if isinstance(name, str):
                 typed_arguments = cast(dict[str, JsonValue], arguments) if isinstance(arguments, dict) else {}
-                calls.append(ToolCall(call_id=_call_id(), name=name, arguments=typed_arguments))
+                calls.append(ToolCall(call_id=call_id(), name=name, arguments=typed_arguments))
         start = text.find("<tool_call>")
         return (text if start < 0 else text[:start]).strip(), calls
 
@@ -268,5 +297,6 @@ def _typed(value: str, schema: Any) -> JsonValue:
     return text
 
 
-def _call_id() -> str:
+def call_id() -> str:
+    """A new id for a tool call a model made."""
     return f"call_{uuid.uuid4().hex[:12]}"

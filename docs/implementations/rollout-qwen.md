@@ -15,10 +15,16 @@ This package has the renderers of two Qwen families. It is installed with `uv sy
 ## What a renderer function is called with
 
 A [profile](../guide/deploying.md) names one for a channel (`renderer = "rollout_qwen:qwen35"`) and calls it with the
-channel's `model`. Given a checkpoint's name or path, the function loads that checkpoint's tokenizer (`tokenizer_of`).
+channel's `model`. Given a checkpoint's name or path, the function loads that checkpoint's tokenizer
+([`tokenizer_of`](../guide/reference.md#tokenizer_of)).
 Given a tokenizer, it uses it as it is. Either way it returns a
 [`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer): prompts are rendered with the tokenizer's own
 chat template, and a turn ends at `<|im_end|>`, or at the end of text (`<|endoftext|>`), where the models stop too.
+
+Each function says the models it renders ([`renders`](../guide/reference.md#renders)): `qwen35` those whose name holds
+`qwen3.5`, `qwen3` those whose name holds `qwen3` not followed by `.`, another digit or `-coder`, case ignored. A
+[launcher](../guide/deploying.md#launchers) offers a profile's evals only the cluster's models its channel's renderer
+renders.
 
 ## How thinking is delimited
 

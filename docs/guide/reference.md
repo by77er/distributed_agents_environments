@@ -17,7 +17,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#scores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
-- **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`Renderer`](#renderer), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
+- **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
@@ -35,8 +35,8 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer), [`StepSettings`](#stepsettings)
-- **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35), [`tokenizer_of`](#rollout_qwentokenizer_of)
-- **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls), [`tokenizer_of`](#rollout_gemmatokenizer_of)
+- **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
+- **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls)
 - **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 - **[`rollout_s3`](#rollout_s3)** — Blobs in S3 or any S3-compatible object store. [`S3BlobStore`](#s3blobstore)
 - **[`rollout_runpod`](#rollout_runpod)** — GPU pods on RunPod, and certificates for them from step-ca. [`fingerprint`](#fingerprint), [`Pod`](#pod), [`PodSpec`](#podspec), [`RunPod`](#runpod), [`RunPodError`](#runpoderror), [`StepCa`](#stepca)
@@ -4095,6 +4095,16 @@ class JsonToolCalls
 
 - `def parse(self, text: str, tools: Sequence[ToolSpecification]) -> tuple[str, list[ToolCall]]`
 
+### `rendered`
+
+*function* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
+
+```python
+def rendered(factory: object, model: str) -> bool | None
+```
+
+Whether a function that makes renderers renders `model`, as it says (`renders`); none where it says nothing.
+
 ### `Renderer`
 
 *class* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
@@ -4116,6 +4126,17 @@ class Renderer(Protocol)
 - `def stop_token_ids(self) -> list[int]` — Tokens that end an assistant turn.
 - `def thinking_end_token_ids(self) -> list[int]` — Tokens that end thinking (to stop a thinking phase on), or none if it is not a single token.
 - `def parse(self, completion: Sequence[int], tools: Sequence[ToolSpecification]) -> Message` — A sampled turn as a canonical assistant message.
+
+### `renders`
+
+*function* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
+
+```python
+def renders[F: Callable[..., object]](pattern: str) -> Callable[[F], F]
+```
+
+Say which models a function that makes renderers renders: those whose name matches `pattern` anywhere, case
+ignored (`r"qwen3\.5"`: `Qwen/Qwen3.5-9B`, `cyankiwi/Qwen3.5-9B-AWQ-4bit`).
 
 ### `sample_turn`
 
@@ -4209,6 +4230,16 @@ TOKEN_LEVEL = ('token_exact', 'sampled_logprobs', 'honours_sampling')
 What a turn can be sampled with: its tokens are the exact ones sampled, each sampled token's behaviour logprob is
 known, and temperature and top-p were applied (`rollout_train.providers.Capabilities`). vLLM and Tinker sample with
 all three, and a turn that does not say what it was sampled with was sampled by one of them.
+
+### `tokenizer_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
+
+```python
+def tokenizer_of(model: str) -> Tokenizer
+```
+
+The tokenizer of a checkpoint, by its name or path.
 
 ### `ToolCallFormat`
 
@@ -7324,16 +7355,6 @@ def qwen35(model: str | Tokenizer) -> Renderer
 Qwen3.5: XML function calls, and thinking the prompt opens. `model` is a checkpoint's name, or its tokenizer.
 A turn ends with `<|im_end|>`, or with the end of text, where the model stops too.
 
-### `tokenizer_of` {#rollout_qwentokenizer_of}
-
-*function* · `implementations/rollout-qwen/src/rollout_qwen/__init__.py`
-
-```python
-def tokenizer_of(model: str) -> Tokenizer
-```
-
-The tokenizer of a checkpoint, by its name or path.
-
 ## `rollout_gemma`
 
 Renderers for the Gemma model families.
@@ -7374,16 +7395,6 @@ class GemmaFunctionCalls
 **Methods**
 
 - `def parse(self, text: str, tools: Sequence[ToolSpecification]) -> tuple[str, list[ToolCall]]`
-
-### `tokenizer_of` {#rollout_gemmatokenizer_of}
-
-*function* · `implementations/rollout-gemma/src/rollout_gemma/__init__.py`
-
-```python
-def tokenizer_of(model: str) -> Tokenizer
-```
-
-The tokenizer of a checkpoint, by its name or path.
 
 ## `rollout_openai`
 

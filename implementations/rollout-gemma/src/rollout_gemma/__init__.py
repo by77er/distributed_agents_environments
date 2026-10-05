@@ -8,29 +8,30 @@ and a tool's response comes back inside the model's own turn, after `<|tool_resp
 `<turn|>`, or at `<|tool_response>` (the model waits there for its tools' results), or at `<eos>`.
 """
 
-import uuid
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any
 
 from pydantic import JsonValue
 
 from rollout.contracts import ToolCall, ToolSpecification
-from rollout_train.recorder.renderers import ChatTemplateRenderer, Renderer, ThinkingFormat, Tokenizer
+from rollout_train.recorder.renderers import (
+    ChatTemplateRenderer,
+    Renderer,
+    ThinkingFormat,
+    Tokenizer,
+    call_id,
+    renders,
+    tokenizer_of,
+)
 
-__all__ = ["GemmaFunctionCalls", "arguments", "gemma4", "tokenizer_of"]
+__all__ = ["GemmaFunctionCalls", "arguments", "gemma4"]
 
 CALL_START, CALL_END = "<|tool_call>", "<tool_call|>"
 QUOTE = '<|"|>'
 """How Gemma quotes a string in a call's arguments (and in a tool's declaration)."""
 
 
-def tokenizer_of(model: str) -> Tokenizer:
-    """The tokenizer of a checkpoint, by its name or path."""
-    from transformers import AutoTokenizer
-
-    return cast(Tokenizer, AutoTokenizer.from_pretrained(model))  # pyright: ignore[reportUnknownMemberType]
-
-
+@renders(r"gemma-?4")
 def gemma4(model: str | Tokenizer) -> Renderer:
     """Gemma 4, thinking: the template is asked for thinking, and the generation prompt opens the thought channel
     (as Gemma's template itself does after a tool's response), so that a thinking budget can close it. `model` is a
@@ -63,9 +64,7 @@ class GemmaFunctionCalls:
                 name, _, rest = body[len("call:") :].partition("{")
                 parsed = arguments(rest[:-1] if rest.endswith("}") else rest)
                 calls.append(
-                    ToolCall(
-                        call_id=_call_id(), name=name.strip(), arguments=_schema_typed(parsed, tools, name.strip())
-                    )
+                    ToolCall(call_id=call_id(), name=name.strip(), arguments=_schema_typed(parsed, tools, name.strip()))
                 )
             at = text.find(CALL_START, end)
         return before.strip(), calls
@@ -152,7 +151,3 @@ def _schema_typed(parsed: dict[str, JsonValue], tools: Sequence[ToolSpecificatio
         else:
             typed[key] = value
     return typed
-
-
-def _call_id() -> str:
-    return f"call_{uuid.uuid4().hex[:12]}"
