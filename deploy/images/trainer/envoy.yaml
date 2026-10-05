@@ -4,6 +4,7 @@
 # cluster's root and carries the gateway's identity. It passes on the training API and nothing else: POST /v1/steps,
 # GET /v1/steps/CHECKPOINT and GET /v1/trainer. Every other request is answered 404 here. The training service listens
 # on 127.0.0.1 only.
+node: {id: rollout-trainer, cluster: rollout}   # (certificates over SDS need a node's id and cluster)
 admin:
   address:
     socket_address: { address: 127.0.0.1, port_value: 9901 }

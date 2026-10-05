@@ -5,6 +5,7 @@
 # root and carries the gateway's identity as a URI SAN. Of those it passes on what sampling needs and nothing else:
 # POST /v1/completions and GET /v1/models. Every other request (loading adapters, sleeping, metrics, the server's
 # other routes) is answered 404 here. vLLM listens on 127.0.0.1 only.
+node: {id: rollout-inference, cluster: rollout}   # (certificates over SDS need a node's id and cluster)
 admin:
   address:
     socket_address: { address: 127.0.0.1, port_value: 9901 }

@@ -5,6 +5,7 @@
 # /v1/completions and GET /v1/models, to vLLM) and the training API (POST /v1/steps, GET /v1/steps/CHECKPOINT and GET
 # /v1/trainer, to the training service), and nothing else: every other request is answered 404 here. Both servers
 # listen on 127.0.0.1 only.
+node: {id: rollout-host, cluster: rollout}   # (certificates over SDS need a node's id and cluster)
 admin:
   address:
     socket_address: { address: 127.0.0.1, port_value: 9901 }
