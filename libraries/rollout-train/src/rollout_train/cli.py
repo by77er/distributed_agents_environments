@@ -167,8 +167,7 @@ async def _asked(
             await asyncio.to_thread(connect, cluster.ray.address)
         launch = await ask(settings, stores.ledger, preset=preset)
         print(f"{settings['name']} ({launch.run}): launch {launch.id}, run here", flush=True)
-        await driven(launch.id, cluster, stores)
-        return 0
+        return await driven(launch.id, cluster, stores)
     launch = await submit(settings, cluster, stores.ledger, preset=preset)
     print(f"{settings['name']} ({launch.run}): launch {launch.id}, job {launch.job} ({launch.state})", flush=True)
     if launch.state == "failed":

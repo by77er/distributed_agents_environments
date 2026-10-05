@@ -203,7 +203,7 @@ class Here:
     def __init__(self, cluster: Cluster, stores: Stores) -> None:
         self.cluster, self.stores = cluster, stores
         self.loop = asyncio.get_running_loop()
-        self.playing: list[asyncio.Future[None]] = []
+        self.playing: list[asyncio.Future[int]] = []
 
     def submit_job(self, **given: Any) -> str:
         launch = str(given["entrypoint"]).rsplit(" ", 1)[-1]

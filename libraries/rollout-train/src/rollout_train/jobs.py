@@ -1189,10 +1189,12 @@ async def _check(run: Run) -> None:
         raise ValueError("the check found what does not hold together")
 
 
-async def driven(launch: str, cluster: Cluster, stores: Stores | None = None) -> None:
+async def driven(launch: str, cluster: Cluster, stores: Stores | None = None) -> int:
     """Run a launch's run, noting on the launch that it runs, what it waits for, and how it ended: ended, failed (with
-    why: its settings' refusals among them) or stopped (cancelled)."""
-    from rollout_train.launches import ASKED, RUNNING, STOPPED, STOPPING, SUBMITTED, launch_of, launches_of
+    why: its settings' refusals among them) or stopped (cancelled); a run that fails raises. A launch that finished
+    already is not run again: a job submitted again after its run failed (its RayJob's `backoffLimit`) returns 1, so
+    that the job fails too, and otherwise 0."""
+    from rollout_train.launches import ASKED, FAILED, RUNNING, STOPPED, STOPPING, SUBMITTED, launch_of, launches_of
 
     stores = stores or Stores.open(cluster)
     launches = launches_of(stores.ledger)
@@ -1205,7 +1207,7 @@ async def driven(launch: str, cluster: Cluster, stores: Stores | None = None) ->
     if noted.state != RUNNING:
         if noted.state == STOPPING:
             await launches.note(launch, expect=(STOPPING,), state=STOPPED, detail="stopped before it started")
-        return
+        return 1 if noted.state == FAILED else 0
     registry = registry_of(stores.ledger)
     entry = next((each for each in await registry.runs() if each.id == found.run), None) if registry else None
     asked = found.asked
@@ -1225,6 +1227,7 @@ async def driven(launch: str, cluster: Cluster, stores: Stores | None = None) ->
     if found.job:
         run.started["job"] = found.job
     await _driven(launches, found.id, ran(run))
+    return 0
 
 
 async def _driven(launches: Any, id: str, work: Coroutine[Any, Any, None]) -> None:
