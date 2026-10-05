@@ -14,11 +14,12 @@ from pydantic import JsonValue
 
 from rollout.contracts import BlobReference
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import Checkpoints, Fence, Fenced, FileLedger, Files, Step, Weighted, results, train, trained
+from rollout_train import Checkpoints, Fence, Fenced, FileLedger, Files, Step, results, train, trained
 from rollout_train.checkpoints import new_id
 from rollout_train.record import GROUPS, STEPS, table
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, runner_scope
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
+from rollout_train.trainer import Item
 from tests.rollout_train.rollouts.games import Words
 from tests.rollout_train.support import Counting, answering, here, made_by
 
@@ -87,7 +88,7 @@ class DyingTrainer(Counting):
         super().__init__()
         self.fuse, self.steps = fuse, steps
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         self.fuse.point()
         (into / "weights").mkdir(parents=True)
         (into / "weights" / "half").write_text("a step that died left this")

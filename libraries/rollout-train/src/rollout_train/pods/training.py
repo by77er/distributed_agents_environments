@@ -52,7 +52,7 @@ from rollout_train.checkpoints import Checkpoints, Manifest, kept
 from rollout_train.pods.environment import listening, public_address, required, serial, serial_file, served, stores
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.presence import beating, presence_of
-from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, Trainer, Weighted
+from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, Item, Labelled, Pair, Trainer, Weighted
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -111,15 +111,15 @@ class StepState:
 _ASKED = TypeAdapter(StepAsked)
 _MADE = TypeAdapter(StepMade)
 _STATE = TypeAdapter(StepState)
-_BATCH = TypeAdapter(list[Weighted])
+_BATCH = TypeAdapter(list[Weighted | Pair | Labelled])
 
 
-def batch_bytes(batch: Sequence[Weighted]) -> bytes:
+def batch_bytes(batch: Sequence[Item]) -> bytes:
     """A batch as one blob's bytes: JSON, NaN kept as NaN (a forced token's logprob)."""
-    return json.dumps([dataclasses.asdict(weighted) for weighted in batch], separators=(",", ":")).encode()
+    return json.dumps([dataclasses.asdict(item) for item in batch], separators=(",", ":")).encode()
 
 
-def batch_of(data: bytes) -> list[Weighted]:
+def batch_of(data: bytes) -> list[Item]:
     return _BATCH.validate_python(json.loads(data))
 
 

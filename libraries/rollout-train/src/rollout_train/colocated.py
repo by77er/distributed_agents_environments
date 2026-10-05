@@ -7,7 +7,8 @@ from typing import Protocol
 
 from pydantic import JsonValue
 
-from rollout_train.trainer import Changeable, Files, Step, Trainer, Weighted
+from rollout_train.objectives import Objective
+from rollout_train.trainer import Changeable, Files, Item, Step, Trainer, objective_of
 
 
 class Pausable(Protocol):
@@ -32,6 +33,7 @@ class Colocated:
         self._guard = guard
         self.budget = trainer.budget
         self.weights = trainer.weights
+        self.objective: Objective = objective_of(trainer)
 
     @property
     def changeable(self) -> Mapping[str, JsonValue]:
@@ -43,7 +45,7 @@ class Colocated:
             raise ValueError(f"the trainer takes no settings between steps (not {', '.join(settings)})")
         self._trainer.change(settings)
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         started = time.monotonic()
         for channel in self._channels:
             await channel.pause()  # no request may be in flight when an engine goes to sleep

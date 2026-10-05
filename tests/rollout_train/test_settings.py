@@ -28,7 +28,7 @@ from rollout_train.settings import (
     desired_settings_of,
     fixed,
 )
-from rollout_train.trainer import Changeable, Files, Step, Weighted
+from rollout_train.trainer import Changeable, Files, Item, Step
 from tests.rollout_train.rollouts.games import words
 from tests.rollout_train.support import ENVIRONMENT, Counting, a_schedule, answering, here, made_by, write
 
@@ -53,7 +53,7 @@ class Rated(Counting):
         self.changes.append(dict(settings))
         self.learning_rate = float(str(settings["learning_rate"]))
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         self.rates.append(self.learning_rate)
         return await super().step(batch, seed=seed, parent=parent, into=into)
 

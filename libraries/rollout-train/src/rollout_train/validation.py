@@ -18,11 +18,13 @@ from dataclasses import dataclass, field
 
 from pydantic import JsonValue
 
+from rollout_train.algorithm import needs_of
 from rollout_train.bridges import AUTO, Bridge, NoBridge, path, rank_factor
 from rollout_train.cluster import Cluster, auth_problem
+from rollout_train.objectives import DEFAULT, POLICY_GRADIENT, Objective, composed
 from rollout_train.providers import InferenceProvider, SettingSpec, TrainerProvider, settings_of
 from rollout_train.registry import Taken, valid
-from rollout_train.run_settings import KINDS, TRAINING, RunSettings, is_trainers, key_of
+from rollout_train.run_settings import KINDS, TRAINING, RunSettings, is_trainers, key_of, objective_in
 from rollout_train.slots import Declared
 from rollout_train.slots import problems as slot_problems
 
@@ -64,7 +66,9 @@ RULES: tuple[Rule, ...] = (
     Rule("providers", "the trainer or a channel's provider is not offered"),
     Rule("auth", "a provider reached with no auth away from this machine"),
     Rule(
-        "capabilities", "the trained channel's provider is not token-exact with sampled logprobs and honoured sampling"
+        "capabilities",
+        "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured "
+        "sampling (an importance correction)",
     ),
     Rule("bridge", "no bridge from the checkpoint's format to what the provider loads"),
     Rule("weights", "adapters for a provider without adapters, full weights for one without full reload"),
@@ -72,7 +76,11 @@ RULES: tuple[Rule, ...] = (
     Rule("rank", "the adapter's rank, as the provider sees it, above its highest"),
     Rule("segment", "segments longer than the trainer or the context takes"),
     Rule("start", "the start does not exist, was released, or is in a format the trainer cannot start from"),
-    Rule("objective", "an objective the trainer does not take"),
+    Rule(
+        "objective",
+        "a component its family does not accept, a combination that means nothing, a family the trainer or the kind of "
+        "run does not take, a reference or an entropy the trainer cannot give",
+    ),
     Rule("evals", "a suite that does not exist, or whose environment is not offered"),
     Rule("distillation", "a teacher without the logprobs distillation needs, or of another renderer family"),
     Rule("environment", "not offered, does not load, or needs sandboxes or tool sets the cluster lacks"),
@@ -380,19 +388,40 @@ def _auth(run: _Run) -> None:
                 run.refuse("auth", f"channels.{channel}.provider", problem)
 
 
+def _objective_of(run: _Run) -> Objective | None:
+    """The objective the run's settings ask for, if it can be made (what is wrong with it is `_objective`'s to say)."""
+    try:
+        return objective_in(run.settings)
+    except ValueError:
+        return None
+
+
 def _capabilities(run: _Run) -> None:
     trained = run.settings.trained
     if trained is None:
         return
+    objective = _objective_of(run) or DEFAULT
+    needs = needs_of(objective)
+    if not needs:  # (a preference loss and a likelihood read neither exact tokens nor behaviour logprobs)
+        return
+    weighs = "sampled_logprobs" in needs
     for name, provider in run.providers(trained):
         offered = provider.capabilities
         key = f"channels.{trained}.provider"
-        if not offered.token_exact and not offered.sampled_logprobs:
+        if weighs and not offered.token_exact and not offered.sampled_logprobs:
             run.refuse(
                 "capabilities", key,
                 f"channel {trained} is trained, and provider {name} ({provider.kind}) returns text, not the sampled "
                 "token ids and their logprobs, which the importance weight needs",
             )  # fmt: skip
+            continue
+        if not weighs:
+            if not offered.token_exact:
+                run.refuse(
+                    "capabilities", key,
+                    f"channel {trained} is trained by a policy gradient, and provider {name} ({provider.kind}) does "
+                    "not return the exact tokens it sampled",
+                )  # fmt: skip
             continue
         lacks = [
             what
@@ -563,16 +592,50 @@ def _start(run: _Run) -> None:
 
 
 def _objective(run: _Run) -> None:
+    if run.kind not in TRAINING:
+        return
+    settings = run.settings
+    preset = settings["objective.preset"]
+    given = {
+        key.removeprefix("objective."): value
+        for key, value in settings.values.items()
+        if key.startswith("objective.") and key != "objective.preset" and value is not None
+    }
+    try:
+        objective, problems = composed(str(preset), given)
+    except ValueError:  # (a preset or a value the schema does not take: the settings rule said so)
+        return
+    for key, reason in problems:
+        run.refuse("objective", f"objective.{key}", reason)
+    if run.kind == "imitate" and objective.family == POLICY_GRADIENT and preset != DEFAULT.preset:
+        run.refuse("objective", "objective.preset", "an imitate run trains on a dataset's examples, which have no "
+                   f"advantages: a likelihood or preference preset, not {preset}")  # fmt: skip
     trainer = run.trainer
-    if trainer is None or run.specs is None:
+    if trainer is None:
         return
-    objective, ratio = run.setting("trainer.objective"), run.setting("trainer.ratio")
-    if objective is None:
-        return
-    named = str(objective) if objective == "likelihood" else f"{objective}/{ratio}"
-    if named not in trainer.capabilities.objectives:
-        run.refuse("objective", "trainer.objective", f"the {trainer.name} trainer does not take {named} (it takes "
-                   f"{', '.join(sorted(trainer.capabilities.objectives))})")  # fmt: skip
+    offered = trainer.capabilities
+    if objective.family not in offered.families:
+        run.refuse("objective", "objective.preset", f"the {trainer.name} trainer does not take a {objective.family} "
+                   f"objective (it takes {', '.join(sorted(offered.families))})")  # fmt: skip
+    if objective.needs_reference:
+        key = "objective.reference"
+        if offered.reference == "no":
+            sdk = " (Tinker's SDK offers prompt logprobs from a sampler of the base model, not yet confirmed by a live "
+            sdk += "test)"
+            why = sdk if offered.format == "tinker" else ""
+            run.refuse("objective", key, f"the {trainer.name} trainer gives no reference logprobs{why}, and the "
+                       f"objective reads them ({_reads(objective)})")  # fmt: skip
+        elif offered.reference == "asked" and run.setting("trainer.frozen_reference") is not True:
+            run.refuse("objective", key, f"the {trainer.name} trainer holds a reference only when asked, and the "
+                       f"objective reads it ({_reads(objective)}): trainer.frozen_reference = true keeps a frozen copy "
+                       "of the model beside the policy")  # fmt: skip
+    if objective.needs_entropy and not offered.entropy:
+        run.refuse("objective", "objective.entropy.coefficient", f"the {trainer.name} trainer gives no entropies, and "
+                   "an entropy bonus reads them")  # fmt: skip
+
+
+def _reads(objective: Objective) -> str:
+    return "a KL to the reference" if objective.family == POLICY_GRADIENT else f"the {objective.preference.loss} loss"
 
 
 def _evals(run: _Run) -> None:

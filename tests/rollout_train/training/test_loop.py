@@ -11,6 +11,7 @@ from typing import Any, cast
 import pytest
 from pydantic import JsonValue
 
+from rollout.contracts import BlobReference
 from rollout.curriculum import Curriculum
 from rollout.environment import Row, Start
 from rollout.harness import Runner
@@ -24,18 +25,18 @@ from rollout_train import (
     FileLedger,
     Files,
     Step,
-    Weighted,
     results,
     train,
     trained,
 )
 from rollout_train.checkpoints import Retention
 from rollout_train.ledger import Fenced
+from rollout_train.objectives import PRESETS
 from rollout_train.record import GROUPS, STARTS, STEPS, table
 from rollout_train.rollouts import Record, loaded
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
-from rollout_train.trainer import WEIGHTS
+from rollout_train.trainer import WEIGHTS, Item, Pair
 from tests.rollout_train.rollouts.games import Words
 from tests.rollout_train.support import Counting, Notes, Running, answering, here, made_by
 
@@ -153,6 +154,23 @@ async def test_a_step_waits_for_its_groups_and_takes_them_together(tmp_path: Pat
     assert all(len(groups) >= 2 for groups in covers[:-1]) and covers[-1]
     assert [len(batch) for batch in trainer.batches] == [4 * len(groups) for groups in covers]
     assert len(await made_by(checkpoints)) == len(covers)
+
+
+async def test_a_trainer_of_a_preference_objective_steps_on_each_groups_best_and_worst(tmp_path: Path) -> None:
+    recorder = answering()
+    checkpoints, trainer = checkpoints_in(tmp_path), Counting()
+    trainer.objective = PRESETS["dpo"].objective  # type: ignore[attr-defined]
+    async with here(checkpoints.ledger, recorder, checkpoints.blobs):
+        await train(
+            Words(), trainer, checkpoints, base="words-base", channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, groups=4, groups_per_step=1, seed=1,
+        )  # fmt: skip
+    items = [item for batch in trainer.batches for item in batch]
+    assert items and all(isinstance(item, Pair) for item in items)
+    steps = await checkpoints.ledger.read(table("train", STEPS))
+    step: Any = next(iter(steps.values()))
+    said = json.loads(await checkpoints.blobs.read(BlobReference.model_validate(step["batch"])))
+    assert all(">" in source and weight == 1.0 for source, weight in said)  # (`RUN/GROUP/CHOSEN>REJECTED`)
 
 
 async def test_episodes_of_any_groups_run_at_once_up_to_the_runners_places(tmp_path: Path) -> None:
@@ -329,7 +347,7 @@ async def test_a_loop_trains_in_a_directory_of_its_own_and_once_replaced_deletes
     written: list[Path] = []
 
     class Noting(Counting):
-        async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+        async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
             written.append(into)
             return await super().step(batch, seed=seed, parent=parent, into=into)
 

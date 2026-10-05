@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from rollout_train.cluster import Cluster, GatewaySection, GuardsSection, MonitorSection, RaySection, RunnersSection
+from rollout_train.objectives import DEFAULT
 from rollout_train.providers import INFERENCE_KINDS, TRAINER_KINDS, InferenceProvider, TrainerProvider, settings_of
 from rollout_train.run_settings import (
     KEYS,
@@ -46,7 +47,7 @@ def test_keys_that_kept_their_meaning_kept_their_names() -> None:
     assert {"channels.*.thinking_tokens", "channels.*.answer_tokens", "channels.*.model", "channels.*.renderer"} <= (
         patterns
     )
-    changeable = {each.pattern for each in KEYS if each.changeable}
+    changeable = {each.pattern for each in KEYS if each.changeable and not each.pattern.startswith("objective.")}
     assert changeable == {
         "groups_per_step", "max_lag", "evals.suite", "evals.every", "evals.episodes", "limits.spend", "share",
     }  # fmt: skip
@@ -163,7 +164,8 @@ def test_a_run_records_a_full_copy_of_its_settings_and_the_preset_version() -> N
     assert record["preset"] == "minecraft-one-gpu@3"
     assert fixed["environment"] == "e:e" and fixed["groups"] == 100 and fixed["trainer.rank"] == 32
     assert fixed["channels.policy.model"] == "Qwen/Qwen3-0.6B" and fixed["channels.policy.bridge"] == "auto"
-    assert changeable["trainer.learning_rate"] == 1e-4 and changeable["trainer.clip_low"] == 0.2
+    assert changeable["trainer.learning_rate"] == 1e-4 and changeable["objective.clip.low"] is None  # (the preset's)
+    assert fixed["objective.preset"] == "default" and record["objective"] == DEFAULT.to_json()
     assert changeable["groups_per_step"] == 4 and changeable["limits.spend"] is None
     assert "eval.suite" not in fixed and "imitation.passes" not in fixed  # (keys of other kinds of run)
     assert not set(fixed) & set(changeable)

@@ -7,6 +7,7 @@ import contextlib
 import math
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
@@ -28,7 +29,7 @@ from rollout_train.pods.training import (
 )
 from rollout_train.record import scope
 from rollout_train.recorder import Segment, Span
-from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Step, StepFailed, Weighted
+from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Item, Step, StepFailed, Weighted
 
 BATCH = [
     Weighted(Segment([1, 2, 3, 4], [Span(2, 4, 3, "e/1")], [-0.5, float("nan")], "policy"), 1.5, "r/1/0/a/0"),
@@ -59,7 +60,7 @@ class Fake:
             raise ValueError(f"{sorted(unknown)} cannot change")
         self.settings.update(settings)
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         await self.gate.wait()
         before = (parent.weights / "adapter.txt").read_text() if parent else "base"
         state = (parent.state / "optimizer.txt").read_text() if parent and parent.state else None
@@ -97,6 +98,8 @@ async def pod(service: TrainerService, **options: object) -> AsyncGenerator[Remo
 
 def test_a_batch_is_one_blob_and_comes_back_whole() -> None:
     back = batch_of(batch_bytes(BATCH))
+    assert all(isinstance(each, Weighted) for each in back)
+    back = cast(list[Weighted], back)
     assert [(each.advantage, each.source, each.segment.tokens, each.segment.spans) for each in back] == [
         (each.advantage, each.source, each.segment.tokens, each.segment.spans) for each in BATCH
     ]

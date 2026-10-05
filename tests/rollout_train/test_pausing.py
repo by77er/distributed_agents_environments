@@ -15,7 +15,7 @@ from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
 from rollout.testing import until
-from rollout_train import Checkpoints, Files, Step, Weighted, train
+from rollout_train import Checkpoints, Files, Step, train
 from rollout_train import loop as loop_module
 from rollout_train.cli import _train  # pyright: ignore[reportPrivateUsage]
 from rollout_train.launcher import LAUNCHER, Launcher
@@ -28,6 +28,7 @@ from rollout_train.resuming import IN_PLACE, LAUNCHED, pause, resume
 from rollout_train.rollouts.scheduler import CLAIMS, EPISODES
 from rollout_train.settings import PAUSED, desired_settings_of, paused
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
+from rollout_train.trainer import Item
 from tests.rollout_train.rollouts.games import GATES, Gated, Words
 from tests.rollout_train.support import ENVIRONMENT, Counting, Notes, Running, Steps, ask, here, runner, served
 
@@ -188,7 +189,7 @@ segments_per_step = 3
 class Slow(Steps):
     """Steps that take a while, so that a run can be stopped between two."""
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         await asyncio.sleep(0.05)
         return await super().step(batch, seed=seed, parent=parent, into=into)
 

@@ -59,6 +59,7 @@ if TYPE_CHECKING:
 
     from rollout_train.cluster import Cluster
     from rollout_train.ledger import Ledger
+    from rollout_train.objectives import Objective
     from rollout_train.profile import Profile
     from rollout_train.registry import Registry
     from rollout_train.run_settings import RunSettings
@@ -597,18 +598,20 @@ async def _imitate(
         taught = await dataset_examples(ledger, made, renderer)
     else:
         taught = await examples(ledger, run.id, blobs, renderer, kinds=kinds)
-    if not taught.segments:
+    if not taught.items:
         raise SystemExit("no solved episode of the run carried that guidance" if made is None else "no examples")
-    print(f"{len(taught.segments)} segments of {taught.episodes} episodes ({taught.left_out} left out), "
-          f"{taught.supervision}", flush=True)  # fmt: skip
+    shown = f"{len(taught.segments)} segments" if taught.segments else f"{len(taught.preferences)} {made and made.kind}"
+    print(f"{shown} of {taught.episodes} episodes ({taught.left_out} left out), {taught.supervision}",
+          flush=True)  # fmt: skip
     head = await checkpoints.head(run.id) or (await checkpoints.checkpoint(start) if start else None)
     model = spec.model  # (an adapter from full weights is trained over them)
     under = await checkpoints.under(head) if head is not None else None
     kind = named(described.trainer.kind)
     if under is not None and under.weights is not None and getattr(kind, "weights", "lora") == "lora":
         model = str(await checkpoints.files(under.weights, described.directory / "bases" / under.id))
-    settings = {**described.trainer.settings, "objective": "likelihood"}
-    chosen = taught.segments if limit is None else taught.segments[:limit]  # (as many as the step takes)
+    objective = _imitated(layers.settings, made.kind if made is not None else "examples")
+    settings: dict[str, Any] = {**described.trainer.settings, "objective": objective.to_json()}
+    chosen = taught.items if limit is None else taught.items[:limit]  # (as many as the step takes)
     weights = str(getattr(kind, "weights", "lora"))
     settings["learning_rate"] = learning_rate if learning_rate is not None else RATES.get(weights, 1e-6)
     settings["warmup_updates"] = WARMUP if warmup is None else warmup
@@ -624,7 +627,7 @@ async def _imitate(
         "started": round(time.time(), 1), "directory": str(where), "profile": str(profiled),
         "blobs": location(described.blobs, described.directory / BLOBS),
         "run_settings": _recorded(layers, described, {
-            "trainer.objective": "likelihood", "trainer.learning_rate": settings["learning_rate"],
+            "objective.preset": objective.preset, "trainer.learning_rate": settings["learning_rate"],
             "imitation.warmup": settings["warmup_updates"], "imitation.passes": settings["passes"],
         }),
     }  # fmt: skip
@@ -797,6 +800,8 @@ async def _layered(
             profile[key] = "" if value is None else value
         elif key in ("episodes_at_once", "trainer.channel") or key.startswith("evals.") or is_trainers(key):
             profile[key] = value
+        elif key.startswith("objective."):
+            continue  # (the trainer's objective, below)
         elif key.startswith("channels.") and key.count(".") == 2 and last in ("model", "renderer", *_BUDGETS):
             profile[key] = "none" if value is None and last in _BUDGETS else value
         else:
@@ -804,7 +809,42 @@ async def _layered(
     if refused:
         raise SystemExit(f"a run over a profile cannot take {', '.join(refused)}: those need the cluster config")
     settings = layered(_given_by(plain, kind), given, {"kind": kind})
+    if any(key.startswith("objective.") for key in settings.values):  # (the trainer takes them as its objective)
+        table: dict[str, Any] = {"preset": settings["objective.preset"]}
+        table |= {key.removeprefix("objective."): value for key, value in settings.values.items()
+                  if key.startswith("objective.") and key != "objective.preset" and value is not None}  # fmt: skip
+        profile["trainer.objective"] = table
     return _Layered(profile, settings, given, chosen.id if chosen else None)
+
+
+def _imitated(settings: "RunSettings", kind: str) -> "Objective":
+    """The objective an imitate run trains with: the likelihood or preference preset its settings name (as the
+    dataset's `kind` holds examples, or pairs and labelled examples), else `sft` with those of their components a
+    likelihood takes. A policy-gradient preset named is refused."""
+    from rollout_train.objectives import DEFAULT, LIKELIHOOD, POLICY_GRADIENT, PREFERENCE, PRESETS, component
+    from rollout_train.run_settings import RunSettings, objective_in
+
+    preset = str(settings["objective.preset"])
+    asked = PRESETS.get(preset)
+    if asked is not None and asked.objective.family == POLICY_GRADIENT:
+        if preset != DEFAULT.preset:
+            raise SystemExit(f"an imitate run trains on a dataset's examples, which have no advantages: a likelihood "
+                             f"or preference preset, not {preset}")  # fmt: skip
+
+        def taken(key: str) -> bool:
+            found = component(key.removeprefix("objective."))
+            return not key.startswith("objective.") or (found is not None and LIKELIHOOD in found.families)
+
+        values = {key: value for key, value in settings.values.items() if taken(key)}
+        settings = RunSettings({**values, "objective.preset": "sft"})
+    try:
+        objective = objective_in(settings)
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
+    if (objective.family == PREFERENCE) != (kind != "examples"):
+        wanted = "a preference preset" if kind != "examples" else "a likelihood preset (sft)"
+        raise SystemExit(f"a dataset of {kind} is trained on by {wanted}, not {objective.preset}")
+    return objective
 
 
 def _whole(settings: "RunSettings", key: str) -> int:
@@ -1280,7 +1320,11 @@ def main() -> None:
     datasets = commands.add_parser("dataset", help="make or list datasets: examples chosen from runs' episodes")
     dataset_commands = datasets.add_subparsers(dest="dataset_command", required=True)
     dataset_making = dataset_commands.add_parser("make", help="make a dataset by an episode rule and turn filters")
-    dataset_making.add_argument("rule", choices=["solved-all", "best-of-group", "capped-per-task"])
+    dataset_making.add_argument(
+        "rule", choices=["solved-all", "best-of-group", "capped-per-task", "best-and-worst", "above-and-below"],
+        help="an episode rule (examples to imitate), or a preference rule: best-and-worst (pairs), above-and-below "
+        "(labelled examples)",
+    )  # fmt: skip
     dataset_making.add_argument("--run", action="append", required=True, help="a run, by name or id (repeatable)")
     dataset_making.add_argument(
         "--turns", action="append", help="a turn filter: all (the default) or module:name (repeatable: every one keeps)"

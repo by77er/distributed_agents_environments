@@ -13,7 +13,7 @@ from rollout.contracts import Message
 from rollout.harness import RecordedModel
 from rollout.harness.blobs import FileBlobStore
 from rollout.local import LocalRunner
-from rollout_train import Budget, Checkpoints, FileLedger, Files, Step, Weighted, train
+from rollout_train import Budget, Checkpoints, FileLedger, Files, Step, train
 from rollout_train.evals import subject_table, suite_table
 from rollout_train.gateway import Attempt
 from rollout_train.launches import EVAL
@@ -29,7 +29,7 @@ from rollout_train.rollouts import EpisodeRunner, playing
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory, stored
 from rollout_train.rollouts.scheduler import CLAIMS, CLOSED, EPISODES, INTERRUPTED, runner_scope
 from rollout_train.testing import Policy, gateway_endpoints, plain_channel, sample_request
-from rollout_train.trainer import STATE, WEIGHTS
+from rollout_train.trainer import STATE, WEIGHTS, Item
 from tests.rollout_train.rollouts.games import Words
 from tests.rollout_train.support import monitor_client
 
@@ -43,7 +43,7 @@ class Trains:
     def __init__(self) -> None:
         self.steps = 0
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         self.steps += 1
         (into / WEIGHTS).mkdir(parents=True)
         (into / WEIGHTS / "adapter.bin").write_text(f"weights after {self.steps} steps")

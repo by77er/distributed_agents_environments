@@ -18,7 +18,7 @@ from rollout_train.merging import SCOPE, merge
 from rollout_train.profile import Profile
 from rollout_train.record import STARTS, scope, table
 from rollout_train.stores import FILES
-from rollout_train.trainer import WEIGHTS, Files, Step, Weighted
+from rollout_train.trainer import WEIGHTS, Files, Item, Step
 from tests.rollout_train.rollouts.games import words
 from tests.rollout_train.support import a_ledger, a_profile, files
 
@@ -93,7 +93,7 @@ class Full:
         self.budget = Budget(segment_tokens, segments_per_step)
         self.weights = "full"
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         (into / WEIGHTS).mkdir(parents=True)
         (into / WEIGHTS / "model.safetensors").write_text(f"from {parent.weights.name if parent else self.model}")
         return Step({"segments": float(len(batch))})
@@ -108,7 +108,7 @@ class Adapters(Full):
         super().__init__(model, segment_tokens=segment_tokens, segments_per_step=segments_per_step)
         self.weights = "lora"
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         Adapters.began.append(parent.weights.parent.name if parent else None)
         return await super().step(batch, seed=seed, parent=parent, into=into)
 

@@ -207,6 +207,18 @@ def named_runs(tables: Iterable[str]) -> list[str]:
     return sorted(found)
 
 
+async def trained_objective(ledger: Ledger, run: str) -> dict[str, JsonValue] | None:
+    """The objective a training run's newest start that trained recorded (its run settings' `objective`, as
+    `rollout_train.objectives.Objective.to_json` wrote it), if any: what the run trains with when it is started
+    again."""
+    starts = await ledger.read(table(run, STARTS))
+    for key in sorted(starts, key=int, reverse=True):
+        said = mapping(mapping(starts[key]).get("run_settings"))
+        if mapping(said.get("fixed")).get("kind") == "train" and isinstance(said.get("objective"), dict):
+            return cast(dict[str, JsonValue], said["objective"])
+    return None
+
+
 async def results(ledger: Ledger, run: str = "train") -> list[Result]:
     """How a run's groups went, by their numbers."""
     logged, decided = await ledger.read(table(run, RESULTS)), await ledger.read(table(run, GROUPS))

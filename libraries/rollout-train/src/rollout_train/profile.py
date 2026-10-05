@@ -13,6 +13,7 @@ of each is passed to it: this module knows no engine and no trainer. docs/guide/
 import asyncio
 import contextlib
 import dataclasses
+import inspect
 import json
 import math
 import secrets
@@ -41,8 +42,10 @@ from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
 from rollout_train.ledger import LOCATION
 from rollout_train.ledger import opened as ledger_at
 from rollout_train.machine import alive, measured
+from rollout_train.objectives import LEGACY
 from rollout_train.presence import presence_of
 from rollout_train.ray_cluster import connect, disconnect
+from rollout_train.record import trained_objective
 from rollout_train.registry import Entry, Registry, registry_of, resolved, run_of
 from rollout_train.rollouts.scheduler import EpisodeRunner
 from rollout_train.sandboxes import admits, keep, leases_of
@@ -321,6 +324,15 @@ class Profile:
             yield started_engines(self, stack, models, servers=True)
 
 
+def takes_objective(making: Any) -> bool:
+    """Whether what makes a trainer takes an objective among its settings (`objective`, or any keyword)."""
+    try:
+        parameters = inspect.signature(making).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(each.name == "objective" or each.kind is inspect.Parameter.VAR_KEYWORD for each in parameters)
+
+
 def _table(described: dict[str, Any], name: str) -> dict[str, Any]:
     return dict(described.pop(name, {}))
 
@@ -429,7 +441,11 @@ class Platform:
         described = profile.trainer
         learner: Trainer | None = None
         if described is not None and training and plays is None:
-            learner = named(described.kind)(models[described.channel], **described.settings)
+            settings, making = dict(described.settings), named(described.kind)
+            kept = await trained_objective(self.ledger, self.run.id)  # (a run started again: what it trained with)
+            if kept is not None and takes_objective(making):
+                settings = {key: value for key, value in settings.items() if key not in LEGACY} | {"objective": kept}
+            learner = making(models[described.channel], **settings)
         sequence = learner.budget.segment_tokens if learner is not None else None
         self.channels = started_engines(profile, stack, models, sequence, leaving=hosted)
         trained = described.channel if described is not None else None

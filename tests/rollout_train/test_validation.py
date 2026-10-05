@@ -460,15 +460,87 @@ def test_start_passes_what_the_trainer_starts_from() -> None:
 
 
 def test_an_objective_the_trainer_does_not_take_is_refused() -> None:
-    capabilities = dataclasses.replace(
-        CLUSTER.trainers["local-lora"].capabilities, objectives=frozenset({"likelihood"})
-    )
+    capabilities = dataclasses.replace(CLUSTER.trainers["local-lora"].capabilities, families=frozenset({"likelihood"}))
     cluster = with_trainer(CLUSTER, "local-lora", capabilities=capabilities)
     assert refused("objective", findings(LOCAL_LORA, cluster=cluster)) == [
-        "the local-lora trainer does not take policy_gradient/token (it takes likelihood)"
+        "the local-lora trainer does not take a policy_gradient objective (it takes likelihood)"
     ]
     assert refused("objective", findings({**LOCAL_LORA, "trainer.objective": "likelihood"}, cluster=cluster)) == []
     assert refused("objective", findings({**LOCAL_LORA, "trainer.ratio": "segment"})) == []
+
+
+def test_a_component_the_family_does_not_accept_and_a_combination_that_means_nothing_are_refused() -> None:
+    found = findings({**LOCAL_LORA, "objective.preset": "dpo", "objective.clip.low": 0.1})
+    assert refused("objective", found) == [
+        "objective.clip.low is not a component of a preference objective (it is of policy_gradient)"
+    ]
+    assert [each.key for each in found if each.rule == "objective"] == ["objective.clip.low"]
+    assert refused("objective", findings({**LOCAL_LORA, "objective.preset": "reinforce", "objective.clip.kind": "ratio"
+                                          })) == ["clip.kind ratio clips a ratio, and ratio is none"]  # fmt: skip
+    simpo = {**LOCAL_LORA, "objective.preset": "simpo", "objective.reference": "base"}
+    assert refused("objective", findings(simpo)) == ["the margin loss compares likelihoods alone: reference = none"]
+    assert refused("settings", findings({**LOCAL_LORA, "objective.preset": "nothing"})) == [
+        "objective.preset is one of default, reinforce, rloo, ppo_clip, grpo, dr_grpo, dapo, gspo, cispo, sft, dpo, "
+        "ipo, simpo, kto, orpo, not 'nothing'"
+    ]
+    assert refused("settings", findings({**LOCAL_LORA, "objective.clip.kind": "tight"})) == [
+        "objective.clip.kind is one of none, ratio, weight, dual, not 'tight'"
+    ]
+    # A KL to the reference reads the base model, which follows from it.
+    assert refused("objective", findings({**LOCAL_LORA, "objective.kl.target": "reference",
+                                          "objective.kl.coefficient": 0.01})) == []  # fmt: skip
+
+
+def test_an_importance_correction_needs_behaviour_logprobs_and_a_preference_loss_does_not() -> None:
+    api = {**LOCAL_LORA, "channels.policy.provider": "openai", "channels.policy.model": "gpt-5"}
+    capabilities = dataclasses.replace(CLUSTER.inference["local-vllm"].capabilities, sampled_logprobs=False)
+    without = with_provider(CLUSTER, "local-vllm", capabilities=capabilities)
+    assert refused("capabilities", findings(LOCAL_LORA, cluster=without)) == [
+        "channel policy is trained, and provider local-vllm (vllm) lacks sampled-token logprobs: the importance weight "
+        "needs the behaviour logprob of each exact sampled token"
+    ]
+    assert refused("capabilities", findings({**LOCAL_LORA, "objective.preset": "reinforce"}, cluster=without)) == []
+    assert refused("capabilities", findings({**api, "objective.preset": "reinforce"})) == [
+        "channel policy is trained by a policy gradient, and provider openai (api) does not return the exact tokens "
+        "it sampled"
+    ]
+    for preset in ("dpo", "simpo", "kto", "sft"):
+        assert refused("capabilities", findings({**api, "objective.preset": preset})) == [], preset
+
+
+def test_a_reference_the_trainer_cannot_give_is_refused() -> None:
+    assert refused("objective", findings({"objective.preset": "dpo"})) == [
+        "the tinker-lora trainer gives no reference logprobs (Tinker's SDK offers prompt logprobs from a sampler of "
+        "the base model, not yet confirmed by a live test), and the objective reads them (the sigmoid loss)"
+    ]
+    assert refused("objective", findings({"objective.preset": "grpo"})) == [
+        "the tinker-lora trainer gives no reference logprobs (Tinker's SDK offers prompt logprobs from a sampler of "
+        "the base model, not yet confirmed by a live test), and the objective reads them (a KL to the reference)"
+    ]
+    assert refused("objective", findings({"objective.preset": "simpo"})) == []  # (no reference: Tinker takes it)
+    assert refused("objective", findings({"objective.preset": "dapo", "objective.entropy.coefficient": 0.01})) == [
+        "the tinker-lora trainer gives no entropies, and an entropy bonus reads them"
+    ]
+    assert refused("objective", findings({**FULL, "objective.preset": "dpo"})) == [
+        "the local-full trainer holds a reference only when asked, and the objective reads it (the sigmoid loss): "
+        "trainer.frozen_reference = true keeps a frozen copy of the model beside the policy"
+    ]
+    assert refused("objective", findings({**FULL, "objective.preset": "dpo", "trainer.frozen_reference": True})) == []
+    assert refused("objective", findings({**LOCAL_LORA, "objective.preset": "dpo"})) == []  # (the adapter off)
+    assert refused("settings", findings({**LOCAL_LORA, "trainer.frozen_reference": True})) == [
+        "the local-lora trainer takes no trainer.frozen_reference: an adapter's reference is the model with the "
+        "adapter switched off"
+    ]
+
+
+def test_an_imitate_run_trains_a_likelihood_or_a_preference() -> None:
+    imitate: dict[str, JsonValue] = {"kind": "imitate", "trainer.provider": "local-lora", "imitation.dataset": "d"}
+    assert refused("objective", check(RunSettings({**imitate, "objective.preset": "dapo"}), CLUSTER)) == [
+        "an imitate run trains on a dataset's examples, which have no advantages: a likelihood or preference preset, "
+        "not dapo"
+    ]
+    assert refused("objective", check(RunSettings({**imitate, "objective.preset": "orpo"}), CLUSTER)) == []
+    assert refused("objective", check(RunSettings(imitate), CLUSTER)) == []  # (none named: sft)
 
 
 # evals

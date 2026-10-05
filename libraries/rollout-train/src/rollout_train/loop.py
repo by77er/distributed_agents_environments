@@ -73,7 +73,7 @@ from rollout.contracts import BlobReference
 from rollout.curriculum import Curriculum, curriculum_of
 from rollout.environment import Environment, binding_for, held_out, train_start
 from rollout.harness.runner import RunBinding
-from rollout_train.algorithm import Algorithm, Grpo, spread
+from rollout_train.algorithm import Algorithm, algorithm_for, within
 from rollout_train.bridges import bridge_of
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
 from rollout_train.evals import Publisher, Schedule, evaluate
@@ -104,10 +104,11 @@ from rollout_train.settings import (
     GROUPS_PER_STEP,
     MAX_LAG,
     PAUSED,
-    TRAINER,
     applied,
+    run_key,
+    trainer_key,
 )
-from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, StepFailed, Trainer, Weighted
+from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, Item, StepFailed, Trainer, objective_of, weight_of
 
 FAILED_UPDATES = 3
 """Steps that may fail in a row (each is written down, and the weights stay as they were) before the loop stops."""
@@ -150,7 +151,8 @@ async def train(
     taken over the groups queued once at least `groups_per_step` have something to train on (and, at the end, over what
     is left). `directory` is where checkpoints' files are kept on this machine while they are in use: the one being
     served and the one before it (a turn in progress finishes under the weights it began with); every checkpoint's files
-    are in the blob store; `publish` serves a checkpoint on `channel`. `algorithm` is `Grpo()` unless given.
+    are in the blob store; `publish` serves a checkpoint on `channel`. `algorithm` is the one the family of the
+    trainer's objective takes, unless given (`rollout_train.algorithm.algorithm_for`).
     `episodes_at_once` is how many episodes the run keeps work waiting for, whatever groups they are of (runners play
     them, as many at once as each has places). `binding` says how the program's model slots and imports are served (by
     default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is one that has
@@ -169,7 +171,7 @@ async def train(
     of evals they name (a suite by name or a version by id, every, episodes; None for a suite the run cannot play),
     without which only `evals`' suite can be played. A suite named by its name is played in the version its name points
     to when each step is decided: the step's record says which (`suite_version`)."""
-    algorithm = algorithm if algorithm is not None else Grpo()
+    algorithm = algorithm if algorithm is not None else algorithm_for(objective_of(trainer))
     retention = retention if retention is not None else Retention()
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
     fence = await ledger.take(scope(run))  # whoever ran this before can no longer write
@@ -207,7 +209,7 @@ async def train(
         EVALS_EVERY: evals.every if evals else 1,
         EVALS_EPISODES: evals.episodes if evals else None,
     }
-    settings |= {f"{TRAINER}{key}": value for key, value in _changeable(trainer).items()}
+    settings |= {run_key(key): value for key, value in _changeable(trainer).items()}
     """The changeable settings in effect: those the next step is decided with."""
     schedules: dict[tuple[str, int, int | None], Schedule | None] = {}
 
@@ -341,7 +343,7 @@ async def train(
             trained_with(_trainers(wanted))
         except (ValueError, TypeError) as error:  # (a value the trainer cannot take: its settings stay as they were)
             note("settings", {"error": str(error)})
-            wanted |= {key: value for key, value in settings.items() if key.startswith(TRAINER)}
+            wanted |= {key: value for key, value in settings.items() if trainer_key(key) is not None}
         if changes := {key: value for key, value in wanted.items() if settings.get(key) != value}:
             note("settings", {"changed": changes})
         settings = wanted
@@ -375,7 +377,7 @@ async def train(
 
     outstanding: dict[asyncio.Task[list[Episode]], int] = {}
     """Groups being played, by the task that waits for their episodes."""
-    segments: dict[int, list[Weighted]] = {}
+    segments: dict[int, list[Item]] = {}
     """What the algorithm found to train on in each group with a result that is not yet done with."""
     queue: list[int] = []
     """Groups with something to train on that no step covers yet."""
@@ -402,9 +404,9 @@ async def train(
         decided[number] = group
         ask(number)
 
-    def held(number: int, episodes: list[Episode]) -> list[Weighted]:
+    def held(number: int, episodes: list[Episode]) -> list[Item]:
         """What the algorithm trains on in a group (the same, from the same episodes, each time it is asked)."""
-        return list(algorithm.batch(episodes, trainer.budget, random.Random(number)).segments)
+        return list(algorithm.batch(episodes, trainer.budget, random.Random(number)).items)
 
     async def record(number: int, episodes: list[Episode]) -> None:
         group = decided[number]
@@ -421,7 +423,7 @@ async def train(
             segments_recorded=sum(
                 len(trajectory.segments) for episode in good for trajectory in episode.trajectories.values()
             ),
-            segments=len(batch.segments),
+            segments=len(batch.items),
             skipped=batch.skipped,
         )
         curriculum.recorded(line)  # (the curriculum sees the task's own rewards, whatever the algorithm adds)
@@ -442,11 +444,11 @@ async def train(
     async def take(key: int, numbers: list[int]) -> None:
         """A step over `numbers`: decided (unless it was), made once, served."""
         nonlocal failed_updates
-        given = spread([weighted for number in numbers for weighted in segments[number]], trainer.budget.segments,
+        given = within([item for number in numbers for item in segments[number]], trainer.budget.segments,
                        random.Random(f"{seed}-step-{key}"))  # fmt: skip
         if key not in steps:
             parent = await current()
-            trained: list[JsonValue] = [[weighted.source, weighted.advantage] for weighted in given]
+            trained: list[JsonValue] = [[item.source, weight_of(item)] for item in given]
             manifest = await blobs.put(json.dumps(trained).encode(), "application/json")
             decision: dict[str, JsonValue] = {
                 "groups": list[JsonValue](numbers),
@@ -614,8 +616,9 @@ def _changeable(trainer: Trainer) -> Mapping[str, JsonValue]:
 
 
 def _trainers(settings: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
-    """The trainer's own of a run's settings (`trainer.…`), by its names for them."""
-    return {key.removeprefix(TRAINER): value for key, value in settings.items() if key.startswith(TRAINER)}
+    """The trainer's own of a run's settings (`trainer.…`, and its objective's `objective.…`), by its names for
+    them."""
+    return {name: value for key, value in settings.items() if (name := trainer_key(key)) is not None}
 
 
 def _groups(step: dict[str, JsonValue]) -> list[int]:

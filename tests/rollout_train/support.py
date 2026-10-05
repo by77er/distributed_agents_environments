@@ -39,7 +39,6 @@ from rollout_train import (
     Ledger,
     Step,
     StepFailed,
-    Weighted,
 )
 from rollout_train.evals import (
     Schedule,
@@ -57,7 +56,7 @@ from rollout_train.rollouts import (
 )
 from rollout_train.stores import FILES
 from rollout_train.testing import PlainRenderer, Policy, gateway_endpoints, plain_channel
-from rollout_train.trainer import STATE, WEIGHTS
+from rollout_train.trainer import STATE, WEIGHTS, Item
 from tests.rollout_train.rollouts.games import Guess
 
 
@@ -68,13 +67,14 @@ class Counting:
     weights = "lora"
 
     def __init__(self, fails: int = 0) -> None:
-        self.batches: list[list[Weighted]] = []
+        self.batches: list[list[Any]] = []
+        """What each step was given (weighted segments, pairs or labelled examples)."""
         self.parents: list[str | None] = []
         """What each step started from: the text of its parent's weights."""
         self.fails = fails
         """Steps that fail before one succeeds."""
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         if self.fails:
             self.fails -= 1
             raise StepFailed("the trainer failed:\nout of memory")
@@ -175,7 +175,7 @@ class Steps:
         self.budget = Budget(segment_tokens, segments_per_step)
         self.weights = "lora"
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         (into / WEIGHTS).mkdir(parents=True)
         (into / WEIGHTS / "adapter.bin").write_text(f"trained on {len(batch)} segments")
         return Step({"segments": float(len(batch))})

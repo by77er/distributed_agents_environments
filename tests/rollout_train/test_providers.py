@@ -66,11 +66,13 @@ def test_a_trainers_settings_are_read_from_its_dataclass() -> None:
     lora = {each.key: each for each in settings_of(TRAINER_KINDS["lora"])}
     assert lora["trainer.rank"] == SettingSpec("trainer.rank", ("int",), 32, False)
     assert lora["trainer.learning_rate"] == SettingSpec("trainer.learning_rate", ("float",), 5e-5, True)
-    assert lora["trainer.truncate"].types == ("float", "null") and lora["trainer.truncate"].changeable
+    assert lora["trainer.max_kl"].types == ("float", "null") and lora["trainer.max_kl"].changeable
     assert lora["trainer.segment_tokens"] == SettingSpec("trainer.segment_tokens", ("int", "null"), None, False)
-    assert lora["trainer.objective"].default == "policy_gradient"
+    assert "trainer.objective" not in lora and "trainer.truncate" not in lora  # (the run's objective.* say it)
+    assert "trainer.frozen_reference" not in lora  # (an adapter's reference is the adapter switched off)
     full = {each.key for each in settings_of(TRAINER_KINDS["full"])}
     assert "trainer.rank" not in full and "trainer.learning_rate" in full  # (a full-weight trainer has no adapter)
+    assert "trainer.frozen_reference" in full
 
 
 def test_a_setting_says_what_it_accepts() -> None:

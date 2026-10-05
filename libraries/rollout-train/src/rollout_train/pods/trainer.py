@@ -28,8 +28,9 @@ from pydantic import JsonValue
 from rollout_train.checkpoints import Checkpoints, kept
 from rollout_train.http import answer_of
 from rollout_train.inference.remote import Connection
+from rollout_train.objectives import DEFAULT, Objective
 from rollout_train.pods.training import FAILED, MADE, Parent, StepAsked, StepState, asked_json, batch_bytes, state_of
-from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Step, StepFailed, Weighted
+from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Item, Step, StepFailed
 
 
 class TrainerUnreachable(StepFailed):
@@ -47,7 +48,8 @@ class TrainerBusy(TrainerRefused):
 class RemoteTrainer:
     """Takes steps on the training service at `address`, its files through `checkpoints`' blob store. `weights` and
     `budget` are what the pod's trainer makes and can take (as the cluster says of it; `describe` asks the pod);
-    `changeable` the settings it takes between steps, with their values now. The pod is reached as `connection` says
+    `objective` what it trains with (the `default` preset unless given); `changeable` the settings it takes between
+    steps, with their values now. The pod is reached as `connection` says
     (a client certificate, the CA, and the identity the pod's certificate must carry). It is asked after a step every
     `every` seconds; a step fails as `TrainerUnreachable` after `patience` seconds without an answer."""
 
@@ -58,6 +60,7 @@ class RemoteTrainer:
         *,
         weights: str = "lora",
         budget: Budget | None = None,
+        objective: Objective = DEFAULT,
         changeable: Mapping[str, JsonValue] | None = None,
         connection: Connection | None = None,
         client: httpx.AsyncClient | None = None,
@@ -68,6 +71,7 @@ class RemoteTrainer:
         self.checkpoints = checkpoints
         self.weights = weights
         self.budget = budget or Budget()
+        self.objective = objective
         self._changeable: dict[str, JsonValue] = dict(changeable or {})
         self._http = client or (connection or Connection()).client(timeout=60.0)
         self._owned = client is None
@@ -90,7 +94,7 @@ class RemoteTrainer:
         steps."""
         return await self._call("GET", "/v1/trainer")
 
-    async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step:
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         async with self._lock:
             blobs = self.checkpoints.blobs
             reference = await blobs.put(batch_bytes(batch), "application/json")

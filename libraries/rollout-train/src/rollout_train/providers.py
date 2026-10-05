@@ -10,7 +10,8 @@ GPUs and replicas, and, for a provider shared by several runs, its adapter slots
 
 A **trainer** makes checkpoints. Its kind (`TRAINER_KINDS`: `lora`, `full`, `tinker`, `runpod-trainer`) declares its
 `TrainerCapabilities`: what it produces (`lora` or `full`), the format its files are in (`peft`, `full`, `tinker`), the
-objectives it takes, whether it scores given tokens, and the formats a run may start from. The cluster config adds its
+objective families it takes (`rollout_train.objectives`), whether it scores given tokens, gives a reference model's
+logprobs and the entropy, and the formats a run may start from. The cluster config adds its
 models, the longest segment this hardware trains on, its GPUs, colocation and cost. A trainer's own settings (its
 rank, learning rate, clips) are read from its settings dataclass by `settings_of`, without importing torch.
 
@@ -38,12 +39,12 @@ from urllib.parse import urlsplit
 from pydantic import JsonValue
 
 from rollout_train.inference.remote import Connection
+from rollout_train.objectives import FAMILIES
 from rollout_train.recorder.segments import TOKEN_LEVEL
 
 __all__ = [
     "AUTHS",
     "INFERENCE_KINDS",
-    "OBJECTIVES",
     "ROUTING",
     "TRAINER_KINDS",
     "Auth",
@@ -69,9 +70,6 @@ AUTHS: tuple[AuthKind, ...] = ("mtls", "bearer", "vendor", "none")
 this machine)."""
 BEATS = "beats"
 """An `Auth.identity` that says each server's SPIFFE identity is the one its heartbeat names (a RunPod pod's)."""
-OBJECTIVES = ("policy_gradient/token", "policy_gradient/segment", "likelihood")
-"""The objectives a trainer may take: the clipped policy gradient with a ratio per token (PPO) or per segment (GSPO),
-and likelihood (imitation)."""
 ROUTING = ("spill", "weighted")
 """How turns are shared among a channel's providers: fill the first and spill the rest over to the next, or by
 weight."""
@@ -437,12 +435,18 @@ class TrainerCapabilities:
     produces: Literal["lora", "full"]
     format: str
     """The checkpoint format its files are in: `peft`, `full` or `tinker`."""
-    objectives: frozenset[str]
-    """Among `OBJECTIVES`."""
+    families: frozenset[str]
+    """The objective families it takes (`rollout_train.objectives.FAMILIES`)."""
     scores: bool
     """Can compute logprobs of given tokens (for distillation, and supervised data without behaviour logprobs)."""
     starts_from: frozenset[str]
     """Checkpoint formats a run may start from (besides the base model)."""
+    reference: Literal["yes", "asked", "no"] = "yes"
+    """Whether it gives the reference model's logprobs, which a KL to the reference and most preference losses read:
+    `yes` (an adapter switched off), `asked` (only when its settings ask, `trainer.frozen_reference`: a frozen copy of
+    the model beside the policy), `no`."""
+    entropy: bool = True
+    """Whether it gives each position's entropy (an entropy bonus reads it)."""
 
 
 @dataclass(frozen=True)
@@ -465,9 +469,10 @@ class TrainerKind:
     """Fields of its settings dataclass a run does not set, and why."""
 
 
-_EVERY_OBJECTIVE = frozenset(OBJECTIVES)
-_LORA = TrainerCapabilities("lora", "peft", _EVERY_OBJECTIVE, True, frozenset({"peft", "full"}))
-_FULL = TrainerCapabilities("full", "full", _EVERY_OBJECTIVE, True, frozenset({"full"}))
+_EVERY_FAMILY = frozenset(FAMILIES)
+_LORA = TrainerCapabilities("lora", "peft", _EVERY_FAMILY, True, frozenset({"peft", "full"}))
+_FULL = TrainerCapabilities("full", "full", _EVERY_FAMILY, True, frozenset({"full"}), reference="asked")
+_OBJECTIVE = {"objective": "the run's objective.* settings say it"}
 TRAINER_KINDS: Mapping[str, TrainerKind] = {
     each.name: each
     for each in (
@@ -478,6 +483,10 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_lora.settings:LoraSettings",
             auths=("none",),
             auth=Auth("none"),
+            not_settings={
+                **_OBJECTIVE,
+                "frozen_reference": "an adapter's reference is the model with the adapter switched off",
+            },
         ),
         TrainerKind(
             "full",
@@ -486,18 +495,20 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_lora.settings:LoraSettings",
             auths=("none",),
             auth=Auth("none"),
-            not_settings={"rank": "a full-weight trainer has no adapter"},
+            not_settings={**_OBJECTIVE, "rank": "a full-weight trainer has no adapter"},
         ),
         TrainerKind(
             "tinker",
-            TrainerCapabilities("lora", "tinker", _EVERY_OBJECTIVE, True, frozenset({"tinker"})),
+            TrainerCapabilities(
+                "lora", "tinker", _EVERY_FAMILY, True, frozenset({"tinker"}), reference="no", entropy=False
+            ),
             "rollout_tinker:TinkerTrainer",
             "rollout_tinker.settings:TinkerSettings",
             auths=("vendor",),
             auth=Auth("vendor", key=Secret(env="TINKER_API_KEY")),
             fields=("project",),
             secrets=("project",),
-            not_settings={"project": "the cluster config says it ([trainers.NAME] project)"},
+            not_settings={**_OBJECTIVE, "project": "the cluster config says it ([trainers.NAME] project)"},
         ),
         TrainerKind(
             "runpod-trainer",
@@ -508,6 +519,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             auth=Auth("mtls", identity=BEATS),
             fields=("trainer", "image", "gpu_types", "pods", "idle_stop", "volume_gb", "secrets", "step_ca"),
             secrets=("api_key",),
+            not_settings=_OBJECTIVE,
         ),
     )
 }

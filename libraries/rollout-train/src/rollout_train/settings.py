@@ -7,7 +7,8 @@ rank, the channels and their engines, how many episodes it plays at once (`fixed
 two steps without breaking it (`CHANGEABLE`): how many groups a step waits for (`groups_per_step`), the evals it makes
 of its checkpoints (`evals.suite`: a suite by name, which follows its newest version, or one version by id, `NAME@N`;
 `evals.every`; `evals.episodes`, none for the suite's own), and whatever settings its trainer says it takes between
-steps (`trainer.learning_rate`, say: `rollout_train.trainer.Changeable`).
+steps (`trainer.learning_rate`, or a component of its objective, `objective.kl.coefficient`, say:
+`rollout_train.trainer.Changeable`).
 
 A run's desired settings are ordinary state, changed in place, not part of the ledger's append-only record: a file
 beside a ledger of files (`FileDesiredSettings`), a table in a database ledger's database
@@ -41,6 +42,23 @@ MAX_LAG = "max_lag"
 EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES = "evals.suite", "evals.every", "evals.episodes"
 TRAINER = "trainer."
 """The start of a setting the trainer takes (`trainer.learning_rate`): what follows is its name for it."""
+OBJECTIVE = "objective."
+"""The start of a component of the objective (`objective.kl.coefficient`): a trainer that takes one between steps
+names it so too."""
+
+
+def run_key(name: str) -> str:
+    """The run setting a trainer's changeable setting is: `trainer.NAME`, or a component of its objective as it is."""
+    return name if name.startswith(OBJECTIVE) else f"{TRAINER}{name}"
+
+
+def trainer_key(key: str) -> str | None:
+    """The trainer's name for a run setting it takes (`run_key`'s inverse); none for one that is not the trainer's."""
+    if key.startswith(OBJECTIVE):
+        return key
+    return key.removeprefix(TRAINER) if key.startswith(TRAINER) else None
+
+
 CHANGEABLE = (GROUPS_PER_STEP, MAX_LAG, EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES)
 """The changeable settings every training run has; its trainer's (`trainer.…`) are beside them."""
 PAUSED = "paused"
@@ -158,7 +176,7 @@ def changeable(trainer: Any, *, groups_per_step: int, max_lag: int, evals: Any =
     said: dict[str, JsonValue] = {GROUPS_PER_STEP: groups_per_step, MAX_LAG: max_lag}
     said |= {EVALS_SUITE: evals.suite if evals else None, EVALS_EVERY: evals.every if evals else 1}
     said |= {EVALS_EPISODES: evals.episodes if evals else None}
-    return said | {f"{TRAINER}{key}": _json(value) for key, value in _changeable_of(trainer).items()}
+    return said | {run_key(key): _json(value) for key, value in _changeable_of(trainer).items()}
 
 
 def _changeable_of(trainer: Any) -> Mapping[str, Any]:

@@ -9,6 +9,12 @@ that names something (`channels.NAME.provider`, `slots.SLOT`), written `*` in th
 its settings dataclass declares (`rollout_train.providers.settings_of`): fixed (`trainer.rank`) or changeable
 (`trainer.learning_rate`).
 
+The objective is `objective.preset` and a key for each component (`objective.clip.low`, `rollout_train.objectives
+.COMPONENTS`), none by default (the preset's value); `objective_in` resolves them. A component that shapes the loss is
+fixed, a number changeable. The trainer settings that can name the objective (`trainer.objective`, `trainer.ratio`,
+`trainer.clip_low`, …: `rollout_train.objectives.LEGACY`) are taken as the `objective.*` keys they say, unless those
+are given (`RunSettings` holds them so).
+
 Settings are given in layers, each over the last (`layered`): the schema's defaults, then a preset
 (`rollout_train.presets`), then a file (`from_file`: TOML or JSON, dotted keys or tables), then the command line
 (`from_flags`: `--set KEY=VALUE`, and `shortcuts` for `--model`, `--provider`, `--renderer`, `--trainer`). `RunSettings`
@@ -16,6 +22,7 @@ holds the result and answers with defaults; `diff` says what changed between two
 `rollout_train.validation.check`'s to say, with every other rule.
 """
 
+import contextlib
 import json
 import tomllib
 from collections.abc import Mapping, Sequence
@@ -25,6 +32,7 @@ from typing import Any, cast
 
 from pydantic import JsonValue
 
+from rollout_train.objectives import COMPONENTS, LEGACY, PRESETS, Objective, from_trainer_settings, resolved
 from rollout_train.providers import ROUTING, SettingSpec
 
 __all__ = [
@@ -40,6 +48,7 @@ __all__ = [
     "is_trainers",
     "key_of",
     "layered",
+    "objective_in",
     "recorded",
     "shortcuts",
 ]
@@ -181,8 +190,25 @@ KEYS: tuple[Key, ...] = (
         least=0,
     ),
     Key("share", ("float",), 1.0, True, SAMPLING, "Its weight in a shared pool's fair shares", least=0, above=True),
+    # The objective: its preset, fixed, and its components (fixed or changeable, each as `COMPONENTS` says).
+    Key("objective.preset", _S, "default", False, TRAINING, "The objective's preset", choices=tuple(PRESETS)),
+    *(
+        Key(
+            f"objective.{each.key}",
+            (*each.types, "null"),
+            None,
+            each.changeable,
+            TRAINING,
+            f"{each.says}; none: the preset's",
+            least=each.least,
+            choices=each.choices,
+            above=each.above,
+        )
+        for each in COMPONENTS
+    ),
 )
 """Every key a run takes, beside the trainer's own (`trainer.FIELD`)."""
+OBJECTIVE = "objective."
 TRAINER = "trainer."
 _TRAINER_OWN = ("trainer.provider", "trainer.channel", "trainer.model")
 
@@ -206,9 +232,13 @@ def is_trainers(key: str) -> bool:
 
 @dataclass(frozen=True)
 class RunSettings:
-    """A run's settings, as given (`values`), answering with the schema's defaults for what was not."""
+    """A run's settings, as given (`values`), answering with the schema's defaults for what was not. Trainer settings
+    that name the objective are held as the `objective.*` keys they say (`current`)."""
 
     values: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", current(self.values))
 
     def __getitem__(self, key: str) -> JsonValue:
         if key in self.values:
@@ -292,6 +322,33 @@ class RunSettings:
             if key not in fixed and key not in changeable:
                 fixed[key] = value
         return fixed, changeable
+
+
+def current(values: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """Settings with the trainer settings that name the objective (`trainer.objective`, `trainer.ratio`, …) as the
+    `objective.*` keys they say, where those are not given (`rollout_train.objectives.from_trainer_settings`)."""
+    named = {name: values[f"{TRAINER}{name}"] for name in LEGACY if f"{TRAINER}{name}" in values}
+    if not named:
+        return dict(values)
+    kept = {key: value for key, value in values.items() if key.removeprefix(TRAINER) not in LEGACY or
+            not key.startswith(TRAINER)}  # fmt: skip
+    preset, overrides = from_trainer_settings(named)
+    if preset is not None:
+        kept.setdefault(f"{OBJECTIVE}preset", preset)
+    for key, value in overrides.items():
+        kept.setdefault(f"{OBJECTIVE}{key}", value)
+    return kept
+
+
+def objective_in(settings: RunSettings) -> Objective:
+    """The objective a run's settings ask for: their preset with each component they give. Raises `ValueError` for one
+    that is wrong (`rollout_train.objectives.resolved`)."""
+    given = {
+        key.removeprefix(OBJECTIVE): value
+        for key, value in settings.values.items()
+        if key.startswith(OBJECTIVE) and key != f"{OBJECTIVE}preset" and value is not None
+    }
+    return resolved(str(settings["objective.preset"]), given)
 
 
 @dataclass(frozen=True)
@@ -395,6 +452,12 @@ def recorded(
     settings: RunSettings, trainer: Sequence[SettingSpec] = (), preset: str | None = None
 ) -> dict[str, JsonValue]:
     """What a run's start records of its settings: a full copy, fixed and changeable (every key with its value,
-    defaults included), and, as provenance only, the preset version they came from (`NAME@N`)."""
+    defaults included); for a run that trains, the objective they resolve to (`objective_in`), so that what it trains
+    with never depends on what a preset means later; and, as provenance only, the preset version they came from
+    (`NAME@N`)."""
     fixed, changeable = settings.split(trainer)
-    return {"fixed": fixed, "changeable": changeable, "preset": preset}
+    said: dict[str, JsonValue] = {"fixed": fixed, "changeable": changeable, "preset": preset}
+    if settings.kind in TRAINING:
+        with contextlib.suppress(ValueError):  # (validation says what is wrong with it)
+            said["objective"] = objective_in(settings).to_json()
+    return said
