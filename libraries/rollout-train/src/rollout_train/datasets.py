@@ -312,7 +312,7 @@ async def make_dataset(
 
 
 def turns_of(episode: Episode) -> list[Turn]:
-    """Every turn of an episode, slot by slot, in order."""
+    """Every turn of an episode that may be trained on, slot by slot, in order."""
     return [
         Turn(
             slot,
@@ -325,6 +325,7 @@ def turns_of(episode: Episode) -> list[Turn]:
         )
         for slot, trajectory in episode.trajectories.items()
         for index, segment in enumerate(trajectory.segments)
+        if segment.trained  # (a judge's turns, or a fixed opponent's, are never trained on)
     ]
 
 
