@@ -1,7 +1,7 @@
 """Helpers the tests of rollout-train share: trainers that train nothing (`Counting`, `Steps`); a runner playing what
 runs ask for in a ledger (`here`, `runner`, `episode_runner`) and asking it for groups (`ask`, `ask_boxed`); hooks that
-take notes (`Notes`, `Running`, `Seen`); a profile (`PROFILE`, `write`); a cluster config that offers some
-environments (`offering`); and a monitor served in this process (`monitor_client`)."""
+take notes (`Notes`, `Running`, `Seen`); a cluster config that offers some environments (`offering`); and a monitor
+served in this process (`monitor_client`)."""
 
 import asyncio
 import contextlib
@@ -139,37 +139,6 @@ class Running(Hooks):
             self.running.pop(str(event["run_id"]), None)
         self.most = max(self.most, len(self.running))
         self.groups_at_once = max(self.groups_at_once, len(set(self.running.values())))
-
-
-PROFILE = """
-directory = "{directory}"
-
-[channels.policy]
-model = "a-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "rollout_train.testing:scripted_engine"
-thinking_tokens = 64
-engines = [{{ device = 0 }}, {{ device = 1 }}]
-
-[channels.judge]
-model = "another-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "rollout_train.testing:scripted_engine"
-
-[trainer]
-kind = "tests.rollout_train.support:Steps"
-channel = "policy"
-colocated = true
-bookmark = "best"
-segment_tokens = 900
-segments_per_step = 3
-"""
-
-
-def write(tmp_path: Path, text: str = PROFILE) -> Path:
-    path = tmp_path / "profile.toml"
-    path.write_text(text.format(directory=tmp_path / "run"))
-    return path
 
 
 class Steps:

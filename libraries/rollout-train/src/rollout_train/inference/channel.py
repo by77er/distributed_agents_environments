@@ -136,7 +136,7 @@ class NotLoaded(Unserved):
 
 
 MAX_LAG = 1
-"""Checkpoints behind what its channel should serve a sample may be, unless a profile or the run says otherwise: one,
+"""Checkpoints behind what its channel should serve a sample may be, unless the run says otherwise (`max_lag`): one,
 the checkpoint before, which a server serves while it loads the newest."""
 
 

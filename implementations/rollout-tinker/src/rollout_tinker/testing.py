@@ -17,7 +17,7 @@ on that learnable table:
 - The rest client hands out an archive of a checkpoint's adapter, with Tinker's names, made by the `adapter` it is
   given (a test's model of a real one), as a `file://` URL.
 
-`fake_service()` is one service shared by whatever names it (a profile's trainer and engine, say); `reset()` starts it
+`fake_service()` is one service shared by whatever names it (a test's trainer and engine, say); `reset()` starts it
 afresh.
 """
 
@@ -396,7 +396,7 @@ SHARED: list[FakeService] = []
 
 
 def fake_service() -> FakeService:
-    """The one fake service of this process (what a profile names: `rollout_tinker.testing:fake_service`)."""
+    """The one fake service of this process (what a test names: `rollout_tinker.testing:fake_service`)."""
     if not SHARED:
         SHARED.append(FakeService(favored=[ord("a"), ord("b"), ord("\n")]))
     return SHARED[0]

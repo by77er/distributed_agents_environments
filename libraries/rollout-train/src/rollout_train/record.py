@@ -2,7 +2,7 @@
 
 - `starts`: each time the run was started, where and by what (its host and process, when, the checkpoint it starts
   from, its environment: as `module:name`, its version and what its results say; and what its starter adds: its
-  directory, the profile, where the monitor on its machine serves, where its blobs are, its settings), by the number of
+  directory, its settings, where the monitor on its machine serves, where its blobs are, its settings), by the number of
   the fence its loop took. Written as the loop starts, so that whatever reads the ledger (the monitor) finds every run
   that shares it, and where each keeps the rest.
 - `ends`: how each start ended (`ENDINGS`), under the same number.

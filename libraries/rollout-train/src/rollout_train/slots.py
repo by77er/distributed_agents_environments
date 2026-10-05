@@ -6,7 +6,7 @@ the run's subject channel (`subject`: the trained channel, `trainer.channel`). A
 fixed opponent: `ModelSlot.trained`) has no such default: the run binds it by name, or it is refused. A judge
 (`ModelSlot.judge`) bound to a channel that serves the run's own checkpoints (the trained channel, or one that follows
 it) judges the policy by itself: the run must say so (`self_judging`). `problems` says what a run's settings break of
-these, as `rollout_train.validation` and a run over a profile refuse them.
+these, as `rollout_train.validation` refuses them.
 """
 
 from collections.abc import Collection, Mapping
@@ -80,7 +80,7 @@ def problems(settings: RunSettings, declared: Declared, own: Collection[str] | N
     for slot in sorted(declared.untrained - set(channels)):
         found.append((f"slots.{slot}", f"slot {slot} is not trained, so it samples no channel by default: bind it to "
                       f"one (slots.{slot})"))  # fmt: skip
-    providing = any(settings.providers(each) for each in settings.channels)  # (a run over a profile names none)
+    providing = any(settings.providers(each) for each in settings.channels)  # (settings naming none: as given)
     for channel, slot in {channel: slot for slot, channel in sorted(channels.items(), reverse=True)}.items():
         if channel == subject(settings) or channel not in settings.channels:
             continue  # (the subject's are required of every run; a channel the settings lack is refused for that)

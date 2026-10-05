@@ -156,7 +156,7 @@ def connected(project: str | None = None) -> Service:
 
 
 def service_of(service: "Service | str | None", project: str | None) -> Service:
-    """The service a trainer or an engine is given: a service, `module:name` of what makes one (as a profile names
+    """The service a trainer or an engine is given: a service, `module:name` of what makes one (as a test names
     it), or None for a session with Tinker."""
     if service is None:
         return connected(project)

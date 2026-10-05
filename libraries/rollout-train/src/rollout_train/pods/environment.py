@@ -1,7 +1,7 @@
 """What a pod's processes read from their environment: the stores, the pod's name and public address, and where to
 serve on the pod's loopback interface.
 
-- `ROLLOUT_POD_NAME`: the pod's name, as the launcher gave it; its certificate's identity is
+- `ROLLOUT_POD_NAME`: the pod's name, as its starter gave it; its certificate's identity is
   `spiffe://rollout/pod/NAME`.
 - `ROLLOUT_LEDGER`: where the ledger is, as JSON (`{"kind": "rollout_train.database:DatabaseLedger", "url": "…"}`).
 - `ROLLOUT_BLOBS`: where the blob store is, as JSON (`{"kind": "rollout_s3:S3BlobStore", "bucket": "…"}`); its

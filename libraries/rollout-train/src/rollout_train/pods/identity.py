@@ -1,7 +1,7 @@
 """The names certificates carry, and the pods that say in their heartbeats that they are alive and where.
 
 Every certificate of the cluster carries one URI SAN in the trust domain `rollout`: the gateway's is
-`spiffe://rollout/gateway`; a pod's is `spiffe://rollout/pod/NAME`, where NAME is the name the launcher gave it when it
+`spiffe://rollout/gateway`; a pod's is `spiffe://rollout/pod/NAME`, where NAME is the name its starter gave it when it
 asked for it (before the pod existed, so before any id the provider gives it). A pod beats beside the ledger with its
 name, the identity its certificate carries, its public address, whether it is ready, and its certificate's serial.
 Whoever reaches pods (the gateway, a run's trainer) reaches only those whose beat is fresh and whose identity is the one
@@ -35,7 +35,7 @@ def pod_identity(name: str) -> str:
 class PodAddress:
     """A pod that is alive, as its newest beat says: its name, the identity its certificate must carry, the address it
     is reached at (`https://IP:PORT`), its role (`inference` or `trainer`), whether it is ready, and its certificate's
-    serial (for the launcher, which has the certificate of a pod it no longer counts as its own revoked)."""
+    serial (for whoever started the pod, which has the certificate of a pod it no longer counts as its own revoked)."""
 
     name: str
     identity: str

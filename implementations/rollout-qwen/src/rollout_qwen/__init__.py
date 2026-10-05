@@ -1,6 +1,7 @@
 """Renderers for the Qwen model families: implementations of `rollout_train.recorder.Renderer`.
 
-A profile names one for a channel (`renderer = "rollout_qwen:qwen35"`); it is called with the channel's model. Each
+A run's settings name one for a channel (`channels.NAME.renderer = "rollout_qwen:qwen35"`); it is called with the
+channel's model. Each
 says the models it renders: `qwen35` Qwen3.5's, `qwen3` Qwen3's (not Qwen3.5's, nor Qwen3-Coder's).
 """
 

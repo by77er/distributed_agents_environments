@@ -1,14 +1,13 @@
 """A run's settings: fixed ones, which make what the run is, and changeable ones, which a running run takes from its
 next step on; and the settings someone wants a run to have from now on (its desired settings).
 
-A training run's settings are named by dotted key, as a profile's are (`rollout_train.profile.Profile.load`). Fixed
-ones are fixed when it starts: the model, the trainer's kind and what its weights are (`lora`, `full`), the adapter's
-rank, the channels and their engines, how many episodes it plays at once (`fixed`). Changeable ones can change between
-two steps without breaking it (`CHANGEABLE`): how many groups a step waits for (`groups_per_step`), the evals it makes
-of its checkpoints (`evals.suite`: a suite by name, which follows its newest version, or one version by id, `NAME@N`;
-`evals.every`; `evals.episodes`, none for the suite's own), and whatever settings its trainer says it takes between
-steps (`trainer.learning_rate`, or a component of its objective, `objective.kl.coefficient`, say:
-`rollout_train.trainer.Changeable`).
+A training run's settings are named by dotted key (`rollout_train.run_settings`). Fixed ones are fixed when it starts:
+its trainer and model, the adapter's rank, its channels and their providers, how many episodes it plays at once.
+Changeable ones can change between two steps without breaking it (`CHANGEABLE`): how many groups a step waits for
+(`groups_per_step`), the evals it makes of its checkpoints (`evals.suite`: a suite by name, which follows its newest
+version, or one version by id, `NAME@N`; `evals.every`; `evals.episodes`, none for the suite's own), and whatever
+settings its trainer says it takes between steps (`trainer.learning_rate`, or a component of its objective,
+`objective.kl.coefficient`, say: `rollout_train.trainer.Changeable`).
 
 A run's desired settings are ordinary state, changed in place, not part of the ledger's append-only record: a file
 beside a ledger of files (`FileDesiredSettings`), a table in a database ledger's database
@@ -29,7 +28,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from pydantic import JsonValue
 
@@ -148,43 +147,6 @@ def applied(current: Mapping[str, JsonValue], desired: Mapping[str, JsonValue]) 
         except ValueError:
             continue
     return settings
-
-
-def fixed(profile: Any, trainer: Any, **loop: JsonValue) -> dict[str, JsonValue]:
-    """A training run's fixed settings, by dotted key: what its profile (`rollout_train.profile.Profile`) says of its
-    model, trainer, channels and machine, what its trainer makes (`weights`), and what the loop was started with
-    (`loop`: `groups`, `seed`), less the settings its trainer takes between steps."""
-    described = profile.trainer
-    taken = set(_changeable_of(trainer))
-    said: dict[str, Any] = {"model": profile.channels[described.channel].model, "weights": trainer.weights}
-    said |= {"trainer.kind": described.kind, "trainer.channel": described.channel}
-    said |= {"trainer.colocated": described.colocated}
-    said |= {f"{TRAINER}{key}": value for key, value in described.settings.items() if key not in taken}
-    for name, channel in profile.channels.items():
-        said |= {f"channels.{name}.model": channel.model, f"channels.{name}.engine": channel.engine}
-        said |= {f"channels.{name}.engines": len(channel.engines), f"channels.{name}.renderer": channel.renderer}
-        said |= {f"channels.{name}.thinking_tokens": channel.thinking_tokens}
-        said |= {f"channels.{name}.answer_tokens": channel.answer_tokens, f"channels.{name}.reshard": channel.reshard}
-    said |= {"episodes_at_once": profile.episodes_at_once, **loop}
-    return {key: _json(value) for key, value in said.items()}
-
-
-def changeable(trainer: Any, *, groups_per_step: int, max_lag: int, evals: Any = None) -> dict[str, JsonValue]:
-    """A training run's changeable settings as it starts, by dotted key: the groups a step waits for, how far behind
-    the newest checkpoint a turn may begin, its evals (an `rollout_train.profile.EvalsSpec`, or none), and the settings
-    its trainer takes between steps with their values."""
-    said: dict[str, JsonValue] = {GROUPS_PER_STEP: groups_per_step, MAX_LAG: max_lag}
-    said |= {EVALS_SUITE: evals.suite if evals else None, EVALS_EVERY: evals.every if evals else 1}
-    said |= {EVALS_EPISODES: evals.episodes if evals else None}
-    return said | {run_key(key): _json(value) for key, value in _changeable_of(trainer).items()}
-
-
-def _changeable_of(trainer: Any) -> Mapping[str, Any]:
-    return getattr(trainer, "changeable", None) or {}
-
-
-def _json(value: Any) -> JsonValue:
-    return value if value is None or isinstance(value, str | int | float | bool) else json.loads(json.dumps(value))
 
 
 class FileDesiredSettings:

@@ -1,6 +1,7 @@
 """Renderers for the Gemma model families: implementations of `rollout_train.recorder.Renderer`.
 
-A profile names one for a channel (`renderer = "rollout_gemma:gemma4"`); it is called with the channel's model.
+A run's settings name one for a channel (`channels.NAME.renderer = "rollout_gemma:gemma4"`); it is called with the
+channel's model.
 
 Gemma 4's turns are `<|turn>role ... <turn|>`. Its thinking is a channel, `<|channel>thought ... <channel|>`, which
 the chat template turns on with `enable_thinking`. It calls tools as `<|tool_call>call:NAME{ARGUMENTS}<tool_call|>`,

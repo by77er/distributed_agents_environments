@@ -121,7 +121,7 @@ class TinkerTrainer:
     state its parent names (its optimizer too, if it is given the parent's state) and leaves pointers to the new
     checkpoints (which Tinker's bridge, `rollout_tinker.bridges`, turns into an adapter engines here load). A client
     from the step before is used again when the parent is the state it saved. `service` is what calls Tinker: by
-    default a session the SDK opens with the key it finds; `module:name` of what makes another (a profile names a fake
+    default a session the SDK opens with the key it finds; `module:name` of what makes another (a test names a fake
     one so). `settings` are `TinkerSettings`' (its `objective` among them); those in `CHANGEABLE`, and the changeable
     components of its objective, it takes between steps (`rollout_train.trainer.Changeable`). Raises `ValueError` for
     an objective that reads the reference, the entropy or the top-k form's logprobs, which Tinker does not give here."""

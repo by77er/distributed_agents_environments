@@ -27,8 +27,7 @@ job, or as a RayJob on Kubernetes; `rollout train --here` runs it in the calling
    (`rollout_train.bridges.on_ray`) where the trained channel's provider loads another format than the trainer makes;
 6. on the way out, ends what it started (Ray ends the actors with the job in any case), and notes how it ended.
 
-Shared inference pools are not claimed here: a run's channel on a `vllm` provider gets engine hosts of its own
-(`Run.start`, `hosted`). That is the seam where a run will bind to a pool's hosts instead.
+A run's channel on a `vllm` provider gets engine hosts of its own (`Run.start`, `hosted`).
 """
 
 import argparse
@@ -422,8 +421,7 @@ class Run:
 
     def hosted(self, channel: str, provider: str, model: str) -> list[Any]:
         """The servers of a channel on a `vllm` provider: engine hosts of the run's own, one per replica, each bound to
-        the run's channel and asking Ray for its share of a GPU. (The seam where a run binds to a shared pool's hosts
-        instead.)"""
+        the run's channel and asking Ray for its share of a GPU."""
         from rollout_train.inference.hosts import HostServer, host_spec, started
 
         offered = self.cluster.inference[provider]

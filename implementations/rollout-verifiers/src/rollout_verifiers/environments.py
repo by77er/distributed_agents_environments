@@ -1,5 +1,5 @@
 """Environments this package gives, each named by `module:name` wherever an environment is named (a run, a suite's
-entry, a launcher's offer).
+entry, the offers).
 
 - `gsm8k`: GSM8K, grade-school math word problems, from the Environments Hub (`primeintellect/gsm8k` 0.1.4, a
   dependency of this project), played by verifiers' tool-less `null` harness: the model answers in one turn, giving its

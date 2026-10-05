@@ -2,7 +2,6 @@
 
 import math
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -13,9 +12,9 @@ from rollout_train.evals import SuiteEntry
 from rollout_train.gateway.keys import Fence, Grant
 from rollout_train.gateway.service import contract_of, limits_of
 from rollout_train.inference import Generation, Limits
-from rollout_train.profile import ChannelSpec, Profile
 from rollout_train.recorder.renderers import Renderer, ThinkingFormat
 from rollout_train.recorder.sampling import MINIMUM_ANSWER, sample_turn
+from rollout_train.run_settings import key_of
 from rollout_train.testing import PlainRenderer, plain_channel
 
 LIMIT = 1000
@@ -161,7 +160,7 @@ def test_a_contract_without_both_budgets_offers_the_whole_context() -> None:
     assert limits_of(Limits(), None, None) == Limits()
 
 
-def test_keys_suite_entries_and_profiles_carry_no_budget_or_a_number() -> None:
+def test_keys_suite_entries_and_run_settings_carry_no_budget_or_a_number() -> None:
     grant = Grant("train", "r_1", "policy", "policy", Fence("train", 1), 0.0)
     assert (Grant.from_json(grant.to_json()).thinking, Grant.from_json(grant.to_json()).answer) == (None, None)
     old = grant.to_json() | {"thinking": 1024, "answer": 400}  # a key minted with numbers
@@ -170,21 +169,6 @@ def test_keys_suite_entries_and_profiles_carry_no_budget_or_a_number() -> None:
     entry = SuiteEntry(environment="games:words", environment_version="1", starts=[])
     assert entry.limits == {} and (entry.thinking_tokens, entry.answer_tokens) == (None, None)
 
-    def served(answer: int | None = None) -> ChannelSpec:
-        return ChannelSpec("m", "r:r", "e:e", ({"address": "http://engine:8000"},), answer_tokens=answer)
-
-    assert served().route(None).limits == Limits()
-    assert served(400).route(None).limits == Limits(answer=400)
-    with pytest.raises(ValueError, match="1 at least"):
-        ChannelSpec(model="m", renderer="r:r", engine="e:e", thinking_tokens=0)
-
-
-def test_a_profile_setting_of_none_removes_a_channels_budget(tmp_path: Path) -> None:
-    path = tmp_path / "profile.toml"
-    path.write_text(
-        'directory = "runs"\n[channels.policy]\nmodel = "m"\nrenderer = "r:r"\nengine = "e:e"\n'
-        "thinking_tokens = 1024\nanswer_tokens = 400\n"
-    )
-    assert Profile.load(path).channels["policy"].thinking_tokens == 1024
-    unset = Profile.load(path, settings={"channels.policy.thinking_tokens": "none"}).channels["policy"]
-    assert (unset.thinking_tokens, unset.answer_tokens) == (None, 400)
+    budget = key_of("channels.policy.thinking_tokens")
+    assert budget is not None and budget.default is None and budget.problem(None) is None
+    assert budget.problem(1024) is None and "at least 1" in str(budget.problem(0))

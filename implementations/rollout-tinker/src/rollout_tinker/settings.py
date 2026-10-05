@@ -1,5 +1,5 @@
 """The Tinker trainer's settings: a policy step's (`rollout_objectives.settings.StepSettings`, the ones `LoraTrainer`
-takes too, so a profile switches trainers by changing `kind`), with Tinker's defaults, and a project."""
+takes too, so a run switches trainers by changing `trainer.provider`), with Tinker's defaults, and a project."""
 
 from dataclasses import dataclass
 

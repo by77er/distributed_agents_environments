@@ -6,8 +6,9 @@ happen, and report the score from the plugin's ground truth; each one is a recor
 performs it. Every episode gets a server of its own, and episodes given the same world seed and layout seed start
 identically.
 
-A pool over it is served in the process that runs the episodes (`worlds`, named in a profile's `[pools]`), or from a
-machine of its own (`rollout pool minecraft_team.worlds:worlds`), and an episode cannot tell which.
+A pool over it is served in the process that runs the episodes (`worlds`, the cluster config's
+`[sandboxes.minecraft] provider`), or from a machine of its own (`rollout pool minecraft_team.worlds:worlds`), and an
+episode cannot tell which.
 """
 
 import asyncio
@@ -247,8 +248,9 @@ async def loaded(control: Control, harness: Harness, *, seconds: float = 30.0) -
 
 
 def worlds(directory: Path, size: int = 6) -> MinecraftWorlds:
-    """The worlds of a deployment whose state is under `directory` (a profile's `[pools]` names this function): at
-    most `size` at once on this machine, their logs kept there. Servers a stopped process left behind are removed."""
+    """The worlds of a deployment whose state is under `directory` (the cluster config's `[sandboxes.minecraft]
+    provider` names this function): at most `size` at once on this machine, their logs kept there. Servers a stopped
+    process left behind are removed."""
     made = MinecraftWorlds(logs=directory / "logs", size=size)
     (directory / "logs").mkdir(parents=True, exist_ok=True)
     sweep(made.installation)

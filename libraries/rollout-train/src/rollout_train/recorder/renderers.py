@@ -4,8 +4,8 @@ A `Renderer` turns canonical messages and tool specifications into prompt tokens
 and parses sampled tokens back into a canonical message (reasoning, text, tool calls). The gateway and trainers
 depend only on this protocol; a model family is supported by a function that makes its renderer from a checkpoint's
 name (`rollout_qwen` has two), usually a `ChatTemplateRenderer` (the tokenizer's chat template, `tokenizer_of`) with
-that family's `ToolCallFormat` and `ThinkingFormat`. A deployment's profile names the function. The function may say
-which models it renders (`renders`): a launcher offers a profile's evals only the models its channel's renderer renders.
+that family's `ToolCallFormat` and `ThinkingFormat`. A run's settings name the function (`channels.NAME.renderer`). The
+function may say which models it renders (`renders`).
 """
 
 import json

@@ -1,15 +1,13 @@
 """Run settings: the schema's keys and what each takes, settings given in layers (defaults, a preset, a file, flags),
 what `--set` and a settings file say, a full copy split into fixed and changeable, and what changed between two."""
 
-import dataclasses
 import json
 from pathlib import Path
 
 import pytest
 
-from rollout_train.cluster import Cluster, GatewaySection, GuardsSection, MonitorSection, RaySection, RunnersSection
 from rollout_train.objectives import DEFAULT
-from rollout_train.providers import INFERENCE_KINDS, TRAINER_KINDS, InferenceProvider, TrainerProvider, settings_of
+from rollout_train.providers import TRAINER_KINDS, settings_of
 from rollout_train.run_settings import (
     KEYS,
     Change,
@@ -180,72 +178,3 @@ def test_what_changed_between_two_settings() -> None:
         Change("trainer.rank", 32, 16),
     ]
     assert diff(before, before) == []
-
-
-PROFILE_FIELDS = {
-    # What each field of a profile became (delete with rollout_train.profile): `Class.field` of the cluster config,
-    # or a run setting.
-    "Profile.directory": "Cluster.scratch",
-    "Profile.channels": "channels.*.provider",
-    "Profile.trainer": "trainer.provider",
-    "Profile.serve": "GatewaySection.listen",
-    "Profile.address": "GatewaySection.url",
-    "Profile.tools": "Cluster.tools",
-    "Profile.pools": "Cluster.sandboxes",
-    "Profile.ledger": "Cluster.ledger",
-    "Profile.blobs": "Cluster.blobs",
-    "Profile.runs_gib": "GuardsSection.runs_gib",
-    "Profile.training_gib": "GuardsSection.training_gib",
-    "Profile.episodes_at_once": "episodes_at_once",
-    "Profile.feed_runs": "MonitorSection.feed_episodes",
-    "Profile.ray": "RaySection.address",
-    "Profile.name": "name",
-    "Profile.evals": "evals.suite",
-    "Profile.gateway": "Cluster.gateway",
-    "ChannelSpec.model": "channels.*.model",
-    "ChannelSpec.renderer": "channels.*.renderer",
-    "ChannelSpec.engine": "InferenceProvider.kind",
-    "ChannelSpec.engines": "InferenceProvider.replicas",
-    "ChannelSpec.thinking_tokens": "channels.*.thinking_tokens",
-    "ChannelSpec.answer_tokens": "channels.*.answer_tokens",
-    "ChannelSpec.reshard": "channels.*.bridge",
-    "ChannelSpec.max_lag": "max_lag",
-    "ChannelSpec.via": "vllm-servers.via",
-    "ChannelSpec.connection": "InferenceProvider.auth",
-    "TrainerSpec.kind": "TrainerProvider.kind",
-    "TrainerSpec.channel": "trainer.channel",
-    "TrainerSpec.start": "start",
-    "TrainerSpec.bookmark": "bookmark",
-    "TrainerSpec.colocated": "TrainerProvider.colocate_with",
-    "TrainerSpec.settings": "trainer.rank",
-    "EvalsSpec.suite": "evals.suite",
-    "EvalsSpec.every": "evals.every",
-    "EvalsSpec.episodes": "evals.episodes",
-    "GatewaySpec.url": "GatewaySection.url",
-    "GatewaySpec.listen": "GatewaySection.listen",
-    "GatewaySpec.keys": "GatewaySection.keys",
-    "GatewaySpec.lifetime": "GatewaySection.lifetime",
-}
-
-
-def test_every_field_of_a_profile_has_a_place() -> None:
-    from rollout_train import profile
-
-    described = {
-        f"{each.__name__}.{field.name}"
-        for each in (profile.Profile, profile.ChannelSpec, profile.TrainerSpec, profile.EvalsSpec, profile.GatewaySpec)
-        for field in dataclasses.fields(each)
-    }
-    assert described == set(PROFILE_FIELDS)
-    owners = (Cluster, GatewaySection, GuardsSection, MonitorSection, RaySection, RunnersSection, InferenceProvider,
-              TrainerProvider)  # fmt: skip
-    classes = {each.__name__: each for each in owners}
-    lora = {each.key for each in settings_of(TRAINER_KINDS["lora"])}
-    for field, place in PROFILE_FIELDS.items():
-        owner, _, name = place.partition(".")
-        if owner in classes:
-            assert name in {each.name for each in dataclasses.fields(classes[owner])}, field
-        elif owner in INFERENCE_KINDS:
-            assert name in INFERENCE_KINDS[owner].fields, field
-        else:
-            assert key_of(place) is not None or place in lora, field

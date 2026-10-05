@@ -9,22 +9,15 @@ policy (docs/libraries/rollout-train/gateway.md).
 - `client`: `GatewayEndpoints`, what a runner needs to have its recorded slots served by the gateway.
 - `directory`: `ChannelDirectory`, every channel a run's start names, built over its providers' servers.
 
-`deployed` makes a replica from a profile's `[gateway]` table, and, given a cluster config, its directory.
+`rollout gateway --cluster` serves a replica over the cluster config's stores, keys and providers
+(`ChannelDirectory.of`); a run's driver serves one of its own over its channels (`rollout_train.jobs`).
 """
-
-import asyncio
-import contextlib
-from typing import TYPE_CHECKING
 
 from rollout_train.gateway.client import Attempt, GatewayEndpoint, GatewayEndpoints
 from rollout_train.gateway.directory import ChannelDirectory, Provided
 from rollout_train.gateway.keys import Grant, KeyRefused, Keyring
 from rollout_train.gateway.service import Gateway, Refused, ScoreRequest, create_app
 from rollout_train.gateway.turns import Link, Reply, TurnRecord, TurnStore, turns_table, unaccepted
-
-if TYPE_CHECKING:
-    from rollout_train.cluster import Cluster
-    from rollout_train.profile import Profile
 
 __all__ = [
     "Attempt",
@@ -43,46 +36,6 @@ __all__ = [
     "TurnRecord",
     "TurnStore",
     "create_app",
-    "deployed",
     "turns_table",
     "unaccepted",
 ]
-
-
-async def deployed(profile: "Profile", stack: contextlib.AsyncExitStack, cluster: "Cluster | None" = None) -> Gateway:
-    """A replica of the gateway a profile describes: its ledger and blob store, its `[gateway]` table's keys, and its
-    channels, sampled as a runner samples them: those whose engines serve elsewhere routed to their servers (each run's
-    from what it says its channel serves), and any other with its engines started here (each closed by `stack`). With
-    a cluster config, also every channel a run's start names, over the servers of the config's providers
-    (`ChannelDirectory.of`)."""
-    from pathlib import Path
-
-    from rollout.harness.blobs import FileBlobStore
-    from rollout.names import named
-    from rollout_train.inference import Routes
-    from rollout_train.layout import BLOBS, LEDGER
-    from rollout_train.ledger import opened as ledger_at
-    from rollout_train.profile import GatewaySpec, started_engines
-    from rollout_train.stores import opened
-
-    spec = profile.gateway or GatewaySpec()
-    ledger = ledger_at(dict(profile.ledger) or {"directory": str(profile.directory / LEDGER)})
-    blobs = opened(dict(profile.blobs)) if profile.blobs else FileBlobStore(profile.directory / BLOBS)
-    models = {name: channel.model for name, channel in profile.channels.items()}
-    await asyncio.to_thread(
-        profile.directory.mkdir, parents=True, exist_ok=True
-    )  # (where engines' processes are noted)
-    channels = started_engines(profile, stack, models)
-    routed = {
-        name: channel.route(named(channel.renderer)(channel.model))
-        for name, channel in profile.channels.items()
-        if channel.routed
-    }
-    routes = Routes(routed, ledger) if routed else None
-    if routes is not None:
-        stack.callback(routes.close)
-    keyring = Keyring.load(Path(spec.keys).expanduser()) if spec.keys else Keyring.from_environment()  # noqa: ASYNC240
-    directory = ChannelDirectory.of(cluster, ledger) if cluster is not None else None
-    if directory is not None:
-        stack.callback(directory.close)
-    return Gateway(TurnStore(ledger, blobs), keyring, channels, routes, models, directory=directory)

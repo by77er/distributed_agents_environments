@@ -1,10 +1,10 @@
 """Which processes are alive, and how their machines are doing: a heartbeat each writes, kept beside the ledger.
 
-Episode runners (`rollout_train.rollouts.scheduler`), engine hosts, gateway replicas, launchers and sandbox pools served
-on their own beat every few seconds, each under its name. A beat says when, and what the process says of itself: an
-episode runner, its host, the run it serves, its places and how many it plays, its machine (memory, accelerators,
-disk), its engines' processes, and what each channel serves and how fast. Each one's newest beat is kept, with the
-measurements of its recent ones, so the monitor can show how its machine moved, from anywhere.
+Episode runners (`rollout_train.rollouts.scheduler`), engine hosts, gateway replicas, runs' drivers and sandbox pools
+served on their own beat every few seconds, each under its name. A beat says when, and what the process says of
+itself: an episode runner, its host, the run it serves, its places and how many it plays, its machine (memory,
+accelerators, disk), its engines' processes, and what each channel serves and how fast. Each one's newest beat is kept,
+with the measurements of its recent ones, so the monitor can show how its machine moved, from anywhere.
 
 One whose newest beat is older than `STALE` seconds is taken to be gone: what a runner had claimed is open to be
 claimed again. This is ordinary state, changed in place, not part of the ledger's append-only record: a file beside a

@@ -20,9 +20,12 @@ do not edit by hand.
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Labelled`](#labelled), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#scores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
-- **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
-- **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
-- **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
+- **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rollout_trainrecorderrendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
+- **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
+- **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#run), [`run_directory`](#run_directory), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
+- **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`declared`](#declared), [`environment_facts`](#environment_facts), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_capacity`](#ray_capacity), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
+- **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
+- **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
 - **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`KubernetesSection`](#kubernetessection), [`LedgerSection`](#ledgersection), [`load`](#load), [`located`](#located), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
@@ -33,7 +36,7 @@ do not edit by hand.
 - **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`FILES`](#files), [`ledger_at`](#ledger_at), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
-- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#runtime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
+- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets)
@@ -3585,7 +3588,7 @@ folded into it. Each group's start is drawn with `train_start`, never one of the
 is served (`Retention()` unless given); besides those, what is served, what any run starts from, and whatever `kept`
 says (the bookmarked checkpoints, say) keep theirs. `started` is what the run's `starts` record says beside what the
 loop knows (where it starts from, this host, the time): where the run's directory is, where the monitor on its
-machine serves (`address`), and what profile started it, say. `hooks` are told of each result and step; `made` is
+machine serves (`address`), and its settings, say. `hooks` are told of each result and step; `made` is
 called with each checkpoint made, once it is served (to move a bookmark, say). `reshard` gives the files the engines
 load for a checkpoint (made by a bridge: `rollout_train.bridges`), told the run's fence to note it under; without
 it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
@@ -4231,7 +4234,7 @@ class JsonToolCalls
 
 - `def parse(self, text: str, tools: Sequence[ToolSpecification]) -> tuple[str, list[ToolCall]]`
 
-### `rendered`
+### `rendered` {#rollout_trainrecorderrendered}
 
 *function* · `libraries/rollout-train/src/rollout_train/recorder/renderers.py`
 
@@ -4489,20 +4492,6 @@ def create_app(gateway: Gateway) -> Starlette
 ```
 
 Serve `gateway` over HTTP (behind a proxy that terminates TLS, or with uvicorn's own certificates).
-
-### `deployed`
-
-*function* · `libraries/rollout-train/src/rollout_train/gateway/__init__.py`
-
-```python
-async def deployed(profile: 'Profile', stack: contextlib.AsyncExitStack, cluster: 'Cluster | None' = None) -> Gateway
-```
-
-A replica of the gateway a profile describes: its ledger and blob store, its `[gateway]` table's keys, and its
-channels, sampled as a runner samples them: those whose engines serve elsewhere routed to their servers (each run's
-from what it says its channel serves), and any other with its engines started here (each closed by `stack`). With
-a cluster config, also every channel a run's start names, over the servers of the config's providers
-(`ChannelDirectory.of`).
 
 ### `Gateway`
 
@@ -4850,76 +4839,46 @@ def unaccepted(turns: Sequence[TurnRecord]) -> set[str]
 The compaction attempts no turn went on from (by effect id): a request linked from an earlier one as its
 `compaction_attempt`, and to no later one as the source of a `compaction`.
 
-## `rollout_train.profile`
+## `rollout_train.jobs`
 
-A deployment, described and opened.
+A run's job: built from its settings and the cluster config, claiming what it needs.
 
-### `ChannelSpec`
+### `driven`
 
-*class* · `libraries/rollout-train/src/rollout_train/profile.py`
-
-```python
-class ChannelSpec
-```
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `model` | `str` | required | The checkpoint every engine of the channel serves. |
-| `renderer` | `str` | required | `module:name` of the model family's renderer, called with `model`. |
-| `engine` | `str` | required | `module:name` of what makes an engine, called with `model` and one entry of `engines`. |
-| `engines` | `tuple[Mapping[str, Any], ...]` | `({},)` | One entry per replica: what that engine is told (its share of a GPU, which device, where it listens). |
-| `thinking_tokens` | `int \| None` | `None` | Tokens of thinking per turn before it is closed by force (`Limits.thinking`); none: no thinking budget. |
-| `answer_tokens` | `int \| None` | `None` | Room for the answer after the thinking (`Limits.answer`); none: whatever room the turn has left. With neither, a turn may fill what the context leaves. |
-| `reshard` | `str \| None` | `None` | The bridge, by name (`rollout_train.bridges.BRIDGES`: `verbatim`, `peft-from-tinker`, …), that makes the files the engines load from a checkpoint's; none: the trainer's files as they are, with no bridge. |
-| `max_lag` | `int` | `MAX_LAG` | For a channel whose engines serve elsewhere (`engine` is `RemoteEngine`, each entry of `engines` a server's `address`): how many checkpoints behind what the channel should serve a sample may be, where its server does not have the newest yet. |
-| `via` | `str \| None` | `None` | For a channel whose engines serve elsewhere: the URL its runners send every request to (a router or a proxy in front of its servers); none: its servers' addresses. Its engine hosts load checkpoints at the addresses. |
-| `connection` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | How servers elsewhere are reached (`Connection`): `token_env` or `token_file`, `ca`, `certificate`, `key`. |
-
-**Methods**
-
-- `@property def routed(self) -> bool` — Whether its engines serve elsewhere (said by name: an engine's module is not imported to load a profile).
-- `def route(self, renderer: Any, sequence: int | None = None) -> Route` — How a runner samples it on its servers elsewhere; `sequence`, the trainer's longest turn, where this process
-  trains it.
-
-### `EvalsSpec`
-
-*class* · `libraries/rollout-train/src/rollout_train/profile.py`
+*function* · `libraries/rollout-train/src/rollout_train/jobs.py`
 
 ```python
-class EvalsSpec
+async def driven(launch: str, cluster: Cluster, stores: Stores | None = None) -> None
 ```
 
-Evals a training run makes of its checkpoints as it makes them (`rollout_train.evals.Schedule`).
+Run a launch's run, noting on the launch that it runs, what it waits for, and how it ended: ended, failed (with
+why: its settings' refusals among them) or stopped (cancelled).
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `suite` | `str` | required | The suite each plays: by name, the version its name points to when each step is decided (the environment's eval data of that name, frozen on first use, or a suite made by hand: `rollout suite make`); or one version, by id (`NAME@N`). |
-| `every` | `int` | `1` | The checkpoint of every `every`th step is evaluated. |
-| `episodes` | `int \| None` | `None` | Episodes of each of the suite's starts; none: the suite's own. |
+### `imitated`
 
-### `GatewaySpec`
-
-*class* · `libraries/rollout-train/src/rollout_train/profile.py`
+*function* · `libraries/rollout-train/src/rollout_train/jobs.py`
 
 ```python
-class GatewaySpec
+def imitated(settings: RunSettings, kind: str) -> 'Objective'
 ```
 
-The gateway (`rollout_train.gateway`): a stateless service that samples the channels and records every turn,
-which `rollout gateway PROFILE` serves, as many replicas as wanted. A run's runner records through it: through the
-replicas at `url`, or, with none, through a gateway in its own process (served to harnesses at the profile's
-`serve`).
+The objective an imitate run trains with: the likelihood or preference preset its settings name (as the
+dataset's `kind` holds examples, or pairs and labelled examples), else `sft` with those of their components a
+likelihood takes. Raises `ValueError` for a policy-gradient preset named, or one that does not fit the dataset.
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `url` | `str \| None` | `None` | Where programs and harnesses reach it (its base URL, as a proxy in front of it presents it); none: a runner samples through a gateway in its own process. A runner that records through replicas elsewhere starts no engine: a routed channel is sampled on its servers, and any other is hosted by the replicas (its engines in their processes), which say what it guarantees. A hosted channel samples what its engines serve: the base model, never trained. |
-| `listen` | `str` | `'127.0.0.1:8830'` | `host:port` a replica serves on. |
-| `keys` | `str \| None` | `None` | A file of the secrets keys are signed with (`rollout_train.gateway.keys`); by default the environment's, and for a gateway in a runner's own process with none there, a secret it makes when it starts. |
-| `lifetime` | `float` | `6 * 3600.0` | Seconds a key minted for a slot is good for. |
+### `main`
+
+*function* · `libraries/rollout-train/src/rollout_train/jobs.py`
+
+```python
+def main(arguments: Sequence[str] | None = None) -> None
+```
+
+`python -m rollout_train.jobs LAUNCH`: a run's job.
 
 ### `NotEnoughMemory`
 
-*class* · `libraries/rollout-train/src/rollout_train/profile.py`
+*class* · `libraries/rollout-train/src/rollout_train/jobs.py`
 
 ```python
 class NotEnoughMemory(Exception)
@@ -4927,101 +4886,632 @@ class NotEnoughMemory(Exception)
 
 Stopping is better than exhausting the machine (a host may shut down rather than kill one process).
 
-### `Platform`
+### `ran`
 
-*class* · `libraries/rollout-train/src/rollout_train/profile.py`
+*function* · `libraries/rollout-train/src/rollout_train/jobs.py`
 
 ```python
-class Platform
+async def ran(run: Run) -> None
 ```
 
-An open profile: its `run`, the checkpoint it trains from (`origin`), the `checkpoints`, a `trainer` to step,
-`publish` to serve a checkpoint, and a `runner` that plays the episodes its run asks for
-(`rollout_train.rollouts.scheduler.EpisodeRunner`).
+Check the run's settings again, then run it as its kind says.
+
+### `Run`
+
+*class* · `libraries/rollout-train/src/rollout_train/jobs.py`
+
+```python
+class Run
+```
+
+A run being built from its settings, and what it started: everything the loop of its kind is given.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `cluster` | `Cluster` | required |  |
+| `stores` | `Stores` | required |  |
+| `settings` | `RunSettings` | required |  |
+| `run` | `Entry` | required |  |
+| `preset` | `str \| None` | `None` | The preset its settings came from (`NAME@N`), recorded as provenance. |
+| `resumes` | `bool` | `False` | Whether it goes on from where a start of it before stopped (it trains with the objective that one did). |
+| `noted` | `Callable[[str], Awaitable[None]] \| None` | `None` | Told what the run waits for, as it changes (its launch's detail). |
+| `environment` | `Environment \| None` | `None` |  |
+| `started` | `dict[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the run's start records beside what its loop knows. |
+| `directory` | `Path` | `field(default_factory=Path)` |  |
+| `origin` | `str \| None` | `None` | The checkpoint it starts from, by id (none: the base model). |
+| `trainer` | `Trainer \| None` | `None` |  |
+| `hosts` | `dict[str, list[Any]]` | `field(default_factory=dict[str, list[Any]])` | The engine hosts of each channel, by channel. |
+| `channels` | `dict[str, Channel]` | `field(default_factory=dict[str, Channel])` | The channels whose engines are in this process (Tinker's). |
+| `routes` | `Routes \| None` | `None` |  |
+| `gateway` | `Gateway \| None` | `None` |  |
+| `recorder` | `GatewayEndpoints \| None` | `None` |  |
+| `runner` | `EpisodeRunner \| None` | `None` |  |
+| `feed` | `Any` | `None` |  |
+| `tool_bindings` | `dict[str, ToolBinding]` | `field(default_factory=dict[str, ToolBinding])` |  |
+| `pool_bindings` | `dict[str, PoolBinding]` | `field(default_factory=dict[str, PoolBinding])` |  |
+| `runs` | `set[str]` | `field(default_factory=set[str])` | The runs its runner plays: its own, and its evals'. |
+| `chain` | `tuple[Bridge, ...]` | `()` | The bridges the trained channel's files are made by (none: the trainer's files as they are). |
+| `objective` | `Mapping[str, JsonValue] \| None` | `None` | The objective its trainer is made with, where the run's settings do not say it all (an imitate run's). |
+| `waiting` | `Waiting` | `field(default_factory=Waiting)` |  |
+| `trainer_handle` | `Any` | `None` |  |
 
 **Methods**
 
-- `def __init__(self, profile: Profile) -> None`
-- `@classmethod async def start(cls, profile: Profile, stack: contextlib.AsyncExitStack, *, training: bool = True, plays: Collection[str] | None = None) -> 'Platform'` — Start everything (the trainer only with `training`), registering with `stack` how each thing is stopped
-  (the engines last). With `plays`, a runner and nothing else (`rollout runner`): no run is registered in the
-  directory and no trainer is made; the runner plays those runs (by id), or with none named every run whose
-  channels it reaches, and the channels whose engines serve in this process follow what the one run named says
-  they should serve (`rollout_train.following`). Without, every channel of this process but the trained one
-  follows what the run says it serves: nothing, unless its start says the channel follows another or is fixed on
-  a checkpoint (`rollout_train.serving.source_of`).
-- `@property def layout(self) -> str | None` — The bridge, by name, that makes the files the trained channel's engines load, if one does.
-- `async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — The files the trained channel's engines load for a checkpoint, made by its bridge: as a Ray task when the
-  profile names a Ray cluster, else here.
+- `@property def ledger(self) -> Any`
+- `@property def checkpoints(self) -> Checkpoints`
+- `@property def kind(self) -> str`
+- `@property def channel(self) -> str` — The channel the run trains or plays: the trained one, else the first its settings name.
+- `async def start(self, stack: contextlib.AsyncExitStack, *, training: bool) -> None` — Start what the run needs, registering with `stack` how each is stopped: the environment, the trainer (with
+  `training`), each channel's engines, the gateway, the pools and the runner; then wait for what Ray has yet to
+  give.
+- `def hosted(self, channel: str, provider: str, model: str) -> list[Any]` — The servers of a channel on a `vllm` provider: engine hosts of the run's own, one per replica, each bound to
+  the run's channel and asking Ray for its share of a GPU.
+- `def binding(self, environment: Environment) -> Any` — How an environment's episodes are played: each slot from the channel the settings bind it to (the run's
+  channel unless said), each import and pool where the cluster serves it.
+- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve a checkpoint on a channel: on engines in this process (Tinker's), loaded now; elsewhere, its engine
+  hosts and servers follow the run's serving record, and this returns the version given.
+- `async def bridged(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — The files the trained channel's engines load for a checkpoint, made by its bridges as Ray tasks.
+- `def chosen(self, formats: frozenset[str]) -> tuple[Bridge, ...]` — The bridges that make what the run's channel's first provider loads from checkpoints in `formats` (none
+  where the files are served as they are); `ValueError` where none does.
 - `async def eval_run(self, step: int | None = None, part: int | None = None) -> str` — The run of an eval, by id, which the runner plays: with `step`, the eval of the checkpoint this run made at
-  that step (`rollout_train.evals.Schedule`), registered the first time as `NAME-eval-STEP` and kept in
-  `directory/evals`; else this run (an eval itself). With `part`, the run that plays that entry (by its number
-  from 1) of the eval of a suite of several: that eval's name and `-PART`, kept beside it.
+  that step (`RUN-eval-STEP`, called `NAME-eval-STEP`); else this run (an eval itself). With `part`, the run that
+  plays that entry of an eval of several (its id and `-PART`).
 - `async def bookmarked(self) -> set[str]` — The checkpoints bookmarks name (which keep their files).
-- `async def made(self, checkpoint: Checkpoint) -> None` — Carry the profile's bookmark, if it names one, to a checkpoint the run made.
-- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve new weights on a channel from now on (with `full`, a full checkpoint's); returns the number its
-  samples are stamped with (a checkpoint's depth). The runner beats at once, saying what the channel serves. A
-  channel whose engines serve elsewhere is served there: they follow what the training loop wrote down that it
-  serves (`rollout_train.serving`), and this returns the version given.
+- `async def made(self, checkpoint: Checkpoint) -> None` — Carry the run's bookmark, if it names one, to a checkpoint it made.
 
-### `Profile`
+### `run_directory`
 
-*class* · `libraries/rollout-train/src/rollout_train/profile.py`
+*function* · `libraries/rollout-train/src/rollout_train/jobs.py`
 
 ```python
-class Profile
+def run_directory(cluster: Cluster, run: str) -> Path
 ```
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `directory` | `Path` | required | The run's state: checkpoints' files while in use, the monitor's feed, and (unless the profile names other places) its ledger and blobs. |
-| `channels` | `Mapping[str, ChannelSpec]` | required |  |
-| `trainer` | `TrainerSpec \| None` | `None` |  |
-| `serve` | `str \| None` | `None` | `host:port` to serve the gateway in the runner's own process on, for harnesses (none: a harness cannot be given an address). |
-| `address` | `str \| None` | `None` | The URL others reach `serve` at (by default `http://` and `serve`). |
-| `tools` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Each tool set by name: a URL, or `module:name` of what makes it, called with `directory`. |
-| `pools` | `Mapping[str, str \| Mapping[str, Any]]` | `field(default_factory=dict[str, str \| Mapping[str, Any]])` | Each sandbox pool by the kind of sandbox it serves: a URL, or `module:name` of the provider that makes them, called with `directory`; or a table whose `kind` is that and whose other entries are passed to it too. |
-| `ledger` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where the run's tables and the checkpoints are kept (`rollout_train.ledger.opened`): `{"directory": …}`, in files; `{"kind": "module:name", …}`, what that makes from the other entries, such as a database (`rollout_train.database:DatabaseLedger` with a `url`). By default files under `directory/ledger`. Runs that share a ledger see each other's checkpoints. |
-| `blobs` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` | Where episodes (and what programs store) are kept: `kind` is `module:name` of what makes the store, called with the other entries. Without one, files under `directory/blobs`. |
-| `runs_gib` | `float` | `0.0` | System memory that must be available to admit runs. |
-| `training_gib` | `float` | `0.0` | And to start a step of a colocated trainer. |
-| `episodes_at_once` | `int` | `6` | The most episodes a run plays at once (whatever groups they are of): what the machine's engines and its memory for the programs' worlds can take. |
-| `feed_runs` | `int \| None` | `None` | Episodes kept in the monitor's feed, where it should not keep `RunFeed`'s own number (the oldest are deleted). |
-| `ray` | `str \| None` | `None` | The Ray cluster to connect to (`auto`, or `ray://host:port`): reshards then run as Ray tasks on it. |
-| `name` | `str \| None` | `None` | What a run first started in `directory` is called (by default the directory's name). It is named again with `rollout rename`; its id, in the directory's `run.json`, never changes. |
-| `evals` | `EvalsSpec \| None` | `None` | The evals a training run makes of its checkpoints as it makes them. |
-| `gateway` | `GatewaySpec \| None` | `None` | The gateway that samples the channels and records turns: what `rollout gateway PROFILE` serves, and what a run's runner records through (by default a gateway in its own process). |
+Where a run keeps its files on its driver's node: its feed, the checkpoints in use, fetched bases.
+
+### `taken_by`
+
+*function* · `libraries/rollout-train/src/rollout_train/jobs.py`
+
+```python
+def taken_by(making: Any, settings: Mapping[str, Any]) -> dict[str, Any]
+```
+
+Those of `settings` that what makes a trainer takes: every one where it takes any keyword, else those it names
+(a run's recorded settings hold every setting of its trainer's kind, which a trainer of its own may not all
+take).
+
+### `TrainerActor`
+
+*class* · `libraries/rollout-train/src/rollout_train/jobs.py`
+
+```python
+class TrainerActor
+```
+
+A trainer in a Ray actor: made with `implementation` (`module:name`), the model and its settings, and asked
+for steps by a `TrainerClient`.
 
 **Methods**
 
-- `@classmethod def load(cls, path: Path, *, directory: Path | None = None, settings: Mapping[str, Any] | None = None) -> 'Profile'` — The profile a TOML file describes; `directory` replaces the file's (one profile, many runs), and
-  `settings` replace or add its keys, by dotted name (`trainer.learning_rate`, `episodes_at_once`). A key the
-  file has and a profile does not is an error: a misspelt guard would otherwise be no guard. A channel's
-  `thinking_tokens` or `answer_tokens` of `"none"` is no budget (TOML has no null: what a setting that removes
-  the file's budget says).
-- `@property def hosted(self) -> list[str]` — The channels the gateway at `[gateway] url` hosts, by name: with a URL, every channel not routed (a runner
-  starts none of their engines, and samples them there); without one, none.
-- `async def open(self, *, training: bool = True, plays: Collection[str] | None = None) -> AsyncGenerator['Platform']` — Start what the profile describes, and stop it on the way out (also if starting fails half way). Without
-  `training` (an eval), no trainer is made: the trained channel's engines still load what the trainer's `start`
-  is served over. With `plays`, a runner and nothing else (`rollout runner`): see `Platform.start`.
-- `async def engines(self) -> AsyncGenerator[dict[str, Channel]]` — The channels whose engines are servers elsewhere, as clients of the servers at their addresses, and nothing
-  else: what an engine host (`rollout engines`) loads checkpoints into. Closed on the way out.
+- `def __init__(self, implementation: str, model: str, settings: Mapping[str, Any]) -> None`
+- `def described(self) -> dict[str, Any]` — What the client says of the trainer: its budget, its weights, its objective, its changeable settings.
+- `async def step(self, batch: list[Item], seed: int, parent: Files | None, into: Path) -> Step`
+- `def change(self, settings: Mapping[str, JsonValue]) -> dict[str, JsonValue]`
 
-### `TrainerSpec`
+### `TrainerClient`
 
-*class* · `libraries/rollout-train/src/rollout_train/profile.py`
+*class* · `libraries/rollout-train/src/rollout_train/jobs.py`
 
 ```python
-class TrainerSpec
+class TrainerClient
+```
+
+A `Trainer` over a `TrainerActor`'s handle: each step is an actor call (an error the trainer raised is raised
+as itself), and what it takes between steps is changed there.
+
+**Methods**
+
+- `def __init__(self, handle: Any, described: Mapping[str, Any]) -> None`
+- `@property def changeable(self) -> Mapping[str, JsonValue]`
+- `def change(self, settings: Mapping[str, JsonValue]) -> None`
+- `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
+
+## `rollout_train.launching`
+
+Asking for a run: its settings in layers, the facts validation reads, the offers.
+
+### `capacity_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+def capacity_of(beats: Sequence[Beat]) -> dict[str, JsonValue] | None
+```
+
+The GPUs the machines that beat now have, and those of them idle (under a twentieth of their memory used), by
+machine; none where no beat says.
+
+### `checked`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+async def checked(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, loaded: 'Environment | None' = None, own: str | None = None, gpus: float | None = None, gpus_free: float | None = None) -> list[Finding]
+```
+
+Everything wrong with a run's settings on this cluster (`rollout_train.validation.check`), with the facts
+gathered now.
+
+### `declared`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+def declared(environment: 'Environment') -> tuple[frozenset[str], EnvironmentFacts]
+```
+
+The sandbox kinds an environment's first program declares, and what validation reads of it.
+
+### `environment_facts`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+async def environment_facts(environment: str | None, cluster: Cluster, ledger: Ledger, *, loaded: 'Environment | None' = None) -> EnvironmentFacts | None
+```
+
+What validation reads of an environment: imported here (`loaded`, where the caller has it), its sandboxes and
+slots; a published one's sandboxes as its version recorded them, or that there is no such version. None where it is
+not known here: an environment whose Python is a project of its own, which this process does not import.
+
+### `free_name`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+def free_name(wanted: str, taken: set[str]) -> str
+```
+
+A name no run has: the one wanted, else it with the first number after it that no run has.
+
+### `ledger_facts`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+async def ledger_facts(settings: RunSettings, ledger: Ledger, *, own: str | None = None, gpus: float | None = None, gpus_free: float | None = None) -> LedgerFacts
+```
+
+What validation reads of the ledger: each checkpoint the settings name (the start, a fixed channel's), the
+suites their evals name, the names other runs have (`own`, the run's id, is left out), and the GPUs the caller
+knows of.
+
+### `offers`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -> dict[str, Any]
+```
+
+What a run can be asked for here (the module's docstring), as JSON.
+
+### `ray_capacity`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+def ray_capacity() -> tuple[float | None, float | None]
+```
+
+The GPUs the Ray cluster this process is connected to has free (none: not connected). Its total is not said:
+an autoscaled cluster has more than its nodes now.
+
+### `Refused` {#rollout_trainlaunchingrefused}
+
+*class* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+class Refused(ValueError)
+```
+
+A run whose settings are refused: the findings that refuse it (each with the setting it is about), and the notes
+beside them.
+
+**Methods**
+
+- `def __init__(self, findings: Sequence[Finding]) -> None`
+- `@property def refusals(self) -> list[Finding]`
+
+### `settled`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+async def settled(kind: str, name: str | None, settings: Mapping[str, JsonValue], *, preset: str | None = None, presets: Presets | None = None) -> tuple[RunSettings, str | None]
+```
+
+A run's settings: the preset's (`NAME` or `NAME@N`: those a run of its kind takes, so that a training run's
+preset serves an eval of the same channels), then `settings`, then its kind and name; and the preset's version
+(`NAME@N`). Raises `KeyError` for a preset there is none of.
+
+## `rollout_train.submitting`
+
+Starting a run's job as a Ray job or a RayJob, and reading how it goes.
+
+### `ask`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+async def ask(settings: RunSettings, ledger: Ledger, *, preset: str | None = None, resumes: str | None = None) -> Launch
+```
+
+Record a launch of a run with these settings (its kind and name among them): of the run it resumes, else a run
+registered now under its name. Raises `ValueError` (`rollout_train.registry.Taken`) for a name another run has.
+
+### `Backend`
+
+*class* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+class Backend(Protocol)
+```
+
+Where runs' jobs go: Ray's job API, or RayJobs on Kubernetes.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+
+**Methods**
+
+- `async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str` — Start a launch's job; its name (a Ray job's submission id, a RayJob's name).
+- `async def status(self, job: str) -> JobState` — How a job goes now.
+- `async def stop(self, job: str) -> None` — Ask a job to stop: its driver is interrupted, and notes its run stopped.
+
+### `backend_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+def backend_of(cluster: Cluster) -> Backend
+```
+
+Where a cluster's runs' jobs go: RayJobs where its config has `[kubernetes]`, else Ray's job API at `[ray]
+jobs`.
+
+### `entrypoint_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+def entrypoint_of(launch: Launch, cluster: Cluster) -> str
+```
+
+What a launch's job runs: `python -m rollout_train.jobs LAUNCH` in the interpreter its run starts in (its
+environment's own, for one in a project's Python; the cluster's `[ray] python` otherwise).
+
+### `followed`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+async def followed(launch: Launch, launches: Launches, cluster: Cluster | None = None, *, backends: Mapping[str, Backend] | None = None) -> Launch
+```
+
+A launch that is going, with what its job's status says noted: a job that waits (with why), runs, ended, failed
+or stopped without its driver saying so. A launch whose job cannot be read is as it was.
+
+### `job_name`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+def job_name(launch: Launch) -> str
+```
+
+The name of a launch's job: `run-` and its id, lowercase (a Kubernetes name: letters, digits and dashes).
+
+### `JobState`
+
+*class* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+class JobState
+```
+
+How a job goes, in a launch's states (`submitted`, `running`, `ended`, `failed`, `stopped`), with why.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `state` | `str` | required |  |
+| `detail` | `str \| None` | `None` |  |
+
+### `KubernetesApi`
+
+*class* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+class KubernetesApi
+```
+
+What makes, reads and deletes RayJobs: the API server at `base`, with the service account's token and CA (by
+default the pod's own), over `transport` where given (a test's).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `ACCOUNT` |  | `Path('/var/run/secrets/kubernetes.io/serviceaccount')` |  |
+
+**Methods**
+
+- `def __init__(self, base: str = 'https://kubernetes.default.svc', *, token: str | None = None, ca: str | None = None, transport: httpx.AsyncBaseTransport | None = None) -> None`
+- `async def create(self, namespace: str, resource: Mapping[str, Any]) -> dict[str, Any]`
+- `async def get(self, namespace: str, name: str) -> dict[str, Any] | None`
+- `async def delete(self, namespace: str, name: str) -> None`
+
+### `RayJobResources`
+
+*class* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+class RayJobResources
+```
+
+Runs' jobs as RayJobs in a Kubernetes namespace, each made from the cluster config's template
+(`[kubernetes]`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` |  | `'kubernetes'` |  |
+
+**Methods**
+
+- `def __init__(self, section: KubernetesSection, api: KubernetesApi | None = None) -> None`
+- `def template(self) -> dict[str, Any]`
+- `async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str`
+- `async def status(self, job: str) -> JobState`
+- `async def stop(self, job: str) -> None`
+
+### `RayJobs`
+
+*class* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+class RayJobs
+```
+
+Runs' jobs as Ray jobs, submitted to the job server at `address` (`client`: a `JobSubmissionClient`, or one
+like it).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` |  | `'ray'` |  |
+
+**Methods**
+
+- `def __init__(self, address: str, client: Any = None) -> None`
+- `def client(self) -> Any`
+- `async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str`
+- `async def status(self, job: str) -> JobState`
+- `async def stop(self, job: str) -> None`
+
+### `rendered` {#rollout_trainsubmittingrendered}
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+def rendered(template: Mapping[str, Any], launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], namespace: str) -> dict[str, Any]
+```
+
+The RayJob of a launch's job, made from `template` (a RayJob as YAML reads it: its Ray cluster, image, volumes,
+retries): its name and labels, its entrypoint and the driver's CPU, its runtime environment (as YAML, as KubeRay
+takes it), its job's submission id and metadata. Everything else is the template's.
+
+### `runtime_env_of` {#rollout_trainsubmittingruntime_env_of}
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+async def runtime_env_of(launch: Launch, cluster: Cluster, ledger: Ledger) -> dict[str, JsonValue]
+```
+
+The Ray runtime environment of a launch's job: the cluster config as JSON (`ROLLOUT_CLUSTER_JSON`), in the
+runtime environment of the published version it plays, if it plays one. Raises `KeyError` for a published version
+the ledger does not keep.
+
+### `start`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+async def start(launch: Launch, cluster: Cluster, ledger: Ledger, backend: Backend | None = None) -> Launch
+```
+
+Start a recorded launch's job; the launch, submitted (or failed, saying why the job could not be made).
+
+### `stopped`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+async def stopped(launch: Launch, launches: Launches, cluster: Cluster | None = None, *, backends: Mapping[str, Backend] | None = None) -> Launch
+```
+
+Ask a launch to stop: one whose job was not made yet is stopped at once; a job going is asked to stop, and its
+driver notes its run stopped. Raises `KeyError` for a launch that is not going.
+
+### `submit`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+async def submit(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, preset: str | None = None, resumes: str | None = None, backend: Backend | None = None) -> Launch
+```
+
+Record a launch of a run with these settings and start its job (`ask`, then `start`).
+
+## `rollout_train.launches`
+
+Runs asked for, the jobs they became, and how each goes.
+
+### `as_launch`
+
+*function* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+def as_launch(data: Mapping[str, Any]) -> Launch
+```
+
+A launch as it was stored. A launch asked for a profile (its `asked` names one) is read as its run settings:
+its environment, start, bookmark, groups, groups a step and seed among them, and an eval's suite and episodes.
+
+### `Asked`
+
+*class* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+class Asked
+```
+
+What a run is asked to be: its kind, its name, its run settings (as given: the schema's defaults are not
+written), the preset they came from (`NAME@N`), and, for a launch that resumes a run, that run's id.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `kind` | `str` | `TRAIN` |  |
+| `name` | `str` | `''` |  |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
+| `preset` | `str \| None` | `None` |  |
+| `resumes` | `str \| None` | `None` |  |
+
+**Methods**
+
+- `@property def environment(self) -> str | None` — The environment it plays (`module:name`, or a published one as `NAME@VERSION`), if it plays one.
+
+### `changed`
+
+*function* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+def changed(launch: Launch, expect: Collection[str] | None, changes: Mapping[str, Any]) -> Launch | None
+```
+
+A launch with `changes`, if they may be made of it as it is (`Launches.note`); else None.
+
+### `FileLaunches`
+
+*class* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+class FileLaunches
+```
+
+`Launches` in `launches.json` in a ledger's directory, under the lock the ledger's files are written under.
+
+**Methods**
+
+- `def __init__(self, directory: Path) -> None`
+- `async def ask(self, asked: Asked, run: str | None = None) -> Launch`
+- `async def all(self) -> list[Launch]`
+- `async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch`
+
+### `Launch`
+
+*class* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+class Launch
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `kind` | `str` | required | `module:name` of what makes the trainer, called with the channel's model and `settings`. |
-| `channel` | `str` | required | The channel that serves the policy it trains. |
-| `start` | `str \| None` | `None` | The checkpoint a new run trains from (`rollout_train.registry.resolved`: a bookmark, `RUN:STEP`, `RUN`, or a checkpoint's id or the start of one); by default the base model. A run started again goes on from the newest checkpoint it made. |
-| `bookmark` | `str \| None` | `None` | A bookmark the run carries: moved to each checkpoint it makes. |
-| `colocated` | `bool` | `False` | Whether it shares the channels' accelerator: their engines then sleep while it steps. |
-| `settings` | `Mapping[str, Any]` | `field(default_factory=dict[str, Any])` |  |
+| `id` | `str` | required |  |
+| `asked` | `Asked` | required |  |
+| `at` | `float` | required | When it was asked for. |
+| `state` | `str` | `ASKED` |  |
+| `run` | `str \| None` | `None` | The run it is, by id: registered when it was asked for, or the run it resumes. |
+| `job` | `str \| None` | `None` | Its job: a Ray job's submission id, or a RayJob's name. |
+| `backend` | `str \| None` | `None` | Where its job is: `ray` (Ray's job API) or `kubernetes` (a RayJob). |
+| `detail` | `str \| None` | `None` | Why it failed, how it ended, or what its run waits for. |
+| `updated` | `float` | `0.0` |  |
+
+### `launch_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+async def launch_of(launches: Launches, id: str) -> Launch
+```
+
+A launch by id. Raises `KeyError` when there is none.
+
+### `Launches`
+
+*class* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+class Launches(Protocol)
+```
+
+**Methods**
+
+- `async def ask(self, asked: Asked, run: str | None = None) -> Launch` — Record a launch, as asked, of the run `run` (by id); the launch.
+- `async def all(self) -> list[Launch]` — Every launch, newest first.
+- `async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch` — Note how a launch goes (its state, job, detail), in one step that compares and sets: the changes are written
+  only if the launch is in a state of `expect` (any, if None) and may go to the state they name (`MOVES`).
+  Returns the launch as it is then, changed or not: whoever moves it compares the state it gets with the state
+  it asked for. Raises `KeyError` when there is no such launch.
+
+### `launches_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+def launches_of(ledger: Ledger) -> Launches | None
+```
+
+The launches beside a ledger: a file beside a ledger of files, a table in a database ledger's database.
+
+### `MOVES`
+
+*constant* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+MOVES: Mapping[str, frozenset[str]] = {ASKED: frozenset({SUBMITTED, RUNNING, FAILED, STOPPED}), SUBMITTED: frozenset({RUNNING, STOPPING, STOPPED, ENDED, FAILED}), RUNNING: frozenset({STOPPING, STOPPED, ENDED, FAILED}), STOPPING: frozenset({STOPPED, ENDED, FAILED})}
+```
+
+Where a launch may go from where it is. A launch that finished (ended, failed, stopped) goes nowhere, nothing goes
+back, and a launch asked to stop is not running again: a stop asked for while its job starts stays, and its job is
+stopped. A driver may start before its submitter has noted its job (asked to running). A state may also be noted again
+(its details changed).
+
+### `new_launch`
+
+*function* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+def new_launch(asked: Asked, run: str | None = None) -> Launch
+```
+
+### `OPEN`
+
+*constant* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+OPEN = (ASKED, SUBMITTED, RUNNING, STOPPING)
+```
+
+### `stored` {#rollout_trainlaunchesstored}
+
+*function* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+def stored(launch: Launch) -> str
+```
+
+A launch as JSON, as it is stored.
 
 ## `rollout_train.monitor`
 
@@ -5237,7 +5727,7 @@ class PodAddress
 
 A pod that is alive, as its newest beat says: its name, the identity its certificate must carry, the address it
 is reached at (`https://IP:PORT`), its role (`inference` or `trainer`), whether it is ready, and its certificate's
-serial (for the launcher, which has the certificate of a pod it no longer counts as its own revoked).
+serial (for whoever started the pod, which has the certificate of a pod it no longer counts as its own revoked).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -7303,7 +7793,7 @@ the findings of `rollout_train.check.checked` and of an episode answered by a sc
 imports no tool set and declares no sandbox, which an import cannot serve), what it says of itself, and this
 Python and where it imported `rollout` and `rollout_train` from.
 
-### `runtime_env_of`
+### `runtime_env_of` {#rollout_trainpublishingruntime_env_of}
 
 *function* · `libraries/rollout-train/src/rollout_train/publishing.py`
 
@@ -8671,7 +9161,7 @@ Trains a LoRA adapter over `model` at Thinking Machines, one step at a time: a s
 state its parent names (its optimizer too, if it is given the parent's state) and leaves pointers to the new
 checkpoints (which Tinker's bridge, `rollout_tinker.bridges`, turns into an adapter engines here load). A client
 from the step before is used again when the parent is the state it saved. `service` is what calls Tinker: by
-default a session the SDK opens with the key it finds; `module:name` of what makes another (a profile names a fake
+default a session the SDK opens with the key it finds; `module:name` of what makes another (a test names a fake
 one so). `settings` are `TinkerSettings`' (its `objective` among them); those in `CHANGEABLE`, and the changeable
 components of its objective, it takes between steps (`rollout_train.trainer.Changeable`). Raises `ValueError` for
 an objective that reads the reference, the entropy or the top-k form's logprobs, which Tinker does not give here.
