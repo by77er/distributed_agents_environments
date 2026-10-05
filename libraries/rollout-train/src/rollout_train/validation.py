@@ -665,6 +665,7 @@ def _objective(run: _Run) -> None:
     if run.kind == "imitate" and objective.family == POLICY_GRADIENT and preset != DEFAULT.preset:
         run.refuse("objective", "objective.preset", "an imitate run trains on a dataset's examples, which have no "
                    f"advantages: a likelihood or preference preset, not {preset}")  # fmt: skip
+    _uncorrected(run, objective)
     trainer = run.trainer
     if trainer is None:
         return
@@ -691,6 +692,23 @@ def _objective(run: _Run) -> None:
         run.refuse("objective", "objective.distillation.form", f"the {trainer.name} trainer gives the logprobs of the "
                    "sampled tokens only, and the top_k form reads the student's logprobs of the teacher's top-k "
                    "tokens: distillation.form = policy_gradient")  # fmt: skip
+
+
+def _uncorrected(run: _Run, objective: Objective) -> None:
+    """A note for a training run whose objective makes no importance correction, while its turns may begin behind the
+    newest checkpoint: they are trained on as if on-policy."""
+    if run.kind != "train" or not objective.takes_importance or objective.importance.correction != "none":
+        return
+    lag = run.settings["max_lag"]
+    if not isinstance(lag, int) or lag <= 0:
+        return
+    exact = objective.importance.paper_exact
+    key = "objective.importance.paper_exact" if exact else "objective.importance.correction"
+    fix = "importance.paper_exact = false" if exact else "importance.correction = truncate"
+    run.note("objective", key, f"the objective makes no importance correction, and max_lag is {lag}: turns that began "
+             f"up to {lag} checkpoint{'' if lag == 1 else 's'} behind the newest, sampled by an engine that computes "
+             f"slightly differently from the trainer, are trained on as if on-policy. {fix} weighs them; max_lag = 0 "
+             "keeps them nearer")  # fmt: skip
 
 
 def _reads(objective: Objective) -> str:

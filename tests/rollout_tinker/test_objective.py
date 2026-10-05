@@ -221,13 +221,17 @@ BUILT_IN = {
         {"objective": {"preset": "dapo", "clip.kind": "none"}, "tokens_per_step": 40},
         "forward_backward importance_sampling",
     ),
-    "reinforce": ({"objective": "reinforce", "tokens_per_step": 40}, "forward_backward cross_entropy"),
-    "reinforce, truncated, one update": (
-        {"objective": {"preset": "reinforce", "importance.correction": "truncate"}, "tokens_per_step": 10**6},
-        "forward_backward cispo",
+    "reinforce, paper exact": (
+        {"objective": {"preset": "reinforce", "importance.paper_exact": True}, "tokens_per_step": 40},
+        "forward_backward cross_entropy",
     ),
-    "a segment mean, one update": (
-        {"objective": {"preset": "dr_grpo", "aggregate": "segment_mean"}, "tokens_per_step": 10**6},
+    "reinforce, several": ({"objective": "reinforce", "tokens_per_step": 40}, "forward_backward cross_entropy"),
+    "reinforce, one update": ({"objective": "reinforce", "tokens_per_step": 10**6}, "forward_backward cispo"),
+    "a segment mean, paper exact, one update": (
+        {
+            "objective": {"preset": "dr_grpo", "aggregate": "segment_mean", "importance.paper_exact": True},
+            "tokens_per_step": 10**6,
+        },
         "forward_backward cross_entropy",
     ),
     "dr_grpo": ({"objective": "dr_grpo", "tokens_per_step": 40}, "forward_backward ppo"),

@@ -119,7 +119,9 @@ def test_the_algorithm_follows_the_objectives_family_and_what_it_reads() -> None
     assert isinstance(algorithm_for(PRESETS["default"].objective), Grpo)
     assert isinstance(algorithm_for(PRESETS["dpo"].objective), Preferences)
     assert algorithm_for(PRESETS["kto"].objective) == Preferences(labelled=True)
-    reinforce = algorithm_for(PRESETS["reinforce"].objective)
+    corrected = algorithm_for(PRESETS["reinforce"].objective)
+    assert isinstance(corrected, Grpo) and corrected.needs == ("token_exact", "sampled_logprobs")
+    reinforce = algorithm_for(resolved("reinforce", {"importance.paper_exact": True}))
     assert isinstance(reinforce, Grpo) and reinforce.needs == ("token_exact",)  # (no correction: no logprobs needed)
     # A policy gradient with no importance correction trains on turns without behaviour logprobs, not on inexact ones.
     without = [episode(0.0, sampled_with=("token_exact",)), episode(3.0, sampled_with=("token_exact",))]

@@ -25,8 +25,17 @@ component the family does not accept or a combination that means nothing (`probl
 resolved objective, so what a run trains with never depends on what a preset means later.
 
 Where a component that follows from another is not given, it follows: a KL to the reference reads the base model
-(`reference = base`), a preference loss with a reference reads it and one without does not, and an odds ratio is of
-length-normalized likelihoods.
+(`reference = base`), a preference loss with a reference reads it and one without does not, an odds ratio is of
+length-normalized likelihoods, and `importance.paper_exact` makes no importance correction.
+
+A preset transcribes its paper's loss, which assumes on-policy samples. A run's samples are not: a turn may begin up to
+`max_lag` checkpoints behind the newest, under an engine that computes slightly differently from the trainer. So
+every policy-gradient preset, and the policy-gradient form of distillation (`on_policy_distillation`, `mopd`), weighs
+each sampled token by its importance weight from where it was sampled to the step's start, truncated at 2, as
+`default` does; `importance.paper_exact = true` removes it, for a run whose samples are on-policy. The top-k forms
+(`mopd_top_k`, `distillation`) carry none: their loss at a position is a divergence over the teacher's top tokens, not
+a term of the sampled token, so the sampled token's weight corrects nothing there, and `distillation` trains on a
+teacher's samples, whose recorded logprobs are the teacher's.
 
 A policy gradient can add a distillation term with a coefficient (`distillation.coefficient`), as a preference loss can
 add a likelihood term: its batch items are then distilled segments, each with its episode's advantage.
@@ -108,17 +117,22 @@ class Clip:
 @dataclass(frozen=True)
 class Importance:
     """The correction for where each token was sampled: the weight of its logprob at the step's start against the one
-    the engine recorded (`old / behavior`), a constant with no gradient."""
+    the engine recorded (`old / behavior`), a constant with no gradient. A turn may begin up to `max_lag` checkpoints
+    behind the newest, and the engine computes slightly differently from the trainer, so every policy-gradient preset
+    and the policy-gradient form of distillation truncate it at 2 by default."""
 
     correction: str = "truncate"
     """`none`; `untruncated`: the weight (importance sampling); `truncate`: the weight, at most `cap` (truncated
-    importance sampling); `mask`: the weight, and a token
-    whose weight is outside `floor` .. `cap` is dropped (masked importance sampling)."""
+    importance sampling); `mask`: the weight, and a token whose weight is outside `floor` .. `cap` is dropped (masked
+    importance sampling)."""
     level: str = "token"
     """`token`: a weight for each token. `segment`: one for the segment, the geometric mean of its tokens'."""
     cap: float = 2.0
     floor: float = 0.0
     """For `mask`: the lowest weight kept."""
+    paper_exact: bool = False
+    """True: no correction (`correction = none` follows), so a preset's loss is its paper's exactly, which assumes
+    on-policy samples: for comparing with a paper on a run whose samples are on-policy (`max_lag = 0`)."""
 
 
 @dataclass(frozen=True)
@@ -273,6 +287,15 @@ class Objective:
         return self.reference != "none"
 
     @property
+    def takes_importance(self) -> bool:
+        """Whether an importance correction weighs its loss: a policy gradient's, or the policy-gradient form of
+        distillation's, each a term of the sampled token (the top-k form's is a divergence over the teacher's top
+        tokens at the position, which the sampled token's weight does not correct)."""
+        if self.family == DISTILLATION:
+            return self.distillation.form == "policy_gradient"
+        return self.family == POLICY_GRADIENT
+
+    @property
     def needs_behaviour(self) -> bool:
         """Whether its loss reads the logprobs the engine recorded (an importance correction)."""
         return self.family in (POLICY_GRADIENT, DISTILLATION) and self.importance.correction != "none"
@@ -343,6 +366,8 @@ COMPONENTS: tuple[Component, ...] = (
     Component("importance.level", _S, _DISTILLED, False, "A weight per token or per segment", ("token", "segment")),
     Component("importance.cap", _F, _DISTILLED, True, "The largest weight", least=0, above=True),
     Component("importance.floor", _F, _DISTILLED, True, "The smallest weight a mask keeps", least=0),
+    Component("importance.paper_exact", _B, _DISTILLED, False, "No correction: the preset's loss as its paper writes "
+              "it, for on-policy samples"),
     Component("kl.target", _S, _DISTILLED, False, "What the KL penalty measures against", ("none", "reference", "old")),
     Component("kl.estimator", _S, _DISTILLED, False, "How the KL is estimated", ("k1", "k2", "k3")),
     Component("kl.placement", _S, _DISTILLED, False, "Where the KL penalty goes", ("loss", "reward")),
@@ -416,11 +441,10 @@ PRESETS: Mapping[str, Preset] = {
         _preset(
             "reinforce",
             "Williams, 1992",
-            "the score times each segment's logprob: no baseline, ratio, clipping or correction",
+            "the score times each segment's logprob: no baseline, ratio or clipping",
             advantage=Advantage(baseline="none", filter="none"),
             ratio="none",
             clip=_NO_CLIP,
-            importance=_NO_IMPORTANCE,
             aggregate="segment_sum",
         ),
         _preset(
@@ -430,7 +454,6 @@ PRESETS: Mapping[str, Preset] = {
             advantage=Advantage(baseline="leave_one_out", filter="none"),
             ratio="none",
             clip=_NO_CLIP,
-            importance=_NO_IMPORTANCE,
             aggregate="segment_sum",
         ),
         _preset(
@@ -439,7 +462,6 @@ PRESETS: Mapping[str, Preset] = {
             "the token ratio clipped at 0.2 either side; advantages normalized within the group (no critic)",
             advantage=_GROUP_NORMALIZED,
             clip=Clip(low=0.2, high=0.2),
-            importance=_NO_IMPORTANCE,
         ),
         _preset(
             "grpo",
@@ -448,7 +470,6 @@ PRESETS: Mapping[str, Preset] = {
             "loss, at 0.04; a mean over each segment's tokens, then segments",
             advantage=_GROUP_NORMALIZED,
             clip=Clip(low=0.2, high=0.2),
-            importance=_NO_IMPORTANCE,
             kl=Kl(target="reference", estimator="k3", placement="loss", coefficient=0.04),
             aggregate="segment_mean",
             reference="base",
@@ -459,7 +480,6 @@ PRESETS: Mapping[str, Preset] = {
             "the group mean without the standard deviation; summed over tokens and divided by a constant; no KL",
             advantage=Advantage(filter="none"),
             clip=Clip(low=0.2, high=0.2),
-            importance=_NO_IMPORTANCE,
             aggregate="constant",
             constant_tokens=3000,
         ),
@@ -469,7 +489,6 @@ PRESETS: Mapping[str, Preset] = {
             "clip-higher (0.2, 0.28); the token mean; groups of equal scores skipped; no KL",
             advantage=Advantage(scale="group_std", filter="equal_scores"),
             clip=Clip(low=0.2, high=0.28),
-            importance=_NO_IMPORTANCE,
         ),
         _preset(
             "gspo",
@@ -478,7 +497,7 @@ PRESETS: Mapping[str, Preset] = {
             advantage=_GROUP_NORMALIZED,
             ratio="segment",
             clip=Clip(low=3e-4, high=4e-4),
-            importance=Importance(correction="none", level="segment"),
+            importance=Importance(level="segment"),
             aggregate="segment_mean",
         ),
         _preset(
@@ -487,7 +506,6 @@ PRESETS: Mapping[str, Preset] = {
             "the importance weight clipped above, with its gradient stopped, times the logprob: no update clipping",
             advantage=_GROUP_NORMALIZED,
             clip=Clip(kind="weight", low=1.0, high=3.0),
-            importance=_NO_IMPORTANCE,
         ),
         _preset(
             "sft",
@@ -540,7 +558,6 @@ PRESETS: Mapping[str, Preset] = {
             "the reverse KL on the student's own samples, from the teacher's logprob of each sampled token: its "
             "advantage the teacher's logprob less the student's",
             family=DISTILLATION,
-            importance=_NO_IMPORTANCE,
             distillation=Distillation(divergence="reverse_kl", form="policy_gradient"),
         ),
         _preset(
@@ -557,7 +574,6 @@ PRESETS: Mapping[str, Preset] = {
             "each sampled token's advantage the teacher's logprob less the student's, clipped at 5; a mean over each "
             "segment's tokens; one teacher for each domain",
             family=DISTILLATION,
-            importance=_NO_IMPORTANCE,
             distillation=Distillation(divergence="reverse_kl", form="policy_gradient", advantage_clip=5.0),
             aggregate="segment_mean",
         ),
@@ -659,6 +675,9 @@ def problems(objective: Objective, overrides: Mapping[str, JsonValue] | None = N
     if family in (POLICY_GRADIENT, DISTILLATION):
         if objective.importance.correction == "mask" and objective.importance.floor >= objective.importance.cap:
             found.append(("importance.floor", "importance.floor is below importance.cap: a mask keeps what is between"))
+        if objective.importance.paper_exact and objective.importance.correction != "none":
+            found.append(("importance.correction", "importance.paper_exact makes no correction: importance.correction "
+                          "= none, or importance.paper_exact = false"))  # fmt: skip
         if objective.kl.target == "reference" and objective.reference == "none":
             found.append(("reference", "kl.target reference needs a reference: reference = base"))
         if objective.kl.target == "none" and objective.kl.coefficient != 0:
@@ -730,8 +749,10 @@ def composed(preset: str, overrides: Mapping[str, JsonValue] | None = None) -> t
 
 def _followed(objective: Objective, given: Mapping[str, JsonValue]) -> Objective:
     """The components that follow from others where they were not given: the reference, from the KL's target or the
-    preference loss; an odds ratio's length normalization."""
+    preference loss; an odds ratio's length normalization; no importance correction, from `importance.paper_exact`."""
     made = objective
+    if made.importance.paper_exact and "importance.correction" not in given:
+        made = replace(made, importance=replace(made.importance, correction="none"))
     if "reference" not in given and ("kl.target" in given or "preference.loss" in given):
         if made.family in (POLICY_GRADIENT, DISTILLATION):
             made = replace(made, reference="base" if made.kl.target == "reference" else "none")

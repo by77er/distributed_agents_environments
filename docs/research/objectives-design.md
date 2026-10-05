@@ -53,6 +53,7 @@ validation refuses the rest. Every component below is built but those marked pro
 | `importance.correction` | `none`, `untruncated`, `truncate` (TIS), `mask` (drop tokens outside the bounds, keeping the weight of those within; NeMo-RL's `icepop`) | policy_gradient, distillation |
 | `importance.level` | `token`, `segment` | policy_gradient, distillation |
 | `importance.cap`, `importance.floor` | numbers: the cap, and the lowest weight a mask keeps | policy_gradient, distillation |
+| `importance.paper_exact` | true or false: no correction, a preset's loss exactly as its paper writes it, for on-policy samples ([presets and off-policy samples](#presets-and-off-policy-samples)) | policy_gradient, distillation |
 | `kl.target` | `none`, `reference`, `old` | policy_gradient, distillation |
 | `kl.estimator` | `k1` (in the reward only: in the loss its gradient is the logprob's, whose mean over the policy's own samples is 0, so it pulls nowhere), `k2`, `k3` | policy_gradient, distillation |
 | `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient, after the group's baseline) | policy_gradient; distillation (`reward` in the policy-gradient form) |
@@ -75,7 +76,8 @@ validation refuses the rest. Every component below is built but those marked pro
 | `distillation.coefficient` | a number: the distillation term beside a policy gradient (0: none); it changes between steps, but not to or from 0 | policy_gradient |
 
 Where a component that follows from another is not given, it follows: a KL to the reference reads `reference = base`,
-a preference loss with a reference reads it and one without reads none, and an odds ratio is length-normalized.
+a preference loss with a reference reads it and one without reads none, an odds ratio is length-normalized, and
+`importance.paper_exact` makes no importance correction.
 
 The step's own controls are `max_kl` (stop a pass when the policy has moved too far), the gradient norm, the learning
 rate and warmup, `passes`, and `tokens_per_step`. They are trainer settings, not components: every preset runs with the
@@ -90,14 +92,17 @@ would let exactly those steps run furthest. The step's `kl_moved` is the same k3
 
 A preset is a family and component values, with the paper it comes from. Its test transcribes the paper's loss
 directly on a fixed batch and compares the composed objective with it, in value and gradient
-(`tests/rollout_objectives/test_presets.py`, which also pins each value to its source). *Built.* A distillation
+(`tests/rollout_objectives/test_presets.py`, which also pins each value to its source). *Built.* Every policy-gradient
+preset and the policy-gradient form of distillation also weigh each token by the platform's importance correction, which
+the papers do not write ([presets and off-policy samples](#presets-and-off-policy-samples)); the table gives the
+papers' terms. A distillation
 preset's transcription reads the full distributions (the student's logits and the teacher's logprobs over the
 vocabulary), and its composed loss only what a distilled segment carries and the step computes.
 
 | Preset | Family | What sets it apart | Source |
 |---|---|---|---|
 | `default` | policy_gradient | Dr. GRPO's advantages (no standard deviation), DAPO's clip-higher (0.2, 0.28) and token mean, groups of equal scores skipped, truncated importance sampling at 2 | this platform's |
-| `reinforce` | policy_gradient | no baseline, ratio, clipping or importance correction; each segment's logprob summed | Williams, 1992 (Eq. 11) |
+| `reinforce` | policy_gradient | no baseline, ratio or clipping; each segment's logprob summed | Williams, 1992 (Eq. 11) |
 | `rloo` | policy_gradient | leave-one-out baseline; each segment's logprob summed, the whole completion one action | Ahmadian et al., 2024 (Sec. 2.3) |
 | `ppo_clip` | policy_gradient | token ratio clipped symmetrically at 0.2; advantages normalized within the group (no critic); token mean | Schulman et al., 2017 (Sec. 3, Table 1) |
 | `grpo` | policy_gradient | group mean and standard deviation; token ratio clipped at 0.2; KL to the reference by k3 in the loss at 0.04; mean over each segment's tokens, then segments | Shao et al., 2024, DeepSeekMath (Eq. 3, 4; Sec. 4.2) |
@@ -111,9 +116,9 @@ vocabulary), and its composed loss only what a distilled segment carries and the
 | `simpo` | preference | length-normalized margin loss at beta 2.0, margin 1.0, no reference | Meng et al., 2024 (Eq. 6, Table 8) |
 | `kto` | preference | unpaired desirable and undesirable examples at beta 0.1, both weights 1 | Ethayarajh et al., 2024 (Eq. 8, Sec. 4.2) |
 | `orpo` | preference plus likelihood | an odds-ratio term at 0.1 beside the chosen side's likelihood, odds of the mean token logprob, no reference | Hong et al., 2024 (Eq. 3, 6, 7; Sec. 6.1) |
-| `on_policy_distillation` | distillation | reverse KL on the student's own samples, from the teacher's logprob of each sampled token: the advantage `log T(y) - log pi_old(y)`, unclipped, its loss the advantage times the logprob; token mean; no importance correction | Agarwal et al., 2024, GKD (Sec. 3, on-policy with the reverse KL); Thinking Machines, 2025 (On-Policy Distillation) |
+| `on_policy_distillation` | distillation | reverse KL on the student's own samples, from the teacher's logprob of each sampled token: the advantage `log T(y) - log pi_old(y)`, unclipped, its loss the advantage times the logprob; token mean | Agarwal et al., 2024, GKD (Sec. 3, on-policy with the reverse KL); Thinking Machines, 2025 (On-Policy Distillation) |
 | `distillation` | distillation | forward KL to the teacher's top-20 logprobs, renormalized over them, on the teacher's samples; temperature 1; token mean | Hinton et al., 2015; Kim and Rush, 2016 (word-level KD) |
-| `mopd` | distillation | the policy-gradient form: `A = clip(sg[log T(y) - log pi_old(y)], -5, 5)`, loss `-1/|y| sum_t A log pi(y)` (a mean over each segment's tokens, then segments); one rollout a prompt (the algorithm's group of 1); each domain routed to its teacher (`distillation.teachers`); no importance correction, no KL | Ma et al., 2026, MOPD: Multi-Teacher On-Policy Distillation (MiMo, ICML 2026; Eq. 3, 4; Sec. 4) |
+| `mopd` | distillation | the policy-gradient form: `A = clip(sg[log T(y) - log pi_old(y)], -5, 5)`, loss `-1/|y| sum_t A log pi(y)` (a mean over each segment's tokens, then segments); one rollout a prompt (the algorithm's group of 1); each domain routed to its teacher (`distillation.teachers`); no KL | Ma et al., 2026, MOPD: Multi-Teacher On-Policy Distillation (MiMo, ICML 2026; Eq. 3, 4; Sec. 4) |
 | `mopd_top_k` | distillation | MOPD's top-k form: `1/|y| sum_t sum over the teacher's top-64 v of [p log(p/q) - p + q]`, the probabilities as they are | Ma et al., 2026 (Eq. 5; k = 64) |
 
 Values the papers do not state, and where they come from instead:
@@ -138,7 +143,7 @@ Values the papers do not state, and where they come from instead:
 - **The student's logprob in a distillation advantage** is the step's start (`old`), as NeMo-RL's MOPD takes
   `prev_logprobs`; MOPD's paper writes `log pi_theta` under a stop-gradient, the same at the first update. Thinking
   Machines' cookbook takes the sampler's logprob and Tinker's `importance_sampling` loss (the ratio to the sampler);
-  on-policy, sampler and start agree up to the engine's numerical gap, which `importance.correction` can weigh.
+  on-policy, sampler and start agree up to the engine's numerical gap, which the importance correction weighs.
 - **`distillation`'s top 20** is vLLM's default most logprobs a position; Hinton et al. and Kim and Rush match the whole
   vocabulary. The tail outside the top k is dropped and the rest renormalized; at k = the vocabulary the loss is theirs.
   Hinton's temperature (they report 20 for MNIST, and scale by its square) is a component (`distillation.temperature`);
@@ -151,11 +156,39 @@ Values the papers do not state, and where they come from instead:
   beta)·pi`, as TRL writes it; `beta` 0.5 by default, TRL's. It is a component of the top-k form, over the
   renormalized top k; no preset takes it.
 
-Importance correction is a modifier any policy-gradient preset can take. `truncate` follows truncated importance
-sampling (Yao et al., 2025; the cap of 2 is their code's) and `mask` follows masked importance sampling, which keeps
-a weight within the bounds and drops the token outside them (Liu, Li et al., 2025), for the gap between the sampler and
-the trainer. The papers' presets carry none, as the papers do; `default` truncates at 2. A distillation takes it too:
-NeMo-RL's MOPD runs with `icepop`, which is `mask`.
+### Presets and off-policy samples
+
+A paper's loss assumes on-policy samples, drawn from the policy its update starts from. A run's are not, in two ways: a
+turn may begin up to `max_lag` checkpoints behind the newest (engines sample while the trainer steps), and the engine
+computes logprobs slightly differently from the trainer (other kernels, other precision), so even a turn of the newest
+checkpoint comes from a policy a little off the trainer's. So every policy-gradient preset weighs each sampled token by
+its importance weight from where it was sampled to the step's start, `old / behavior`, truncated at 2
+(`importance.correction = truncate`, `importance.cap = 2`), as `default` does: truncated importance sampling (Yao et
+al., 2025; the cap of 2 is their code's). GSPO's is one weight for the segment, the geometric mean of its tokens'
+(`importance.level = segment`), as its ratio is one for the segment.
+
+- **How it composes.** The weight and each preset's ratio are two factors of the full weight `now / behavior`: the
+  ratio `now / old`, which the preset clips (PPO's, DAPO's, GSPO's) or leaves out (`ratio = none`: REINFORCE, RLOO), and
+  the correction `old / behavior`. Each factor is bounded once.
+- **CISPO.** Its clipped weight is of `now / old` too, the step's start standing for the behaviour policy as the paper
+  takes it. Its clip (at most 4) bounds the update's factor and the correction (at most 2) the sampling's, so the full
+  weight is at most 8 and neither factor is corrected twice.
+- **`importance.paper_exact = true`** takes the correction away (`importance.correction = none` follows; with another
+  correction it is refused): the paper's loss exactly, for comparing with a paper on a run whose samples are on-policy
+  (`max_lag = 0`, and an engine whose logprobs match the trainer's). Validation notes a training run that makes no
+  correction while `max_lag` is above 0.
+- **The tests.** Each preset's transcription of its paper's loss is compared with the preset under `paper_exact`, and
+  with the preset on samples taken where the step starts (every weight 1); and, on samples taken elsewhere, with the
+  paper's loss with each token weighed by its truncated weight.
+- **Distillation.** The policy-gradient form (`on_policy_distillation`, `mopd`) is a policy gradient of the student's
+  own samples, which lag as a policy gradient's do, so it takes the same correction. MOPD's paper has none (its samples
+  are on-policy); NeMo-RL's MOPD offers masking (`icepop`), which is `importance.correction = mask` here (masked
+  importance sampling keeps a weight within `floor` .. `cap` and drops the token outside them; Liu, Li et al., 2025).
+  The top-k forms (`mopd_top_k`, `distillation`) carry none: their loss at a position is a divergence over the
+  teacher's top tokens, not a term of the sampled token, so the sampled token's weight corrects nothing there; and
+  `distillation` trains on a teacher's samples, whose recorded logprobs are the teacher's.
+
+### Choosing and overriding
 
 The platform's present default is a preset of its own, `default`, with the `max_kl` stop. A trainer's own settings
 that named the objective before (`objective = "policy_gradient"`, `ratio`, the clips, `truncate`) say `default` and its
@@ -256,7 +289,7 @@ reached through the gateway, so every judge call is recorded, counted in spend, 
    current behaviour reproduce exactly as `default`, `dapo` and `gspo`, and add `grpo`, `dr_grpo`, `rloo`, `cispo` and
    `reinforce`. Wire `objective.preset` and component overrides into the run settings and validation. *Built*
    (`default` reproduces the step to the last bit; `dapo` and `gspo` are the papers' presets, which differ from it in
-   their advantages' scale and importance correction).
+   their advantages' scale).
 2. **The preference family**: `dpo`, `ipo`, `simpo`, `kto`, `orpo`, with pairs from a group's best and worst
    episodes and from datasets. Use the adapter-off reference for LoRA. *Built.*
 3. **Judges**: judge channels, rubric scores and comparisons, and comparisons feeding preferences and group
@@ -267,8 +300,9 @@ reached through the gateway, so every judge call is recorded, counted in spend, 
 
 ## Checked on Qwen3-0.6B
 
-**Recorded on 2026-10-04, before `kl_moved` was the k3 estimate:** *KL moved* below is the k1 estimate, which has
-either sign.
+**Recorded on 2026-10-04, before `kl_moved` was the k3 estimate and before the policy-gradient presets took the
+importance correction:** *KL moved* below is the k1 estimate, which has either sign, and every preset but `default` ran
+without a correction.
 
 On 2026-10-04, at commit `94146d7` (the code of this branch, run before it was rebased onto main's scoring and
 untrained-slot changes), every preset took a short real run on one RTX 5080 (16 GB): `rollout train` over GSM8K
@@ -328,6 +362,9 @@ What looks wrong, and is reported rather than tuned away:
   either sign.
 
 ## Checked on Qwen3
+
+**Recorded on 2026-10-04, before `on_policy_distillation` and `mopd` took the importance correction:** they ran without
+one.
 
 On 2026-10-04, at commit `3d8f100`, the distillation presets took a few steps each on one RTX 5080 (16 GB), without
 the run wiring: a script drove `PolicyStep` directly. The student, Qwen/Qwen3-0.6B with a fresh LoRA adapter (rank 16,

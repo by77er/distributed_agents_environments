@@ -292,7 +292,7 @@ def test_turns_without_behaviour_logprobs_are_trained_on_without_an_importance_c
 ):
     policy = ToyPolicy()
     segment = sampled([1, 2, 3, 4])
-    reinforce = StepSettings(objective="reinforce", learning_rate=0.05)
+    reinforce = StepSettings(objective={"preset": "reinforce", "importance.paper_exact": True}, learning_rate=0.05)
     metrics = PolicyStep(policy, reinforce).step([Weighted(segment, 1.0)])  # type: ignore[arg-type]
     assert metrics["optimizer_steps"] == 1.0 and metrics["mean_mismatch"] == 0.0  # (no finite behaviour: none)
     with pytest.raises(ValueError, match="no behavior logprob"):

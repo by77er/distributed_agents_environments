@@ -68,7 +68,8 @@ For each sampled token of a segment with advantage `A`:
 
 1. **The importance weight** `w`, a constant (`importance.*`): none; `old / behavior` (`untruncated`); that, at most
    `cap` (`truncate`); or that, with a token whose weight is outside `floor` .. `cap` dropped (`mask`). At the
-   `segment` level the weight is one for the segment, the geometric mean of its tokens'.
+   `segment` level the weight is one for the segment, the geometric mean of its tokens'. Every policy-gradient preset
+   truncates it at 2; `importance.paper_exact` takes it away (none), for samples that are on-policy.
 2. **The ratio** `r = now / old` (`ratio = token`), one for the segment (`segment`: `exp(mean(now - old))`, its
    gradient spread over the tokens as GSPO's token form spreads it), or none (`none`: the logprob itself).
 3. **The surrogate**, by `clip.kind`: `r·A` (`none`); `min(r·A, clip(r)·A)` with `clip(r)` bounded to
@@ -202,7 +203,10 @@ loss, clip fraction, KL estimate (as `kl_moved`) and learning rate, and the trai
 ## Tests
 
 `tests/rollout_objectives/` needs torch. `test_presets.py` pins every preset's values to its paper and compares its
-composed loss and gradient with a direct transcription of the paper's formula on a fixed batch.
+composed loss and gradient with a direct transcription of the paper's formula on a fixed batch: with
+`importance.paper_exact`, or on samples taken where the step starts (every weight 1), the paper's loss itself; as the
+preset composes it on samples taken elsewhere, the paper's loss with each token weighed by its truncated importance
+weight.
 `test_components.py` covers each component alone (clipping by kind, the importance corrections, the KL estimators and
 their placement, the entropy bonus, aggregation), the default against the step's loss as it was written before
 components (to the last bit), and the step over pairs and labelled examples (its two-part gradient equal to the

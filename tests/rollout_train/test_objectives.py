@@ -80,6 +80,28 @@ def test_a_k1_kl_penalty_is_refused_in_the_loss_and_taken_in_the_reward(preset: 
         assert resolved(preset, {**k1, "kl.estimator": estimator}).kl.placement == "loss"
 
 
+def test_every_policy_gradient_preset_corrects_for_where_its_tokens_were_sampled_unless_paper_exact() -> None:
+    corrected = ("default", "reinforce", "rloo", "ppo_clip", "grpo", "dr_grpo", "dapo", "gspo", "cispo",
+                 "on_policy_distillation", "mopd")  # fmt: skip
+    for name in corrected:
+        made = PRESETS[name].objective
+        importance = made.importance
+        assert (importance.correction, importance.cap, importance.paper_exact) == ("truncate", 2.0, False), name
+        assert made.needs_behaviour and made.takes_importance, name
+        exact = resolved(name, {"importance.paper_exact": True})
+        assert exact.importance.correction == "none" and not exact.needs_behaviour, name
+        assert Objective.from_json(exact.to_json()) == exact
+    assert PRESETS["gspo"].objective.importance.level == "segment"  # (one weight for the segment, as its ratio)
+    for name in ("distillation", "mopd_top_k"):  # (the top-k form: a divergence over the teacher's top tokens)
+        made = PRESETS[name].objective
+        assert made.importance.correction == "none" and not made.takes_importance, name
+    with pytest.raises(ValueError, match=r"importance\.paper_exact makes no correction"):
+        resolved("dapo", {"importance.paper_exact": True, "importance.correction": "truncate"})
+    assert not resolved("dapo", {"importance.paper_exact": True, "importance.correction": "none"}).needs_behaviour
+    with pytest.raises(ValueError, match="not a component of a preference objective"):
+        resolved("dpo", {"importance.paper_exact": True})
+
+
 def test_what_changes_between_steps_is_a_number() -> None:
     changeable = {each.key for each in COMPONENTS if each.changeable}
     assert changeable == {
@@ -161,7 +183,8 @@ def test_a_run_started_again_trains_with_the_objective_its_start_recorded(tmp_pa
 def test_a_distillation_accepts_its_components_and_a_policy_gradient_a_distillation_term() -> None:
     accepted = {each.key for each in COMPONENTS if "distillation" in each.families}
     assert accepted == {
-        "importance.correction", "importance.level", "importance.cap", "importance.floor", "kl.target",
+        "importance.correction", "importance.level", "importance.cap", "importance.floor", "importance.paper_exact",
+        "kl.target",
         "kl.estimator", "kl.placement", "kl.coefficient", "aggregate", "constant_tokens", "reference",
         "distillation.divergence", "distillation.form", "distillation.top_k", "distillation.temperature",
         "distillation.advantage_clip", "distillation.beta", "distillation.teachers",

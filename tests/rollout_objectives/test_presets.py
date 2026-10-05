@@ -15,7 +15,7 @@ from rollout_objectives.distillation import distilled
 from rollout_objectives.step import preference_terms
 from rollout_objectives.terms import terms, units
 from rollout_train.algorithm import advantages_of, algorithm_for
-from rollout_train.objectives import PRESETS, Objective
+from rollout_train.objectives import PRESETS, Objective, resolved
 from rollout_train.recorder import Segment, Span, TeacherScores
 from rollout_train.trainer import Distilled, Labelled, Pair
 
@@ -34,8 +34,9 @@ class Sampled:
     reference: torch.Tensor
 
 
-def group(seed: int = 0) -> list[Sampled]:
-    """A group whose logprobs now have moved from the step's start, some far enough to be clipped."""
+def group(seed: int = 0, *, on_policy: bool = False) -> list[Sampled]:
+    """A group whose logprobs now have moved from the step's start, some far enough to be clipped, sampled where the
+    step starts (`on_policy`) or elsewhere, some far enough for their importance weight to be truncated."""
     generator = torch.Generator().manual_seed(seed)
     made: list[Sampled] = []
     for length in LENGTHS:
@@ -43,7 +44,8 @@ def group(seed: int = 0) -> list[Sampled]:
         moved = (torch.rand(length, generator=generator, dtype=torch.float64) - 0.5) * 0.6
         behavior = old + (torch.rand(length, generator=generator, dtype=torch.float64) - 0.5) * 1.6
         reference = old + (torch.rand(length, generator=generator, dtype=torch.float64) - 0.5) * 0.8
-        made.append(Sampled((old + moved).clamp(max=-1e-3).requires_grad_(True), old, behavior, reference))
+        sampled_at = old.clone() if on_policy else behavior
+        made.append(Sampled((old + moved).clamp(max=-1e-3).requires_grad_(True), old, sampled_at, reference))
     return made
 
 
@@ -58,9 +60,11 @@ def composed(objective: Objective, sampled: Sequence[Sampled], rewards: Sequence
     return loss / total
 
 
-def same(objective: Objective, transcribed: Callable[[list[Sampled]], torch.Tensor]) -> None:
+def same(
+    objective: Objective, transcribed: Callable[[list[Sampled]], torch.Tensor], *, on_policy: bool = False
+) -> None:
     """The composed loss and the transcription agree in value and in the gradient of every logprob."""
-    ours, theirs = group(), group()
+    ours, theirs = group(on_policy=on_policy), group(on_policy=on_policy)
     mine = composed(objective, ours, REWARDS)
     paper = transcribed(theirs)
     mine.backward()
@@ -162,80 +166,117 @@ def test_the_presets_are_the_papers() -> None:
     assert (default.importance.correction, default.importance.cap, default.aggregate) == ("truncate", 2.0, "token_mean")
 
 
-def test_reinforce() -> None:  # -(1/G) sum_i r_i sum_t log pi
-    same(PRESETS["reinforce"].objective,
-         lambda g: -total(r * each.now.sum() for each, r in zip(g, REWARDS, strict=True)) / len(g))  # fmt: skip
+Weight = Callable[[Sampled], torch.Tensor]
+"""Each token's importance weight in a transcription."""
 
 
-def test_rloo() -> None:  # -(1/k) sum_i (R_i - 1/(k-1) sum_{j != i} R_j) log pi(y_i)
-    def paper(g: list[Sampled]) -> torch.Tensor:
-        k = len(g)
-        return (
-            -total((r - (sum(REWARDS) - r) / (k - 1)) * each.now.sum() for each, r in zip(g, REWARDS, strict=True)) / k
+def unweighted(each: Sampled) -> torch.Tensor:
+    """The paper's: no weight (its samples are on-policy)."""
+    return torch.ones_like(each.old)
+
+
+def truncated(each: Sampled) -> torch.Tensor:
+    """The platform's: from where each token was sampled to the step's start, at most 2 (truncated importance
+    sampling, Yao et al., 2025)."""
+    return torch.exp(each.old - each.behavior).clamp(max=2.0)
+
+
+def truncated_segment(each: Sampled) -> torch.Tensor:
+    """The platform's at the segment level: the geometric mean of its tokens' weights, at most 2."""
+    return torch.exp((each.old - each.behavior).mean()).clamp(max=2.0).expand_as(each.old)
+
+
+def reinforce(g: list[Sampled], w: Weight) -> torch.Tensor:  # -(1/G) sum_i r_i sum_t log pi
+    return -total((w(each) * r * each.now).sum() for each, r in zip(g, REWARDS, strict=True)) / len(g)
+
+
+def rloo(g: list[Sampled], w: Weight) -> torch.Tensor:  # -(1/k) sum_i (R_i - 1/(k-1) sum_{j != i} R_j) log pi(y_i)
+    k = len(g)
+    baselined = [r - (sum(REWARDS) - r) / (k - 1) for r in REWARDS]
+    return -total((w(each) * a * each.now).sum() for each, a in zip(g, baselined, strict=True)) / k
+
+
+def ppo_clip(g: list[Sampled], w: Weight) -> torch.Tensor:  # -(1/T) sum min(r A, clip(r, 1 - 0.2, 1 + 0.2) A)
+    tokens = sum(each.now.numel() for each in g)
+    advantages = standardized(REWARDS)
+    return -total((w(e) * ppo_term(e, a, 0.2, 0.2)).sum() for e, a in zip(g, advantages, strict=True)) / tokens
+
+
+def grpo(g: list[Sampled], w: Weight) -> torch.Tensor:
+    # -(1/G) sum_i (1/|o_i|) sum_t [min(r A, clip(r) A) - beta (ref/pi - log(ref/pi) - 1)]
+    total = torch.zeros((), dtype=torch.float64)
+    for each, advantage in zip(g, standardized(REWARDS), strict=True):
+        quotient = torch.exp(each.reference - each.now)
+        kl = quotient - torch.log(quotient) - 1
+        total = total + (w(each) * ppo_term(each, advantage, 0.2, 0.2) - 0.04 * kl).mean()
+    return -total / len(g)
+
+
+def dr_grpo(g: list[Sampled], w: Weight) -> torch.Tensor:  # -(1/G) sum_i sum_t min(r A~, clip(r) A~) / 3000
+    advantages = centred(REWARDS)
+    return -total((w(e) * ppo_term(e, a, 0.2, 0.2)).sum() / 3000 for e, a in zip(g, advantages, strict=True)) / len(g)
+
+
+def dapo(g: list[Sampled], w: Weight) -> torch.Tensor:  # -(1/sum |o_i|) sum_i sum_t min(r A, clip(r, 0.8, 1.28) A)
+    tokens = sum(each.now.numel() for each in g)
+    advantages = standardized(REWARDS)
+    return -total((w(e) * ppo_term(e, a, 0.2, 0.28)).sum() for e, a in zip(g, advantages, strict=True)) / tokens
+
+
+def gspo(g: list[Sampled], w: Weight) -> torch.Tensor:
+    # -(1/G) sum_i min(s_i A_i, clip(s_i, 1 - 3e-4, 1 + 4e-4) A_i), s_i = (pi/pi_old)^(1/|y|), its gradient spread over
+    # the tokens (the weight, one for the segment, the same at each)
+    total = torch.zeros((), dtype=torch.float64)
+    for each, advantage in zip(g, standardized(REWARDS), strict=True):
+        s = torch.exp((each.now - each.old).mean())
+        total = total + w(each)[0] * torch.minimum(s * advantage, s.clamp(1 - 3e-4, 1 + 4e-4) * advantage)
+    return -total / len(g)
+
+
+def cispo(g: list[Sampled], w: Weight) -> torch.Tensor:  # -(1/sum |o_i|) sum_i sum_t sg(clip(r, 0, 4)) A log pi
+    tokens = sum(each.now.numel() for each in g)
+    return (
+        -total(
+            (w(e) * ratio_of(e).clamp(0.0, 4.0).detach() * a * e.now).sum()
+            for e, a in zip(g, standardized(REWARDS), strict=True)
         )
-
-    same(PRESETS["rloo"].objective, paper)
-
-
-def test_ppo_clip() -> None:  # -(1/T) sum min(r A, clip(r, 1 - 0.2, 1 + 0.2) A)
-    def paper(g: list[Sampled]) -> torch.Tensor:
-        tokens = sum(each.now.numel() for each in g)
-        return -total(ppo_term(e, a, 0.2, 0.2).sum() for e, a in zip(g, standardized(REWARDS), strict=True)) / tokens
-
-    same(PRESETS["ppo_clip"].objective, paper)
+        / tokens
+    )
 
 
-def test_grpo() -> None:  # -(1/G) sum_i (1/|o_i|) sum_t [min(r A, clip(r) A) - beta (ref/pi - log(ref/pi) - 1)]
-    def paper(g: list[Sampled]) -> torch.Tensor:
-        total = torch.zeros((), dtype=torch.float64)
-        for each, advantage in zip(g, standardized(REWARDS), strict=True):
-            quotient = torch.exp(each.reference - each.now)
-            kl = quotient - torch.log(quotient) - 1
-            total = total + (ppo_term(each, advantage, 0.2, 0.2) - 0.04 * kl).mean()
-        return -total / len(g)
-
-    same(PRESETS["grpo"].objective, paper)
+PAPERS: dict[str, Callable[[list[Sampled], Weight], torch.Tensor]] = {
+    "reinforce": reinforce, "rloo": rloo, "ppo_clip": ppo_clip, "grpo": grpo, "dr_grpo": dr_grpo, "dapo": dapo,
+    "gspo": gspo, "cispo": cispo,
+}  # fmt: skip
+"""Each policy-gradient preset's paper's loss, transcribed, with each token's importance weight."""
 
 
-def test_dr_grpo() -> None:  # -(1/G) sum_i sum_t min(r A~, clip(r) A~) / MAX_TOKENS, A~ = R - mean
-    def paper(g: list[Sampled]) -> torch.Tensor:
-        return -total(ppo_term(e, a, 0.2, 0.2).sum() / 3000 for e, a in zip(g, centred(REWARDS), strict=True)) / len(g)
-
-    same(PRESETS["dr_grpo"].objective, paper)
+def exact(name: str) -> Objective:
+    """The preset with no importance correction: its paper's loss exactly."""
+    return resolved(name, {"importance.paper_exact": True})
 
 
-def test_dapo() -> None:  # -(1/sum |o_i|) sum_i sum_t min(r A, clip(r, 1 - 0.2, 1 + 0.28) A)
-    def paper(g: list[Sampled]) -> torch.Tensor:
-        tokens = sum(each.now.numel() for each in g)
-        return -total(ppo_term(e, a, 0.2, 0.28).sum() for e, a in zip(g, standardized(REWARDS), strict=True)) / tokens
-
-    same(PRESETS["dapo"].objective, paper)
-    assert advantages_of([1.0, 1.0, 1.0], PRESETS["dapo"].objective.advantage) is None  # (dynamic sampling)
+@pytest.mark.parametrize("name", list(PAPERS))
+def test_a_policy_gradient_preset_with_paper_exact_is_its_papers_loss(name: str) -> None:
+    same(exact(name), lambda g: PAPERS[name](g, unweighted))
+    assert not exact(name).needs_behaviour
 
 
-def test_gspo() -> None:  # -(1/G) sum_i min(s_i A_i, clip(s_i, 1 - 3e-4, 1 + 4e-4) A_i), s_i = (pi/pi_old)^(1/|y|)
-    def paper(g: list[Sampled]) -> torch.Tensor:
-        total = torch.zeros((), dtype=torch.float64)
-        for each, advantage in zip(g, standardized(REWARDS), strict=True):
-            s = torch.exp((each.now - each.old).mean())
-            total = total + torch.minimum(s * advantage, s.clamp(1 - 3e-4, 1 + 4e-4) * advantage)
-        return -total / len(g)
+@pytest.mark.parametrize("name", list(PAPERS))
+def test_a_policy_gradient_preset_weighs_each_token_from_where_it_was_sampled(name: str) -> None:
+    """Its samples are behind the policy the step starts from (by up to `max_lag` checkpoints, and the engine's
+    numerical difference): its paper's loss, each token weighed by its truncated importance weight, as `default`'s."""
+    preset = PRESETS[name].objective
+    weight = truncated_segment if preset.importance.level == "segment" else truncated
+    same(preset, lambda g: PAPERS[name](g, weight))
+    assert (preset.importance.correction, preset.importance.cap, preset.needs_behaviour) == ("truncate", 2.0, True)
+    with pytest.raises(AssertionError):  # (the weights do act on this group)
+        same(preset, lambda g: PAPERS[name](g, unweighted))
 
-    same(PRESETS["gspo"].objective, paper)
 
-
-def test_cispo() -> None:  # -(1/sum |o_i|) sum_i sum_t sg(clip(r, 0, 4)) A log pi
-    def paper(g: list[Sampled]) -> torch.Tensor:
-        tokens = sum(each.now.numel() for each in g)
-        return (
-            -total(
-                (ratio_of(e).clamp(0.0, 4.0).detach() * a * e.now).sum()
-                for e, a in zip(g, standardized(REWARDS), strict=True)
-            )
-            / tokens
-        )
-
-    same(PRESETS["cispo"].objective, paper)
+@pytest.mark.parametrize("name", list(PAPERS))
+def test_on_policy_samples_weigh_1_and_a_preset_is_its_papers_loss(name: str) -> None:
+    same(PRESETS[name].objective, lambda g: PAPERS[name](g, unweighted), on_policy=True)
 
 
 def test_default() -> None:  # -(1/T) sum min(old/behavior, 2) min(r A, clip(r, 0.8, 1.28) A), A = R - mean
@@ -385,12 +426,13 @@ VOCABULARY = 80
 @dataclass
 class Studied:
     """One segment: the student's logits now (a leaf), the logprobs of its sampled tokens at the step's start, the
-    teacher's logprobs over the vocabulary, and the sampled tokens."""
+    teacher's logprobs over the vocabulary, the sampled tokens, and their logprobs when they were sampled."""
 
     logits: torch.Tensor
     old: torch.Tensor
     teacher: torch.Tensor
     sampled: torch.Tensor
+    behavior: torch.Tensor
 
     @property
     def logged(self) -> torch.Tensor:
@@ -408,6 +450,7 @@ class Studied:
 def studied(seed: int = 0) -> list[Studied]:
     """A group whose teacher disagrees with the student, by more than 5 nats on some sampled tokens."""
     generator = torch.Generator().manual_seed(seed)
+    elsewhere = torch.Generator().manual_seed(seed + 1)  # (where each token was sampled: off the step's start)
     made: list[Studied] = []
     for length in LENGTHS:
         logits = torch.randn(length, VOCABULARY, generator=generator, dtype=torch.float64)
@@ -415,7 +458,8 @@ def studied(seed: int = 0) -> list[Studied]:
         teacher = torch.log_softmax(torch.randn(length, VOCABULARY, generator=generator, dtype=torch.float64) * 3, -1)
         sampled = torch.randint(0, VOCABULARY, (length,), generator=generator)
         old = torch.log_softmax(start, -1).gather(-1, sampled.unsqueeze(-1)).squeeze(-1)
-        made.append(Studied(logits.requires_grad_(True), old, teacher, sampled))
+        behavior = old + (torch.rand(length, generator=elsewhere, dtype=torch.float64) - 0.5) * 1.6
+        made.append(Studied(logits.requires_grad_(True), old, teacher, sampled, behavior))
     return made
 
 
@@ -442,7 +486,7 @@ def composed_distillation(objective: Objective, group: Sequence[Studied]) -> tor
         if objective.needs_distribution:
             candidates = torch.tensor(item.scores.top_tokens)
             among = each.logged.gather(-1, candidates)
-        loss = loss + distilled(objective, item, each.now, each.old, among=among).loss
+        loss = loss + distilled(objective, item, each.now, each.old, each.behavior, among=among).loss
     return loss / total_units
 
 
@@ -465,8 +509,7 @@ def test_the_distillation_presets_are_the_papers() -> None:
     on = p["on_policy_distillation"]
     assert (on.family, on.distillation.divergence, on.distillation.form, on.distillation.top_k) == (
         "distillation", "reverse_kl", "policy_gradient", 0)  # fmt: skip
-    assert (on.distillation.advantage_clip, on.importance.correction, on.kl.target, on.aggregate) == (
-        0.0, "none", "none", "token_mean")  # fmt: skip
+    assert (on.distillation.advantage_clip, on.kl.target, on.aggregate) == (0.0, "none", "token_mean")
     # Hinton et al. 2015 (soft targets) and Kim and Rush 2016 (word-level KD on the teacher's outputs): the forward KL
     # to the teacher's distribution, here its top 20 (vLLM's default most logprobs), renormalized; temperature 1.
     off = p["distillation"]
@@ -474,32 +517,64 @@ def test_the_distillation_presets_are_the_papers() -> None:
     assert (off.distillation.temperature, off.importance.correction, off.aggregate) == (1.0, "none", "token_mean")
     # MOPD (Ma et al. 2026), Eq. 3 and 4: A = clip(sg[log pi_teacher - log pi], -A_max, A_max) with A_max = 5, the
     # loss -1/|y| sum_t A log pi; Eq. 5 the top-k form with k = 64; N = 1 rollout a prompt (the algorithm's group);
-    # no importance sampling, no KL.
+    # no KL.
     mopd, top = p["mopd"], p["mopd_top_k"]
-    assert (mopd.distillation.form, mopd.distillation.advantage_clip, mopd.aggregate, mopd.importance.correction) == (
-        "policy_gradient", 5.0, "segment_mean", "none")  # fmt: skip
+    assert (mopd.distillation.form, mopd.distillation.advantage_clip, mopd.aggregate) == (
+        "policy_gradient", 5.0, "segment_mean")  # fmt: skip
     assert (top.distillation.form, top.distillation.divergence, top.distillation.top_k, top.aggregate) == (
         "top_k", "reverse_kl", 64, "segment_mean")  # fmt: skip
     assert algorithm_for(mopd).group_size == 1 and mopd.kl.target == "none" and mopd.distills
     for name in ("on_policy_distillation", "distillation", "mopd", "mopd_top_k"):
-        assert p[name].family == "distillation" and not p[name].needs_reference and not p[name].needs_behaviour
+        assert p[name].family == "distillation" and not p[name].needs_reference
+    # The policy-gradient form is a policy gradient of the student's own samples, behind the step's start as a policy
+    # gradient's are: the platform's truncated importance weight, which no paper writes. The top-k form is a divergence
+    # over the teacher's top tokens at each position, which the sampled token's weight does not correct; `distillation`
+    # trains on the teacher's samples.
+    for name in ("on_policy_distillation", "mopd"):
+        importance = p[name].importance
+        assert (importance.correction, importance.cap, p[name].needs_behaviour) == ("truncate", 2.0, True)
+    for name in ("distillation", "mopd_top_k"):
+        assert (p[name].importance.correction, p[name].needs_behaviour) == ("none", False)
 
 
-def test_on_policy_distillation() -> None:  # -(1/T) sum_t sg(log pi_T(y_t) - log pi_old(y_t)) log pi(y_t)
-    def paper(g: list[Studied]) -> torch.Tensor:
-        tokens = sum(each.sampled.numel() for each in g)
-        return -total(((e.teacher_sampled - e.old).detach() * e.now).sum() for e in g) / tokens
-
-    same_distillation(PRESETS["on_policy_distillation"].objective, paper)
+StudiedWeight = Callable[[Studied], torch.Tensor]
 
 
-def test_mopd() -> None:  # MOPD Eq. 4: -(1/G) sum_i (1/|y_i|) sum_t clip(sg[log pi_T - log pi_old], -5, 5) log pi
-    def paper(g: list[Studied]) -> torch.Tensor:
-        clipped = [(e.teacher_sampled - e.old).detach().clamp(-5.0, 5.0) for e in g]
-        assert any(bool(((e.teacher_sampled - e.old).abs() > 5).any()) for e in g)  # (the clip acts here)
-        return -total((a * e.now).mean() for a, e in zip(clipped, g, strict=True)) / len(g)
+def unweighted_studied(each: Studied) -> torch.Tensor:
+    return torch.ones_like(each.old)
 
-    same_distillation(PRESETS["mopd"].objective, paper)
+
+def truncated_studied(each: Studied) -> torch.Tensor:
+    return torch.exp(each.old - each.behavior).clamp(max=2.0)
+
+
+def on_policy_distillation(g: list[Studied], w: StudiedWeight) -> torch.Tensor:
+    # -(1/T) sum_t sg(log pi_T(y_t) - log pi_old(y_t)) log pi(y_t)
+    tokens = sum(each.sampled.numel() for each in g)
+    return -total((w(e) * (e.teacher_sampled - e.old).detach() * e.now).sum() for e in g) / tokens
+
+
+def mopd(g: list[Studied], w: StudiedWeight) -> torch.Tensor:
+    # MOPD Eq. 4: -(1/G) sum_i (1/|y_i|) sum_t clip(sg[log pi_T - log pi_old], -5, 5) log pi
+    clipped = [(e.teacher_sampled - e.old).detach().clamp(-5.0, 5.0) for e in g]
+    assert any(bool(((e.teacher_sampled - e.old).abs() > 5).any()) for e in g)  # (the clip acts here)
+    return -total((w(e) * a * e.now).mean() for a, e in zip(clipped, g, strict=True)) / len(g)
+
+
+DISTILLING: dict[str, Callable[[list[Studied], StudiedWeight], torch.Tensor]] = {
+    "on_policy_distillation": on_policy_distillation, "mopd": mopd,
+}  # fmt: skip
+"""The policy-gradient form's presets' losses, transcribed, with each token's importance weight."""
+
+
+@pytest.mark.parametrize("name", list(DISTILLING))
+def test_a_policy_gradient_distillation_with_paper_exact_is_its_papers_loss(name: str) -> None:
+    same_distillation(exact(name), lambda g: DISTILLING[name](g, unweighted_studied))
+
+
+@pytest.mark.parametrize("name", list(DISTILLING))
+def test_a_policy_gradient_distillation_weighs_each_token_from_where_it_was_sampled(name: str) -> None:
+    same_distillation(PRESETS[name].objective, lambda g: DISTILLING[name](g, truncated_studied))
 
 
 def test_mopd_top_k() -> None:  # MOPD Eq. 5: (1/G) sum_i (1/|y_i|) sum_t sum_{v in top-64} [p log(p/q) - p + q]

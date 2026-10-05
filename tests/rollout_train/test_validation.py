@@ -548,10 +548,15 @@ def test_an_importance_correction_needs_behaviour_logprobs_and_a_preference_loss
         "channel policy is trained, and provider local-vllm (vllm) lacks sampled-token logprobs: the importance weight "
         "needs the behaviour logprob of each exact sampled token"
     ]
-    assert refused("capabilities", findings({**LOCAL_LORA, "objective.preset": "reinforce"}, cluster=without)) == []
-    assert refused("capabilities", findings({**api, "objective.preset": "reinforce"})) == [
+    exact: dict[str, JsonValue] = {"objective.preset": "reinforce", "objective.importance.paper_exact": True}
+    assert refused("capabilities", findings({**LOCAL_LORA, **exact}, cluster=without)) == []
+    assert refused("capabilities", findings({**api, **exact})) == [
         "channel policy is trained by a policy gradient, and provider openai (api) does not return the exact tokens "
         "it sampled"
+    ]
+    assert refused("capabilities", findings({**api, "objective.preset": "reinforce"})) == [
+        "channel policy is trained, and provider openai (api) returns text, not the sampled token ids and their "
+        "logprobs, which the importance weight needs"
     ]
     for preset in ("dpo", "simpo", "kto", "sft"):
         assert refused("capabilities", findings({**api, "objective.preset": preset})) == [], preset
@@ -567,6 +572,26 @@ def test_a_k1_kl_penalty_in_the_loss_is_refused_and_one_in_the_reward_is_not() -
     ]
     assert [each.key for each in found if each.rule == "objective"] == ["objective.kl.estimator"]
     assert refused("objective", findings({**k1, "objective.kl.placement": "reward"})) == []
+
+
+def test_an_objective_without_an_importance_correction_is_noted_while_turns_may_lag() -> None:
+    exact: dict[str, JsonValue] = {**LOCAL_LORA, "objective.preset": "dapo", "objective.importance.paper_exact": True}
+    found = findings(exact)
+    assert noted("objective", found) == [
+        "the objective makes no importance correction, and max_lag is 1: turns that began up to 1 checkpoint behind "
+        "the newest, sampled by an engine that computes slightly differently from the trainer, are trained on as if "
+        "on-policy. importance.paper_exact = false weighs them; max_lag = 0 keeps them nearer"
+    ]
+    assert refused("objective", found) == []
+    assert [each.key for each in found if each.rule == "objective"] == ["objective.importance.paper_exact"]
+    assert noted("objective", findings({**exact, "max_lag": 0})) == []
+    assert noted("objective", findings({**LOCAL_LORA, "objective.preset": "dapo"})) == []  # (it corrects)
+    none: dict[str, JsonValue] = {**LOCAL_LORA, "objective.importance.correction": "none", "max_lag": 3}
+    assert [each.reason.split(". ")[-1] for each in findings(none) if each.rule == "objective"] == [
+        "importance.correction = truncate weighs them; max_lag = 0 keeps them nearer"
+    ]
+    for preset in ("dpo", "sft", "mopd_top_k"):  # (no policy gradient of the sampled tokens to weigh)
+        assert noted("objective", findings({**LOCAL_LORA, "objective.preset": preset})) == [], preset
 
 
 def test_a_reference_the_trainer_cannot_give_is_refused() -> None:

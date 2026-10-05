@@ -151,6 +151,7 @@ accept it; validation refuses the rest. The numbers can change between steps; wh
 | `importance.correction` | `none`, `untruncated`, `truncate` (TIS), `mask` (tokens outside `floor` .. `cap` dropped; NeMo's `icepop`) | policy_gradient, distillation |
 | `importance.level` | `token`, `segment` | policy_gradient, distillation |
 | `importance.cap`, `importance.floor` | numbers | policy_gradient, distillation |
+| `importance.paper_exact` | true or false: no correction (`importance.correction = none` follows), a preset's loss exactly as its paper writes it, for on-policy samples | policy_gradient, distillation |
 | `kl.target` | `none`, `reference`, `old` (the step's start) | policy_gradient, distillation |
 | `kl.estimator` | `k1` (in the reward only), `k2`, `k3` | policy_gradient, distillation |
 | `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient) | policy_gradient, distillation (`reward` in the policy-gradient form only) |
@@ -173,19 +174,27 @@ accept it; validation refuses the rest. The numbers can change between steps; wh
 | `distillation.coefficient` | a number: a distillation term beside the policy gradient (0: none) | policy_gradient |
 
 A component that follows from another follows where it is not given: a KL to the reference reads `reference = base`, a
-preference loss with a reference reads it and one without (`margin`, `odds_ratio`) reads none, and an odds ratio is
-length-normalized. A k1 KL penalty is refused in the loss: its gradient is the policy's logprob's alone, whose mean
-over the policy's own samples is 0, so it adds noise and no pull toward its target (k3 in the loss, or k1 in the
-reward, pulls). A policy gradient's `distillation.*` components shape its distillation term, so they are refused
+preference loss with a reference reads it and one without (`margin`, `odds_ratio`) reads none, an odds ratio is
+length-normalized, and `importance.paper_exact` makes no importance correction. A k1 KL penalty is refused in the loss:
+its gradient is the policy's logprob's alone, whose mean over the policy's own samples is 0, so it adds noise and no
+pull toward its target (k3 in the loss, or k1 in the reward, pulls). A policy gradient's `distillation.*` components shape its distillation term, so they are refused
 while `distillation.coefficient` is 0, and the coefficient changes between steps but not to or from 0.
 
 **Presets** are the literature's objectives, each a family and component values pinned to its paper (its test compares
 the composed loss with a transcription of the paper's formula): `default` (Dr. GRPO's advantages, DAPO's clip-higher
 (0.2, 0.28) and token mean, truncated importance sampling at 2), `reinforce`, `rloo`, `ppo_clip`, `grpo`, `dr_grpo`,
 `dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto`, `orpo`, `on_policy_distillation`, `distillation`,
-`mopd` and `mopd_top_k` ([the design](../../research/objectives-design.md#presets) lists their values and sources). A run names one (`objective.preset`) and overrides any component
-(`objective.kl.target = "reference"`, `objective.kl.coefficient = 0.01`); `resolved(preset, overrides)` is the
-objective, refused (`ValueError`) for a component the family does not accept or a combination that means nothing.
+`mopd` and `mopd_top_k` ([the design](../../research/objectives-design.md#presets) lists their values and sources).
+A paper's loss assumes on-policy samples, and a run's turns may begin up to `max_lag` checkpoints behind the newest,
+sampled by an engine that computes slightly differently from the trainer: so every policy-gradient preset, and the
+policy-gradient form of distillation (`on_policy_distillation`, `mopd`), weighs each sampled token by its importance
+weight from where it was sampled to the step's start, truncated at 2, as `default` does
+([how presets meet off-policy samples](../../research/objectives-design.md#presets-and-off-policy-samples)).
+`importance.paper_exact = true` takes it away, for comparing with a paper on a run whose samples are on-policy;
+validation notes a run without a correction while `max_lag` is above 0. A run names one (`objective.preset`) and
+overrides any component (`objective.kl.target = "reference"`, `objective.kl.coefficient = 0.01`); `resolved(preset,
+overrides)` is the objective, refused (`ValueError`) for a component the family does not accept or a combination that
+means nothing.
 
 A trainer's own settings can name an objective too: `objective = "policy_gradient"` is `default`, `"likelihood"` is
 `sft`, and `ratio`, `clip_low`, `clip_high`, `segment_clip_low`, `segment_clip_high` and `truncate` are its components
