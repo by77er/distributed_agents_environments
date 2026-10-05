@@ -25,7 +25,7 @@ do not edit by hand.
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`HoursReached`](#hoursreached), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#run), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
 - **[`rollout_train.demand`](#rollout_traindemand)** — What a run's scheduled parts need, and the placement group that reserves them together. [`BRIDGE`](#bridge), [`bridge_asks`](#bridge_asks), [`Bundle`](#bundle), [`colocating`](#colocating), [`Demand`](#demand), [`demand`](#demand), [`HEADROOM`](#headroom), [`Part`](#part), [`placed`](#placed), [`played_channel`](#played_channel), [`Pod`](#rollout_traindemandpod), [`pods`](#pods), [`requested`](#requested), [`reserve`](#reserve), [`Resources`](#resources), [`SUBMITTER`](#submitter), [`TRAINER`](#trainer)
-- **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
+- **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`checkpoints_at`](#checkpoints_at), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
 - **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
@@ -36,7 +36,7 @@ do not edit by hand.
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Distillation`](#distillation), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`objective_in`](#objective_in), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts), [`WEIGHTS`](#weights)
-- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`FILES`](#files), [`for_pods`](#for_pods), [`ledger_at`](#ledger_at), [`ledger_of`](#ledger_of), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`opened_ledger`](#opened_ledger), [`Stores`](#stores)
+- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`described`](#described), [`FILES`](#files), [`for_pods`](#for_pods), [`ledger_at`](#ledger_at), [`ledger_of`](#ledger_of), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`opened_ledger`](#opened_ledger), [`store_named`](#store_named), [`Stores`](#stores)
 - **[`rollout_train.ledger_service`](#rollout_trainledger_service)** — The ledger over HTTP: the service, the client every role can use, pods' tokens. [`app`](#app), [`Conflict`](#rollout_trainledger_serviceconflict), [`Forbidden`](#forbidden), [`HttpLedger`](#httpledger), [`LedgerUnreachable`](#ledgerunreachable), [`PLATFORM`](#platform), [`pod_token`](#pod_token), [`Scope`](#scope), [`scope_of`](#scope_of)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
@@ -5435,6 +5435,20 @@ async def checked(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, lo
 Everything wrong with a run's settings on this cluster (`rollout_train.validation.check`), with the facts
 gathered now.
 
+### `checkpoints_at`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+def checkpoints_at(settings: RunSettings, cluster: Cluster, *, written: Mapping[str, Any] | None = None) -> dict[str, JsonValue] | None
+```
+
+Where a training run's checkpoints go (none for a run that makes none): `store`, the blob store its trainer
+writes them to (`rollout_train.stores.described`: the store its RunPod providers name, else `[blobs]`; or the one
+`written` says, where a run's start recorded it); `tinker`, whether Tinker keeps the weights (the store holds
+pointers to Tinker's archive); `bridges`, the bridges that write converted copies for the trained channel's first
+provider (none where its files are served as they are), and `bridged`, the store those copies go to (`[blobs]`).
+
 ### `declared`
 
 *function* · `libraries/rollout-train/src/rollout_train/launching.py`
@@ -5467,7 +5481,7 @@ class Examined
 ```
 
 A run's settings, checked: the findings, what is known of its environment, its estimated spend (one step's, or
-an eval's) and what it trains.
+an eval's), what it trains and where its checkpoints go (`checkpoints_at`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -5475,6 +5489,7 @@ an eval's) and what it trains.
 | `environment` | `EnvironmentFacts \| None` | required |  |
 | `spend` | `Spend` | required |  |
 | `weights` | `str \| None` | required |  |
+| `checkpoints` | `dict[str, JsonValue] \| None` | `None` |  |
 
 ### `examined`
 
@@ -5485,7 +5500,8 @@ async def examined(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, l
 ```
 
 A run's settings checked on this cluster with the facts gathered now (`checked`), with those facts' environment,
-its estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`).
+its estimated spend (`rollout_train.validation.spend_of`), what it trains (`weights_of`) and where its checkpoints
+go (`checkpoints_at`).
 
 ### `free_name`
 
@@ -6060,7 +6076,7 @@ class System
 - `async def check(self, body: Mapping[str, Any]) -> dict[str, Any]` — What a launch's body would be refused for, and the notes beside (each with the setting it is about), on
   this monitor's cluster (`rollout_train.launching.examined`); the settings it would run with, what it trains,
   its estimated spend on its metered parts (one step's, or an eval's: `per`; or why it cannot be estimated
-  yet), and the slots its
+  yet), where its checkpoints go (`rollout_train.launching.checkpoints_at`), and the slots its
   environment's programs declare, where they are known here. Raises `Taken` where this monitor has no cluster
   config, or for a body it cannot read.
 - `async def presets(self) -> dict[str, Any]` — Every preset's newest version, each with how many versions it has (`rollout_train.presets`).
@@ -6105,7 +6121,9 @@ class System
   launch going.
 - `async def settings(self, run: str) -> dict[str, Any] | None` — A training run's settings (`rollout_train.settings`): its fixed ones and its changeable ones as its newest
   start says, what is wanted of them now, those its newest step used, and each step that used other settings than
-  the one before, with what changed. None where there is no such run.
+  the one before, with what changed; and where its checkpoints go (`rollout_train.launching.checkpoints_at`, in
+  the store its newest start wrote to), where this monitor has the cluster config. None where there is no such
+  run.
 - `async def want(self, run: str, settings: Mapping[str, Any]) -> Desired` — Want these of a run's changeable settings from its next step on. Raises `Taken` for a setting it does not
   have or cannot change, or a value it cannot take (a suite of another environment than the run's, say);
   `KeyError` where there is no such run, or nowhere to keep what is wanted. A suite the ledger does not have is
@@ -8072,6 +8090,18 @@ def cluster_ledger(cluster: Mapping[str, Any]) -> 'Ledger'
 The ledger a cluster config names (given as JSON, `Cluster.described`), opened on this node: what a ledger's
 location `ledger_at` gives names (`rollout_train.ledger.opened`).
 
+### `described`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def described(where: Mapping[str, Any], name: str | None = None) -> dict[str, JsonValue]
+```
+
+A blob store as a page says it, from its location (`blobs_at`, `location`): its `name` (`[stores.NAME]`; none:
+`[blobs]`), its `kind` (`files`, or `module:name`), and its `bucket` and `prefix` or its `directory`; never a key,
+nor the variables one is read from.
+
 ### `FILES`
 
 *constant* · `libraries/rollout-train/src/rollout_train/stores.py`
@@ -8160,6 +8190,17 @@ def opened_ledger(url: str, token: 'Secret | None' = None) -> 'Ledger'
 
 The ledger at `url`: a database (`sqlite:///…`, `postgresql://…`), or the ledger service (`http(s)://…`) with
 the token `token` names.
+
+### `store_named`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def store_named(cluster: 'Cluster', where: Mapping[str, Any]) -> str | None
+```
+
+The name of the cluster's store a location is (`[stores.NAME]`), where it is one of them; none for `[blobs]`
+or a store the cluster does not name.
 
 ### `Stores`
 
@@ -10301,9 +10342,12 @@ proxy that ends TLS with a public certificate, such as a Cloudflare Tunnel).
 
 - `def __init__(self, url: str, *, provisioner: str, key: Mapping[str, Any], root: bytes, client: httpx.AsyncClient | None = None, system: bool = False) -> None`
 - `@classmethod def from_files(cls, url: str, *, provisioner: str, key: Path, root: Path, system: bool = False) -> 'StepCa'` — With the provisioner's key and the root certificate read from files.
-- `def token(self, subject: str, sans: Sequence[str] | None = None, *, audience: str = 'sign', lifetime: float = TOKEN_LIFETIME, now: float | None = None) -> str` — A one-time token for a certificate of `subject` (with `sans`, by default the subject alone), good for
+- `def token(self, subject: str, sans: Sequence[str] | None = None, *, audience: str = 'sign', lifetime: float = TOKEN_LIFETIME, now: float | None = None, pinned: bool = True) -> str` — A one-time token for a certificate of `subject` (with `sans`, by default the subject alone), good for
   `lifetime` seconds; with `audience = "revoke"`, for revoking the certificate whose serial `subject` is.
-- `def pod_token(self, identity: str, *, lifetime: float = TOKEN_LIFETIME) -> str` — The one-time token a pod gets its first certificate with: its identity as the subject and the only SAN.
+  `pinned` names the root's fingerprint in it (`sha`): step then trusts only that root for step-ca's own TLS,
+  whatever `--root` says, which fails behind a proxy that ends TLS with a public certificate.
+- `def pod_token(self, identity: str, *, lifetime: float = TOKEN_LIFETIME) -> str` — The one-time token a pod gets its first certificate with: its identity as the subject and the only SAN. It
+  names no root (`pinned` false): the pod is given the cluster's root and checks step-ca's TLS by its `--root`.
 - `async def certificate(self, identity: str, *, lifetime: float | None = None) -> tuple[bytes, bytes]` — A certificate for `identity` (its subject and its only URI SAN), from a key made here: the certificate with
   its chain, and the key (both PEM). `lifetime` asks for fewer seconds than the provisioner's default.
 - `async def revoke(self, serial: str, *, reason: str = '') -> None` — Revoke the certificate whose serial is `serial` (decimal), so that it is not renewed (passive revocation).

@@ -265,6 +265,27 @@ Validation (`capacity`, [validation](../../guide/cluster.md#validation)) refuses
 more than the cluster config's `[capacity]` (on Kubernetes with Kueue, the queue's quota, which the chart writes
 there), with each number; one that fits but finds less free now waits, with a note.
 
+## Where checkpoints go
+
+`checkpoints_at(settings, cluster)` says where a training run's checkpoints go, as the New run form shows it:
+
+| Field | Holds |
+|---|---|
+| `store` | The blob store its trainer writes them to: the one its RunPod providers name (`store = "NAME"`, `[stores.NAME]`), else the cluster's `[blobs]`; as `rollout_train.stores.described` says it: `name` (none for `[blobs]`), `kind` (`files`, or `module:name`), `bucket` and `prefix`, or `directory`; never a key, nor the variables one is read from |
+| `tinker` | Whether Tinker keeps the weights (a Tinker trainer): the store holds pointers to Tinker's archive (`tinker://`) |
+| `bridges` | The bridges that write converted copies for the trained channel's first provider (`peft-from-tinker`, `merge-quantize`); none where its files are served as they are |
+| `bridged` | The store those copies go to: the cluster's `[blobs]` |
+
+| Setup | `store` | The form says |
+|---|---|---|
+| A local GPU's trainer and engines, together | `[blobs]` | the cluster's bucket |
+| Tinker's trainer and sampler | `[blobs]` | Tinker |
+| Tinker's trainer, vLLM here serving | `[blobs]` | Tinker, bridged to the cluster's bucket |
+| A RunPod host pod, together | the host's `store` | its name and bucket (`r2 (rollout)`) |
+| A RunPod trainer, vLLM here serving | the trainer's `store` | its name and bucket |
+
+A started run's page says the same, with the store its newest start recorded (`written`).
+
 ## What a cluster offers
 
 `offers(cluster, ledger, beats)` is what the New run form chooses from (`GET /api/offers`):
@@ -273,9 +294,9 @@ there), with each number; one that fits but finds less free now waits, with a no
 |---|---|
 | `cluster`, `kinds`, `submits` | The cluster's name, the kinds of run, and where jobs go (`ray` or `kubernetes`) |
 | `environments` | The cluster config's (`environment`, `python`: `platform` or `project`), then every published version beside the ledger (`environment` as `NAME@VERSION`, `name`, `source`, `commit`, `imported`, `sandboxes`); each with the renderer `families` runs and presets on it named for their trained channel |
-| `trainers` | Each trainer: `name`, `kind`, `produces`, `format`, `models`, `gpus`, `colocate_with`, `segment_tokens`, `cost`, `families` (the objective families it takes), `allocation` (`metered` or `scheduled`), `concurrency`, `weights` (`lora` or `full`: what it trains), and its `settings` (each `key`, `types`, `default`, `changeable`) |
+| `trainers` | Each trainer: `name`, `kind`, `produces`, `format`, `models`, `gpus`, `colocate_with`, `segment_tokens`, `cost`, `families` (the objective families it takes), `allocation` (`metered` or `scheduled`), `concurrency`, `weights` (`lora` or `full`: what it trains), `separate` (whether it trains apart from what samples its checkpoints: not a `runpod-trainer` on a host's pods), and its `settings` (each `key`, `types`, `default`, `changeable`) |
 | `inference` | Each provider: `name`, `kind`, `gpus`, `replicas`, `allocation`, `concurrency`, `capabilities`, `weights` (those it serves a run's checkpoints as: `lora` with adapters, `full` with full-weight reload), and its `models` (each `model`, `context`, `base`, `max_lora_rank`, `cost`, the `renderers` that say they render it, or the model it was quantized from, and their `families`; none for a provider that renders messages itself) |
-| `pairs` | Each trainer and provider: the `bridge` chain's names, or none and why it is `refused` (no bridge, or a provider that cannot serve the trainer's weights) |
+| `pairs` | Each trainer and provider: the `bridge` chain's names, or none and why it is `refused` (no bridge, or a provider that cannot serve the trainer's weights), and whether the two share one machine (`together`: the trainer's `colocate_with` names the provider) |
 | `sandboxes` | Each pool's `size` and `provider` |
 | `presets` | Each preset's newest version: `name`, `version`, `id`, `settings`, `note`, `saved` |
 | `capacity` | The GPUs the machines that beat now have, and those idle (under a twentieth of their memory used), by machine; none where no beat says |
@@ -283,7 +304,8 @@ there), with each number; one that fits but finds less free now waits, with a no
 | `schema` | The keys a training run takes, each `key`, `types`, `default`, `changeable`, `says`, `choices`, `least` |
 
 `examined(settings, cluster, ledger)` is `checked` with what it found beside the findings: the environment's facts, one
-step's estimated spend on the run's metered parts (`spend_of`) and what the run trains (`weights_of`). The monitor's
+step's estimated spend on the run's metered parts (`spend_of`), what the run trains (`weights_of`) and where its
+checkpoints go (`checkpoints_at`). The monitor's
 `POST /api/launches/check` answers with it. Both the check and the submission first say what follows from the settings
 (`completed`): a training run's `weights` (its trainer's, where the settings do not say), and each channel's renderer
 where it names a model and no renderer and exactly one declared renderer renders that model (`with_renderers`). So a

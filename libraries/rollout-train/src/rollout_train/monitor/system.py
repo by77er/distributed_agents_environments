@@ -51,7 +51,7 @@ from rollout_train.inference.remote import ENGINES
 from rollout_train.launches import OPEN, TRAIN, Launch, launch_of, launches_of
 from rollout_train.launching import Refused as LaunchRefused
 from rollout_train.launching import checked as findings_of
-from rollout_train.launching import examined, offers, settled
+from rollout_train.launching import checkpoints_at, examined, offers, settled
 from rollout_train.layout import BLOBS, FEED, RUN
 from rollout_train.ledger import FileLedger, Ledger, between, of_run, present
 from rollout_train.monitor.environments import Read, described, listed, page_of
@@ -348,7 +348,7 @@ class System:
         """What a launch's body would be refused for, and the notes beside (each with the setting it is about), on
         this monitor's cluster (`rollout_train.launching.examined`); the settings it would run with, what it trains,
         its estimated spend on its metered parts (one step's, or an eval's: `per`; or why it cannot be estimated
-        yet), and the slots its
+        yet), where its checkpoints go (`rollout_train.launching.checkpoints_at`), and the slots its
         environment's programs declare, where they are known here. Raises `Taken` where this monitor has no cluster
         config, or for a body it cannot read."""
         if self._cluster is None:
@@ -365,7 +365,7 @@ class System:
             "settings": dict(settings.values), "preset": preset, "weights": found.weights,
             "spend": {"dollars": found.spend.dollars, "parts": dict(found.spend.parts), "why": found.spend.why,
                       "per": found.spend.per},
-            "environment": slots,
+            "checkpoints": found.checkpoints, "environment": slots,
         }  # fmt: skip
 
     async def presets(self) -> dict[str, Any]:
@@ -608,7 +608,9 @@ class System:
     async def settings(self, run: str) -> dict[str, Any] | None:
         """A training run's settings (`rollout_train.settings`): its fixed ones and its changeable ones as its newest
         start says, what is wanted of them now, those its newest step used, and each step that used other settings than
-        the one before, with what changed. None where there is no such run."""
+        the one before, with what changed; and where its checkpoints go (`rollout_train.launching.checkpoints_at`, in
+        the store its newest start wrote to), where this monitor has the cluster config. None where there is no such
+        run."""
         if not await asyncio.to_thread(present, self._ledger):
             return None
         starts: Any = await self._ledger.read(table(run, STARTS))
@@ -635,6 +637,11 @@ class System:
             known = with_weights(RunSettings({"kind": str(latest.get("kind") or TRAIN), **fixed}), self._cluster)
             if known["weights"] is not None:  # (a start from before runs said what they train: its trainer's)
                 fixed["weights"] = known["weights"]
+        kept = None
+        written = latest.get("blobs")
+        if self._cluster is not None and isinstance(written, dict) and "trainer.provider" in fixed:
+            ran = RunSettings({"kind": str(latest.get("kind") or TRAIN), **fixed})
+            kept = checkpoints_at(ran, self._cluster, written=cast(dict[str, Any], written))
         return {
             "run": run,
             "kind": str(latest.get("kind") or "run"),
@@ -645,6 +652,7 @@ class System:
             "desired": dict(desired.settings) if desired else {},
             "changed": desired.changed if desired else None,
             "changes": changes,
+            "checkpoints": kept,
         }
 
     async def want(self, run: str, settings: Mapping[str, Any]) -> Desired:

@@ -1,9 +1,10 @@
 // A training run's settings: the changeable ones, which it takes from its next step on once changed here, and the
-// fixed ones, shown as they are.
+// fixed ones, shown as they are, with where its checkpoints go.
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useEvals, useRunSettings, useWantSettings } from "../api/queries";
 import type { RunSettings } from "../api/types";
+import { checkpointsText, checkpointsTitle } from "../lib/form";
 import { EVALS_SUITE, GROUPS_PER_STEP, shown, wantedOf } from "../lib/settings";
 import { Card, Pairs, SectionTitle, Table } from "./ui";
 
@@ -23,7 +24,10 @@ export function RunSettingsSection({ run }: { run: string }) {
       <div className="cols">
         <SettingsForm settings={settings} />
         <Card title="Fixed">
-          <Pairs entries={Object.entries(settings.fixed).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, <span className="mono">{shown(value) || "none"}</span>])} />
+          <Pairs entries={[
+            ...(settings.checkpoints ? [["checkpoints", <span title={checkpointsTitle(settings.checkpoints)}>{checkpointsText(settings.checkpoints)}</span>] as [string, ReactNode]] : []),
+            ...Object.entries(settings.fixed).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]): [string, ReactNode] => [key, <span className="mono">{shown(value) || "none"}</span>]),
+          ]} />
         </Card>
       </div>
     </>

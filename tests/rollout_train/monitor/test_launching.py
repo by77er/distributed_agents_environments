@@ -127,7 +127,8 @@ async def test_the_page_is_offered_what_the_cluster_config_and_the_ledger_hold(t
     assert [each["model"] for each in provider["models"]] == ["tiny"]
     assert (provider["allocation"], provider["concurrency"], trainer["allocation"]) == ("scheduled", None, "scheduled")
     assert (trainer["weights"], provider["weights"]) == (["lora"], ["lora", "full"])
-    assert offers["pairs"] == [{"trainer": "steps", "inference": "local", "bridge": ["verbatim"]}]
+    assert offers["pairs"] == [{"trainer": "steps", "inference": "local", "together": True, "bridge": ["verbatim"]}]
+    assert trainer["separate"]  # (it shares local's card, and could train apart from it)
     (preset,) = offers["presets"]
     assert preset["id"] == "small@1" and preset["settings"]["trainer.provider"] == "steps"
     assert offers["environments"][0]["families"] == ["rollout_train.testing"]  # (the preset's renderer on it)
@@ -160,6 +161,8 @@ async def test_a_run_is_checked_asked_for_from_the_page_and_stopped(tmp_path: Pa
         assert checked["refusals"] == [] and checked["preset"] == "small@1" and checked["weights"] == "lora"
         assert checked["spend"] == {"dollars": 0.0, "parts": {}, "why": "", "per": "step"}  # (nothing metered)
         assert checked["environment"] == {"slots": ["policy"], "untrained": [], "judges": []}
+        blobs = {"name": None, "kind": "files", "bucket": None, "prefix": None, "directory": str(tmp_path / "blobs")}
+        assert checked["checkpoints"] == {"store": blobs, "tinker": False, "bridges": [], "bridged": None}
         assert checked["settings"]["trainer.learning_rate"] == 3e-5 and checked["settings"]["groups"] == 2
         refusals = (await client.post("/api/launches/check", json=wrong)).json()["refusals"]
         assert {each["key"] for each in refusals} >= {"channels.policy.provider", "trainer.rank"}
@@ -199,7 +202,8 @@ async def test_a_run_is_paused_resumed_in_place_and_once_stopped_submitted_again
         "changeable": {"groups_per_step": 2, "share": 1.0},
         "preset": "small@1",
     }
-    begun: dict[str, JsonValue] = {"environment": WORDS, "run_settings": recorded}
+    begun: dict[str, JsonValue] = {"environment": WORDS, "run_settings": recorded,
+                                   "blobs": location({}, tmp_path / "blobs")}  # fmt: skip
     await a_run(ledger, entry.id, **begun)
     await a_run(ledger, f"{entry.id}-eval-2", kind="eval", by=entry.id, step=2)  # (an eval its schedule asked for)
     heartbeats = presence_of(ledger)
@@ -214,6 +218,7 @@ async def test_a_run_is_paused_resumed_in_place_and_once_stopped_submitted_again
         assert (await states())[entry.id] == ("running", False)
         settings = (await client.get(f"/api/runs/{entry.id}/settings")).json()
         assert settings["fixed"]["weights"] == "lora"  # (read as its trainer's)
+        assert settings["checkpoints"]["store"]["directory"] == str(tmp_path / "blobs")  # (where its start wrote)
         paused = (await client.post(f"/api/runs/{entry.id}/pause")).json()
         assert paused["desired"]["settings"] == {"paused": True}
         resumed = (await client.post(f"/api/runs/{entry.id}/resume")).json()["resumed"]

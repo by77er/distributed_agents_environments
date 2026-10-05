@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
 import type { Checked, OfferedProvider, OfferedTrainer, Offers, Preset, PresetVersions, Presets as PresetList, System } from "./api/types";
 import {
-  fielded, filled, HOSTED_FOLLOWS, HOSTED_TRAINED, launchSettings, pricesOf, providerChoices, settled, trainerChoices, weightChoices,
+  checkpointsText, fielded, filled, HOSTED_FOLLOWS, HOSTED_TRAINED, launchSettings, machineChoices, modeChoices, modeOf, pricesOf, providerChoices, settled,
+  trainerChoices, weightChoices,
 } from "./lib/form";
 import { NewRun } from "./pages/NewRun";
 import { PresetPage, Presets } from "./pages/Presets";
@@ -17,7 +18,7 @@ const exact = { token_exact: true, sampled_logprobs: true };
 const trainer = (name: string, kind: string, weights: "lora" | "full", models: string[]): OfferedTrainer => ({
   name, kind, produces: weights, format: kind === "tinker" ? "tinker" : weights === "full" ? "full" : "peft", models, gpus: 0, colocate_with: null,
   segment_tokens: null, cost: {}, families: ["policy_gradient", "preference"], allocation: kind === "tinker" ? "metered" : "scheduled", concurrency: null,
-  weights: [weights], settings: [{ key: "trainer.rank", types: ["int"], default: 32, changeable: false }, { key: "trainer.learning_rate", types: ["float"], default: 1e-4, changeable: true }],
+  weights: [weights], separate: true, settings: [{ key: "trainer.rank", types: ["int"], default: 32, changeable: false }, { key: "trainer.learning_rate", types: ["float"], default: 1e-4, changeable: true }],
 });
 const provider = (name: string, kind: string, weights: ("lora" | "full")[], models: string[], capabilities: Record<string, unknown> = exact): OfferedProvider => ({
   name, kind, gpus: 0, replicas: 1, capabilities, allocation: kind === "vllm" ? "scheduled" : "metered", concurrency: null, weights,
@@ -38,11 +39,11 @@ const offers: Offers = {
     provider("openai", "api", [], ["gpt-5"], { token_exact: false, sampled_logprobs: false }),
   ],
   pairs: [
-    { trainer: "tinker-lora", inference: "local-vllm", bridge: ["peft-from-tinker"] }, { trainer: "tinker-lora", inference: "tinker", bridge: ["none"] },
-    { trainer: "tinker-lora", inference: "openai", bridge: null, refused: "the OpenAI Responses API returns text" },
-    { trainer: "local-full", inference: "local-vllm", bridge: ["full-reload"] },
-    { trainer: "local-full", inference: "tinker", bridge: null, refused: "Tinker samples only checkpoints Tinker trained: there is no upload" },
-    { trainer: "local-full", inference: "openai", bridge: null, refused: "the OpenAI Responses API returns text" },
+    { trainer: "tinker-lora", inference: "local-vllm", together: false, bridge: ["peft-from-tinker"] }, { trainer: "tinker-lora", inference: "tinker", together: false, bridge: ["none"] },
+    { trainer: "tinker-lora", inference: "openai", together: false, bridge: null, refused: "the OpenAI Responses API returns text" },
+    { trainer: "local-full", inference: "local-vllm", together: false, bridge: ["full-reload"] },
+    { trainer: "local-full", inference: "tinker", together: false, bridge: null, refused: "Tinker samples only checkpoints Tinker trained: there is no upload" },
+    { trainer: "local-full", inference: "openai", together: false, bridge: null, refused: "the OpenAI Responses API returns text" },
   ],
   sandboxes: {}, presets: [preset], capacity: null,
   objectives: {
@@ -59,6 +60,34 @@ const offers: Offers = {
   schema: [{ key: "groups", types: ["int"], default: 100, changeable: false, says: "", choices: [], least: 1 }],
 };
 const system = { runs: [], checkpoints: [], bookmarks: {}, names: { runs: {}, bookmarks: {} } } as unknown as System;
+
+// The same, with machines that train and sample together: a local GPU's colocated trainer and engines, and a RunPod
+// host pod with the trainer that takes its steps there.
+const H100 = { gpu: "NVIDIA H100 80GB HBM3", gpu_types: ["NVIDIA H100 80GB HBM3"], gpu_count: 1, price: 2.69, cloud: "SECURE", regions: [], max_pods: 1, idle_stop: 600, host: null };
+const NO_UPLOAD = "Tinker samples only checkpoints Tinker trained: there is no upload", TEXT = "the OpenAI Responses API returns text";
+const paired: Offers = {
+  ...offers,
+  trainers: [
+    ...offers.trainers, { ...trainer("local-lora", "lora", "lora", [QWEN]), gpus: 1, colocate_with: "local-vllm" },
+    { ...trainer("h100-lora", "runpod-trainer", "lora", [QWEN]), colocate_with: "h100", separate: false, pods: H100 },
+  ],
+  inference: [{ ...offers.inference[0], gpus: 1 }, ...offers.inference.slice(1), { ...provider("h100", "runpod-host", ["lora"], [QWEN]), allocation: "scheduled", pods: H100 }],
+  pairs: [
+    ...offers.pairs,
+    { trainer: "tinker-lora", inference: "h100", together: false, bridge: ["peft-from-tinker"] },
+    { trainer: "local-full", inference: "h100", together: false, bridge: null, refused: "the provider cannot reload full weights in place" },
+    { trainer: "local-lora", inference: "local-vllm", together: true, bridge: ["verbatim"] },
+    { trainer: "local-lora", inference: "tinker", together: false, bridge: null, refused: NO_UPLOAD },
+    { trainer: "local-lora", inference: "openai", together: false, bridge: null, refused: TEXT },
+    { trainer: "local-lora", inference: "h100", together: false, bridge: ["verbatim"] },
+    { trainer: "h100-lora", inference: "local-vllm", together: false, bridge: ["verbatim"] },
+    { trainer: "h100-lora", inference: "tinker", together: false, bridge: null, refused: NO_UPLOAD },
+    { trainer: "h100-lora", inference: "openai", together: false, bridge: null, refused: TEXT },
+    { trainer: "h100-lora", inference: "h100", together: true, bridge: ["verbatim"] },
+  ],
+};
+const LOCAL_MACHINE = "local-lora\nlocal-vllm", HOST_MACHINE = "h100-lora\nh100";
+const bucket = (name: string | null, named: string) => ({ name, kind: "rollout_s3:S3BlobStore", bucket: named, prefix: "blobs/", directory: null });
 
 const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 let checked: Checked;
@@ -134,6 +163,75 @@ describe("the New run form's choices", () => {
     });
     const from = filled(offers, preset, {});
     expect([from.weights, from["trainer.model"], from["limits.spend"]]).toEqual(["lora", QWEN, 2]);
+  });
+});
+
+describe("training and sampling together or separate", () => {
+  it("offers together only the pairs that share a machine, each named by it", () => {
+    expect(machineChoices(paired, "lora").map(each => [each.value, each.label, each.why])).toEqual([
+      [LOCAL_MACHINE, "local-vllm: 1 GPU", null], [HOST_MACHINE, "h100: NVIDIA H100 80GB HBM3 · $2.69 an hour", null],
+    ]);
+    expect(machineChoices(paired, "full").map(each => each.why)).toEqual(["trains a LoRA only", "trains a LoRA only"]);
+    expect(modeChoices(paired, "full").map(each => [each.value, each.why])).toEqual([["together", "no machine here trains and samples"], ["separate", null]]);
+    expect(modeChoices(offers, "lora")[0].why).toBe("no machine here trains and samples");  // (no pair shares one)
+  });
+
+  it("offers separate a trainer and a provider apart, from the pairs that can work", () => {
+    expect(trainerChoices(paired, "lora", "separate").map(each => [each.value, each.why])).toEqual([
+      ["tinker-lora", null], ["local-full", "trains full weights only"], ["local-lora", null], ["h100-lora", "trains only beside h100"],
+    ]);
+    expect(providerChoices(paired, "trained", "local-lora", "lora", "separate").map(each => [each.value, each.why])).toEqual([
+      ["local-vllm", "shares local-lora's machine"], ["tinker", NO_UPLOAD], ["openai", HOSTED_TRAINED], ["h100", null],
+    ]);
+    expect(providerChoices(paired, "trained", "tinker-lora", "lora", "separate").filter(each => each.why == null).map(each => each.value))
+      .toEqual(["local-vllm", "tinker", "h100"]);  // (Tinker's trainer with vLLM here, through a bridge; or Tinker's sampler; or a pod)
+  });
+
+  it("fills the trainer and the trained channel's provider from the mode chosen", () => {
+    const start = settled(paired, { environment: GSM8K });
+    expect([modeOf(paired, start), start["trainer.provider"], start["channels.policy.provider"]]).toEqual(["separate", "tinker-lora", "local-vllm"]);
+    const together = settled(paired, start, "together");
+    expect([modeOf(paired, together), together["trainer.provider"], together["channels.policy.provider"], together["channels.policy.model"]])
+      .toEqual(["together", "local-lora", "local-vllm", QWEN]);
+    const apart = settled(paired, together, "separate");
+    expect([modeOf(paired, apart), apart["trainer.provider"], apart["channels.policy.provider"]]).toEqual(["separate", "local-lora", "h100"]);
+    const full = settled(paired, { ...together, weights: "full" }, "together");  // (no machine trains full weights: separate)
+    expect([modeOf(paired, full), full["trainer.provider"], full["channels.policy.provider"]]).toEqual(["separate", "local-full", "local-vllm"]);
+  });
+
+  it("chooses a machine together, and a trainer and a provider separate, in the form", async () => {
+    shown(<NewRun />, "/runs/new", client => client.setQueryData(topics.offers().key, paired));
+    expect((screen.getByRole("radio", { name: "Separate" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "machine" })).toBeNull();
+    expect(option("trainer", /h100-lora/).textContent).toBe("h100-lora — trains only beside h100");
+    fireEvent.click(screen.getByRole("radio", { name: "Together" }));
+    expect(select("machine").value).toBe(LOCAL_MACHINE);
+    expect(within(select("machine")).getAllByRole("option").map(each => each.textContent)).toEqual(["local-vllm: 1 GPU", "h100: NVIDIA H100 80GB HBM3 · $2.69 an hour"]);
+    expect(screen.queryByRole("combobox", { name: "trainer" })).toBeNull();
+    expect(screen.getByLabelText("policy provider").textContent).toBe("local-vllm");
+    fireEvent.change(select("machine"), { target: { value: HOST_MACHINE } });
+    expect(screen.getByLabelText("policy provider").textContent).toBe("h100");
+    fireEvent.change(screen.getByRole("textbox", { name: "name" }), { target: { value: "on the pod" } });
+    fireEvent.click(screen.getByRole("button", { name: "Launch the run" }));
+    await waitFor(() => expect(asked.some(each => each.path === "api/launches")).toBe(true));
+    const settings = asked.find(each => each.path === "api/launches")!.body.settings as Record<string, unknown>;
+    expect([settings["trainer.provider"], settings["channels.policy.provider"], settings["channels.policy.model"]]).toEqual(["h100-lora", "h100", QWEN]);
+    fireEvent.click(screen.getByRole("radio", { name: "Separate" }));
+    expect(select("trainer").value).toBe("tinker-lora");  // (h100-lora trains only beside its host)
+    expect(option("policy provider", /^h100/).disabled).toBe(false);
+  });
+
+  it("says where the run's checkpoints go, beside the mode", async () => {
+    checked = { ...checked, checkpoints: { store: bucket("r2", "rollout"), tinker: false, bridges: [], bridged: null } };
+    shown(<NewRun />);
+    await waitFor(() => expect(screen.getByText("Checkpoints: r2 (rollout)")).toBeTruthy());
+    expect(screen.getByText("Checkpoints: r2 (rollout)").closest(".mode-bar")).toBeTruthy();
+    const local = bucket(null, "local");
+    expect(checkpointsText({ store: local, tinker: false, bridges: [], bridged: null })).toBe("the cluster's bucket (local)");
+    expect(checkpointsText({ store: local, tinker: true, bridges: [], bridged: null })).toBe("Tinker");
+    expect(checkpointsText({ store: local, tinker: true, bridges: ["peft-from-tinker"], bridged: local })).toBe("Tinker, bridged to the cluster's bucket (local)");
+    const files = { name: null, kind: "files", bucket: null, prefix: null, directory: "/var/blobs" };
+    expect(checkpointsText({ store: files, tinker: false, bridges: [], bridged: null })).toBe("files in /var/blobs");
   });
 });
 

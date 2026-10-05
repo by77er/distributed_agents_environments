@@ -3,7 +3,9 @@
 // what follows from a choice upstream (`settled`); the objective's presets by family and the components a family
 // accepts; which settings the form has a field for; and the settings a launch asks for.
 
-import type { ObjectiveComponent, ObjectivePreset, OfferedPods, OfferedProvider, OfferedTrainer, Offers, Preset, Weights } from "../api/types";
+import type {
+  CheckpointsAt, ObjectiveComponent, ObjectivePreset, OfferedPair, OfferedPods, OfferedProvider, OfferedTrainer, Offers, Preset, StoreSaid, Weights,
+} from "../api/types";
 
 export const WEIGHTS: Weights[] = ["lora", "full"];
 export const WEIGHT_LABELS: Record<Weights, string> = { lora: "LoRA", full: "Full weights" };
@@ -37,13 +39,110 @@ export const weightChoices = (offers: Offers): Choice[] =>
     why: offers.trainers.some(each => each.weights.includes(weights)) ? null : `no trainer here trains ${weightsText(weights)}`,
   }));
 
-/** The trainers, each disabled where it trains the other kind of weights. */
-export const trainerChoices = (offers: Offers, weights: string | null): Choice[] =>
-  offers.trainers.map(each => ({
-    value: each.name,
-    label: each.name,
-    why: weights && !each.weights.includes(weights as Weights) ? `trains ${weightsText(each.weights[0] ?? "")} only` : null,
-  }));
+/** Why a trainer cannot train these weights, if it cannot. */
+const weightsWhy = (trainer: OfferedTrainer, weights: string | null): string | null =>
+  weights && !trainer.weights.includes(weights as Weights) ? `trains ${weightsText(trainer.weights[0] ?? "")} only` : null;
+
+/** The trainers, each disabled where it trains the other kind of weights; for training apart (`separate`), also one
+ * that trains only beside its provider. */
+export const trainerChoices = (offers: Offers, weights: string | null, mode?: Mode): Choice[] =>
+  offers.trainers.map(each => {
+    let why = weightsWhy(each, weights);
+    const apart = () => each.separate !== false && providerChoices(offers, "trained", each.name, weights, "separate").some(choice => choice.why == null);
+    if (!why && mode === "separate" && !apart()) {
+      why = each.colocate_with ? `trains only beside ${each.colocate_with}` : "nothing here serves its checkpoints";
+    }
+    return { value: each.name, label: each.name, why };
+  });
+
+/** Whether one machine trains and samples (a trainer and its trained channel's provider that share it), or a trainer
+ * and a provider apart. */
+export type Mode = "together" | "separate";
+export const MODES: Mode[] = ["together", "separate"];
+export const MODE_LABELS: Record<Mode, string> = { together: "Together", separate: "Separate" };
+
+/** The pair of a trainer and a provider, as the offers say it. */
+export const pairOf = (offers: Offers, trainer: unknown, provider: unknown): OfferedPair | undefined =>
+  offers.pairs.find(each => each.trainer === trainer && each.inference === provider);
+
+/** Whether a run's trainer and its trained channel's provider share one machine. */
+export const modeOf = (offers: Offers, settings: Record<string, unknown>): Mode =>
+  pairOf(offers, settings["trainer.provider"], settings[`channels.${trainedOf(settings)}.provider`])?.together ? "together" : "separate";
+
+/** A machine choice's value: its trainer and provider. */
+const machineValue = (pair: OfferedPair): string => `${pair.trainer}\n${pair.inference}`;
+const machineOf = (value: string): [string, string] => {
+  const [trainer, provider] = value.split("\n");
+  return [trainer, provider];
+};
+
+/** A machine in a few words: its provider's name, and its pods (`NVIDIA H100 80GB HBM3 · $2.69 an hour`) or its
+ * GPUs. */
+export function machineText(provider: OfferedProvider | undefined, name: string): string {
+  if (provider?.pods) return `${name}: ${podsOf(provider.pods)}`;
+  const gpus = provider?.gpus ?? 0;
+  return gpus ? `${name}: ${gpus} GPU${gpus === 1 ? "" : "s"}` : name;
+}
+
+/** The machines that train and sample together: each pair that shares one and can work, named by its machine (and its
+ * trainer, where the machine has several); one whose trainer trains the other weights is disabled. */
+export function machineChoices(offers: Offers, weights: string | null): Choice[] {
+  const together = offers.pairs.filter(each => each.together && !each.refused);
+  return together.map(pair => {
+    const trainer = offers.trainers.find(each => each.name === pair.trainer);
+    const provider = offers.inference.find(each => each.name === pair.inference);
+    const several = together.filter(each => each.inference === pair.inference).length > 1;
+    const label = `${machineText(provider, pair.inference)}${several ? ` (${pair.trainer})` : ""}`;
+    return { value: machineValue(pair), label, why: trainer ? weightsWhy(trainer, weights) : null };
+  });
+}
+
+/** The machine a run trains and samples on, as its machine choice's value; none where its pair shares none. */
+export const machineChosen = (offers: Offers, settings: Record<string, unknown>): string | undefined => {
+  const pair = pairOf(offers, settings["trainer.provider"], settings[`channels.${trainedOf(settings)}.provider`]);
+  return pair?.together ? machineValue(pair) : undefined;
+};
+
+/** The settings a machine choice fills: its trainer, and the trained channel's provider. */
+export const machineSettings = (settings: Record<string, unknown>, value: string): Record<string, unknown> => {
+  const [trainer, provider] = machineOf(value);
+  return { "trainer.provider": trainer, [`channels.${trainedOf(settings)}.provider`]: provider };
+};
+
+/** Together or separate, each disabled where nothing here trains these weights that way. */
+export function modeChoices(offers: Offers, weights: string | null): Choice[] {
+  const together = machineChoices(offers, weights);
+  const apart = trainerChoices(offers, weights, "separate");
+  return MODES.map(mode => {
+    const fits = (mode === "together" ? together : apart).some(each => each.why == null);
+    const why = fits ? null : mode === "together" ? "no machine here trains and samples" : "no trainer here trains apart";
+    return { value: mode, label: MODE_LABELS[mode], why };
+  });
+}
+
+/** A blob store in a few words: a named one by its name and bucket (`r2 (rollout)`), the cluster's own as its bucket,
+ * a store of files as its directory. */
+export function storeText(store: StoreSaid): string {
+  const place = store.bucket ?? (store.directory ? `files in ${store.directory}` : store.kind);
+  if (store.name) return `${store.name} (${place})`;
+  return store.bucket ? `the cluster's bucket (${store.bucket})` : place;
+}
+
+/** Where a run's checkpoints go, in a few words: the store, or Tinker, and where a bridge writes its copies. */
+export function checkpointsText(at: CheckpointsAt): string {
+  const store = storeText(at.store);
+  const copies = at.bridges.length && at.bridged ? storeText(at.bridged) : null;
+  if (at.tinker) return copies ? `Tinker, bridged to ${copies}` : "Tinker";
+  return copies && copies !== store ? `${store}, bridged to ${copies}` : store;
+}
+
+/** The same, in full, as a tooltip says it: each store's kind and prefix, and the bridges. */
+export function checkpointsTitle(at: CheckpointsAt): string {
+  const full = (store: StoreSaid) => [store.kind, store.bucket, store.prefix, store.directory].filter(Boolean).join(" · ");
+  const said = [`${at.tinker ? "pointers to Tinker's archive in" : "written to"} ${full(at.store)}`];
+  if (at.bridges.length && at.bridged) said.push(`${at.bridges.join(" → ")} into ${full(at.bridged)}`);
+  return said.join("\n");
+}
 
 /** The renderer families of a model, as the providers that serve it (or a model quantized from it) say. */
 export function familiesOf(offers: Offers, model: string): string[] {
@@ -89,8 +188,9 @@ export const HOSTED_FOLLOWS = "a hosted API: it serves no checkpoint";
 
 /** The providers for a channel, each disabled where it cannot serve it: the run's weights, the trained channel's needs
  * (the exact tokens it sampled, and their logprobs), and a bridge from the trainer's format. A hosted API serves only a
- * fixed model. */
-export function providerChoices(offers: Offers, role: Role, trainer: string | undefined, weights: string | null): Choice[] {
+ * fixed model. Training apart (`separate`), the trained channel's provider is not one that shares the trainer's
+ * machine. */
+export function providerChoices(offers: Offers, role: Role, trainer: string | undefined, weights: string | null, mode?: Mode): Choice[] {
   return offers.inference.map(provider => {
     let why: string | null = null;
     if (role !== "fixed" && isHosted(provider)) why = role === "trained" ? HOSTED_TRAINED : HOSTED_FOLLOWS;
@@ -98,7 +198,9 @@ export function providerChoices(offers: Offers, role: Role, trainer: string | un
     if (!why && role === "trained" && (!provider.capabilities.token_exact || !provider.capabilities.sampled_logprobs)) {
       why = "returns text, not the sampled tokens and their logprobs";
     }
-    if (!why && role !== "fixed" && trainer) why = offers.pairs.find(each => each.trainer === trainer && each.inference === provider.name)?.refused ?? null;
+    const pair = trainer ? pairOf(offers, trainer, provider.name) : undefined;
+    if (!why && role === "trained" && mode === "separate" && pair?.together) why = `shares ${trainer}'s machine`;
+    if (!why && role !== "fixed" && trainer) why = pair?.refused ?? null;
     return { value: provider.name, label: provider.name, why };
   });
 }
@@ -148,18 +250,33 @@ export function rendererFor(provider: OfferedProvider | undefined, model: unknow
 }
 
 /** What follows from a choice upstream: a trainer that trains the weights, a model it trains, and for the trained
- * channel a provider that can serve it, a model it serves and a renderer, each kept where it still fits. */
-export function settled(offers: Offers, settings: Record<string, unknown>): Record<string, unknown> {
+ * channel a provider that can serve it, a model it serves and a renderer, each kept where it still fits. Together
+ * (`mode`, else as the settings are), the trainer and the trained channel's provider are a machine's that trains the
+ * weights; separate, a trainer that trains apart and a provider that does not share its machine. Where nothing here
+ * trains the weights in that mode and something does in the other, the other is taken. */
+export function settled(offers: Offers, settings: Record<string, unknown>, mode?: Mode): Record<string, unknown> {
   const next = { ...settings };
   const weights = (next.weights as string | undefined) ?? null;
-  const trainerName = pick(trainerChoices(offers, weights), next["trainer.provider"]);
-  if (trainerName !== undefined) next["trainer.provider"] = trainerName;
+  const channel = trainedOf(next);
+  const modes = modeChoices(offers, weights);
+  let wanted = mode ?? modeOf(offers, next);
+  const other: Mode = wanted === "together" ? "separate" : "together";
+  if (modes.find(each => each.value === wanted)?.why != null && modes.find(each => each.value === other)?.why == null) wanted = other;
+  const machine = wanted === "together" ? pick(machineChoices(offers, weights), machineChosen(offers, next)) : undefined;
+  if (machine !== undefined) Object.assign(next, machineSettings(next, machine));
+  else {
+    const said = next["trainer.provider"];
+    const trainerName = pick(trainerChoices(offers, weights, "separate"), said) ?? pick(trainerChoices(offers, weights), said);
+    if (trainerName !== undefined) next["trainer.provider"] = trainerName;
+  }
   const trainer = offers.trainers.find(each => each.name === next["trainer.provider"]);
   if (!weights && trainer) next.weights = trainer.weights[0];
   if (trainer && !trainer.models.includes(String(next["trainer.model"]))) next["trainer.model"] = trainer.models[0];
-  const channel = trainedOf(next);
-  const providerName = pick(providerChoices(offers, "trained", trainer?.name, (next.weights as string) ?? null), next[`channels.${channel}.provider`]);
-  if (providerName !== undefined) next[`channels.${channel}.provider`] = providerName;
+  if (machine === undefined) {
+    const trains = (next.weights as string) ?? null, said = next[`channels.${channel}.provider`];
+    const providerName = pick(providerChoices(offers, "trained", trainer?.name, trains, "separate"), said) ?? pick(providerChoices(offers, "trained", trainer?.name, trains), said);
+    if (providerName !== undefined) next[`channels.${channel}.provider`] = providerName;
+  }
   const provider = offers.inference.find(each => each.name === next[`channels.${channel}.provider`]);
   const model = pick(channelModelChoices(provider, next["trainer.model"] as string | undefined, true), next[`channels.${channel}.model`]);
   if (model !== undefined) next[`channels.${channel}.model`] = model;

@@ -1,8 +1,9 @@
 // A new training run, asked for from the page, in the order its choices decide each other: the environment, LoRA or
-// full weights, the trainer and its model, inference for each channel, the objective, budgets, evals, the spend limit
-// and the name. Every choice comes from what the cluster offers (`/api/offers`); one that can never work is disabled
-// with its reason. A preset fills the form, and the form saves itself as one. The monitor checks the settings as they
-// change, and what it refuses is said beside the field it is about.
+// full weights, whether one machine trains and samples (together: the machine) or a trainer and a provider apart
+// (separate), with where its checkpoints go, the trainer and its model, inference for each channel, the objective,
+// budgets, evals, the spend limit and the name. Every choice comes from what the cluster offers (`/api/offers`); one
+// that can never work is disabled with its reason. A preset fills the form, and the form saves itself as one. The
+// monitor checks the settings as they change, and what it refuses is said beside the field it is about.
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -11,9 +12,9 @@ import type { Checked, EvalSuite, LaunchAsking, OfferedTrainer, Offers, SettingF
 import { Card, Empty, Head } from "../components/ui";
 import { publishedParts, readable } from "../lib/environments";
 import {
-  bridgeOf, channelModelChoices, type Choice, choiceText, componentsOf, defaultOf, fielded, filled, launchSettings, modelChoices, objectiveGroups,
-  objectivePreset, pick, podsOf, pricesOf, providerChoices, rendererFor, renderersOf, type Role, same, servesWhy, settled, trainedOf, trainerChoices,
-  weightChoices,
+  bridgeOf, channelModelChoices, checkpointsText, checkpointsTitle, type Choice, choiceText, componentsOf, defaultOf, fielded, filled, launchSettings,
+  machineChoices, machineChosen, machineSettings, type Mode, modeChoices, modelChoices, modeOf, objectiveGroups, objectivePreset, pick, podsOf,
+  pricesOf, providerChoices, rendererFor, renderersOf, type Role, same, servesWhy, settled, trainedOf, trainerChoices, weightChoices,
 } from "../lib/form";
 import { presetsPlace } from "../lib/places";
 import { EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, evalsSettings, NO_EVALS, shown, typed } from "../lib/settings";
@@ -115,7 +116,8 @@ function Form({ offers, system }: { offers: Offers; system: System }) {
   const [name, setName] = useState("");
   const [saving, setSaving] = useState<string | null>(null);  // (the name the settings are being saved as a preset under)
   const set = (changes: Record<string, unknown>) => setSettings(current => ({ ...current, ...changes }));
-  const setUpstream = (changes: Record<string, unknown>) => setSettings(current => settled(offers, { ...current, ...changes }));
+  const mode = modeOf(offers, settings);
+  const setUpstream = (changes: Record<string, unknown>, wanted: Mode = mode) => setSettings(current => settled(offers, { ...current, ...changes }, wanted));
   const unset = (keys: string[]) => setSettings(current => Object.fromEntries(Object.entries(current).filter(([key]) => !keys.includes(key))));
 
   const trained = trainedOf(settings);
@@ -197,19 +199,36 @@ function Form({ offers, system }: { offers: Offers; system: System }) {
       </Card>
 
       <Card title="Weights">
-        <WeightsChoice offers={offers} value={weights} onChange={picked => setUpstream({ weights: picked })} marked={marked("weights")} />
+        <Segmented name="weights" choices={weightChoices(offers)} value={weights} onChange={picked => setUpstream({ weights: picked })} marked={marked("weights")} />
         <Said refusals={refusals} keys={["weights"]} />
+      </Card>
+
+      <Card title="Training and sampling">
+        <div className="fields">
+          <div className="mode-bar">
+            <Segmented name="mode" choices={modeChoices(offers, weights)} value={mode} onChange={picked => setUpstream({}, picked as Mode)}
+              marked={marked("trainer.provider", `channels.${trained}.provider`)} />
+            {checked?.checkpoints ? <small className="muted" title={checkpointsTitle(checked.checkpoints)}>Checkpoints: {checkpointsText(checked.checkpoints)}</small> : null}
+          </div>
+          {mode === "together" ? (
+            <Field label="Machine" keys={["trainer.provider"]} refusals={refusals} marked={marked("trainer.provider")}
+              note={trainer ? <small>{trainer.name} · {trainer.kind}</small> : null}>
+              <Picker value={machineChosen(offers, settings)} choices={machineChoices(offers, weights)} onChange={picked => setUpstream(machineSettings(settings, picked), "together")}
+                label="machine" />
+            </Field>
+          ) : null}
+        </div>
       </Card>
 
       <Card title="Trainer">
         <TrainerStep offers={offers} system={system} known={known} settings={settings} trainer={trainer} weights={weights} families={environmentFamilies}
-          refusals={refusals} marked={marked} set={set} setUpstream={setUpstream} unset={unset} />
+          mode={mode} refusals={refusals} marked={marked} set={set} setUpstream={setUpstream} unset={unset} />
       </Card>
 
       <Card title="Inference">
         <div className="fields">
-          <ChannelFields offers={offers} settings={settings} channel={trained} role="trained" trainer={trainer} weights={weights} refusals={refusals} marked={marked}
-            set={set} setUpstream={setUpstream} />
+          <ChannelFields offers={offers} settings={settings} channel={trained} role="trained" trainer={trainer} weights={weights} mode={mode} refusals={refusals}
+            marked={marked} set={set} setUpstream={setUpstream} />
           {others.map(channel => {
             const slot = slotNames.find(each => channelOf(each) === channel);
             const role: Role = settings[`channels.${channel}.mode`] === "follows" ? "follows" : "fixed";
@@ -317,13 +336,13 @@ function EnvironmentChoice({ offers, value, onChange }: { offers: Offers; value:
   );
 }
 
-/** LoRA or full weights: one no trainer trains is disabled, with why. */
-function WeightsChoice({ offers, value, onChange, marked }: { offers: Offers; value: string | null; onChange: (weights: string) => void; marked: boolean }) {
+/** One of a few choices (LoRA or full weights; together or separate): one that cannot work is disabled, with why. */
+function Segmented({ name, choices, value, onChange, marked }: { name: string; choices: Choice[]; value: string | null; onChange: (value: string) => void; marked: boolean }) {
   return (
-    <div className={`segmented${marked ? " from-preset" : ""}`} role="radiogroup" aria-label="weights">
-      {weightChoices(offers).map(each => (
+    <div className={`segmented${marked ? " from-preset" : ""}`} role="radiogroup" aria-label={name}>
+      {choices.map(each => (
         <label key={each.value} className={each.why ? "disabled" : undefined} title={each.why ?? undefined}>
-          <input type="radio" name="weights" value={each.value} checked={value === each.value} disabled={each.why != null} onChange={() => onChange(each.value)} />
+          <input type="radio" name={name} value={each.value} checked={value === each.value} disabled={each.why != null} onChange={() => onChange(each.value)} />
           <span>{each.label}</span>
           {each.why ? <small>{each.why}</small> : null}
         </label>
@@ -340,8 +359,8 @@ interface StepProps {
   set: (changes: Record<string, unknown>) => void;
 }
 
-function TrainerStep({ offers, system, known, settings, trainer, weights, families, refusals, marked, set, setUpstream, unset }: StepProps & {
-  system: System; known: ReturnType<typeof useKnown>; trainer: OfferedTrainer | undefined; weights: string | null; families: string[];
+function TrainerStep({ offers, system, known, settings, trainer, weights, families, mode, refusals, marked, set, setUpstream, unset }: StepProps & {
+  system: System; known: ReturnType<typeof useKnown>; trainer: OfferedTrainer | undefined; weights: string | null; families: string[]; mode: Mode;
   setUpstream: (changes: Record<string, unknown>) => void; unset: (keys: string[]) => void;
 }) {
   const checkpoints = [...system.checkpoints].sort((a, b) => b.made - a.made);
@@ -361,10 +380,13 @@ function TrainerStep({ offers, system, known, settings, trainer, weights, famili
   return (
     <div className="fields">
       <div className="field-row">
-        <Field label="Trainer" keys={["trainer.provider"]} refusals={refusals} marked={marked("trainer.provider")}
-          note={trainer ? <small>{trainer.kind} · {trainer.allocation}{trainer.pods ? ` · ${podsOf(trainer.pods)}` : ""}</small> : null}>
-          <Picker value={settings["trainer.provider"]} choices={trainerChoices(offers, weights)} onChange={picked => setUpstream({ "trainer.provider": picked })} label="trainer" />
-        </Field>
+        {mode === "separate" ? (
+          <Field label="Trainer" keys={["trainer.provider"]} refusals={refusals} marked={marked("trainer.provider")}
+            note={trainer ? <small>{trainer.kind} · {trainer.allocation}{trainer.pods ? ` · ${podsOf(trainer.pods)}` : ""}</small> : null}>
+            <Picker value={settings["trainer.provider"]} choices={trainerChoices(offers, weights, "separate")} onChange={picked => setUpstream({ "trainer.provider": picked })}
+              label="trainer" />
+          </Field>
+        ) : null}
         <Field label="Model" keys={["trainer.model"]} refusals={refusals} marked={marked("trainer.model")}>
           <Picker value={settings["trainer.model"]} choices={modelChoices(offers, trainer, families)} onChange={picked => setUpstream({ "trainer.model": picked })} label="model" />
         </Field>
@@ -412,19 +434,20 @@ function TrainerStep({ offers, system, known, settings, trainer, weights, famili
   );
 }
 
-function ChannelFields({ offers, settings, channel, slot, role, trainer, weights, judges = false, refusals, marked, set, setUpstream }: StepProps & {
-  channel: string; slot?: string; role: Role; trainer: OfferedTrainer | undefined; weights: string | null; judges?: boolean;
+function ChannelFields({ offers, settings, channel, slot, role, trainer, weights, mode, judges = false, refusals, marked, set, setUpstream }: StepProps & {
+  channel: string; slot?: string; role: Role; trainer: OfferedTrainer | undefined; weights: string | null; mode?: Mode; judges?: boolean;
   setUpstream: (changes: Record<string, unknown>) => void;
 }) {
   const key = (setting: string) => `channels.${channel}.${setting}`;
   const providerName = settings[key("provider")];
   const provider = offers.inference.find(each => each.name === providerName);
   const serving = role !== "fixed";
-  const providers = providerChoices(offers, role, trainer?.name, weights);
+  const providers = providerChoices(offers, role, trainer?.name, weights, role === "trained" ? mode : undefined);
   const models = channelModelChoices(provider, settings["trainer.model"] as string | undefined, serving);
   const renderers = renderersOf(provider, settings[key("model")]);
   const bridge = serving ? bridgeOf(offers, trainer?.name, provider?.name) : [];
   const trained = role === "trained";
+  const onMachine = trained && mode === "together";  // (the machine chosen serves it)
   const bound = slot ? { [`slots.${slot}`]: channel } : {};
   const chooseProvider = (picked: string) => {
     if (trained) return setUpstream({ [key("provider")]: picked });
@@ -444,7 +467,11 @@ function ChannelFields({ offers, settings, channel, slot, role, trainer, weights
       <div className="field-row">
         <Field label="Provider" keys={[key("provider"), key("providers")]} refusals={refusals} marked={marked(key("provider"))}
           note={provider ? <small>{provider.kind} · {provider.allocation}{provider.pods ? ` · ${podsOf(provider.pods)}` : ""}{bridge.length ? ` · ${bridge.join(" → ")}` : ""}{provider.allocation === "metered" && pricesOf(provider, settings[key("model")]) ? ` · ${pricesOf(provider, settings[key("model")])}` : ""}</small> : null}>
-          <Picker value={providerName} choices={providers} onChange={chooseProvider} label={`${channel} provider`} />
+          {onMachine ? (
+            <span className="field-value" aria-label={`${channel} provider`}>{text(providerName)}</span>
+          ) : (
+            <Picker value={providerName} choices={providers} onChange={chooseProvider} label={`${channel} provider`} />
+          )}
         </Field>
         <Field label="Model" keys={[key("model")]} refusals={refusals} marked={marked(key("model"))}>
           <Picker value={settings[key("model")]} choices={models}

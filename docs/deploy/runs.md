@@ -35,7 +35,8 @@ checks the settings against the cluster config, records a launch and submits the
 chart's `files/rayjob.yaml` on Kubernetes, a Ray job on one machine
 ([launching runs](../libraries/rollout-train/launching.md)).
 
-- **From the monitor:** the **New run** form (a preset, the environment, the name, the settings to change), and an
+- **From the monitor:** the **New run** form (a preset, the environment, whether one machine trains and samples or a
+  trainer and a provider apart, with where the run's checkpoints go, the name, the settings to change), and an
   eval form on each suite's, checkpoint's and base model's page. Both post to `POST /api/launches`; a refusal is shown
   beside the setting it is about ([launching a run](../libraries/rollout-train/monitor.md#launching-a-run)). The
   monitor makes each RayJob with its own service account, which `templates/rbac.yaml` allows to create, read and delete

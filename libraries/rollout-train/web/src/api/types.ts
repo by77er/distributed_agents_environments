@@ -509,6 +509,37 @@ export interface OfferedTrainer {
   weights: Weights[];
   /** Its pods, for a trainer on RunPod. */
   pods?: OfferedPods | null;
+  /** Whether it trains apart from what samples its checkpoints (not: a trainer on a host's pods). */
+  separate: boolean;
+}
+
+/** A trainer and a provider: the bridge chain's names, or none and why the pair is refused; and whether the two share
+ * one machine (the trainer's `colocate_with`). */
+export interface OfferedPair {
+  trainer: string;
+  inference: string;
+  bridge: string[] | null;
+  refused?: string;
+  together: boolean;
+}
+
+/** A blob store as the monitor says it: its name (`[stores.NAME]`; none: `[blobs]`), its kind (`files`, or
+ * `module:name`), and its bucket and prefix or its directory. */
+export interface StoreSaid {
+  name: string | null;
+  kind: string;
+  bucket: string | null;
+  prefix: string | null;
+  directory: string | null;
+}
+
+/** Where a training run's checkpoints go: the store its trainer writes them to, whether Tinker keeps the weights, and
+ * the bridges that write converted copies for its trained channel's provider, with the store those go to. */
+export interface CheckpointsAt {
+  store: StoreSaid;
+  tinker: boolean;
+  bridges: string[];
+  bridged: StoreSaid | null;
 }
 
 export interface OfferedModel {
@@ -587,7 +618,7 @@ export interface Offers {
   environments: OfferedEnvironment[];
   trainers: OfferedTrainer[];
   inference: OfferedProvider[];
-  pairs: { trainer: string; inference: string; bridge: string[] | null; refused?: string }[];
+  pairs: OfferedPair[];
   sandboxes: Record<string, { size: number; provider: string }>;
   presets: Preset[];
   capacity: { gpus: number; gpus_free: number; machines: Record<string, number> } | null;
@@ -606,6 +637,8 @@ export interface Checked {
   weights: Weights | null;
   spend: { dollars: number | null; parts: Record<string, number>; why: string; per?: "step" | "eval" };
   environment: { slots: string[]; untrained: string[]; judges: string[] } | null;
+  /** Where its checkpoints go; none for a run that makes none. */
+  checkpoints?: CheckpointsAt | null;
 }
 
 /** Every preset's newest version (`/api/presets`). */
@@ -1227,6 +1260,8 @@ export interface RunSettings {
   desired: Record<string, unknown>;
   changed: number | null;
   changes: { step: number; changed: Record<string, unknown> }[];
+  /** Where its checkpoints go, in the store its newest start wrote to; none where the monitor has no cluster config. */
+  checkpoints?: CheckpointsAt | null;
 }
 
 /** Running, idle or paused while its process beats; how it ended, once it said; lost if it stopped beating without

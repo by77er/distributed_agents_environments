@@ -18,7 +18,8 @@ holds the keys of every store. The monitor reads finished episodes from where a 
 (`opened`). A pod gets a store's location and a key of its own (`for_pods`): the read-only key (the store's `reader`)
 for one that only reads, the store's own for one that writes. A process the run starts elsewhere (an engine host, a
 bridge's task) is told where the ledger is as `ledger_at`: the cluster config itself, so that it reads the ledger's URL
-on its own node (`cluster_ledger`), and no secret is handed on.
+on its own node (`cluster_ledger`), and no secret is handed on. A page says a store as `described` says it: its name
+(`store_named` finds it from a location), its kind, and its bucket and prefix or its directory.
 """
 
 from collections.abc import Mapping
@@ -44,6 +45,7 @@ __all__ = [
     "Stores",
     "blobs_at",
     "cluster_ledger",
+    "described",
     "for_pods",
     "ledger_at",
     "ledger_of",
@@ -51,6 +53,7 @@ __all__ = [
     "location",
     "opened",
     "opened_ledger",
+    "store_named",
 ]
 
 FILES = "rollout.harness.blobs:FileBlobStore"
@@ -80,6 +83,29 @@ def opened(where: Mapping[str, Any]) -> Blobs:
     if kind == FILES:
         return FileBlobStore(Path(str(settings["directory"])).expanduser())
     return named(kind)(**settings)
+
+
+def described(where: Mapping[str, Any], name: str | None = None) -> dict[str, JsonValue]:
+    """A blob store as a page says it, from its location (`blobs_at`, `location`): its `name` (`[stores.NAME]`; none:
+    `[blobs]`), its `kind` (`files`, or `module:name`), and its `bucket` and `prefix` or its `directory`; never a key,
+    nor the variables one is read from."""
+    kind = str(where.get("kind") or FILES)
+
+    def said(key: str) -> str | None:
+        value = where.get(key)
+        return str(value) if isinstance(value, str) and value else None
+
+    return {"name": name, "kind": "files" if kind == FILES else kind, "bucket": said("bucket"),
+            "prefix": said("prefix"), "directory": said("directory")}  # fmt: skip
+
+
+def store_named(cluster: "Cluster", where: Mapping[str, Any]) -> str | None:
+    """The name of the cluster's store a location is (`[stores.NAME]`), where it is one of them; none for `[blobs]`
+    or a store the cluster does not name."""
+    for name in cluster.stores:
+        if blobs_at(cluster, name) == dict(where):
+            return name
+    return None
 
 
 def ledger_url(cluster: "Cluster", environ: Mapping[str, str] | None = None) -> str:

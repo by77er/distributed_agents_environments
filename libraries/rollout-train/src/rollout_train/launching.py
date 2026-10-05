@@ -13,10 +13,16 @@ the setting it is about; one that does not is a note (the run waits for somethin
 version beside the ledger), trainers with their settings, inference providers with their capabilities and models (each
 with the renderer families that render it, among those named so far), each trainer's and provider's allocation and the
 weights it takes (`lora`, `full`), a RunPod provider's pods (their GPU type and hourly price, cloud, regions, most at
-once), each trainer and provider pair's bridge or why there is none, sandbox pools, presets,
+once), whether a trainer can train apart from what samples its checkpoints (`separate`), each trainer and provider
+pair's bridge or why there is none and whether the pair shares one machine (`together`), sandbox pools, presets,
 the GPUs the heartbeats say are free, the objective's families, presets and components, and the keys a training run
 takes (the schema). Each environment carries the renderer families runs and presets on it named for their trained
 channel (its model family, as far as is known).
+
+`checkpoints_at` says where a training run's checkpoints go, which the check (`examined`) answers with: the blob store
+its trainer writes them to (the one its RunPod providers name, `[stores.NAME]`, else the cluster's `[blobs]`), whether
+Tinker keeps the weights (the store then holds pointers to Tinker's archive), and the bridges that write converted
+copies for its trained channel's provider, with the store those go to (the cluster's `[blobs]`).
 """
 
 import asyncio
@@ -29,9 +35,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import JsonValue
 
-from rollout_train.bridges import NoBridge, format_of, path
+from rollout_train.bridges import AUTO, VERBATIM, NoBridge, format_of, path
 from rollout_train.cluster import Cluster
-from rollout_train.demand import Resources
+from rollout_train.demand import Resources, played_channel
 from rollout_train.ledger import Ledger
 from rollout_train.presence import Beat, alive
 from rollout_train.presets import Presets
@@ -39,7 +45,8 @@ from rollout_train.providers import settings_of
 from rollout_train.published import environment_versions_of, is_published
 from rollout_train.recorder.renderers import renderers_for
 from rollout_train.registry import registry_of, resolved
-from rollout_train.run_settings import WEIGHTS, RunSettings, layered
+from rollout_train.run_settings import TRAINING, WEIGHTS, RunSettings, layered
+from rollout_train.stores import blobs_at, described, store_named
 from rollout_train.validation import (
     CheckpointFacts,
     EnvironmentFacts,
@@ -63,6 +70,7 @@ __all__ = [
     "Refused",
     "capacity_of",
     "checked",
+    "checkpoints_at",
     "declared",
     "environment_facts",
     "examined",
@@ -306,12 +314,13 @@ async def checked(
 @dataclass(frozen=True)
 class Examined:
     """A run's settings, checked: the findings, what is known of its environment, its estimated spend (one step's, or
-    an eval's) and what it trains."""
+    an eval's), what it trains and where its checkpoints go (`checkpoints_at`)."""
 
     findings: list[Finding]
     environment: EnvironmentFacts | None
     spend: Spend
     weights: str | None
+    checkpoints: dict[str, JsonValue] | None = None
 
 
 async def examined(
@@ -325,7 +334,8 @@ async def examined(
     free: Resources | None = None,
 ) -> Examined:
     """A run's settings checked on this cluster with the facts gathered now (`checked`), with those facts' environment,
-    its estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`)."""
+    its estimated spend (`rollout_train.validation.spend_of`), what it trains (`weights_of`) and where its checkpoints
+    go (`checkpoints_at`)."""
     settings = completed(settings, cluster)
     environment = settings.get("environment")
     facts = await environment_facts(str(environment) if environment else None, cluster, ledger, loaded=loaded)
@@ -335,7 +345,45 @@ async def examined(
         facts,
         spend_of(settings, cluster, facts, known),
         weights_of(settings, cluster),
+        checkpoints_at(settings, cluster),
     )
+
+
+def checkpoints_at(
+    settings: RunSettings, cluster: Cluster, *, written: Mapping[str, Any] | None = None
+) -> dict[str, JsonValue] | None:
+    """Where a training run's checkpoints go (none for a run that makes none): `store`, the blob store its trainer
+    writes them to (`rollout_train.stores.described`: the store its RunPod providers name, else `[blobs]`; or the one
+    `written` says, where a run's start recorded it); `tinker`, whether Tinker keeps the weights (the store holds
+    pointers to Tinker's archive); `bridges`, the bridges that write converted copies for the trained channel's first
+    provider (none where its files are served as they are), and `bridged`, the store those copies go to (`[blobs]`)."""
+    from rollout_train.pods.leasing import pods_store
+
+    if settings.kind not in TRAINING:
+        return None
+    if written is not None:
+        store: dict[str, JsonValue] = described(written, store_named(cluster, written))
+    else:
+        try:
+            named = pods_store(settings, cluster)
+        except ValueError:  # (a trainer on a host's pods whose trained channel is elsewhere: validation refuses it)
+            named = None
+        store = described(blobs_at(cluster, named), named)
+    trainer = cluster.trainers.get(str(settings["trainer.provider"]))
+    format = trainer.capabilities.format if trainer is not None else None
+    copies: list[str] = []
+    channel = played_channel(settings)
+    providers = settings.providers(channel)
+    provider = cluster.inference.get(providers[0]) if providers else None
+    if format is not None and provider is not None:
+        wanted = str(settings.get(f"channels.{channel}.bridge") or AUTO)
+        chain = path(format, provider.capabilities.loads, wanted=wanted)
+        if not isinstance(chain, NoBridge):
+            copies = [each.name for each in chain if each.task is not None and each.task != VERBATIM]
+    return {
+        "store": store, "tinker": format == "tinker", "bridges": cast(JsonValue, copies),
+        "bridged": described(blobs_at(cluster), None) if copies else None,
+    }  # fmt: skip
 
 
 def ray_free() -> Resources | None:
@@ -422,6 +470,7 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
             "cost": dict(trainer.cost), "families": sorted(trainer.capabilities.families), "settings": specs,
             "allocation": trainer.allocation, "concurrency": trainer.concurrency,
             "weights": [trainer.capabilities.produces], "pods": _pods_offered(cluster, name),
+            "separate": not (trainer.kind == "runpod-trainer" and trainer.colocate_with is not None),
         })  # fmt: skip
     inference: list[dict[str, Any]] = []
     for name, provider in cluster.inference.items():
@@ -448,12 +497,14 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
         for name, provider in cluster.inference.items():
             found = path(trainer.capabilities.format, provider.capabilities.loads)
             unserved = serves(provider, trainer.capabilities.produces)
+            together = trainer.colocate_with == name  # (they share one machine)
+            pair: dict[str, Any] = {"trainer": trainer_name, "inference": name, "together": together}
             if isinstance(found, NoBridge):
-                pairs.append({"trainer": trainer_name, "inference": name, "bridge": None, "refused": found.reason})
+                pairs.append({**pair, "bridge": None, "refused": found.reason})
             elif unserved is not None:
-                pairs.append({"trainer": trainer_name, "inference": name, "bridge": None, "refused": unserved})
+                pairs.append({**pair, "bridge": None, "refused": unserved})
             else:
-                pairs.append({"trainer": trainer_name, "inference": name, "bridge": [each.name for each in found]})
+                pairs.append({**pair, "bridge": [each.name for each in found]})
     presets = presets_of(ledger)
     listed = await presets.all() if presets is not None else []
     kept = [
