@@ -20,7 +20,8 @@ with (what `step crypto jwe decrypt` does).
 
 The token is what `step ca token` makes: a JWT (`ES256`, the provisioner's key id as `kid`) whose claims are the
 provisioner's name (`iss`), the CA's sign or revoke endpoint (`aud`), the subject (`sub`), the SANs (`sans`), the root
-certificate's SHA-256 fingerprint (`sha`), a random id (`jti`) and its times. The provisioner's private key is a JWK
+certificate's SHA-256 fingerprint (`sha`; not in a pod's token, whose step then checks step-ca's TLS by the roots it is
+given rather than that root alone), a random id (`jti`) and its times. The provisioner's private key is a JWK
 (EC P-256), the decrypted form of the `encryptedKey` in step-ca's configuration
 (`step crypto jwe decrypt < encrypted.json > provisioner.jwk`), kept as a secret file.
 """
@@ -87,15 +88,19 @@ class StepCa:
 
     def token(
         self, subject: str, sans: Sequence[str] | None = None, *, audience: str = "sign",
-        lifetime: float = TOKEN_LIFETIME, now: float | None = None,
+        lifetime: float = TOKEN_LIFETIME, now: float | None = None, pinned: bool = True,
     ) -> str:  # fmt: skip
         """A one-time token for a certificate of `subject` (with `sans`, by default the subject alone), good for
-        `lifetime` seconds; with `audience = "revoke"`, for revoking the certificate whose serial `subject` is."""
+        `lifetime` seconds; with `audience = "revoke"`, for revoking the certificate whose serial `subject` is.
+        `pinned` names the root's fingerprint in it (`sha`): step then trusts only that root for step-ca's own TLS,
+        whatever `--root` says, which fails behind a proxy that ends TLS with a public certificate."""
         issued = int(time.time() if now is None else now)
         claims: dict[str, Any] = {
             "iss": self.provisioner, "aud": f"{self.url}/1.0/{audience}", "sub": subject, "iat": issued,
-            "nbf": issued, "exp": issued + int(lifetime), "jti": secrets.token_hex(32), "sha": self.fingerprint,
+            "nbf": issued, "exp": issued + int(lifetime), "jti": secrets.token_hex(32),
         }  # fmt: skip
+        if pinned:
+            claims["sha"] = self.fingerprint
         if audience == "sign":
             claims["sans"] = list(sans if sans is not None else [subject])
         header = {"alg": "ES256", "kid": self._kid, "typ": "JWT"}
@@ -104,8 +109,9 @@ class StepCa:
         return f"{signing}.{_encoded(r.to_bytes(32) + s.to_bytes(32))}"
 
     def pod_token(self, identity: str, *, lifetime: float = TOKEN_LIFETIME) -> str:
-        """The one-time token a pod gets its first certificate with: its identity as the subject and the only SAN."""
-        return self.token(identity, [identity], lifetime=lifetime)
+        """The one-time token a pod gets its first certificate with: its identity as the subject and the only SAN. It
+        names no root (`pinned` false): the pod is given the cluster's root and checks step-ca's TLS by its `--root`."""
+        return self.token(identity, [identity], lifetime=lifetime, pinned=False)
 
     async def certificate(self, identity: str, *, lifetime: float | None = None) -> tuple[bytes, bytes]:
         """A certificate for `identity` (its subject and its only URI SAN), from a key made here: the certificate with

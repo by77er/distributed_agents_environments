@@ -75,7 +75,8 @@ class FakeStepCa:
             "issuer": claims["iss"] == PROVISIONER,
             "audience": claims["aud"] == f"{self.url}/1.0/{audience}",
             "times": claims["nbf"] <= now + 60 and now < claims["exp"] and claims["exp"] - claims["iat"] <= 15 * 60,
-            "root": claims["sha"] == fingerprint(self.authority.pem),
+            "root": claims.get("sha", fingerprint(self.authority.pem))
+            == fingerprint(self.authority.pem),  # (as step-ca: optional)
             "once": claims["jti"] not in self.used,
         }
         if failed := [name for name, passed in checks.items() if not passed]:
@@ -247,3 +248,19 @@ async def test_the_gateway_s_certificate_is_issued_for_its_identity(tmp_path: Pa
         assert sans.get_values_for_type(x509.UniformResourceIdentifier) == [GATEWAY_IDENTITY]
         assert serialization.load_pem_private_key(key, None).public_key() == issued.public_key()
         await ca.aclose()
+
+
+def test_a_pods_token_names_no_root_so_step_checks_the_cas_tls_by_the_roots_it_is_given(tmp_path: Path) -> None:
+    authority = Authority(tmp_path / "ca")
+    jwk, _ = provisioner_key()
+    (tmp_path / "provisioner.jwk").write_text(json.dumps(jwk))
+    ca = StepCa.from_files(
+        "https://ca.example.com", provisioner=PROVISIONER, key=tmp_path / "provisioner.jwk", root=authority.root
+    )
+
+    def claims(token: str) -> dict[str, Any]:
+        return json.loads(_unb64(token.split(".")[1]))
+
+    # (a token naming the root makes step trust only that root for step-ca's own TLS, which fails behind a tunnel)
+    assert "sha" not in claims(ca.pod_token("spiffe://rollout/pod/p"))
+    assert claims(ca.token("spiffe://rollout/gateway"))["sha"] == fingerprint(authority.pem)
