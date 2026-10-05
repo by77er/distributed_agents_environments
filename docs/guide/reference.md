@@ -20,9 +20,10 @@ do not edit by hand.
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Labelled`](#labelled), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#scores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
+- **[`rollout_train.inference.api`](#rollout_traininferenceapi)** — Channels on hosted APIs: by message, never trained on, spend counted. [`ApiChannel`](#apichannel), [`ATTEMPTS`](#attempts), [`Hosted`](#hosted), [`HostedEndpoint`](#hostedendpoint), [`priced`](#priced)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rollout_trainrecorderrendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
-- **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#run), [`run_directory`](#run_directory), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
+- **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#run), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
 - **[`rollout_train.demand`](#rollout_traindemand)** — What a run's scheduled parts need, and the placement group that reserves them together. [`BRIDGE`](#bridge), [`bridge_asks`](#bridge_asks), [`Bundle`](#bundle), [`colocating`](#colocating), [`Demand`](#demand), [`demand`](#demand), [`HEADROOM`](#headroom), [`Part`](#part), [`placed`](#placed), [`played_channel`](#played_channel), [`Pod`](#rollout_traindemandpod), [`pods`](#pods), [`requested`](#requested), [`reserve`](#reserve), [`Resources`](#resources), [`SUBMITTER`](#submitter), [`TRAINER`](#trainer)
 - **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
@@ -38,7 +39,7 @@ do not edit by hand.
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
-- **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
+- **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteEntryFacts`](#suiteentryfacts), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
@@ -48,7 +49,8 @@ do not edit by hand.
 - **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`positions`](#positions), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`TrainablePolicy`](#trainablepolicy)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls)
-- **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
+- **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`hosted`](#rollout_openaihosted), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
+- **[`rollout_anthropic`](#rollout_anthropic)** — A model endpoint for Anthropic's Messages API. [`hosted`](#rollout_anthropichosted), [`MessagesEndpoint`](#messagesendpoint), [`MessagesOptions`](#messagesoptions)
 - **[`rollout_s3`](#rollout_s3)** — Blobs in S3 or any S3-compatible object store. [`S3BlobStore`](#s3blobstore)
 - **[`rollout_runpod`](#rollout_runpod)** — GPU pods on RunPod, and certificates for them from step-ca. [`fingerprint`](#fingerprint), [`Pod`](#rollout_runpodpod), [`PodSpec`](#podspec), [`RunPod`](#runpod), [`RunPodError`](#runpoderror), [`StepCa`](#stepca)
 - **[`rollout_tinker`](#rollout_tinker)** — A trainer and an engine at Thinking Machines (Tinker). [`TinkerEngine`](#tinkerengine), [`TinkerSettings`](#tinkersettings), [`TinkerTrainer`](#tinkertrainer)
@@ -1946,8 +1948,10 @@ Context use after a sample.
 |---|---|---|---|
 | `context_used` | `int` | required | Drives the agent's compaction decisions. |
 | `context_limit` | `int` | required |  |
-| `input_tokens` | `int \| None` | `None` |  |
-| `output_tokens` | `int \| None` | `None` |  |
+| `input_tokens` | `int \| None` | `None` | Every prompt token, those read from a cache among them. |
+| `output_tokens` | `int \| None` | `None` | Every token the reply took, its thinking among them. |
+| `cached_input_tokens` | `int \| None` | `None` | Of `input_tokens`, those a provider read from its prompt cache (billed at its cached-input price). |
+| `thinking_tokens` | `int \| None` | `None` | Of `output_tokens`, those spent thinking. |
 
 ## `rollout.environment`
 
@@ -4178,6 +4182,105 @@ what `spec` says and started again whenever it dies; its handle. A run's own hos
 in its bundle of the run's placement group (`placement`: the options `rollout_train.demand.placed` gives); a pool's
 is `detached`, and lives until it is ended.
 
+## `rollout_train.inference.api`
+
+Channels on hosted APIs: by message, never trained on, spend counted.
+
+### `ApiChannel`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/api.py`
+
+```python
+class ApiChannel
+```
+
+One model of a hosted API, as a channel (the module's docstring). It serves no checkpoint: every turn is the
+model's own, and none is trained on (`sampled_with` is empty).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `sampled_with` | `tuple[str, ...]` | `()` |  |
+
+**Methods**
+
+- `def __init__(self, name: str, provider: Hosted, model: str, limits: Limits | None = None, *, endpoint: HostedEndpoint | None = None, attempts: int = ATTEMPTS, backoff: float = BACKOFF, longest_wait: float = LONGEST_WAIT) -> None`
+- `@property def context_limit(self) -> int`
+- `@property def max_output_tokens(self) -> int` — The most a reply may take: the model's `max_output_tokens` option, else its context.
+- `@property def held(self) -> str` — What every turn is recorded as served by: the model.
+- `def dollars(self, usage: Usage) -> float | None` — What a reply with this usage cost (`priced`, at the model's catalog prices).
+- `async def weights(self, session: str) -> tuple[str | None, int]` — The model's own weights, at depth 0: a hosted model serves no checkpoint.
+- `async def reaches(self) -> bool` — Always: whether the API answers is known once it is asked.
+- `async def refresh(self) -> None` — Nothing to learn: the catalog says what the model takes.
+- `def endpoint(self) -> HostedEndpoint` — The endpoint the provider names for the model, made the first time, with the key read then. Raises
+  `ModelEndpointError` where it cannot be made (no key, an endpoint that does not import).
+- `async def sample(self, request: SampleRequest, *, temperature: float = 1.0, top_p: float = 1.0, thinking: int | None = None, answer: int | None = None) -> SampleResult` — One reply, with the binding's sampling and budgets (none: the channel's), asked for again while the API
+  cannot give it now, up to `attempts` times (the module's docstring).
+- `def take(self) -> dict[str, float]` — What passed through since the last call: requests, tokens in and out, throughput, the retries and the
+  dollars spent.
+- `def close(self) -> None` — Nothing to end: the endpoint's connections close with the process.
+
+### `ATTEMPTS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/inference/api.py`
+
+```python
+ATTEMPTS = 6
+```
+
+Times a reply the API cannot give now is asked for, before the channel gives up.
+
+### `Hosted`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/api.py`
+
+```python
+class Hosted
+```
+
+An `api` provider as a gateway reaches it: what makes its models' endpoints (`module:name`), its key, its
+catalog, its base URL, and its concurrency cap with what holds it (`admission`, shared by its channels).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `endpoint` | `str` | required |  |
+| `key` | `'Secret \| None'` | required |  |
+| `models` | `Mapping[str, 'ModelOffer']` | required |  |
+| `base_url` | `str \| None` | `None` |  |
+| `concurrency` | `int \| None` | `None` |  |
+| `admission` | `asyncio.Semaphore \| None` | `field(default=None, repr=False)` |  |
+
+**Methods**
+
+- `@classmethod def of(cls, provider: 'InferenceProvider') -> 'Hosted'` — A cluster's `api` provider: its key is its `api_key_env` (or `api_key_file`), else its auth's key or
+  token.
+
+### `HostedEndpoint`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/api.py`
+
+```python
+class HostedEndpoint(Protocol)
+```
+
+What samples a hosted model: an endpoint that takes the sampling parameters of each request.
+
+**Methods**
+
+- `async def sample(self, request: SampleRequest, *, sampling: SamplingParameters | None = None) -> SampleResult`
+
+### `priced`
+
+*function* · `libraries/rollout-train/src/rollout_train/inference/api.py`
+
+```python
+def priced(usage: Usage, cost: Mapping[str, float]) -> float | None
+```
+
+What a reply cost, in dollars, from its usage at a model's catalog prices (dollars per million tokens of
+`input`, `cached_input`, `output` and `thinking`); none where the catalog prices nothing or the usage counts no
+tokens.
+
 ## `rollout_train.recorder`
 
 What recording a trainable channel takes: renderers, the thinking budget, segments.
@@ -4469,19 +4572,19 @@ class ChannelDirectory
 
 Every run's channels, built from its start when the run is first asked for (`load`), over the servers of the
 providers in `providers`, rendered with the renderer each channel names (`renderers`, given its `module:name` and
-the model; by default the renderer itself, called with the model). What each channel should serve and what its
-servers have are asked again every `every` seconds; a turn waits up to `patience` seconds for a server with a
-checkpoint close enough.
+the model; by default the renderer itself, called with the model), and over the hosted APIs in `hosted`. What each
+channel should serve and what its servers have are asked again every `every` seconds; a turn waits up to
+`patience` seconds for a server with a checkpoint close enough.
 
 **Methods**
 
-- `def __init__(self, ledger: Ledger, providers: Mapping[str, Provided], *, renderers: Callable[[str, str], 'Renderer'] = _renderer, every: float | None = None, patience: float = 300.0) -> None`
+- `def __init__(self, ledger: Ledger, providers: Mapping[str, Provided], *, hosted: Mapping[str, Hosted] | None = None, renderers: Callable[[str, str], 'Renderer'] = _renderer, every: float | None = None, patience: float = 300.0) -> None`
 - `@classmethod def of(cls, cluster: 'Cluster', ledger: Ledger, **options: Any) -> 'ChannelDirectory'` — A directory over the cluster config's providers whose servers answer vLLM's API at their endpoints
-  (`SERVED_AT_ENDPOINTS`), each reached as its auth says.
-- `async def load(self, run: str) -> dict[str, RemoteChannel]` — A run's channels, by name, built from its newest start the first time (a run whose start names no
+  (`SERVED_AT_ENDPOINTS`), each reached as its auth says, and its `api` providers.
+- `async def load(self, run: str) -> dict[str, Built]` — A run's channels, by name, built from its newest start the first time (a run whose start names no
   provider this directory knows has none; one with no start yet is asked again next time).
-- `def channel(self, run: str, name: str) -> RemoteChannel | None` — A run's channel, once the run is loaded.
-- `def channels(self) -> dict[str, RemoteChannel]` — Every channel built so far, by its name within its run (`RUN/NAME`).
+- `def channel(self, run: str, name: str) -> Built | None` — A run's channel, once the run is loaded.
+- `def channels(self) -> dict[str, Built]` — Every channel built so far, by its name within its run (`RUN/NAME`).
 - `def close(self) -> None`
 
 ### `create_app`
@@ -4508,7 +4611,8 @@ publishes to (`channels`, by name; `models` names each one's base model), and th
 (`routes`), each run's sampled from what that run says it serves. `hooks` are told of each sample a
 harness asks for in one of the three APIs and the gateway records (a runner's own samples reach its hooks through
 its endpoints). Each turn records what its sampler samples with: the sampler's `sampled_with` where it says, else
-`TOKEN_LEVEL` (every engine and server a channel samples from is token-exact, with sampled-token logprobs).
+`TOKEN_LEVEL` (every engine and server a channel samples from is token-exact, with sampled-token logprobs). The
+channels on hosted APIs it samples by name are `hosted`; what runs spend on them is counted in `spending`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -4519,6 +4623,8 @@ its endpoints). Each turn records what its sampler samples with: the sampler's `
 | `models` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` |  |
 | `hooks` | `Sequence[RunHooks]` | `()` |  |
 | `directory` | `ChannelDirectory \| None` | `None` |  |
+| `hosted` | `Mapping[str, ApiChannel]` | `field(default_factory=dict[str, ApiChannel])` |  |
+| `spending` | `Spending \| None` | `None` |  |
 
 **Methods**
 
@@ -4526,10 +4632,10 @@ its endpoints). Each turn records what its sampler samples with: the sampler's `
   if it is not one this gateway takes.
 - `async def load(self, run: str, channel: str) -> None` — Build a run's channels from its start, if there is a directory and they are not built yet (a channel named
   within its run, `RUN/NAME`, is that run's).
-- `def sampler(self, grant: Grant) -> Sampler` — What a grant's turns sample from (`sampler_of` its run and channel).
-- `def sampler_of(self, run: str, channel: str) -> Sampler` — What a run's channel samples from: the channel its start names, built by the directory (once the run is
-  loaded: `load`); else the channel of this process it names; else the run's routed channel of that name. A
-  channel named within its run (`RUN/NAME`) is that run's.
+- `def sampler(self, grant: Grant) -> 'Sampler | ApiChannel'` — What a grant's turns sample from (`sampler_of` its run and channel).
+- `def sampler_of(self, run: str, channel: str) -> 'Sampler | ApiChannel'` — What a run's channel samples from: the channel its start names, built by the directory (once the run is
+  loaded: `load`); else the channel of this process it names (its engines here, or a hosted API); else the run's
+  routed channel of that name. A channel named within its run (`RUN/NAME`) is that run's.
 - `async def reaches(self, run: str, channel: str) -> bool` — Whether a run's channel can be sampled now: one its start names or a routed one, whose servers have a
   checkpoint close enough to what the run says it should serve; or one of this process.
 - `@property def names(self) -> list[str]` — The channels it samples, by name.
@@ -4542,7 +4648,8 @@ its endpoints). Each turn records what its sampler samples with: the sampler's `
   (`ValueError` from the channel, for a range or a `top` it does not take, is a request refused), or the
   endpoint's `ModelEndpointError` (`ContextOverflow` for a sequence too long to score).
 - `def observe(self, grant: Grant, request: SampleRequest, reply: Reply, seconds: float) -> None` — Tell the hooks of a sample a harness asked for, newly recorded.
-- `async def count(self, grant: Grant, prompt: Prompt) -> int` — How many tokens a prompt renders to with the channel's renderer: what a turn's prompt would hold.
+- `async def count(self, grant: Grant, prompt: Prompt) -> int` — How many tokens a prompt renders to with the channel's renderer: what a turn's prompt would hold. A hosted
+  API's channel has no renderer, and counts none (`Refused`).
 - `async def ready(self) -> dict[str, str]` — What is not ready, by part (empty: ready): the ledger and the blob store must answer.
 
 ### `GatewayEndpoint`
@@ -4788,7 +4895,8 @@ One turn, as the gateway sampled and recorded it.
 | `sampled_with` | `tuple[str, ...]` | `TOKEN_LEVEL` | What it was sampled with, of `TOKEN_LEVEL`: what its sampler could do (a turn recorded without saying was sampled with all of them). |
 | `use` | `str` | `SAMPLE` | `sample`, or `score`: the logprobs the channel gave the prompt's tokens (`scores`), with nothing sampled. |
 | `scores` | `Scores \| None` | `None` | A scoring turn's scores. |
-| `trained` | `bool` | `True` | Whether it may be trained on: false for a turn of a slot that is not trained (a judge, a fixed opponent). |
+| `trained` | `bool` | `True` | Whether it may be trained on: false for a turn of a slot that is not trained (a judge, a fixed opponent), and for a turn a hosted API sampled. |
+| `spend` | `float \| None` | `None` | Dollars it cost, from its usage at its model's catalog prices, where its provider is metered and prices it. |
 
 **Methods**
 
@@ -4826,8 +4934,9 @@ cache.
   `fence` was taken again.
 - `async def turns(self, run: str, run_id: str) -> list[TurnRecord]` — A program's run's turns, in the order they were recorded.
 - `async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]` — What each model slot of a program's run exports, by slot (`segments_of` its samples: scoring turns are left
-  out). The segments of a slot that is not trained are kept, marked so (`Segment.trained`). With
-  `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from it.
+  out, and so are a hosted API's, which hold no tokens). The segments of a slot that is not trained are kept,
+  marked so (`Segment.trained`). With `accepted_only`, what a compaction attempt sampled is trained on only if
+  its harness went on from it.
 
 ### `unaccepted`
 
@@ -4923,6 +5032,7 @@ A run being built from its settings, and what it started: everything the loop of
 | `trainer` | `Trainer \| None` | `None` |  |
 | `hosts` | `dict[str, list[Any]]` | `field(default_factory=dict[str, list[Any]])` | The engine hosts of each channel, by channel. |
 | `channels` | `dict[str, Channel]` | `field(default_factory=dict[str, Channel])` | The channels whose engines are in this process (Tinker's). |
+| `on_apis` | `dict[str, ApiChannel]` | `field(default_factory=dict[str, ApiChannel])` | The channels on hosted APIs. |
 | `routes` | `Routes \| None` | `None` |  |
 | `gateway` | `Gateway \| None` | `None` |  |
 | `recorder` | `GatewayEndpoints \| None` | `None` |  |
@@ -4974,6 +5084,16 @@ def run_directory(cluster: Cluster, run: str) -> Path
 ```
 
 Where a run keeps its files on its driver's node: its feed, the checkpoints in use, fetched bases.
+
+### `SpendReached`
+
+*class* · `libraries/rollout-train/src/rollout_train/jobs.py`
+
+```python
+class SpendReached(Exception)
+```
+
+A run spent what its `limits.spend` allows.
 
 ### `taken_by`
 
@@ -5320,8 +5440,8 @@ not known here: an environment whose Python is a project of its own, which this 
 class Examined
 ```
 
-A run's settings, checked: the findings, what is known of its environment, one step's estimated spend and what
-it trains.
+A run's settings, checked: the findings, what is known of its environment, its estimated spend (one step's, or
+an eval's) and what it trains.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -5339,7 +5459,7 @@ async def examined(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, l
 ```
 
 A run's settings checked on this cluster with the facts gathered now (`checked`), with those facts' environment,
-one step's estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`).
+its estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`).
 
 ### `free_name`
 
@@ -5913,7 +6033,8 @@ class System
   without a cluster config.
 - `async def check(self, body: Mapping[str, Any]) -> dict[str, Any]` — What a launch's body would be refused for, and the notes beside (each with the setting it is about), on
   this monitor's cluster (`rollout_train.launching.examined`); the settings it would run with, what it trains,
-  one step's estimated spend on its metered parts (or why it cannot be estimated yet), and the slots its
+  its estimated spend on its metered parts (one step's, or an eval's: `per`; or why it cannot be estimated
+  yet), and the slots its
   environment's programs declare, where they are known here. Raises `Taken` where this monitor has no cluster
   config, or for a body it cannot read.
 - `async def presets(self) -> dict[str, Any]` — Every preset's newest version, each with how many versions it has (`rollout_train.presets`).
@@ -6525,7 +6646,7 @@ What an inference provider's kind can do.
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-INFERENCE_KINDS: Mapping[str, InferenceKind] = {each.name: each for each in (InferenceKind('vllm', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=True, loads=frozenset({'peft', 'full'})), auths=('none', 'bearer', 'mtls'), auth=Auth('none'), fields=('engine', 'listen', 'max_logprobs'), implementation='rollout_vllm:VllmEngine'), InferenceKind('vllm-servers', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'})), auths=('none', 'bearer', 'mtls'), auth=None, fields=('addresses', 'via', 'loader', 'max_logprobs'), implementation='rollout_train.inference:RemoteEngine', remote=True), InferenceKind('tinker', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'tinker'}), bills='tokens', unchecked=frozenset({'prompt_logprobs', 'top_logprobs'})), auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), implementation='rollout_tinker:TinkerEngine', allocation='metered'), InferenceKind('api', Capabilities(token_exact=False, sampled_logprobs=False, prompt_logprobs=False, top_logprobs=0, honours_sampling=False, adapters=False, full_reload=False, streaming=True, loads=frozenset(), bills='tokens'), auths=('vendor', 'bearer'), auth=None, fields=('endpoint',), allocation='metered'), InferenceKind('runpod-inference', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca', 'max_logprobs'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True))}
+INFERENCE_KINDS: Mapping[str, InferenceKind] = {each.name: each for each in (InferenceKind('vllm', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=True, loads=frozenset({'peft', 'full'})), auths=('none', 'bearer', 'mtls'), auth=Auth('none'), fields=('engine', 'listen', 'max_logprobs'), implementation='rollout_vllm:VllmEngine'), InferenceKind('vllm-servers', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'})), auths=('none', 'bearer', 'mtls'), auth=None, fields=('addresses', 'via', 'loader', 'max_logprobs'), implementation='rollout_train.inference:RemoteEngine', remote=True), InferenceKind('tinker', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'tinker'}), bills='tokens', unchecked=frozenset({'prompt_logprobs', 'top_logprobs'})), auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), implementation='rollout_tinker:TinkerEngine', allocation='metered'), InferenceKind('api', Capabilities(token_exact=False, sampled_logprobs=False, prompt_logprobs=False, top_logprobs=0, honours_sampling=False, adapters=False, full_reload=False, streaming=True, loads=frozenset(), bills='tokens'), auths=('vendor', 'bearer'), auth=Auth('vendor'), fields=('endpoint', 'base_url'), secrets=('api_key',), allocation='metered'), InferenceKind('runpod-inference', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca', 'max_logprobs'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True))}
 ```
 
 Every kind of inference provider, by name.
@@ -6607,8 +6728,8 @@ A model a provider serves here.
 | `context` | `int` | required | The longest sequence it takes, prompt and reply. |
 | `base` | `str \| None` | `None` | The model it was quantized from, if any: an adapter trained over the base can be served on it. |
 | `max_lora_rank` | `int \| None` | `None` | The highest adapter rank it loads (none: adapters are not limited here, or not served). |
-| `cost` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Dollars per million tokens by token class (`input`, `cached_input`, `output`, `thinking`), or per hour (`hour`). |
-| `options` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What its engines are started with (`gpu_memory_utilization`, `max_num_seqs`, …). |
+| `cost` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Dollars per million tokens by token class (`input`, `cached_input`, `output`, `thinking`), or per hour (`hour`). Cached input is priced as input, and thinking as output, where the table does not say. |
+| `options` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What its engines are started with (`gpu_memory_utilization`, `max_num_seqs`, …); for a hosted API's model, what it takes (`max_output_tokens`, and its endpoint's own: how it thinks, whether it takes sampling). |
 
 ### `ROUTING`
 
@@ -7492,7 +7613,7 @@ it (a trainer's own setting among them).
 *constant* · `libraries/rollout-train/src/rollout_train/run_settings.py`
 
 ```python
-KEYS: tuple[Key, ...] = (Key('kind', _S, 'train', False, EVERY, 'The kind of run', choices=KINDS), Key('name', _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"), Key('environment', _S + _N, None, False, SAMPLING, 'The environment, `module:name`'), Key('groups', _I, 100, False, TRAINED | {'check'}, 'Groups it plays', least=1), Key('seed', _I, 0, False, EVERY, 'The seed its draws start from', least=0), Key('start', _S + _N, None, False, EVERY, 'The checkpoint it trains from or evaluates; none: the base model'), Key('bookmark', _S + _N, None, False, TRAINING, 'A bookmark it moves to each checkpoint it makes'), Key('episodes_at_once', _I, 6, False, SAMPLING, 'Episodes it keeps work waiting for', least=1), Key('trainer.provider', _S + _N, None, False, TRAINING, 'The trainer, a `[trainers.NAME]` of the cluster'), Key('trainer.channel', _S, 'policy', False, TRAINED, 'The trained channel'), Key('trainer.model', _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"), Key('weights', _S + _N, None, False, TRAINING, 'What it trains: `lora` (an adapter) or `full` weights; none: what its trainer makes', choices=WEIGHTS), Key('channels.*.provider', _S + _N, None, False, SAMPLING, 'What samples the channel, an `[inference.NAME]`'), Key('channels.*.providers', ('list', 'null'), None, False, SAMPLING, 'Several providers serving it, in order'), Key('channels.*.routing', _S, 'spill', False, SAMPLING, 'How turns are shared among them', choices=ROUTING), Key('channels.*.weights', ('table', 'null'), None, False, SAMPLING, "Each provider's weight, for `weighted`"), Key('channels.*.model', _S + _N, None, False, RENDERING, "The model it serves, among its providers'"), Key('channels.*.renderer', _S + _N, None, False, RENDERING, 'The renderer, `module:name`'), Key('channels.*.thinking_tokens', _I + _N, None, False, SAMPLING, 'Thinking budget per turn', least=1), Key('channels.*.answer_tokens', _I + _N, None, False, SAMPLING, 'Room for the answer after it', least=1), Key('channels.*.replicas', _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1), Key('channels.*.bridge', _S, 'auto', False, SAMPLING, 'The bridge', choices=('auto', 'merge-quantize')), Key('channels.*.mode', _S + _N, None, False, SAMPLING, '`fixed` or `follows`; none: the trained channel serves what the run trains, another serves `fixed`', choices=('fixed', 'follows')), Key('channels.*.checkpoint', _S + _N, None, False, SAMPLING, 'What a `fixed` channel serves; none: the base model'), Key('channels.*.follows', _S + _N, None, False, SAMPLING, 'The channel a `follows` channel follows'), Key('channels.*.lag', _I, 0, False, SAMPLING, 'How many checkpoints behind it follows', least=0), Key('slots.*', _S, None, False, SAMPLING, "The channel a program's slot samples"), Key('self_judging', _B, False, False, SAMPLING, "Whether a judge may be bound to a channel serving the run's own"), Key('eval.suite', _S + _N, None, False, frozenset({'eval'}), 'The suite an eval plays, by name or `NAME@N`'), Key('eval.episodes', _I + _N, None, False, frozenset({'eval'}), 'Episodes of each start', least=1), Key('check.episodes', _I + _N, None, False, frozenset({'check'}), "Episodes of each group; none: a group's size", least=1), Key('imitation.dataset', _S + _N, None, False, frozenset({'imitate'}), 'The dataset, by name or id'), Key('imitation.limit', _I + _N, None, False, frozenset({'imitate'}), 'At most this many segments', least=1), Key('imitation.passes', _I, 1, False, frozenset({'imitate'}), 'Passes over the dataset', least=1), Key('imitation.warmup', _I, 0, False, frozenset({'imitate'}), 'Warm-up updates', least=0), Key('imitation.resume_optimizer', _B, False, False, frozenset({'imitate'}), "Go on from the start's optimizer"), Key('imitation.without', ('list',), [], False, frozenset({'imitate'}), 'Datasets whose segments are left out'), Key('groups_per_step', _I, 4, True, TRAINED, 'Groups a step waits for', least=1), Key('max_lag', _I, 1, True, TRAINED, 'Checkpoints behind the newest a turn may begin', least=0), Key('evals.suite', _S + _N, None, True, TRAINED, 'The suite its checkpoints play, by name or `NAME@N`'), Key('evals.every', _I, 1, True, TRAINED, 'Every this many steps', least=1), Key('evals.episodes', _I + _N, None, True, TRAINED, "Episodes of each start; none: the suite's", least=1), Key('limits.spend', ('float', 'null'), None, True, TRAINING, 'Dollars: the run ends once its estimate reaches this', least=0), Key('objective.preset', _S, 'default', False, TRAINING, "The objective's preset", choices=tuple(PRESETS)), *(Key(f'objective.{each.key}', (*each.types, 'null'), None, each.changeable, TRAINING, f"{each.says}; none: the preset's", least=each.least, choices=each.choices, above=each.above) for each in COMPONENTS))
+KEYS: tuple[Key, ...] = (Key('kind', _S, 'train', False, EVERY, 'The kind of run', choices=KINDS), Key('name', _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"), Key('environment', _S + _N, None, False, SAMPLING, 'The environment, `module:name`'), Key('groups', _I, 100, False, TRAINED | {'check'}, 'Groups it plays', least=1), Key('seed', _I, 0, False, EVERY, 'The seed its draws start from', least=0), Key('start', _S + _N, None, False, EVERY, 'The checkpoint it trains from or evaluates; none: the base model'), Key('bookmark', _S + _N, None, False, TRAINING, 'A bookmark it moves to each checkpoint it makes'), Key('episodes_at_once', _I, 6, False, SAMPLING, 'Episodes it keeps work waiting for', least=1), Key('trainer.provider', _S + _N, None, False, TRAINING, 'The trainer, a `[trainers.NAME]` of the cluster'), Key('trainer.channel', _S, 'policy', False, TRAINED, 'The trained channel'), Key('trainer.model', _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"), Key('weights', _S + _N, None, False, TRAINING, 'What it trains: `lora` (an adapter) or `full` weights; none: what its trainer makes', choices=WEIGHTS), Key('channels.*.provider', _S + _N, None, False, SAMPLING, 'What samples the channel, an `[inference.NAME]`'), Key('channels.*.providers', ('list', 'null'), None, False, SAMPLING, 'Several providers serving it, in order'), Key('channels.*.routing', _S, 'spill', False, SAMPLING, 'How turns are shared among them', choices=ROUTING), Key('channels.*.weights', ('table', 'null'), None, False, SAMPLING, "Each provider's weight, for `weighted`"), Key('channels.*.model', _S + _N, None, False, RENDERING, "The model it serves, among its providers'"), Key('channels.*.renderer', _S + _N, None, False, RENDERING, 'The renderer, `module:name`'), Key('channels.*.thinking_tokens', _I + _N, None, False, SAMPLING, 'Thinking budget per turn', least=1), Key('channels.*.answer_tokens', _I + _N, None, False, SAMPLING, 'Room for the answer after it', least=1), Key('channels.*.replicas', _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1), Key('channels.*.bridge', _S, 'auto', False, SAMPLING, 'The bridge', choices=('auto', 'merge-quantize')), Key('channels.*.mode', _S + _N, None, False, SAMPLING, '`fixed` or `follows`; none: the trained channel serves what the run trains, another serves `fixed`', choices=('fixed', 'follows')), Key('channels.*.checkpoint', _S + _N, None, False, SAMPLING, 'What a `fixed` channel serves; none: the base model'), Key('channels.*.follows', _S + _N, None, False, SAMPLING, 'The channel a `follows` channel follows'), Key('channels.*.lag', _I, 0, False, SAMPLING, 'How many checkpoints behind it follows', least=0), Key('slots.*', _S, None, False, SAMPLING, "The channel a program's slot samples"), Key('self_judging', _B, False, False, SAMPLING, "Whether a judge may be bound to a channel serving the run's own"), Key('eval.suite', _S + _N, None, False, frozenset({'eval'}), 'The suite an eval plays, by name or `NAME@N`'), Key('eval.episodes', _I + _N, None, False, frozenset({'eval'}), 'Episodes of each start', least=1), Key('check.episodes', _I + _N, None, False, frozenset({'check'}), "Episodes of each group; none: a group's size", least=1), Key('imitation.dataset', _S + _N, None, False, frozenset({'imitate'}), 'The dataset, by name or id'), Key('imitation.limit', _I + _N, None, False, frozenset({'imitate'}), 'At most this many segments', least=1), Key('imitation.passes', _I, 1, False, frozenset({'imitate'}), 'Passes over the dataset', least=1), Key('imitation.warmup', _I, 0, False, frozenset({'imitate'}), 'Warm-up updates', least=0), Key('imitation.resume_optimizer', _B, False, False, frozenset({'imitate'}), "Go on from the start's optimizer"), Key('imitation.without', ('list',), [], False, frozenset({'imitate'}), 'Datasets whose segments are left out'), Key('groups_per_step', _I, 4, True, TRAINED, 'Groups a step waits for', least=1), Key('max_lag', _I, 1, True, TRAINED, 'Checkpoints behind the newest a turn may begin', least=0), Key('evals.suite', _S + _N, None, True, TRAINED, 'The suite its checkpoints play, by name or `NAME@N`'), Key('evals.every', _I, 1, True, TRAINED, 'Every this many steps', least=1), Key('evals.episodes', _I + _N, None, True, TRAINED, "Episodes of each start; none: the suite's", least=1), Key('limits.spend', ('float', 'null'), None, True, TRAINING | {'eval'}, 'Dollars: an eval ends once it spends this; a training run whose step is estimated above it is refused', least=0), Key('objective.preset', _S, 'default', False, TRAINING, "The objective's preset", choices=tuple(PRESETS)), *(Key(f'objective.{each.key}', (*each.types, 'null'), None, each.changeable, TRAINING, f"{each.says}; none: the preset's", least=each.least, choices=each.choices, above=each.above) for each in COMPONENTS))
 ```
 
 Every key a run takes, beside the trainer's own (`trainer.FIELD`).
@@ -8262,11 +8383,11 @@ What the environment's worker says of it, asked beforehand.
 *function* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-def estimated_spend(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> float | None
+def estimated_spend(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None, ledger: LedgerFacts | None = None) -> float | None
 ```
 
-Dollars one step is estimated to cost on the run's metered parts, at most (`spend_of`); none where it cannot be
-estimated.
+Dollars one step (of an eval: the eval) is estimated to cost on the run's metered parts, at most
+(`spend_of`); none where it cannot be estimated.
 
 ### `Finding`
 
@@ -8342,7 +8463,7 @@ class Rule
 *constant* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('renderer', 'a channel sampling tokens whose model no renderer renders, that several do with none said, or a renderer said that says it renders other models'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
+RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered, or a hosted API shares a channel"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is a hosted API (no exact tokens or behaviour logprobs, whatever the objective), is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('renderer', 'a channel sampling tokens whose model no renderer renders, that several do with none said, or a renderer said that says it renders other models'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a training run's spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
 ```
 
 Every rule `check` applies, in the order it reports them.
@@ -8366,28 +8487,49 @@ reloaded in place), if it cannot.
 class Spend
 ```
 
-One step's estimated spend on the run's metered parts (its trainer, the providers of its trained channel), at
-most: every token trained times the trainer's cost for the model, and the sampled and prompt tokens times the
-dearest metered provider's costs to sample and read them, uncached. Its scheduled parts are capacity the run is
-placed on, not spent per step.
+A run's estimated spend on its metered parts, at most. For a training run, one step's (`per` is `step`): every
+token trained times the trainer's cost for the model, and the sampled and prompt tokens times the dearest metered
+provider's costs to sample and read them, uncached. For an eval, the whole eval's (`per` is `eval`): every
+episode of the suite's starts, each turn's thinking and answer budgets sampled and its prompt read at the
+dearest metered provider of the channel it plays. Scheduled parts are capacity the run is placed on, not spent.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `dollars` | `float \| None` | required | None where it cannot be estimated (`why`). |
 | `parts` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Each metered part's dollars, by provider or trainer. |
 | `why` | `str` | `''` | Why it cannot be estimated. |
+| `per` | `str` | `'step'` | What it is the spend of: one step of a training run (`step`), or a whole eval (`eval`). |
 
 ### `spend_of`
 
 *function* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-def spend_of(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> Spend
+def spend_of(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None, ledger: LedgerFacts | None = None) -> Spend
 ```
 
-One step's estimated spend (`Spend`), or why it cannot be estimated: not a training run, no trainer, the
-environment's numbers or the budgets unknown, or a metered part priced by the hour. Episodes a group are the
-environment's, else the objective's group size.
+A run's estimated spend (`Spend`), or why it cannot be estimated: one step of a training run, or a whole eval
+(from the suite's starts in `ledger`); not for other runs; for a training run, not without a trainer; not where the
+environment's numbers or the budgets are unknown, or a metered part is priced by the hour. Episodes a group are
+the environment's, else the objective's group size.
+
+### `SuiteEntryFacts`
+
+*class* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+class SuiteEntryFacts
+```
+
+One entry of the version of a suite the settings name: what an eval of it plays.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str` | required |  |
+| `starts` | `int` | required |  |
+| `episodes` | `int` | required | Of each start, unless the eval says another number. |
+| `thinking_tokens` | `int \| None` | `None` |  |
+| `answer_tokens` | `int \| None` | `None` |  |
 
 ### `SuiteFacts`
 
@@ -8402,6 +8544,7 @@ class SuiteFacts
 | `name` | `str` | required |  |
 | `newest` | `int` | required | Its newest version's number. |
 | `environments` | `frozenset[str]` | `frozenset()` |  |
+| `entries` | `tuple[SuiteEntryFacts, ...]` | `()` | The entries of the version the settings name (its newest, where they name none). |
 
 ### `weights_of`
 
@@ -9355,6 +9498,18 @@ Where requests go and how they authenticate.
 - `@property def url(self) -> str`
 - `@property def accepts_max_output_tokens(self) -> bool` — Whether the backend accepts `max_output_tokens`.
 
+### `hosted` {#rollout_openaihosted}
+
+*function* · `implementations/rollout-openai/src/rollout_openai/responses.py`
+
+```python
+def hosted(model: str, *, api_key: str | None, context_limit: int, max_output_tokens: int, options: Mapping[str, JsonValue] | None = None, base_url: str | None = None) -> ResponsesEndpoint
+```
+
+The endpoint of a cluster's `api` provider for one of its models: its API key, the model's context and most
+output (its catalog entry), the model's `options` (`reasoning_effort`: the effort a request is sampled with where
+its binding says none), and the API's base URL (none: OpenAI's own). Raises `PermissionError` without a key.
+
 ### `ResponsesContract`
 
 *class* · `implementations/rollout-openai/src/rollout_openai/responses.py`
@@ -9385,9 +9540,66 @@ Serves one model through the Responses API. Direct adapters do not deduplicate: 
 - `def __init__(self, credentials: Credentials, model: str, *, sampling: SamplingParameters | None = None, contract: ResponsesContract | None = None, client: httpx.AsyncClient | None = None, timeout: float = 600.0, blobs: Blobs | None = None) -> None` — `blobs` reads the bytes of `Media` blocks (images); without it, a context with media cannot be sent.
 - `def describe(self, session_id: str) -> CapabilityContract`
 - `async def cancel(self, effect_id: str) -> None` — Nothing to do: the request stops when the task awaiting `sample` is cancelled.
-- `async def sample(self, request: SampleRequest) -> SampleResult`
-- `def request_body(self, request: SampleRequest, media: Mapping[str, bytes] | None = None) -> dict[str, JsonValue]` — The Responses API request for a sample request (public for tests and debugging). `media` holds the bytes
-  of the context's `Media` blocks by SHA-256.
+- `async def sample(self, request: SampleRequest, *, sampling: SamplingParameters | None = None) -> SampleResult` — One reply; `sampling` in place of the endpoint's own sampling parameters, for this request.
+- `def request_body(self, request: SampleRequest, media: Mapping[str, bytes] | None = None, *, sampling: SamplingParameters | None = None) -> dict[str, JsonValue]` — The Responses API request for a sample request (public for tests and debugging). `media` holds the bytes
+  of the context's `Media` blocks by SHA-256; `sampling`, the sampling parameters in place of the endpoint's.
+
+## `rollout_anthropic`
+
+A model endpoint for Anthropic's Messages API.
+
+### `hosted` {#rollout_anthropichosted}
+
+*function* · `implementations/rollout-anthropic/src/rollout_anthropic/messages.py`
+
+```python
+def hosted(model: str, *, api_key: str | None, context_limit: int, max_output_tokens: int, options: Mapping[str, JsonValue] | None = None, base_url: str | None = None, blobs: Blobs | None = None, timeout: float = 600.0) -> MessagesEndpoint
+```
+
+The endpoint of a cluster's `api` provider for one of its models (`endpoint = "rollout_anthropic:hosted"`): its
+API key, the model's context and most output and its `options` (`MessagesOptions`), from its catalog entry, and the
+API's base URL (none: Anthropic's own). Raises `PermissionError` without a key.
+
+### `MessagesEndpoint`
+
+*class* · `implementations/rollout-anthropic/src/rollout_anthropic/messages.py`
+
+```python
+class MessagesEndpoint
+```
+
+Serves one model through the Messages API. It does not deduplicate: a retried effect samples again.
+
+**Methods**
+
+- `def __init__(self, client: anthropic.AsyncAnthropic, model: str, *, contract: CapabilityContract, options: MessagesOptions | None = None, sampling: SamplingParameters | None = None, blobs: Blobs | None = None) -> None` — `client` is made with `max_retries=0` (the holder retries); `blobs` reads the bytes of `Media` blocks:
+  without it, a context with media cannot be sent.
+- `def describe(self, session_id: str) -> CapabilityContract`
+- `async def cancel(self, effect_id: str) -> None` — Nothing to do: the request stops when the task awaiting `sample` is cancelled.
+- `async def sample(self, request: SampleRequest, *, sampling: SamplingParameters | None = None) -> SampleResult` — One reply; `sampling` in place of the endpoint's own sampling parameters, for this request.
+- `def request_body(self, request: SampleRequest, media: Mapping[str, bytes] | None = None, *, sampling: SamplingParameters | None = None) -> dict[str, Any]` — The Messages API request for a sample request (public for tests and debugging). `media` holds the bytes of
+  the context's `Media` blocks by SHA-256; `sampling`, the sampling parameters in place of the endpoint's.
+
+### `MessagesOptions`
+
+*class* · `implementations/rollout-anthropic/src/rollout_anthropic/messages.py`
+
+```python
+class MessagesOptions
+```
+
+What one model takes, as its catalog entry's `options` say.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `thinking` | `Literal['adaptive', 'budget', 'none']` | `'none'` |  |
+| `effort` | `str \| None` | `None` | The effort adaptive thinking is steered by where a binding says none (none: the model's default). |
+| `sampling` | `bool` | `True` | Whether it takes temperature and top-p. |
+| `forced_tool_choice` | `bool` | `True` | Whether it takes a tool choice that forces a call (`any`, a named tool); where it does not, such a choice is sent as `auto`. |
+
+**Methods**
+
+- `@classmethod def of(cls, options: Mapping[str, JsonValue] | None) -> 'MessagesOptions'` — The options of a model's catalog entry (those not about the Messages API are left).
 
 ## `rollout_s3`
 
