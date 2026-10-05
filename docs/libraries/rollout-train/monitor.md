@@ -381,7 +381,7 @@ runners' heartbeats; every chart is drawn to scale and says each series' value u
 | `inference` | each run's engines: tokens a second and requests at once, a measurement each beat while they are busy; then each channel, what it serves and how fast now |
 | `ledger` | each runner that took its fence in the ledger (its fence, the claims it has made, how many hold, when it last claimed), the ledger's fences (but [episodes'](rollouts.md#each-episodes-fence), one per episode claimed) and tables |
 
-An episode's reward is summed as the trainer sums it ([rewards](episodes.md#rewards)): the mean of its slots'. One
+An episode's reward is summed as the trainer sums it ([rewards](episodes.md#rewards)): the mean of its trained slots'. One
 still playing is shown with its reward so far, read from its feed the same way, and each slot's where they differ.
 
 Whether an episode solved its task is what its program reported (`info["solved"]`), and a task need not say. The
@@ -423,7 +423,9 @@ launcher its `profiles`, `environments`, `at_once`, `playing` and `launches`; a 
 
 Each agent's rollout is its samples in order, its slots in their numbers' order (`agent-2` before `agent-10`), each in
 a color its whole name gives it. An agent offered tools on its turns that samples with none offered (summarising its
-memory, say) takes no turn then: those samples are folded, closed, under its turn before. For the turn shown:
+memory, say) takes no turn then: those samples are folded, closed, under its turn before. A slot that is not trained
+(a judge, a fixed opponent) has its rollout beside the others', labelled by its slot and, once the episode has ended,
+`not trained` (the ended episode's `untrained`). For the turn shown:
 
 - **Sees**: what came back since its newest reply (the messages after it, with any tool results), or with **whole
   context**, every message it was sent. A map in it (the rows under a line opening `Map of what you have seen`, as

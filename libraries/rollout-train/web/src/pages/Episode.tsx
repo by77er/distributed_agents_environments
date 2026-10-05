@@ -140,7 +140,7 @@ function Rollouts({ episode, slot: asked }: { episode: EpisodeData; slot: string
         <div className="turns-frame">
           <div className="turns" style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(300px, 1fr))` }}>
             {shown.map(([each, samples]) => (
-              <TurnCard key={each} slot={each} sample={samples[turn]} next={samples[turn + 1]} beside={samples[turn] && beside.get(samples[turn])} source={episode.source} state={episode.state} full={full} />
+              <TurnCard key={each} slot={each} untrained={episode.ended?.untrained?.includes(each) ?? false} sample={samples[turn]} next={samples[turn + 1]} beside={samples[turn] && beside.get(samples[turn])} source={episode.source} state={episode.state} full={full} />
             ))}
           </div>
         </div>
@@ -190,14 +190,14 @@ function Beside({ samples }: { samples: SampleLine[] }) {
   );
 }
 
-const TurnCard = memo(function TurnCard({ slot, sample, next, beside, source, state, full }: { slot: string; sample: SampleLine | undefined; next: SampleLine | undefined; beside: SampleLine[] | undefined; source: EpisodeData["source"]; state: string | null; full: boolean }) {
+const TurnCard = memo(function TurnCard({ slot, untrained, sample, next, beside, source, state, full }: { slot: string; untrained: boolean; sample: SampleLine | undefined; next: SampleLine | undefined; beside: SampleLine[] | undefined; source: EpisodeData["source"]; state: string | null; full: boolean }) {
   const pre = useRef<HTMLDivElement>(null);
   // (a turn newly shown opens at the bottom of what the agent saw: its newest observation)
   useLayoutEffect(() => {
     const element = pre.current?.querySelector("pre");
     if (element) element.scrollTop = element.scrollHeight;
   }, [sample, full]);
-  const header = <header><Avatar name={slot} /><b>{slot}</b><span>{sample ? `${figure(sample.seconds)} s · ${sample.finish_reason ?? ""}` : ""}</span></header>;
+  const header = <header><Avatar name={slot} /><b>{slot}</b><span>{untrained ? "not trained · " : ""}{sample ? `${figure(sample.seconds)} s · ${sample.finish_reason ?? ""}` : ""}</span></header>;
   if (!sample) return <div className="turn">{header}<section><span className="none">no turn yet</span></section></div>;
   const came = cameOf(sample, next), many = sample.reply.calls.length > 1;
   return (

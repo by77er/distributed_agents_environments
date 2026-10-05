@@ -1564,6 +1564,7 @@ def _ended(record: Record) -> dict[str, Any]:
         "sampled": sum(record.sampled.values()),
         "labels": dict(episode.labels),
         "slots": sorted(episode.trajectories),
+        "untrained": sorted(slot for slot, trajectory in episode.trajectories.items() if not trajectory.trained),
         "info": dict(episode.info),
         "events": record.events.model_dump(mode="json") if record.events else None,
         "kept": sum(blob.size for blob in (record.trajectories, record.events) if blob is not None),

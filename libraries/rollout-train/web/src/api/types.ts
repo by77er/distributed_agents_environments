@@ -493,7 +493,7 @@ export interface Episode {
   run_id: string;
   labels: Record<string, string>;
   state: string | null;
-  ended: (Record<string, unknown> & { reward?: number; solved?: boolean | null; sampled?: number; info?: Record<string, unknown> }) | null;
+  ended: (Record<string, unknown> & { reward?: number; solved?: boolean | null; sampled?: number; untrained?: string[]; info?: Record<string, unknown> }) | null;
   source: "feed" | "archive" | null;
   lines: Line[];
 }
