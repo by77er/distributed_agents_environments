@@ -26,6 +26,12 @@ as `rollout_train.imitation.without` cuts it; a turn where the cut cannot be mad
 A dataset records its `supervision`: `importance` where every example's turns were sampled with their exact tokens and
 behaviour logprobs, else `supervised` (`rollout_train.imitation.supervision_of`).
 
+**Teacher samples.** A dataset of examples every one of which a teacher scored, with its top-k logprobs at each sampled
+token (`Segment.teacher`, `rollout_train.distillation`), is of `teacher` supervision: its manifest names each turn's
+teacher, and its examples are distilled segments (`rollout_train.trainer.Distilled`), which a distillation objective
+(`distillation`: the forward KL to the teacher's top-k) trains on. Its episodes are a teacher's: a run, or an eval,
+whose sampled channel served the teacher, its segments scored with the teacher's top-k as an on-policy run's are.
+
 **Preferences.** A dataset of `pairs` or `labelled` examples, for a preference loss (its `kind`), is made by a
 preference rule (`PREFERENCE_RULES`) instead: `best-and-worst`, of each group whose rewards differ, its best episode
 (the highest reward, then the shortest, then the first) preferred to its worst (the lowest, then the first); or
@@ -55,7 +61,7 @@ from rollout.contracts import BlobReference, RunEvent
 from rollout.harness.blobs import Blobs
 from rollout.names import named
 from rollout_train.checkpoints import SHORTEST, checkpoints_in, new_id
-from rollout_train.imitation import GUIDANCE, IMPORTANCE, SUPERVISED, Examples, without
+from rollout_train.imitation import GUIDANCE, IMPORTANCE, SUPERVISED, TEACHER, Examples, without
 from rollout_train.ledger import Ledger
 from rollout_train.record import GROUPS, STARTS, newest_record, table
 from rollout_train.recorder.renderers import Renderer
@@ -64,7 +70,7 @@ from rollout_train.registry import Registry
 from rollout_train.rollouts.episodes import COMPRESSED, Episode, Record, events_of, loaded
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.stores import FILES, opened
-from rollout_train.trainer import Labelled, Pair, Weighted
+from rollout_train.trainer import Distilled, Labelled, Pair, Weighted
 
 DATASETS = "datasets"
 """The ledger's table of datasets, by id."""
@@ -89,6 +95,10 @@ class Turn:
     """The depth of the checkpoint that sampled it (its spans' newest); None if it sampled nothing."""
     sampled_with: tuple[str, ...] = TOKEN_LEVEL
     """What its turns were sampled with (`Segment.sampled_with`)."""
+    teacher: str | None = None
+    """The teacher that scored its sampled tokens, if one did (`Segment.teacher`)."""
+    top: int = 0
+    """How many of the teacher's most likely tokens its scores carry at a position (0: none)."""
 
 
 class TurnFilter(Protocol):
@@ -241,8 +251,8 @@ class Dataset:
     checkpoints: list[str] = field(default_factory=list[str])
     """The checkpoints that sampled its examples, by id, by depth (examples sampled by the base model name none)."""
     supervision: str = IMPORTANCE
-    """`importance` if every example's turns were sampled with their exact tokens and behaviour logprobs, else
-    `supervised`."""
+    """`teacher` if a teacher scored every example with its top-k (a dataset of examples), else `importance` if every
+    example's turns were sampled with their exact tokens and behaviour logprobs, else `supervised`."""
     kind: str = EXAMPLES
     """What its lines are: `examples`, `pairs` or `labelled` examples."""
     made: float = 0.0
@@ -292,6 +302,8 @@ async def make_dataset(
     left_out: Counter[str] = Counter()
     seen = 0
     supervision = IMPORTANCE
+    taught: list[bool] = []
+    """Whether a teacher scored each turn the lines hold, with its top-k."""
 
     async def kept(candidate: Candidate) -> list[dict[str, JsonValue]]:
         """A line for each of an episode's turns that every filter keeps (and what the filters saw of it)."""
@@ -321,10 +333,12 @@ async def make_dataset(
             source = f"{candidate.run}/{candidate.group}/{candidate.number}/{turn.slot}/{turn.index}"
             if any(each not in turn.sampled_with for each in BEHAVIOUR):
                 supervision = SUPERVISED
+            taught.append(turn.teacher is not None and turn.top > 0)
             found.append({
                 **noted, "source": source, "task": candidate.task, "reward": episode.reward, "depth": turn.depth,
                 "checkpoint": served[candidate.run].get(turn.depth) if turn.depth is not None else None,
                 "tokens": turn.tokens, "sampled": turn.sampled, "guidance": list[JsonValue](carried),
+                **({"teacher": turn.teacher} if turn.teacher is not None else {}),
             })  # fmt: skip
         return found
 
@@ -378,6 +392,8 @@ async def make_dataset(
     }
     if kind != EXAMPLES:
         counts[kind] = len(lines)
+    if kind == EXAMPLES and taught and all(taught):
+        supervision = TEACHER
     dataset = Dataset(
         new_id(),
         rule,
@@ -412,6 +428,8 @@ def turns_of(episode: Episode) -> list[Turn]:
             segment.sampled,
             max((span.version for span in segment.spans), default=None),
             segment.sampled_with,
+            segment.teacher.teacher if segment.teacher is not None else None,
+            segment.teacher.top if segment.teacher is not None else 0,
         )
         for slot, trajectory in episode.trajectories.items()
         for index, segment in enumerate(trajectory.segments)
@@ -483,8 +501,9 @@ async def manifest_of(dataset: Dataset) -> list[dict[str, Any]]:
 
 async def examples(ledger: Ledger, dataset: Dataset, renderer: Renderer) -> Examples:
     """A dataset's examples, made from its episodes' blobs (each episode read once), with the guidance its manifest
-    names cut from each turn's prompt: each weighted 1, or as pairs or labelled examples (`Examples.preferences`). A
-    turn whose cut cannot be made exactly is left out, and a pair or example with it."""
+    names cut from each turn's prompt: each weighted 1, as pairs or labelled examples (`Examples.preferences`), or, for
+    a dataset of teacher samples, as distilled segments (`Examples.distilled`). A turn whose cut cannot be made exactly
+    is left out, and a pair or example with it."""
     lines = await manifest_of(dataset)
     turns: list[dict[str, Any]] = list(lines) if dataset.kind == EXAMPLES else []
     for line in lines if dataset.kind != EXAMPLES else []:
@@ -515,6 +534,13 @@ async def examples(ledger: Ledger, dataset: Dataset, renderer: Renderer) -> Exam
                 found.left_out += 1
             elif turn.get("checkpoint"):
                 found.sampled_by[source] = str(turn["checkpoint"])
+    if dataset.kind == EXAMPLES and dataset.supervision == TEACHER:
+        found.distilled = [
+            Distilled(shorter, shorter.teacher, 0.0, source)
+            for source, shorter in made.items()
+            if shorter is not None and shorter.teacher is not None
+        ]
+        return found
     if dataset.kind == EXAMPLES:
         found.segments = [Weighted(shorter, 1.0, source) for source, shorter in made.items() if shorter is not None]
         return found

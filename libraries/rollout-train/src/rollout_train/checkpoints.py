@@ -82,8 +82,9 @@ class Checkpoint:
     """The dataset it was trained on, by id (`rollout_train.datasets`), if a supervised step on one made it: its
     parents after the first are then the checkpoints that sampled the dataset's examples."""
     supervision: str | None = None
-    """For a checkpoint a supervised step made: `importance` if every segment it trained on was sampled with its exact
-    tokens and behaviour logprobs, else `supervised` (`rollout_train.imitation.supervision_of`)."""
+    """For a checkpoint a supervised step made: `teacher` if a teacher scored every segment it trained on with its
+    top-k, else `importance` if every one was sampled with its exact tokens and behaviour logprobs, else `supervised`
+    (`rollout_train.imitation.supervision_of`)."""
     made: float = 0.0
     """When, in seconds since the epoch."""
     released: float | None = None

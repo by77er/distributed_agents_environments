@@ -1,6 +1,7 @@
 """Datasets: episodes picked by a rule, turns by filters, kept as a record in the ledger and a manifest in a blob, and
 a supervised step on one that makes a checkpoint learned from the checkpoints that sampled it."""
 
+import dataclasses
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -27,13 +28,13 @@ from rollout_train.datasets import (
 )
 from rollout_train.imitation import GUIDANCE, imitate, passes_for
 from rollout_train.record import GROUPS, STARTS, scope, table
-from rollout_train.recorder import TOKEN_LEVEL, Segment, Span
+from rollout_train.recorder import TOKEN_LEVEL, Segment, Span, TeacherScores
 from rollout_train.registry import Taken, registry_of
 from rollout_train.rollouts import Episode, Outcome, Trajectory, stored
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.stores import FILES
 from rollout_train.testing import plain_renderer
-from rollout_train.trainer import Item, Labelled, Pair
+from rollout_train.trainer import Distilled, Item, Labelled, Pair
 from tests.rollout_train.support import Counting
 
 WAY = "How to get there. Place the table."
@@ -422,6 +423,49 @@ async def test_a_dataset_of_turns_sampled_without_behaviour_logprobs_is_supervis
     assert (
         made_by.supervision == "supervised" and (await checkpoints.checkpoint(made_by.id)).supervision == "supervised"
     )
+
+
+def taught_segment(prompt: str, sampled: str, version: int, top: int = 2) -> Segment:
+    """A segment a teacher scored: its logprob of each sampled token, and its top `top` tokens at each."""
+    made = segment(prompt, sampled, version)
+    scores = TeacherScores("teacher", [-0.25] * len(sampled), [[ord("a"), ord("b")][:top]] * len(sampled),
+                           [[-0.1, -2.5][:top]] * len(sampled))  # fmt: skip
+    return dataclasses.replace(made, teacher=scores)
+
+
+async def test_a_dataset_of_teacher_samples_is_of_teacher_supervision_and_its_examples_are_distilled(
+    tmp_path: Path,
+) -> None:
+    played = Played(tmp_path, run="teacher-eval")
+    told = f"system: Goal.\n\n{WAY}\nuser: guess\nassistant: "
+    sampled = [taught_segment(told, "apple", 0), taught_segment(told, "pear", 0)]
+    await played.group(1, "t1", {"solved": True, "segments": sampled, "guidance": {"way": WAY}})
+    made = await make_dataset(played.ledger, "solved-all", ["teacher-eval"], into=played.blobs, at=played.at)
+    assert made.supervision == "teacher" and await dataset_of(played.ledger, made.id) == made
+    assert {line["teacher"] for line in await manifest_of(made)} == {"teacher"}
+    taught = await examples(played.ledger, made, plain_renderer("plain"))
+    assert taught.supervision == "teacher" and not taught.segments and len(taught.distilled) == 2
+    first = taught.distilled[0]
+    assert isinstance(first, Distilled) and first.scores.top == 2 and first.source == "teacher-eval/1/1/policy/0"
+    assert WAY not in "".join(map(chr, first.segment.tokens))  # (the guidance cut, the teacher's scores kept)
+    assert first.scores.logprobs == [-0.25] * 5 and first.segment.sampled == 5
+    checkpoints, trainer = Checkpoints(played.ledger, played.blobs), Counting()
+    made_by = await imitate(checkpoints, trainer, taught, fence=await played.ledger.take(scope("distil")),
+                            run="distil", start=None, base="qwen", directory=tmp_path / "checkpoints")  # fmt: skip
+    assert made_by.supervision == "teacher" and all(isinstance(each, Distilled) for each in trainer.batches[0])
+
+
+async def test_a_dataset_with_a_turn_no_teacher_scored_is_not_of_teacher_supervision(tmp_path: Path) -> None:
+    played = Played(tmp_path)
+    mixed = [taught_segment("user: a\nassistant: ", "apple", 0), segment("user: b\nassistant: ", "pear", 0)]
+    await played.group(1, "t1", {"solved": True, "segments": mixed})
+    made = await make_dataset(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at)
+    assert made.supervision == "importance"
+    assert len((await examples(played.ledger, made, plain_renderer("plain"))).segments) == 2
+    played = Played(tmp_path / "without-top")
+    await played.group(1, "t1", {"solved": True, "segments": [taught_segment("user: a\nassistant: ", "apple", 0, 0)]})
+    made = await make_dataset(played.ledger, "solved-all", ["train"], into=played.blobs, at=played.at)
+    assert made.supervision == "importance"  # (logprobs of the sampled tokens alone are an on-policy run's, no dataset)
 
 
 async def test_a_dataset_of_pairs_prefers_each_groups_best_episode_to_its_worst(tmp_path: Path) -> None:

@@ -11,8 +11,9 @@ and its parents after the first are the checkpoints that sampled the examples it
 
 Examples whose turns were sampled with their exact tokens and behaviour logprobs are `importance` data; where some
 were not (a frontier API's turns), they are `supervised`: the trainer computes what it needs of their logprobs itself,
-and nothing is importance-corrected. Examples say which (`supervision_of`), and so does the checkpoint a step on them
-makes.
+and nothing is importance-corrected. Examples a teacher scored, with its top-k at each sampled token, are `teacher`
+data, which a distillation trains on (`Distilled` items, from a teacher dataset). Examples say which
+(`supervision_of`), and so does the checkpoint a step on them makes.
 
 A segment is cut by its tokens: the fewest tokens before its first sampled one whose text holds the guidance, and
 which encode back to themselves, are decoded, the guidance is taken out, and the rest is encoded again; what the
@@ -38,7 +39,19 @@ from rollout_train.recorder.renderers import Renderer
 from rollout_train.recorder.segments import Segment, Span
 from rollout_train.rollouts.episodes import Episode, Record, loaded
 from rollout_train.rollouts.scheduler import EPISODES
-from rollout_train.trainer import STATE, WEIGHTS, Files, Item, Labelled, Pair, Trainer, Weighted, segments_of, weight_of
+from rollout_train.trainer import (
+    STATE,
+    WEIGHTS,
+    Distilled,
+    Files,
+    Item,
+    Labelled,
+    Pair,
+    Trainer,
+    Weighted,
+    segments_of,
+    weight_of,
+)
 
 GUIDANCE = "guidance"
 """The entry of an episode's result that holds the guidance its prompts carried: by kind, word for word."""
@@ -50,14 +63,21 @@ RATES = {"full": 1e-6, "lora": 1e-4}
 """A supervised step's learning rate, by what its trainer makes: every weight, or an adapter."""
 IMITATION = "imitation"
 """The kind of a run's start that took a supervised step (`rollout imitate`), as its `starts` record says."""
-IMPORTANCE, SUPERVISED = "importance", "supervised"
-"""Examples whose every turn was sampled with its exact tokens and behaviour logprobs, and examples some of whose
-turns were not."""
+IMPORTANCE, SUPERVISED, TEACHER = "importance", "supervised", "teacher"
+"""Examples whose every turn was sampled with its exact tokens and behaviour logprobs; examples some of whose turns
+were not; and examples a teacher scored, its top-k at each sampled token (distillation's)."""
+
+
+def taught_top(segment: Segment) -> bool:
+    """Whether a teacher scored a segment's sampled tokens with its top-k at them."""
+    return segment.teacher is not None and segment.teacher.top > 0
 
 
 def supervision_of(segments: Sequence[Segment]) -> str:
-    """`importance` if every segment's turns were sampled with their exact tokens and behaviour logprobs, else
-    `supervised`."""
+    """`teacher` if a teacher scored every segment with its top-k (and there are some); else `importance` if every
+    segment's turns were sampled with their exact tokens and behaviour logprobs; else `supervised`."""
+    if segments and all(taught_top(segment) for segment in segments):
+        return TEACHER
     return SUPERVISED if any(segment.lacks for segment in segments) else IMPORTANCE
 
 
@@ -119,11 +139,13 @@ def passes_for(items: Sequence[Item], tokens_per_step: int) -> int:
 
 @dataclass
 class Examples:
-    """Segments to imitate, each weighted 1, or pairs and labelled examples for a preference loss, with what was left
-    out and why."""
+    """Segments to imitate, each weighted 1, pairs and labelled examples for a preference loss, or segments a teacher
+    scored for a distillation, with what was left out and why."""
 
     segments: list[Weighted]
     preferences: list[Pair | Labelled] = field(default_factory=list[Pair | Labelled])
+    distilled: list[Distilled] = field(default_factory=list[Distilled])
+    """A teacher dataset's examples, each with its teacher's scores."""
     episodes: int = 0
     """Episodes they came from."""
     left_out: int = 0
@@ -137,12 +159,12 @@ class Examples:
 
     @property
     def items(self) -> list[Item]:
-        """What a step trains on: the segments, or the pairs and labelled examples."""
-        return [*self.segments, *self.preferences]
+        """What a step trains on: the segments, the pairs and labelled examples, or the distilled segments."""
+        return [*self.segments, *self.preferences, *self.distilled]
 
     @property
     def supervision(self) -> str:
-        """`importance` or `supervised` (`supervision_of` its segments)."""
+        """`importance`, `supervised` or `teacher` (`supervision_of` its segments)."""
         return supervision_of([segment for item in self.items for segment in segments_of(item)])
 
 
