@@ -78,18 +78,38 @@ export function servesWhy(provider: OfferedProvider, weights: string): string | 
  * checkpoints), or for one that serves a fixed model. */
 export type Role = "trained" | "follows" | "fixed";
 
+/** Whether a provider is a hosted API: it takes messages and returns text, with no exact tokens or logprobs. */
+export const isHosted = (provider: OfferedProvider | undefined): boolean =>
+  provider != null && provider.capabilities.token_exact === false && provider.capabilities.sampled_logprobs === false;
+
+/** Why a hosted API cannot serve a channel of this role, where it cannot: what it samples is never trained on, and it
+ * serves no checkpoint. */
+export const HOSTED_TRAINED = "a hosted API: it returns text, not the exact tokens it sampled or their logprobs, so nothing it samples is trained on";
+export const HOSTED_FOLLOWS = "a hosted API: it serves no checkpoint";
+
 /** The providers for a channel, each disabled where it cannot serve it: the run's weights, the trained channel's needs
- * (the exact tokens it sampled, and their logprobs), and a bridge from the trainer's format. */
+ * (the exact tokens it sampled, and their logprobs), and a bridge from the trainer's format. A hosted API serves only a
+ * fixed model. */
 export function providerChoices(offers: Offers, role: Role, trainer: string | undefined, weights: string | null): Choice[] {
   return offers.inference.map(provider => {
     let why: string | null = null;
-    if (role !== "fixed" && weights) why = servesWhy(provider, weights);
+    if (role !== "fixed" && isHosted(provider)) why = role === "trained" ? HOSTED_TRAINED : HOSTED_FOLLOWS;
+    if (!why && role !== "fixed" && weights) why = servesWhy(provider, weights);
     if (!why && role === "trained" && (!provider.capabilities.token_exact || !provider.capabilities.sampled_logprobs)) {
       why = "returns text, not the sampled tokens and their logprobs";
     }
     if (!why && role !== "fixed" && trainer) why = offers.pairs.find(each => each.trainer === trainer && each.inference === provider.name)?.refused ?? null;
     return { value: provider.name, label: provider.name, why };
   });
+}
+
+/** A model's catalog prices, in a few words (`$2 in · $10 out a million tokens`); empty where the catalog prices none. */
+export function pricesOf(provider: OfferedProvider | undefined, model: unknown): string {
+  const cost = provider?.models.find(each => each.model === model)?.cost ?? {};
+  if (cost.input == null && cost.output == null) return "";
+  const dollars = (value: number) => `$${Number(value.toFixed(4))}`;
+  const said = [cost.input != null ? `${dollars(cost.input)} in` : "", cost.output != null ? `${dollars(cost.output)} out` : ""];
+  return `${said.filter(Boolean).join(" · ")} a million tokens`;
 }
 
 /** The bridges from a trainer's checkpoints to what a provider loads, where there is work to do. */

@@ -557,14 +557,15 @@ export interface Offers {
 }
 
 /** What `POST /api/launches/check` answers: the refusals and notes, the settings the run would have, what it trains,
- * one step's spend on its metered parts (or why it cannot be estimated yet), and its environment's slots. */
+ * its estimated spend on its metered parts (one step's, or an eval's: `per`; or why it cannot be estimated yet), and
+ * its environment's slots. */
 export interface Checked {
   refusals: SettingFinding[];
   notes: SettingFinding[];
   settings: Record<string, unknown>;
   preset: string | null;
   weights: Weights | null;
-  spend: { dollars: number | null; parts: Record<string, number>; why: string };
+  spend: { dollars: number | null; parts: Record<string, number>; why: string; per?: "step" | "eval" };
   environment: { slots: string[]; untrained: string[]; judges: string[] } | null;
 }
 

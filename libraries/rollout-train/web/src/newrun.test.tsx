@@ -4,7 +4,9 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
 import type { Checked, OfferedProvider, OfferedTrainer, Offers, Preset, PresetVersions, Presets as PresetList, System } from "./api/types";
-import { fielded, filled, launchSettings, providerChoices, settled, trainerChoices, weightChoices } from "./lib/form";
+import {
+  fielded, filled, HOSTED_FOLLOWS, HOSTED_TRAINED, launchSettings, pricesOf, providerChoices, settled, trainerChoices, weightChoices,
+} from "./lib/form";
 import { NewRun } from "./pages/NewRun";
 import { PresetPage, Presets } from "./pages/Presets";
 
@@ -105,11 +107,11 @@ describe("the New run form's choices", () => {
     expect(weightChoices({ ...offers, trainers: [offers.trainers[0]] })[1].why).toBe("no trainer here trains full weights");
     expect(trainerChoices(offers, "full").map(each => [each.value, each.why])).toEqual([["tinker-lora", "trains a LoRA only"], ["local-full", null]]);
     expect(providerChoices(offers, "trained", "local-full", "full").map(each => [each.value, each.why])).toEqual([
-      ["local-vllm", null], ["tinker", "Tinker's sampler serves only checkpoints Tinker trained"], ["openai", "cannot reload full weights in place"],
+      ["local-vllm", null], ["tinker", "Tinker's sampler serves only checkpoints Tinker trained"], ["openai", HOSTED_TRAINED],
     ]);
-    expect(providerChoices(offers, "trained", "tinker-lora", "lora").map(each => each.why)).toEqual([
-      null, null, "serves no adapters",
-    ]);
+    expect(providerChoices(offers, "trained", "tinker-lora", "lora").map(each => each.why)).toEqual([null, null, HOSTED_TRAINED]);
+    expect(providerChoices(offers, "follows", "tinker-lora", "lora").map(each => each.why)).toEqual([null, null, HOSTED_FOLLOWS]);
+    expect(providerChoices(offers, "fixed", "tinker-lora", "lora").map(each => each.why)).toEqual([null, null, null]);  // (a judge, say)
     expect(providerChoices(offers, "fixed", "tinker-lora", "lora").map(each => each.why)).toEqual([null, null, null]);  // (a judge may be any)
   });
 
@@ -155,10 +157,10 @@ describe("the New run form", () => {
 
   it("disables a choice that can never work, with its reason as visible text and a tooltip", () => {
     shown(<NewRun />);
-    const openai = option("policy provider", /openai/);
+    const openai = option("policy provider", /openai/);  // (a hosted API, on the trained channel)
     expect(openai.disabled).toBe(true);
-    expect(openai.title).toBe("serves no adapters");
-    expect(openai.textContent).toBe("openai — serves no adapters");
+    expect(openai.title).toBe(HOSTED_TRAINED);
+    expect(openai.textContent).toBe(`openai — ${HOSTED_TRAINED}`);
     expect(fieldOf(select("policy provider")).textContent).toContain("peft-from-tinker");  // (the pair's bridge)
   });
 
@@ -221,6 +223,19 @@ describe("the New run form", () => {
     await waitFor(() => expect(asked.some(each => each.path === "api/launches")).toBe(true));
     const settings = asked.find(each => each.path === "api/launches")!.body.settings as Record<string, unknown>;
     expect([settings["slots.judge"], settings["channels.judge.mode"], settings["channels.judge.follows"], settings.self_judging]).toEqual(["judge", "follows", "policy", true]);
+  });
+
+  it("binds a judge to a hosted API, shown metered with its model's prices and no renderer of its own", async () => {
+    checked = { ...checked, environment: { slots: ["policy", "judge"], untrained: ["judge"], judges: ["judge"] } };
+    const priced = { model: "gpt-5", context: 400_000, base: null, max_lora_rank: null, cost: { input: 1.25, output: 10 }, renderers: [], families: [] };
+    const hosted = { ...offers, inference: offers.inference.map(each => (each.name === "openai" ? { ...each, models: [priced] } : each)) };
+    shown(<NewRun />, "/runs/new", client => client.setQueryData(topics.offers().key, hosted));
+    await waitFor(() => expect(select("judge provider")).toBeTruthy());
+    fireEvent.change(select("judge provider"), { target: { value: "openai" } });
+    expect(fieldOf(select("judge provider")).textContent).toContain("api · metered · $1.25 in · $10 out a million tokens");
+    expect(screen.getByLabelText("judge renderer").textContent).toBe("the provider's own");
+    expect(pricesOf(hosted.inference[2], "gpt-5")).toBe("$1.25 in · $10 out a million tokens");
+    expect(pricesOf(hosted.inference[0], QWEN)).toBe("");  // (nothing priced: placed, not metered)
   });
 
   it("posts the run's settings and goes to the runs", async () => {

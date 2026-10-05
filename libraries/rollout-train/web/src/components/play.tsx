@@ -1,11 +1,13 @@
 // The form that asks for an eval: a version of a suite played by a checkpoint or a base model (nothing trained), with
 // the channel settings of a preset. On a suite's page, who plays is chosen; on a checkpoint's or a base model's, the
-// suite. The version is the newest unless another is chosen.
+// suite. The version is the newest unless another is chosen. A base model is played on a provider that serves it; on
+// a metered one (a hosted API), the form says the eval's estimated spend and takes a limit.
 
 import { useState } from "react";
-import { useKnown, useLaunch } from "../api/queries";
-import type { EvalSuite, Offers, Preset, SuiteVersion, System } from "../api/types";
+import { useCheck, useKnown, useLaunch } from "../api/queries";
+import type { Checked, EvalSuite, OfferedProvider, Offers, Preset, SuiteVersion, System } from "../api/types";
 import { readable } from "../lib/environments";
+import { isHosted, pricesOf } from "../lib/form";
 import { currentOf, versionsOf, versionTag } from "../lib/suites";
 import { Card } from "./ui";
 
@@ -25,20 +27,36 @@ export const baseModelsOf = (offers: Offers): string[] => [...new Set(offers.inf
 export const evalSettingsOf = (preset: Preset | undefined): Record<string, unknown> =>
   Object.fromEntries(Object.entries(preset?.settings ?? {}).filter(([key]) => /^(channels|slots)\.|^(self_judging|episodes_at_once)$/.test(key)));
 
-/** The channel settings an eval of a base model plays with: the preset's, with the model; where the preset's provider
- * does not serve it, the first provider that does (and that model's renderer, where one is named). */
-export function playedBy(offers: Offers, preset: Preset | undefined, model: string | undefined): Record<string, unknown> {
+/** The providers that serve a model, in the order the cluster offers them. */
+export const providersOf = (offers: Offers, model: string | undefined): OfferedProvider[] =>
+  model == null ? [] : offers.inference.filter(each => each.models.some(offered => offered.model === model));
+
+/** The channel settings an eval of a base model plays with: the preset's, with the model, on `provider` where it serves
+ * the model; else the preset's provider where it serves it; else the first provider that does (and that model's
+ * renderer, where one is named). A hosted API renders messages itself: its channel names no renderer. */
+export function playedBy(offers: Offers, preset: Preset | undefined, model: string | undefined, provider?: string): Record<string, unknown> {
   const settings = evalSettingsOf(preset);
   if (model == null) return settings;
   settings["channels.policy.model"] = model;
-  const serves = (name: unknown) => offers.inference.some(each => each.name === name && each.models.some(offered => offered.model === model));
-  if (!serves(settings["channels.policy.provider"])) {
-    const provider = offers.inference.find(each => each.models.some(offered => offered.model === model));
-    if (provider) settings["channels.policy.provider"] = provider.name;
-    const renderer = provider?.models.find(each => each.model === model)?.renderers[0];
+  const serving = providersOf(offers, model);
+  const asked = serving.find(each => each.name === provider);
+  const kept = serving.find(each => each.name === settings["channels.policy.provider"]);
+  const chosen = asked ?? kept ?? serving[0];
+  if (chosen && chosen !== kept) {
+    settings["channels.policy.provider"] = chosen.name;
+    const renderer = chosen.models.find(each => each.model === model)?.renderers[0];
     if (renderer) settings["channels.policy.renderer"] = renderer;
   }
+  if (isHosted(chosen)) delete settings["channels.policy.renderer"];
   return settings;
+}
+
+/** An eval's estimated spend, or why it cannot be estimated yet, in a few words. */
+export function spendText(checked: Checked | undefined): string | null {
+  const spend = checked?.spend;
+  if (!spend) return null;
+  if (spend.dollars == null) return `spend can't be estimated yet: ${spend.why}`;
+  return `≈ $${spend.dollars.toFixed(2)} for the eval at most`;
 }
 
 /** How the Played by picker says a base model (a checkpoint or a bookmark is said by itself). */
@@ -72,6 +90,8 @@ export function PlayForm({ suites, offers, system, suite: fixedSuite, subject: f
   const [suiteName, setSuiteName] = useState(fixedSuite?.suite ?? (suites.find(plays) ?? suites[0])?.suite ?? "");
   const suite = fixedSuite ?? suites.find(each => each.suite === suiteName) ?? suites[0];
   const [presetId, setPreset] = useState<string | null>(null);
+  const [providerName, setProvider] = useState("");
+  const [limit, setLimit] = useState("");
   const [chosenSubject, setSubject] = useState("");
   const [episodes, setEpisodes] = useState("");
   const [versions, setVersions] = useState<Record<string, string>>({});  // (the version chosen of each suite)
@@ -97,6 +117,15 @@ export function PlayForm({ suites, offers, system, suite: fixedSuite, subject: f
   const count = episodes.trim() ? Number(episodes) : own.length === 1 ? own[0] : 1;
   const total = (version?.entries ?? []).reduce((sum, entry) => sum + entry.starts * (episodes.trim() ? Math.max(1, count || 1) : entry.episodes), 0);
   const playing = environmentsOf(suite, version);
+  const serving = providersOf(offers, model);
+  const played = playedBy(offers, preset, model, providerName || undefined);
+  const provider = offers.inference.find(each => each.name === played["channels.policy.provider"]);
+  const metered = provider?.allocation === "metered";
+  const settings: Record<string, unknown> = { ...played, ...(version ? { "eval.suite": version.id } : {}) };
+  if (subject) settings.start = subject;
+  if (episodes.trim()) settings["eval.episodes"] = Number(episodes);
+  if (metered && limit.trim()) settings["limits.spend"] = Number(limit);
+  const check = useCheck(metered && version ? { kind: "eval", name: "", environment: playing[0] ?? null, preset: null, settings } : null);
   const unoffered = playing.filter(each => !offered.has(each));
   const served = model == null || bases.includes(model);
   const missing = !offers.cluster ? "this monitor asks for no runs (rollout monitor --cluster)"
@@ -105,9 +134,6 @@ export function PlayForm({ suites, offers, system, suite: fixedSuite, subject: f
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!suite || !version || missing) return;
-    const settings: Record<string, unknown> = { ...playedBy(offers, preset, model), "eval.suite": version.id };
-    if (subject) settings.start = subject;
-    if (episodes.trim()) settings["eval.episodes"] = count;
     launch.mutate(
       { kind: "eval", name: named, environment: playing[0] ?? null, preset: null, settings },
       { onSuccess: made => { setAsked(made.asked.name); setName(""); } },
@@ -172,6 +198,21 @@ export function PlayForm({ suites, offers, system, suite: fixedSuite, subject: f
                 {offers.presets.map(each => <option key={each.id} value={each.id}>{each.id}{typeof each.settings["channels.policy.model"] === "string" ? ` · ${each.settings["channels.policy.model"]}` : ""}</option>)}
               </select>
             </label>
+            {model != null && serving.length ? (
+              <label className="field">
+                <span>Provider</span>
+                <select value={provider?.name ?? ""} onChange={event => setProvider(event.target.value)} aria-label="provider">
+                  {serving.map(each => <option key={each.name} value={each.name}>{each.name} · {each.allocation}</option>)}
+                </select>
+                {metered ? <small>{[pricesOf(provider, model), spendText(check.data)].filter(Boolean).join(" · ")}</small> : null}
+              </label>
+            ) : null}
+            {metered ? (
+              <label className="field">
+                <span>Limit ($)</span>
+                <input type="number" min={0} step="any" value={limit} onChange={event => setLimit(event.target.value)} placeholder="none" aria-label="limit" />
+              </label>
+            ) : null}
             <label className="field">
               <span>Name</span>
               <input value={name} onChange={event => setName(event.target.value)} placeholder={named} spellCheck={false} />

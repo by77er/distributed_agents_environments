@@ -6,7 +6,8 @@ import { Link } from "react-router-dom";
 import { useEvals, useHistory, useLaunches, useLineage, useOffers, useSystem } from "../api/queries";
 import type { System } from "../api/types";
 import { Starting } from "../components/launches";
-import { PlayForm } from "../components/play";
+import { PlayForm, providersOf } from "../components/play";
+import { isHosted } from "../lib/form";
 import { Card, Empty, Head, Spec, Specs, Table } from "../components/ui";
 import { historyOf } from "../lib/history";
 import { launchFor, runPlace } from "../lib/places";
@@ -69,13 +70,15 @@ function PlayIt({ model, system }: { model: string; system: System }) {
   const { data: launched } = useLaunches();
   const { data: offers } = useOffers();
   if (!evals || !launched || !offers) return null;
+  const serving = providersOf(offers, model);
+  const hosted = serving.length > 0 && serving.every(isHosted);  // (a hosted API's model is played, never trained)
   const launches = launched.launches.filter(each =>
     each.asked.kind === "eval" && !each.asked.settings.start && each.asked.settings["channels.policy.model"] === model);
   return (
     <>
       {!evals.suites.length ? <MakeSuite ledger={system.ledger_at} />
         : <PlayForm model={model} suites={evals.suites} offers={offers} system={system} title="Run an eval" />}
-      {offers.cluster ? <p><Link to={launchFor(model)} className="linkish">Train from {model}</Link></p> : null}
+      {offers.cluster && !hosted ?<p><Link to={launchFor(model)} className="linkish">Train from {model}</Link></p> : null}
       <Starting launches={launches} system={system} titled />
     </>
   );

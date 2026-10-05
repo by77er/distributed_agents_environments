@@ -4,7 +4,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
 import type { Checkpoint, EvalSuite, Launches, Lineage, LineageCheckpoint, OfferedProvider, Offers, Preset, SubjectHistory, SuiteVersion, System } from "./api/types";
-import { baseModelsOf, evalSettingsOf, playedBy } from "./components/play";
+import { baseModelsOf, evalSettingsOf, playedBy, providersOf, spendText } from "./components/play";
 import { basePlace, placeOf } from "./lib/places";
 import { Base } from "./pages/Base";
 import { Checkpoints } from "./pages/Checkpoints";
@@ -195,5 +195,70 @@ describe("an eval's settings", () => {
       "channels.policy.provider": "far", "channels.policy.model": "org/elsewhere", "channels.policy.renderer": "rollout_qwen:qwen35",
     });
     expect(playedBy(offers, undefined, undefined)).toEqual({});
+  });
+});
+
+describe("an eval of a hosted model", () => {
+  const hosted: OfferedProvider = {
+    name: "anthropic", kind: "api", gpus: 0, replicas: 1, capabilities: { token_exact: false, sampled_logprobs: false },
+    allocation: "metered", concurrency: 16, weights: [],
+    models: [{ model: "claude-haiku-4-5-20251001", context: 200_000, base: null, max_lora_rank: null, cost: { input: 1, cached_input: 0.1, output: 5 },
+      renderers: [], families: [] }],
+  };
+  const served = { ...offers, inference: [...offers.inference, hosted, { ...provider("also", ["org/base-a"]) }] };
+  const checked = { refusals: [], notes: [], settings: {}, preset: null, weights: null, environment: null,
+    spend: { dollars: 0.42, parts: { anthropic: 0.42 }, why: "", per: "eval" as const } };
+  const posted: { path: string; body: Record<string, unknown> }[] = [];
+  const answering = vi.fn(async (path: string, init?: RequestInit) => {
+    if (init?.method === "POST") posted.push({ path, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+    const answer = path === "api/launches/check" ? checked : init?.method === "POST" ? { launch: { id: "launch_1", asked: { name: "asked" } } } : launches;
+    return new Response(JSON.stringify(answer), { headers: { "Content-Type": "application/json" } });
+  });
+
+  beforeEach(() => {
+    posted.length = 0;
+    vi.stubGlobal("fetch", answering);
+  });
+
+  it("plays on a provider that serves it, a hosted API naming no renderer", () => {
+    expect(providersOf(served, "org/base-a").map(each => each.name)).toEqual(["local", "also"]);
+    expect(playedBy(served, offers.presets[0], "org/base-a", "also")["channels.policy.provider"]).toBe("also");
+    expect(playedBy(served, offers.presets[0], "claude-haiku-4-5-20251001")).toEqual({
+      "channels.policy.provider": "anthropic", "channels.policy.model": "claude-haiku-4-5-20251001",
+    });  // (the preset's renderer is for its own model, and a hosted API renders messages itself)
+    expect(spendText(undefined)).toBeNull();
+    expect(spendText({ ...checked, spend: { dollars: null, parts: {}, why: "the suite's starts are not known here" } }))
+      .toBe("spend can't be estimated yet: the suite's starts are not known here");
+  });
+
+  it("is asked for from the suite's page as metered, with its estimated spend and a limit", async () => {
+    shown(<Suite name="words-v1" />, "/evals/words-v1", client => client.setQueryData(topics.offers().key, served));
+    const played = screen.getByRole("group", { name: "Base models" }).closest("select")!;
+    expect([...played.querySelectorAll("option")].map(option => option.textContent)).toContain("claude-haiku-4-5-20251001");
+    fireEvent.change(played, { target: { value: "base:claude-haiku-4-5-20251001" } });
+    const chosen = screen.getByRole("combobox", { name: "provider" }) as HTMLSelectElement;
+    expect([...chosen.options].map(option => option.textContent)).toEqual(["anthropic · metered"]);
+    await waitFor(() => expect(chosen.closest(".field")!.textContent).toContain("≈ $0.42 for the eval at most"));
+    expect(chosen.closest(".field")!.textContent).toContain("$1 in · $5 out a million tokens");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "limit" }), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run this suite" }));
+    await waitFor(() => expect(posted.some(each => each.path === "api/launches")).toBe(true));
+    const settings = posted.find(each => each.path === "api/launches")!.body.settings as Record<string, unknown>;
+    expect(settings).toEqual({
+      "eval.suite": "words-v1@1", "channels.policy.provider": "anthropic", "channels.policy.model": "claude-haiku-4-5-20251001",
+      "limits.spend": 2,
+    });
+    const check = posted.find(each => each.path === "api/launches/check")!.body;
+    expect([check.kind, (check.settings as Record<string, unknown>)["channels.policy.provider"]]).toEqual(["eval", "anthropic"]);
+  });
+
+  it("asks for no check and no limit on a placed provider, and offers no training from a hosted model", () => {
+    shown(<Base model="org/base-b" />, basePlace("org/base-b"), client => client.setQueryData(topics.offers().key, served));
+    expect(screen.queryByRole("spinbutton", { name: "limit" })).toBeNull();
+    expect(posted.filter(each => each.path === "api/launches/check")).toEqual([]);
+    cleanup();
+    shown(<Base model="claude-haiku-4-5-20251001" />, basePlace("claude-haiku-4-5-20251001"), client => client.setQueryData(topics.offers().key, served));
+    expect(screen.queryByRole("link", { name: /Train from/ })).toBeNull();
+    expect(screen.getByRole("spinbutton", { name: "limit" })).toBeTruthy();
   });
 });

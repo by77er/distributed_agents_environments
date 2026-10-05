@@ -12,7 +12,8 @@ import { Card, Empty, Head } from "../components/ui";
 import { publishedParts, readable } from "../lib/environments";
 import {
   bridgeOf, channelModelChoices, type Choice, choiceText, componentsOf, defaultOf, fielded, filled, launchSettings, modelChoices, objectiveGroups,
-  objectivePreset, pick, providerChoices, rendererFor, renderersOf, type Role, same, servesWhy, settled, trainedOf, trainerChoices, weightChoices,
+  objectivePreset, pick, pricesOf, providerChoices, rendererFor, renderersOf, type Role, same, servesWhy, settled, trainedOf, trainerChoices,
+  weightChoices,
 } from "../lib/form";
 import { presetsPlace } from "../lib/places";
 import { EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, evalsSettings, NO_EVALS, shown, typed } from "../lib/settings";
@@ -442,7 +443,7 @@ function ChannelFields({ offers, settings, channel, slot, role, trainer, weights
       <legend>{slot && slot !== channel ? `${slot} · ${channel}` : channel}</legend>
       <div className="field-row">
         <Field label="Provider" keys={[key("provider"), key("providers")]} refusals={refusals} marked={marked(key("provider"))}
-          note={provider ? <small>{provider.kind} · {provider.allocation}{bridge.length ? ` · ${bridge.join(" → ")}` : ""}</small> : null}>
+          note={provider ? <small>{provider.kind} · {provider.allocation}{bridge.length ? ` · ${bridge.join(" → ")}` : ""}{provider.allocation === "metered" && pricesOf(provider, settings[key("model")]) ? ` · ${pricesOf(provider, settings[key("model")])}` : ""}</small> : null}>
           <Picker value={providerName} choices={providers} onChange={chooseProvider} label={`${channel} provider`} />
         </Field>
         <Field label="Model" keys={[key("model")]} refusals={refusals} marked={marked(key("model"))}>
