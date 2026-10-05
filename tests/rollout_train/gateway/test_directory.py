@@ -15,7 +15,7 @@ from rollout.harness.blobs import FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.following import Follower
 from rollout_train.gateway import ChannelDirectory, Gateway, GatewayEndpoints, Provided, TurnStore, create_app
-from rollout_train.inference import Generation, Limits
+from rollout_train.inference import Generation, Limits, Scores
 from rollout_train.inference.channel import Channel, NotLoaded
 from rollout_train.ledger import Fence, FileLedger
 from rollout_train.record import STARTS, scope, start_header, table
@@ -53,12 +53,26 @@ class Held:
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        top: int = 0,
     ) -> Generation:
         name = adapter or self.model
         if name not in self.held:
             raise NotLoaded(f"{self.address} holds no {name}")
         tokens = [ord(each) for each in f"{name}\n"]
         return Generation(tokens, [-0.5] * len(tokens), "stop", model=name)
+
+    async def score(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None = None,
+        top: int = 0,
+        adapter: str | None,
+        session: str = "",
+        request: str | None = None,
+    ) -> Scores:
+        raise NotImplementedError("these servers only sample")
 
     def close(self) -> None: ...
 
