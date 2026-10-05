@@ -1,7 +1,7 @@
 // Words and numbers, as the page writes them.
 
 export const span = (seconds: number | null | undefined): string =>
-  seconds == null ? "" : seconds < 90 ? `${Math.round(seconds)} s` : seconds < 5400 ? `${Math.round(seconds / 60)} min` : `${(seconds / 3600).toFixed(1)} h`;
+  seconds == null ? "–" : seconds < 90 ? `${Math.round(seconds)} s` : seconds < 5400 ? `${Math.round(seconds / 60)} min` : `${(seconds / 3600).toFixed(1)} h`;
 
 export const clock = (at: number | null | undefined): string =>
   at ? new Date(at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";

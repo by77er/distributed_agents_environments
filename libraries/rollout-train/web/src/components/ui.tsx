@@ -35,12 +35,16 @@ export const Kpis = ({ children, style }: { children: ReactNode; style?: React.C
   <div className="kpis" style={style}>{children}</div>
 );
 
-export const Card = ({ title, note, children, className = "" }: { title: ReactNode; note?: ReactNode; children?: ReactNode; className?: string }) => (
+/** A card: its title, with a note beside it, over its body; with neither, the body alone (where a section's title above
+ * it says what it is). */
+export const Card = ({ title, note, children, className = "" }: { title?: ReactNode; note?: ReactNode; children?: ReactNode; className?: string }) => (
   <section className={`card ${className}`}>
-    <header>
-      <h2>{title}</h2>
-      {note ? <span>{note}</span> : null}
-    </header>
+    {title || note ? (
+      <header>
+        <h2>{title}</h2>
+        {note ? <span>{note}</span> : null}
+      </header>
+    ) : null}
     <div className="body">{children}</div>
   </section>
 );
