@@ -12,6 +12,8 @@
 - **What is trained on**: every segment of the episodes whose advantage is not zero, up to what the trainer can
   afford in a step; beyond that, segments are taken at even steps through the group, so that each episode and
   slot keeps its share, spread over its whole game.
+- **What is never trained on**: a segment of a slot that is not trained (a judge's, a fixed opponent's:
+  `Segment.trained`).
 - **What cannot be trained on**: a segment whose turns were sampled without their exact tokens or their behaviour
   logprobs (`Segment.lacks`) has no importance weight. A group with one is not trained on, and its result says why.
 """
@@ -126,6 +128,7 @@ class Grpo:
             if advantage != 0.0
             for slot, trajectory in episode.trajectories.items()
             for index, segment in enumerate(trajectory.segments)
+            if segment.trained  # (a judge's turns, or a fixed opponent's, are never trained on)
         ]
         if (why := unweighable([each.segment for each in weighted])) is not None:
             return Batch(skipped=why, notes=notes)
