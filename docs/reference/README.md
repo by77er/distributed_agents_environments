@@ -38,8 +38,9 @@ The `rollout` command is installed with the workspace (`uv sync`). `uv run rollo
 ## Objective presets
 
 A run's objective is chosen by `objective.preset`: `default`, `reinforce`, `rloo`, `ppo_clip`, `grpo`, `dr_grpo`,
-`dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto` or `orpo`. Each sets the components of one family
-(policy gradient, likelihood or preference), and each component can be changed with an `objective.COMPONENT` setting.
+`dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto`, `orpo`, `on_policy_distillation`, `distillation`, `mopd`
+or `mopd_top_k`. Each sets the components of one family (policy gradient, likelihood, preference or distillation),
+and each component can be changed with an `objective.COMPONENT` setting.
 
 - [Objectives](../libraries/rollout-train/training.md#objectives): the families, their components and the presets.
 - [Run settings](../guide/cluster.md#run-settings): the `objective.*` keys, and which are changeable while a run goes.

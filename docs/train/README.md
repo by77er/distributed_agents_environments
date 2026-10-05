@@ -33,8 +33,8 @@ turns them into checkpoints, which objectives it can optimise, and how checkpoin
 - The trainers are the [LoRA and full-weight trainers](../implementations/rollout-lora.md) on your own GPU, and
   [Tinker](../implementations/rollout-tinker.md) at Thinking Machines. Their capabilities are compared in
   [the cluster config](../guide/cluster.md#trainers).
-- A run's objective is a preset (`default`, `grpo`, `dapo`, `sft`, `dpo` and others) with components you can change.
-  The presets are listed in [run settings](../guide/cluster.md#run-settings); what each component does is in
+- A run's objective is a preset (`default`, `grpo`, `dapo`, `sft`, `dpo`, `distillation` and others) with components you
+  can change. The presets are listed in [run settings](../guide/cluster.md#run-settings); what each component does is in
   [objectives](../libraries/rollout-train/training.md#objectives), and how the local trainers compute it is in
   [objectives in torch](../implementations/rollout-objectives.md).
 

@@ -188,7 +188,7 @@ structural components cannot. *Built.*
 
 ## Distillation
 
-*Built* as library code, and checked on Qwen3 ([below](#checked-on-qwen3)); the loop does not yet ask teachers.
+*Built* as library code, and [checked on Qwen3](#checked-on-qwen3); the loop does not yet ask teachers.
 
 - **On-policy.** The student samples as it does for reinforcement learning. A teacher channel scores each sampled
   token with its own logprobs (prompt logprobs over the student's tokens, with the top k at each position where the
