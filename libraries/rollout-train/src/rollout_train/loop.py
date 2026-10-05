@@ -77,7 +77,7 @@ from rollout_train.algorithm import Algorithm, Grpo, spread
 from rollout_train.bridges import bridge_of
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, new_id
 from rollout_train.evals import Publisher, Schedule, evaluate
-from rollout_train.inference.remote import MAX_LAG as MAX_LAG_DEFAULT
+from rollout_train.inference.channel import MAX_LAG as MAX_LAG_DEFAULT
 from rollout_train.ledger import Fence, Fenced, Ledger
 from rollout_train.record import (
     EVALS,

@@ -20,12 +20,13 @@ import asyncio
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
 from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoints, kept
+from rollout_train.http import answer_of
 from rollout_train.inference.remote import Connection
 from rollout_train.pods.training import FAILED, MADE, Parent, StepAsked, StepState, asked_json, batch_bytes, state_of
 from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Step, StepFailed, Weighted
@@ -133,7 +134,7 @@ class RemoteTrainer:
                         f"{error}"
                     ) from error
                 await asyncio.sleep(self.every)
-        said = _answer(response)
+        said = answer_of(response)
         if response.status_code == 409 and busy:
             raise TrainerBusy(f"{self.address} is taking another step ({said.get('running')})")
         if response.status_code == 404 and path.startswith("/v1/steps/") and said.get("error") == "no such step":
@@ -151,11 +152,3 @@ class RemoteTrainer:
 
 class _Forgotten(Exception):
     """The pod has never heard of the step."""
-
-
-def _answer(response: httpx.Response) -> dict[str, Any]:
-    try:
-        said: Any = response.json()
-    except ValueError:
-        return {}
-    return cast(dict[str, Any], said) if isinstance(said, dict) else {}

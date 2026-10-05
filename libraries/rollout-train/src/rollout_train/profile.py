@@ -36,7 +36,7 @@ from rollout_train.bridges import bridged, by_name, on_ray
 from rollout_train.following import Follower
 from rollout_train.gateway import Gateway, GatewayEndpoints, Keyring, TurnStore
 from rollout_train.inference import Channel, Connection, Engine, Limits, Route, Routes
-from rollout_train.inference.remote import MAX_LAG
+from rollout_train.inference.channel import MAX_LAG
 from rollout_train.layout import BLOBS, FEED, LEDGER, PROCESSES
 from rollout_train.ledger import LOCATION
 from rollout_train.ledger import opened as ledger_at

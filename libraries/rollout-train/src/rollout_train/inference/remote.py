@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import httpx
 from pydantic import JsonValue
 
-from rollout_train.http import error_of
+from rollout_train.http import answer_of, error_of
 from rollout_train.inference.channel import (
     MAX_LAG,
     Generation,
@@ -365,7 +365,7 @@ class RemoteEngine:
         if response.status_code >= 400:
             said = error_of(response).get("message") or response.text[:300]
             raise RuntimeError(f"{self.address}: {response.status_code} {said}")
-        return _answer(response) if answer else {}
+        return answer_of(response) if answer else {}
 
 
 def _by_id(entry: Any) -> dict[int, float]:
@@ -383,14 +383,6 @@ def _accepted(listing: Mapping[str, Any], model: str) -> int:
     cards = [_object(each) for each in listed]
     card = next((each for each in cards if each.get("id") == model), cards[0])
     return int(card["max_model_len"])
-
-
-def _answer(response: httpx.Response) -> dict[str, Any]:
-    """What a response says, as JSON (nothing, for one that is not an object: a proxy's own page, say)."""
-    try:
-        return _object(response.json())
-    except ValueError:
-        return {}
 
 
 def _object(value: Any) -> dict[str, Any]:
