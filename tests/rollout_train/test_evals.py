@@ -142,7 +142,7 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
         return version or 0
 
     recorder = answering()
-    async with here(ledger, recorder, blobs):
+    async with here(ledger, recorder, blobs, places=1):  # (one episode at a time, in order: yes, no, yes, no)
         said = await evaluate(
             checkpoints, run="eval-1", suite=suite, subject=subject.id, base="tiny", channel="policy",
             directory=tmp_path / "files", publish=publish, episodes=2,
