@@ -28,6 +28,38 @@ export function groupsOf(run: Run): Map<number, GroupEntry> {
   return found;
 }
 
+export interface Toward {
+  /** Done, with something to train on: what the next step waits for. */
+  learnable: number[];
+  /** Done, and gave nothing to train on. */
+  nothing: number[];
+  /** Why each of `nothing` gave nothing, without repeats. */
+  why: string[];
+  perStep: number | null;
+}
+
+/** The groups toward a run's next step, done with: those with something to train on, counted against its
+ * `groups_per_step`, and those that gave nothing (every episode scored the same, say), which a step never waits for. */
+export function towardStep(run: Run): Toward {
+  const groups = groupsOf(run);
+  const lines = run.next.map(number => groups.get(number)?.line).filter((line): line is DoneLine => line !== undefined);
+  const nothing = lines.filter(line => !line.segments);
+  return {
+    learnable: lines.filter(line => line.segments > 0).map(line => line.group),
+    nothing: nothing.map(line => line.group),
+    why: [...new Set(nothing.map(line => line.skipped).filter((why): why is string => !!why))],
+    perStep: run.groups_per_step ?? null,
+  };
+}
+
+/** `1 of 4 groups with something to train`. */
+export const learnableText = (toward: Toward): string =>
+  `${toward.learnable.length}${toward.perStep != null ? ` of ${toward.perStep}` : ""} group${(toward.perStep ?? toward.learnable.length) === 1 ? "" : "s"} with something to train`;
+
+/** `15 gave nothing to train on: every episode scored the same`; empty for none. */
+export const nothingText = (toward: Toward): string =>
+  toward.nothing.length ? `${toward.nothing.length} gave nothing to train on${toward.why.length === 1 ? `: ${toward.why[0]}` : ""}` : "";
+
 export const stepOf = (run: Run, number: number): Step | undefined =>
   run.steps.find(step => step.groups.includes(number) || step.skipped.includes(number));
 

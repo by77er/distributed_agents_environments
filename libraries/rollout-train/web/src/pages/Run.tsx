@@ -13,7 +13,7 @@ import type { OpenGroup, Run as RunData, Step, Checkpoint } from "../api/types";
 import { RewardsChart, Sized } from "../components/charts";
 import { Card, Cells, Dots, Empty, Head, Kpi, Kpis, Legend, Mark, SectionTitle, Spec, Specs, Stages, Table, Tile } from "../components/ui";
 import { byNumber, figure, mean, shareOf, span } from "../lib/format";
-import { asked, type GroupEntry, groupsOf, madeBy, nameOf, range, reported, runKind, stateKind } from "../lib/model";
+import { asked, type GroupEntry, groupsOf, learnableText, madeBy, nameOf, nothingText, range, reported, runKind, stateKind, towardStep } from "../lib/model";
 import { groupPlace, stepPlace } from "../lib/places";
 import { BaseName, CheckpointTag } from "../components/checkpoints";
 import { PathCard } from "../components/scores";
@@ -110,7 +110,7 @@ const RunFigures = memo(function RunFigures({ run, made }: { run: RunData; made:
   const known = useKnown();
   const from = run.from ?? run.steps[0]?.parent ?? null, newest = made.at(-1);
   const trained = run.done.filter(line => line.update).length, last = run.done.at(-1);
-  const committed = run.steps.filter(step => step.state === "committed").length;
+  const committed = run.steps.filter(step => step.state === "committed").length, toward = towardStep(run);
   // (each channel's newest measurement, summed: every channel the run serves)
   const measured = run.channels.map(channel => channel.throughput.at(-1)).filter(each => each != null);
   const sum = (key: "tokens_per_second" | "mean_concurrency") => measured.reduce((total, each) => total + (each[key] ?? 0), 0);
@@ -122,7 +122,7 @@ const RunFigures = memo(function RunFigures({ run, made }: { run: RunData; made:
     <Kpis>
       <Kpi label="Started from" value={from ? known.short(from) : "base"} note={from ? known.origin(from) : <BaseName base={made[0]?.base} short />} />
       <Kpi label="Now" value={newest ? newest.short : "–"} note={newest ? `depth ${newest.depth} · ${made.filter(each => each.weights).length} of ${made.length} kept` : ""} />
-      <Kpi label="Steps" value={`${run.steps.length}`} note={`${committed} committed · ${run.next.length} waiting`} />
+      <Kpi label="Steps" value={`${run.steps.length}`} note={`${committed} committed · ${toward.learnable.length}${toward.perStep != null ? ` of ${toward.perStep}` : ""} toward the next`} />
       <Kpi label="Groups done" value={`${run.done.length}`} note={`${trained} trained on, of ${run.decided} decided`} />
       {said ? <Kpi label="Groups solved" value={`${all} · ${run.done.length - all - none} · ${none}`} note="all · some · none solved" /> : null}
       <Kpi label="Episodes" value={`${outcomes.length}`} note={said ? `${outcomes.filter(Boolean).length} solved · ${shareOf(outcomes)}` : ""} />
@@ -147,18 +147,19 @@ function Member({ run, number, groups }: { run: RunData; number: number; groups:
 
 const InFlight = memo(function InFlight({ run }: { run: RunData }) {
   const groups = groupsOf(run), stepping = run.steps.filter(step => step.state === "stepping");
-  const waiting = run.next.filter(number => groups.get(number)?.line);
+  const toward = towardStep(run), waiting = toward.learnable.length + toward.nothing.length, nothing = nothingText(toward);
   const note = [`${run.open.length} groups playing`, stepping.length ? `step ${stepping.map(step => step.step).join(", ")} being taken` : null].filter(Boolean).join(" · ");
   return (
     <>
       <SectionTitle title="In flight" note={note} />
-      {run.open.length || stepping.length || waiting.length ? (
+      {run.open.length || stepping.length || waiting ? (
         <div className="tiles">
           {stepping.map(step => <SteppingTile key={`s${step.step}`} run={run} step={step} groups={groups} />)}
-          {waiting.length ? (
+          {waiting ? (
             <div className="tile rail warm">
-              <header><b>Toward the next step</b><span className="what">{waiting.length} recorded</span></header>
-              <div className="members">{waiting.map(number => <Member key={number} run={run} number={number} groups={groups} />)}</div>
+              <header><b>Toward the next step</b><span className="what">{learnableText(toward)}</span></header>
+              {toward.learnable.length ? <div className="members">{toward.learnable.map(number => <Member key={number} run={run} number={number} groups={groups} />)}</div> : null}
+              {nothing ? <div className="small muted">{nothing} · {range(toward.nothing)}</div> : null}
             </div>
           ) : null}
           {run.open.map(group => <OpenTile key={group.number} run={run.run} group={group} />)}

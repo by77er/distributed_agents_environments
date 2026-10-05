@@ -123,7 +123,10 @@ export interface Run {
   open: OpenGroup[];
   done: DoneLine[];
   steps: Step[];
+  /** The groups no step covers yet: in flight, or done and waiting toward the next step. */
   next: number[];
+  /** The groups with something to train on that the next step waits for (none: not said). */
+  groups_per_step?: number | null;
   channels: Channel[];
   state: RunState;
   ending?: { how: "finished" | "stopped" | "failed"; at: number; detail?: string | null };

@@ -10,7 +10,7 @@ import type { EvalRun, GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, Twist } from "../components/ui";
 import { entriesText, shareText } from "../components/evals";
 import { byNumber, figure, mean } from "../lib/format";
-import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "../lib/model";
+import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported, towardStep } from "../lib/model";
 import { basePlace, environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, subjectPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { versionTag } from "../lib/suites";
@@ -117,16 +117,16 @@ const RunBranch = memo(function RunBranch({ run, only, place, folds, fold, showi
   const children: ReactNode[] = [];
   if (runOpen) {
     if (run.next.length) {
-      const key = `next:${run.run}`, open = folds[key] ?? true;
+      const key = `next:${run.run}`, open = folds[key] ?? true, toward = towardStep(run), nothing = new Set(toward.nothing);
       children.push(
         <Node key="next" to={runPlace(run.run)} className="step">
           <Twist open={open} onToggle={() => fold(key, !open)} />
           <span className="num">next</span>
           <span className="name">toward a step</span>
-          <span className="tag">{run.next.length} group{run.next.length === 1 ? "" : "s"}</span>
+          <span className="tag" title={`${toward.learnable.length} with something to train · ${toward.nothing.length} with nothing`}>{toward.learnable.length}{toward.perStep != null ? `/${toward.perStep}` : ""}</span>
         </Node>,
       );
-      if (open) children.push(<div key="next-children" className="children">{[...run.next].reverse().map(number => groupRows(number, false))}</div>);
+      if (open) children.push(<div key="next-children" className="children">{[...run.next].reverse().map(number => groupRows(number, nothing.has(number)))}</div>);
     }
     const newest = run.steps.at(-1)?.step;
     for (const step of [...run.steps].reverse()) {

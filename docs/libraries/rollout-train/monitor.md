@@ -143,8 +143,8 @@ on any machine is told apart the same way.
 ## The pages
 
 Each page has a sidebar of its own. On **Runs**, every run (its state, and its host when it is not this one)
-folding open to the groups toward its next step (in flight, or recorded and waiting for a step), then its steps,
-newest first, each with the groups that went into it (a square for each episode); then the episodes outside a run.
+folding open to the groups toward its next step (in flight, or recorded and waiting for a step), tagged with those
+that have something to train on against `groups_per_step` (`1/4`), then its steps, newest first, each with the groups that went into it (a square for each episode); then the episodes outside a run.
 A step's groups need not be consecutive. A group that gave nothing to train on is listed with the step decided after
 it, marked skipped. Runs, steps, groups and episodes fold open and closed: an open step lists its groups, an open
 group its episodes, and an open episode its rollouts. On **Checkpoints**, the graph, the base models checkpoints were
@@ -160,11 +160,11 @@ so a reload stays there.
 
 | Page | View | Address | Shows |
 |---|---|---|---|
-| Runs | Every run | `#/runs` (and `#/`) | the launches (each asked-for run: its state, what it waits for, the settings it changed, why it failed, a Stop button); each run, running ones first: its state and host, groups in flight and done, steps, the share solved over its last groups, each group's mean reward in order, and where its episodes are read |
+| Runs | Every run | `#/runs` (and `#/`) | the launches (each asked-for run: its state, what it waits for, the settings it changed, why it failed, a Stop button); each run, running ones first: its state and host, groups in flight, the groups toward its next step that have something to train on against `groups_per_step` (`1 of 4 groups with something to train`) and, apart, those since its last step that gave nothing to train on and why, groups done, steps, the share solved over its last groups, each group's mean reward in order, and where its episodes are read |
 | Runs | New run | `#/runs/new` | a form asking for a run ([launching a run](#launching-a-run)) |
 | Runs | Presets | `#/presets` | every preset's newest version: its name, version and how many there are, how many settings, its note and when it was saved; each opening its page |
 | Runs | Preset | `#/presets/NAME` | a version's settings (the newest unless another is picked), those it changed from the version before marked and those it removed listed; **Edit** (a row a setting and a note, saved as the next version) and **Delete** (its versions stay readable by number) |
-| Runs | Run | `#/run/RUN` | its name (with a control to rename it) and the buttons its state allows ([pausing, resuming and stopping](#pausing-resuming-and-stopping)), id, state, base model (or the full checkpoint its adapters build on), the checkpoint it started from and the one it is at, what each of its channels serves; figures: where it started and is now, steps, groups done and solved (all, some, none), episodes, the share solved early and late, mean reward, rows unlocked, inference; the step being taken, with its groups; the groups recorded and waiting for a step; each group in flight with its stage (asked, claimed, played, recorded) and episodes; every group's rewards, in the order of the steps they went into (a column opens its group); the latest steps; the tasks played; each suite's score along the line to its newest checkpoint ([scores along a line](#scores-along-a-line)); its settings ([a run's settings](#a-runs-settings)). An eval's run shows the eval's page instead |
+| Runs | Run | `#/run/RUN` | its name (with a control to rename it) and the buttons its state allows ([pausing, resuming and stopping](#pausing-resuming-and-stopping)), id, state, base model (or the full checkpoint its adapters build on), the checkpoint it started from and the one it is at, what each of its channels serves; figures: where it started and is now, steps, groups done and solved (all, some, none), episodes, the share solved early and late, mean reward, rows unlocked, inference; the step being taken, with its groups; the groups recorded toward the next step: those with something to train on, against `groups_per_step`, and apart those that gave nothing; each group in flight with its stage (asked, claimed, played, recorded) and episodes; every group's rewards, in the order of the steps they went into (a column opens its group); the latest steps; the tasks played; each suite's score along the line to its newest checkpoint ([scores along a line](#scores-along-a-line)); its settings ([a run's settings](#a-runs-settings)). An eval's run shows the eval's page instead |
 | Runs | Step | `#/run/RUN/step/N` | the checkpoint the step made and its parent, the groups that went into it (and those decided before it that gave nothing to train on), and the update's statistics |
 | Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one playing with its reward so far, and each slot's where they differ; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the checkpoint it made, or why it was skipped), and its start |
 | Runs | Episode | `#/episode/RUN_ID`, `#/episode/RUN_ID/SLOT` | what the episode reported, and its rollouts, every agent's side by side or one: **turn by turn** (a slider over turns, following the newest unless one moves it, and for the turn shown **Sees**, **Thinks**, **Does** and **Result**), or the **whole trajectory** (every turn a row: what each agent did and what came back, with what it saw and thought a click away); the program's own tool calls below ([an episode's rollouts](#an-episodes-rollouts)) |
@@ -532,7 +532,9 @@ A claim holds while it is its episode's latest attempt, its runner keeps the fen
 and the attempt was not cut short ([claims](rollouts.md#what-runners-write)); the page lists the claims that hold as
 what each runner plays. A step's state is read likewise: `stepping` while it has neither made
 the checkpoint it names nor failed, then `committed` or `failed`. A group that is done carries the number and state of
-the step that covers it, if one does; a recorded group that no step covers waits toward the next one.
+the step that covers it, if one does; a recorded group that no step covers waits toward the next one. A run says the
+`groups_per_step` its next step waits for: as its newest step used it, or as its newest start says where that is
+newer. A step waits only for groups with something to train on, so those that gave nothing are counted apart.
 
 ## The checkpoints view
 

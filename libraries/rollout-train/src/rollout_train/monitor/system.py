@@ -75,6 +75,7 @@ from rollout_train.record import (
     STARTS,
     STEPS,
     Result,
+    mapping,
     named_runs,
     newest_record,
     runs_in,
@@ -97,7 +98,7 @@ from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, EPISODES, INTERRUP
 from rollout_train.run_settings import RunSettings
 from rollout_train.sandboxes import leases_of
 from rollout_train.serving import SERVING
-from rollout_train.settings import EVALS_SUITE, TRAINER, Desired, desired_settings_of
+from rollout_train.settings import EVALS_SUITE, GROUPS_PER_STEP, TRAINER, Desired, desired_settings_of
 from rollout_train.settings import PAUSED as PAUSE
 from rollout_train.settings import checked as checked_setting
 from rollout_train.stores import opened
@@ -1076,6 +1077,7 @@ class System:
                 | seen
                 | {"played": played[run].counts(), "name": called["runs"].get(run, run), "kind": kind}
                 | {"by": begun.get("by"), "by_step": begun.get("step"), "part_of": begun.get("part_of")}
+                | {"groups_per_step": _per_step(begun, own[STEPS])}
             )
         states = {run["run"]: run["state"] for run in runs}
         for run in runs:  # (an eval a training run's schedule asked for, not done, is played by that run's runner)
@@ -1286,6 +1288,19 @@ def _run(
         "steps": listed,
         "next": upcoming,
     }
+
+
+def _per_step(start: Mapping[str, Any], steps: Mapping[str, JsonValue]) -> int | None:
+    """The groups with something to train on that a run's next step waits for: as its newest step used them, or as its
+    newest start says where that started after the step (a run started again with other settings); none where neither
+    says."""
+    said = mapping(start.get("run_settings") or start.get("settings"))
+    started = mapping(said.get("changeable")).get(GROUPS_PER_STEP)
+    step = newest_record(steps)
+    stepped = mapping(step.get("settings")).get(GROUPS_PER_STEP)
+    newer = float(start.get("started") or 0.0) > float(step.get("decided") or 0.0)
+    order = (started, stepped) if newer else (stepped, started)
+    return next((found for found in order if isinstance(found, int)), None)
 
 
 def _group(

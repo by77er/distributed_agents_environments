@@ -8,7 +8,7 @@ import type { Launch, Run } from "../api/types";
 import { Spark } from "../components/charts";
 import { Card, Empty, Head, Mark, Spec, Specs, Tile } from "../components/ui";
 import { clock, figure, mean } from "../lib/format";
-import { episodeReward, nameOf, reported, runKind, slotRewards, stateKind } from "../lib/model";
+import { episodeReward, learnableText, nameOf, nothingText, reported, runKind, slotRewards, stateKind, towardStep } from "../lib/model";
 import { Marks } from "../components/checkpoints";
 import { episodePlace, launchPlace, runPlace } from "../lib/places";
 import { Asked, Starting, launchesByRun } from "../components/launches";
@@ -50,16 +50,18 @@ const RunTile = memo(function RunTile({ run, host, launch }: { run: Run; host: s
   const committed = run.steps.filter(step => step.state === "committed").length;
   const head = run.steps.findLast(step => step.state === "committed")?.makes;
   const from = run.from ?? run.steps[0]?.parent ?? null;
+  const toward = towardStep(run), nothing = nothingText(toward);
   return (
     <Tile to={runPlace(run.run)} className={`rail ${runKind(run.state)}`}>
       <header><RunDot run={run} host={host} /><b title={`id: ${run.run}`}>{nameOf(run)}</b><span className="what">from {from ? `${known.short(from)} (${known.origin(from)})` : known.base(known.checkpoint(head)?.base)}</span><span className="faint small">{running(run, host)}</span></header>
       <div className="cells four">
-        <div className={`cell ${run.open.length ? "accent" : "waiting"}`}><span>in flight</span><b>{run.open.length}</b><small>{run.next.length} toward a step</small></div>
+        <div className={`cell ${run.open.length ? "accent" : "waiting"}`}><span>in flight</span><b>{run.open.length}</b><small>{learnableText(toward)}</small></div>
         <div className="cell"><span>groups done</span><b>{run.done.length}</b><small>of {run.decided} decided</small></div>
         <div className="cell violet"><span>steps</span><b>{committed}</b><small className="mono">{head ? known.short(head) : "none yet"}{head ? <> <Marks names={known.bookmarks(head)} /></> : null}</small></div>
         {reported(solved) ? <div className="cell good"><span>solved</span><b>{`${Math.round((100 * solved.filter(Boolean).length) / solved.length)}%`}</b><small>of the last {recent.length} groups</small></div>
           : <div className="cell"><span>mean reward</span><b>{figure(mean(rewards))}</b><small>of the last {recent.length} groups</small></div>}
       </div>
+      {nothing ? <div className="small muted">{nothing}</div> : null}
       {run.done.length > 1 ? (
         <div>
           <Spark values={run.done.map(line => mean(line.rewards) ?? 0)} kind="s-accent" width={420} height={40} fill />

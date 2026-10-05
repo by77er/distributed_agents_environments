@@ -128,6 +128,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     # after it (or toward the next one, when none was).
     members = [number for step in run["steps"] for number in [*step["groups"], *step["skipped"]]]
     assert sorted([*members, *run["next"]]) == [1, 2, 3]
+    assert run["groups_per_step"] == 1  # (as its steps used it: what the page counts the groups toward a step against)
     # (groups play at once: a step covers every group queued when it begins, one or more)
     assert sorted(number for step in run["steps"] for number in step["groups"]) == [line["group"] for line in trained]
     made = {step["step"]: step["makes"] for step in run["steps"]}
