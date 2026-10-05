@@ -232,7 +232,8 @@ class HostSpec:
 
 def host_spec(cluster: Cluster, provider: str, model: str, *, settings: "RunSettings | None" = None) -> HostSpec:
     """An engine host of `provider`'s `model` (an `[inference.NAME]` of the cluster, of a kind its engines run in an
-    engine host, `vllm`): its kind's engine, the model's options, a replica's GPUs, and `[placement.engines]`. A run
+    engine host, `vllm`): its kind's engine, the model's options with the provider's `max_logprobs` (what it declares
+    as its top-k logprobs, and so what its engines allow), a replica's GPUs, and `[placement.engines]`. A run
     whose trainer shares the provider's card (`colocate_with`, by its `settings`) has its host ask for half of the
     replica's GPUs, and its trainer for the other half."""
     offered = cluster.inference[provider]
@@ -246,7 +247,8 @@ def host_spec(cluster: Cluster, provider: str, model: str, *, settings: "RunSett
     if trainer is not None and trainer.colocate_with == provider:
         gpus /= 2
     resources = dict(cluster.placement.get("engines", {}))
-    return HostSpec(engine, model, dict(offered.models[model].options), gpus, resources)
+    options = {**offered.models[model].options, "max_logprobs": offered.capabilities.top_logprobs}
+    return HostSpec(engine, model, options, gpus, resources)
 
 
 def started(

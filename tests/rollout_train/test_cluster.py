@@ -106,6 +106,10 @@ def test_a_config_named_and_missing_says_where_it_looked(tmp_path: Path, monkeyp
         ('\n[trainers.t]\nkind = "lora"\nmodels = ["m"]\ncolocate_with = "elsewhere"\n', "not a vllm provider"),
         ('\n[trainers.t]\nkind = "lora"\nmodels = []\n', "models is a list"),
         ('\n[inference.local.models."n"]\n', "needs context"),
+        (
+            '\n[inference.local.models."n"]\ncontext = 8\noptions = { max_logprobs = 5 }\n',
+            r"max_logprobs is the provider's \(\[inference.local\] max_logprobs\)",
+        ),
         ("\n[placement.everyone]\nresources = { a = 1 }\n", "the roles are"),
         ('\n[environments."e:e"]\npython = "platform"\nproject = "p"\n', 'python = "platform" or a project'),
         ('\n[sandboxes.box]\nprovider = "p:p"\npython = "nowhere"\n', "python is platform or an environment"),

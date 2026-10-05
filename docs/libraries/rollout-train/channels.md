@@ -169,11 +169,12 @@ cluster. So the same actor is a run's own replica, started by the run's job, or 
 |---|---|
 | `models()` | what it holds, by name, as vLLM's `/v1/models` lists it: the model (unless full weights replaced it), each adapter (its `parent` the model), each full checkpoint, with the depth each was published as |
 | `generate(prompt, …, adapter=)` | samples the checkpoint named (None: the model); `NotLoaded` where it does not hold it once a load in progress ends |
+| `score(tokens, start=, end=, top=, adapter=)` | scores tokens with the checkpoint named, refused as `generate` is |
 | `pause`, `resume`, `sleep`, `wake` | hold its requests back, and free and take back the GPU, for a trainer that shares it |
 | `bind`, `unbind`, `bound`, `follow`, `served`, `about` | what it serves, a look now, what its beats say |
 
 `host_spec(cluster, provider, model, settings=)` says what a host of a `vllm` provider's model asks for: the kind's
-engine, the model's options, a replica's `gpus` (half of them where the run's trainer shares the provider's card,
+engine, the model's options with the provider's `max_logprobs` (the top-k it declares), a replica's `gpus` (half of them where the run's trainer shares the provider's card,
 `colocate_with`), and the custom resources `[placement.engines]` names. Ray places it by those: on Kubernetes, a GPU
 share no node has free makes KubeRay's autoscaler start a GPU worker. Ray starts a host again when it dies
 (`max_restarts=-1`); its engines start afresh and its follower loads what the serving records say again.

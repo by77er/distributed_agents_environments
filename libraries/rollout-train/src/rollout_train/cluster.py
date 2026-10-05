@@ -454,6 +454,10 @@ def _inference(name: str, described: dict[str, Any], tls: Tls | None) -> Inferen
         if not isinstance(options, dict):
             raise ClusterError(f'{where}.models."{model}" options is a table')
         options = cast(dict[str, JsonValue], options)
+        if "max_logprobs" in options:
+            raise ClusterError(
+                f'{where}.models."{model}" options: max_logprobs is the provider\'s ({where} max_logprobs)'
+            )
         cost = _numbers(offer.take("cost", {}))
         if cost is None:
             raise ClusterError(f'{where}.models."{model}" cost is a table of dollars per million tokens (or per hour)')

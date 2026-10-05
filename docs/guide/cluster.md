@@ -183,8 +183,15 @@ rollout bookmark diamonds first:20 --cluster lab
 | auth | `none`, `bearer`, `mtls` (default `none`) | `none`, `bearer`, `mtls` (must say) | `vendor` | `vendor`, `bearer` (must say) | `mtls` (each pod's identity from its heartbeat) |
 | its own fields | `engine`, `listen`, `max_logprobs`, `pool` | `addresses`, `via`, `loader`, `max_logprobs`, `pool` | `project` / `project_env` | `endpoint` | `image`, `gpu_types`, `pods`, `idle_stop`, `volume_gb`, `secrets`, `step_ca`, `max_logprobs`, `pool`, `api_key_env` |
 
-Tinker's prompt and top-k logprobs are declared as its SDK says (`Capabilities.unchecked`): nothing relies on them
-until a live test confirms them.
+Tinker's prompt and top-k logprobs are declared as its SDK says (`Capabilities.unchecked`): the SDK takes prompt
+logprobs and a top k at prompt and sampled positions, whose width Tinker's server bounds without the SDK saying how
+far (declared as 20). Nothing relies on them, and `TinkerEngine` does not ask for them, until a live test confirms
+them.
+
+`max_logprobs` is the top-k a provider declares. A `vllm` provider's engines are started with it (`VllmEngine`'s
+`max_logprobs`, which vLLM caps a request's top k at), so a model's `options` do not set it. A `vllm-servers` or
+`runpod-inference` provider's servers must have been started with at least as many (`--max-logprobs`, 20 unless
+given).
 
 **Auth.** `auth` is a kind or a table: `auth = "none"`, `auth = { kind = "bearer", token_env = "ENGINES_TOKEN" }`,
 `auth = { kind = "vendor", key_env = "OPENAI_API_KEY" }`, `auth = { kind = "mtls", identity = "spiffe://…" }`.

@@ -306,8 +306,8 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
         InferenceKind(
             "vllm",
             _token_level(
-                prompt_logprobs=True,
-                top_logprobs=20,
+                prompt_logprobs=True,  # (`VllmEngine.score`)
+                top_logprobs=20,  # (vLLM's default `max_logprobs`; the provider's `max_logprobs` starts its engines)
                 full_reload=True,
                 loads=frozenset({"peft", "full"}),
             ),
@@ -335,8 +335,10 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
         InferenceKind(
             "tinker",
             _token_level(
-                prompt_logprobs=False,
-                top_logprobs=0,
+                # (its SDK, 0.32, takes `include_prompt_logprobs` and a top k at prompt and sampled positions, the
+                # width bounded by its server, which the SDK does not state)
+                prompt_logprobs=True,
+                top_logprobs=20,
                 full_reload=False,
                 loads=frozenset({"tinker"}),
                 bills="tokens",
@@ -405,7 +407,8 @@ class InferenceProvider:
     name: str
     kind: str
     capabilities: Capabilities
-    """The kind's, with this deployment's `max_logprobs`."""
+    """The kind's, with this deployment's `max_logprobs` as its top-k logprobs: what a `vllm` provider's engines are
+    started with, and what a `vllm-servers` or `runpod-inference` provider's servers were (`--max-logprobs`)."""
     models: Mapping[str, ModelOffer]
     auth: Auth
     gpus: float = 0

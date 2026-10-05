@@ -37,6 +37,13 @@ def test_the_capability_table() -> None:
     assert INFERENCE_KINDS["runpod-inference"].capabilities.bills == "hours"
     tinker = INFERENCE_KINDS["tinker"].capabilities
     assert tinker.bills == "tokens" and tinker.unchecked == {"prompt_logprobs", "top_logprobs"}  # (checked live first)
+    assert tinker.prompt_logprobs and tinker.top_logprobs == 20  # (as its SDK says)
+    scoring = {kind: (each.capabilities.prompt_logprobs, each.capabilities.top_logprobs) for kind, each in
+               INFERENCE_KINDS.items()}  # fmt: skip
+    assert scoring == {
+        "vllm": (True, 20), "vllm-servers": (True, 20), "tinker": (True, 20), "api": (False, 0),
+        "runpod-inference": (True, 20),
+    }  # fmt: skip
     assert INFERENCE_KINDS["runpod-inference"].auths == ("mtls",)
     assert INFERENCE_KINDS["tinker"].auths == ("vendor",)
     sampled_with = {kind: each.capabilities.sampled_with for kind, each in INFERENCE_KINDS.items()}
