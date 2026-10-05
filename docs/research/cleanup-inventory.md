@@ -1,5 +1,8 @@
 # Cleanup inventory
 
+**Status: in progress.** A plan of removals, carried out commit by commit. A design note: see [Design notes](README.md)
+for the others.
+
 What to remove (leftovers of replaced mechanisms, paths the decided design drops, dead code) and what to factor out
 (duplicated logic), taken at `0f90a2b`. Each item gives where it is, why it goes, what depends on it, what replaces it,
 and roughly how many lines it removes. Items are ranked by payoff over risk within each section; the ranking across

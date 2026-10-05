@@ -1,8 +1,13 @@
 # Runs and events
 
-A run records what happened as a sequence of typed **run events**. Consumers such as episode runners, client event
-streams, the monitor and tests read these events, never a runner's internals. This page covers what a run records
-and how to read it.
+For environment and tool authors: what a run records (effects, their identity, and run events), and how to start runs
+with the local runner.
+
+**Read first:** [Messages, files and digests](content.md). **Next:** [Use a hosted model](models.md).
+
+A run records what happened as a sequence of typed **run events**. Consumers such as
+[episode](../libraries/rollout-train/episodes.md) runners, client event streams, the monitor and tests read these
+events, never a runner's internals. This page covers what a run records and how to read it.
 
 ## The local run context
 
@@ -40,8 +45,9 @@ An **effect** is an operation that leaves task or agent code:
 | `tool.call` | a call to an imported tool (`run.tools.call`, which the default `respond` uses) |
 | `output.emit` | `run.emit(...)` |
 
-Each effect gets an identity, which receivers use to perform it once: the gateway answers a sample asked for again
-under its `effect_id` with the turn it recorded ([determinism](../libraries/rollout/determinism.md)):
+Each effect gets an identity, which receivers use to perform it once: the
+[gateway](../libraries/rollout-train/gateway.md) answers a sample asked for again under its `effect_id` with the turn it
+recorded ([determinism](../libraries/rollout/determinism.md)):
 
 | Identifier | Format | Example |
 |---|---|---|

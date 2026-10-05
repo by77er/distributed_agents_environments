@@ -1,9 +1,15 @@
-# Models
+# Use a hosted model
+
+For environment authors who want a real model behind a slot: binding it to a hosted model through the OpenAI Responses
+API, with an API key or a Codex login.
+
+**Read first:** [Choose what the model sees](agents.md). **Next:** [Test with a scripted model](testing.md).
 
 A run's model slots are served by **model endpoints**. Which endpoint serves a slot is decided by the run's binding,
 never by task or agent code. A `ModelBinding` is either `direct` (a provider's API, on this page) or `recorded` (a
-trainable channel served through the [gateway](../libraries/rollout-train/gateway.md), which records every turn). This page covers the
-adapter for the OpenAI Responses API.
+trainable [channel](../libraries/rollout-train/channels.md) served through the
+[gateway](../libraries/rollout-train/gateway.md), which records every turn). This page covers the adapter for the OpenAI
+Responses API.
 
 ## Binding a slot to a provider
 
@@ -76,7 +82,7 @@ runner = LocalRunner(providers={
 - **No recording.** Direct adapters are for models you do not train: nothing about tokens or logprobs is kept, and a
   retried effect samples again.
 
-## Trying it
+## Try it with a hosted model
 
 ```bash
 ROLLOUT_LIVE=1 uv run pytest tests/rollout_openai -k live   # one real round trip; skipped unless ROLLOUT_LIVE=1

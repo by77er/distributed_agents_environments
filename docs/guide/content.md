@@ -1,9 +1,13 @@
 # Content
 
-Everything a model reads or writes is **canonical content**: model-agnostic messages made of typed blocks. Task
-and agent code use only this form; rendering to a model's tokens happens in the gateway or inside a provider.
-The types live in `rollout.contracts` and are specified in
-[canonical content](../libraries/rollout/contracts/canonical-content.md).
+For anyone who builds or reads messages: canonical content, tool calls and results, media kept as blobs, and digests.
+
+**Read first:** [Choose what the model sees](agents.md). **Next:** [What a run records](runs-and-events.md).
+
+Everything a model reads or writes is **canonical content**: model-agnostic messages made of typed blocks. Task and
+agent code use only this form; rendering to a model's tokens happens in the
+[gateway](../libraries/rollout-train/gateway.md) or inside a provider. The types live in `rollout.contracts` and are
+specified in [canonical content](../libraries/rollout/contracts/canonical-content.md).
 
 ## Messages and blocks
 

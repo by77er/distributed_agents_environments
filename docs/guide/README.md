@@ -1,64 +1,58 @@
-# Developer guide
+# Write an environment
 
-How to build with `rollout`: write tasks, tools and agents, run episodes, test them, and train on them. The
-[documentation index](../README.md) lists everything else.
+This section is for people who write environments: the worlds agents are trained and evaluated in. It shows how to
+write a task, give the model tools, choose what the model sees, test it all without a GPU, and publish it so that a
+cluster can import it.
 
-Every block tagged exactly `python` in this guide runs as part of the test suite (`tests/test_docs.py`). A block
-tagged `py` shows a shape and is not run. Every profile in a `toml` block is loaded by the tests. The
-[API reference](reference.md) is generated from the source, and a test fails when it is out of date.
+**Read first:** [Start here](../start/README.md). **Next:** [Run a first episode](getting-started.md).
 
-## Pages
+## Read in this order
 
-| Page | Read it to |
-|---|---|
-| [Three ways in](perspectives.md) | see the system from where you stand: building an environment, designing training, deploying |
-| [Getting started](getting-started.md) | install, write a first task, run one episode |
-| [Tasks](tasks.md) | define an environment: hooks, observations, rewards, endings, extra model slots |
-| [Tools](tools.md) | give the model an action space with `@tool` methods and imported tool sets |
-| [Agents](agents.md) | control what the model sees and how it acts |
-| [Content](content.md) | build and read messages, tool calls, tool results; blobs; digests |
-| [Runs and events](runs-and-events.md) | understand what a run records: effects, identifiers, events; start runs with the local runner |
-| [Models](models.md) | run against a real model through the Responses API |
-| [Testing](testing.md) | test tasks and agents with a scripted model |
-| [Deploying](deploying.md) | describe engines, the trainer, the runner and tool sets in a profile; the `rollout` command |
-| [The cluster config and run settings](cluster.md) | describe a cluster's providers and trainers once; a run's settings, presets, and the check of a run |
-| [Writing an environment others can import](publishing.md) | publish an environment in a git repository: the entry point, its dependencies, what the import checks |
-| [API reference](reference.md) | look up any public name |
+1. [Run a first episode](getting-started.md): install, write a first task, and play one episode against a scripted
+   model.
+2. [Write a task](tasks.md): hooks, observations, rewards, endings, and more model slots such as a judge.
+3. [Give the model tools](tools.md): `@tool` methods, schemas from type hints, errors as observations, and tool sets
+   imported by name.
+4. [Choose what the model sees](agents.md): context selection, context hints, and how an agent turns the model's
+   output into one reply.
+5. [Messages, files and digests](content.md): canonical content, tool calls and results, blobs, digests.
+6. [What a run records](runs-and-events.md): effects, identifiers, run events, and the local runner.
+7. [Use a hosted model](models.md): bind a model slot to a model behind the OpenAI Responses API.
+8. [Test with a scripted model](testing.md): scripted endpoints, helpers, and `rollout env check`.
+9. [Import an environment from git](publishing.md): what a repository needs so that a cluster can import it from
+   the monitor, and what the import checks.
 
-Beyond the guide:
+Then, as you need them:
 
-| For | Read |
-|---|---|
-| Long episodes in a context that fits any model | [Memory](../libraries/rollout/memory.md) |
-| Training: episode runners, episodes, the training loop, checkpoints, recorded channels | [Rollouts](../libraries/rollout-train/rollouts.md), [episodes](../libraries/rollout-train/episodes.md), [training](../libraries/rollout-train/training.md), [checkpoints](../libraries/rollout-train/checkpoints.md), [channels](../libraries/rollout-train/channels.md), [recorder](../libraries/rollout-train/recorder.md) |
-| What a profile names: an engine, a trainer, a model family's renderer | [vLLM engine](../implementations/rollout-vllm.md), [LoRA trainer](../implementations/rollout-lora.md), [Qwen renderers](../implementations/rollout-qwen.md), [Gemma renderers](../implementations/rollout-gemma.md) |
+- **The harness in depth.** [The harness](../libraries/rollout/README.md) (the loop, programs and runners),
+  [sandboxes](../libraries/rollout/sandboxes.md), [determinism](../libraries/rollout/determinism.md),
+  [hooks](../libraries/rollout/hooks.md), and [memory for long episodes](../libraries/rollout/memory.md).
+- **Example environments.** The [Minecraft team](../products/minecraft-team.md), the
+  [gridworld](../products/gridworld.md), and [judging](../products/judging.md), where a judge scores open-ended
+  answers.
 
-## Concepts in one place
+## The ideas this section uses
 
-The [glossary](../architecture/glossary.md) defines every term; these are the ones the guide uses most.
+The [glossary](../architecture/glossary.md) defines every term. These are the ones the pages here use most:
 
-| Term | Meaning |
-|---|---|
-| **Run** | One execution of a program: for an agent, one episode. Identified by `run_id` (`r_{ulid}`). |
-| **Task** | The environment the agent acts in: first observation, a response to each reply, tools, scoring. |
-| **Agent** | The policy side: what the model sees each turn, and how its output becomes one reply. |
-| **Observation** | What the model is shown next, plus the reward for the reply it answers and whether the episode ended. |
-| **Reply** | The assistant `Message` the agent returns each turn. |
-| **Turn** | One reply and the observation that answers it. `run.turn` counts replies. |
-| **Model slot** | A named model a task uses. The agent acts through `policy`; tasks may declare others. |
-| **Model endpoint** | What serves a model slot: the gateway, an API adapter, or a scripted endpoint in tests. |
-| **Effect** | An operation that leaves task or agent code, such as a model sample. It has a stable `effect_id`. |
-| **Run event** | A typed record of something that happened in a run, in a gapless sequence. |
-| **Environment** | What a run trains on and an eval measures: rows, easiest first, and how to draw a start of one; eval data training never draws; what its results say; a version; perhaps a curriculum of its own. |
-| **Group** | One start of one row, played as several episodes that are compared with each other. |
-| **Step** | One update by the trainer, over several groups: it makes a checkpoint from the one before. |
-| **Checkpoint** | Weights a step made: a node of a graph that grows from a base model, with an id, its parents, and the run and step that made it. A **bookmark** can name one. |
-| **Episode** | A finished run as training sees it: labels, outcome, result, and each model slot's trajectory of segments. |
-| **Channel** | A trainable model being served, by name. A binding names one for a model slot; training publishes weights to it. |
+- **Environment.** What a run trains on and an eval measures: rows (situations, easiest first), how to draw a start
+  of one, eval data that training never draws, what its results say, a version, and perhaps a curriculum of its own.
+- **Task.** The world an agent acts in: the first observation, a response to each reply, tools, and scoring.
+- **Agent.** The policy side: what the model sees each turn, and how its output becomes one reply.
+- **Run.** One execution of a program, identified by `run_id` (`r_{ulid}`). For an agent, one episode.
+- **Observation.** What the model is shown next, with the reward for the reply it answers and whether the episode
+  ended.
+- **Reply** and **turn.** The reply is the assistant `Message` the agent returns. A turn is one reply and the
+  observation that answers it; `run.turn` counts replies.
+- **Model slot.** A named model a task uses. The agent acts through `policy`; a task may declare others, such as a
+  judge.
+- **Model endpoint.** What serves a model slot: the gateway, an API adapter, or a scripted endpoint in tests.
+- **Effect.** An operation that leaves task or agent code, such as a model sample. It has a stable `effect_id`.
+- **Run event.** A typed record of something that happened in a run, in a gapless sequence.
 
 ## Where things live
 
-Each row is a module of one package; the [documentation index](../README.md#packages) lists the packages.
+Each row is a module of one package. The [documentation home](../README.md#packages) lists the packages.
 
 | Import from | Package | For |
 |---|---|---|
@@ -82,7 +76,9 @@ Each row is a module of one package; the [documentation index](../README.md#pack
 
 ## Conventions
 
+- Every block tagged exactly `python` in these pages runs as part of the test suite (`tests/test_docs.py`). A block
+  tagged `py` shows a shape and is not run. The [API reference](reference.md) is generated from the source, and a
+  test fails when it is out of date.
 - Hooks and tools are `async` methods. Everything a task or agent does outside its own code goes through `run`.
 - Contract types are immutable pydantic models: construct new values rather than modifying existing ones.
 - Type names are never abbreviated: `Observation`, not `Obs`.
-- For AI coding assistants: [`llms.txt`](../../llms.txt) at the repository root indexes the documentation.

@@ -1,5 +1,11 @@
 # vLLM engine
 
+For whoever deploys or extends inference: vLLM as an engine, its options, adapters by name, sleep and wake, and
+measurements.
+
+**Read first:** [Channels and engines](../libraries/rollout-train/channels.md). **Next:** [LoRA
+trainer](rollout-lora.md).
+
 Code: `rollout_vllm`
 
 `VllmEngine` implements the [`Engine`](../guide/reference.md#engine) protocol on vLLM: tokens in; tokens, their
@@ -29,7 +35,7 @@ Each entry of `engines` is passed to `VllmEngine(model, **entry)`. An entry may 
 | `max_num_batched_tokens` | How many tokens one scheduling step of vLLM processes |
 | `max_lora_rank` | The highest adapter rank the engine loads; at least the trainer's `rank` |
 | `max_loras` | How many adapters one batch may mix. A channel keeps its run's `max_lag + 1` loaded (two by default: the one it samples from and the one before it), and an engine host serving several runs holds each one's side by side, so this is at least the sum of their windows |
-| `language_model_only` | Load only the language model of a multimodal checkpoint |
+| `language_model_only` | Load only the language model of a multimodal [checkpoint](../libraries/rollout-train/checkpoints.md) |
 | `speculative` | vLLM's speculative decoding, as its `speculative_config`: for Qwen3.5, whose checkpoints carry a multi-token prediction layer, `{ method = "qwen3_5_mtp", num_speculative_tokens = 2 }`. The draft is not adapted with the channel's LoRA, so fewer drafted tokens are accepted as the policy moves from the base; what is sampled keeps the target model's distribution. Whether the logprobs it returns are the target model's, as the trainer needs, is to be checked before training on them. Off unless given |
 | `quantization` | vLLM's quantization of a checkpoint as it loads: `fp8` turns a bfloat16 checkpoint's linear layers into FP8 (the embeddings and the output layer stay bfloat16). Off unless given |
 | `seed` | The engine's sampling seed |

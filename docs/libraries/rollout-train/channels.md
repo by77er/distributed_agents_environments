@@ -1,5 +1,10 @@
 # Channels and engines
 
+For people who train and deploy: how a channel serves the model a run trains, its engines and limits, what it should
+serve, engine hosts, and engines on other machines.
+
+**Read first:** [Checkpoints, runs and the ledger](checkpoints.md). **Next:** [Record turns for training](recorder.md).
+
 Code: `rollout_train.inference` · See [`Channel`](../../guide/reference.md#channel),
 [`Engine`](../../guide/reference.md#engine), [`Limits`](../../guide/reference.md#limits), [recorder](recorder.md)
 
@@ -193,8 +198,8 @@ share no node has free makes KubeRay's autoscaler start a GPU worker. Ray starts
 (`max_restarts=-1`); its engines start afresh and its follower loads what the serving records say again.
 
 `HostServer(handle, address)` is a `CheckpointServer` over a host's handle, for a `RemoteChannel` in the same Ray
-cluster: a host that does not answer is `Unreachable`. `HostPausable(handle)` is what [`Colocated`](#sharing-an-accelerator)
-pauses and puts to sleep.
+cluster: a host that does not answer is `Unreachable`. `HostPausable(handle)` is what
+[`Colocated`](#share-a-gpu-between-engines-and-the-trainer) pauses and puts to sleep.
 
 ## Engines elsewhere
 
@@ -245,7 +250,7 @@ otherwise: the checkpoint before, which a server serves while it loads the newes
 Every token is stamped with the depth of the checkpoint its answer names, and the trainer's importance weight corrects
 for the difference.
 
-## Sharing an accelerator
+## Share a GPU between engines and the trainer
 
 A trainer that shares the engines' accelerator is wrapped in [`Colocated`](training.md#the-trainer), which uses four
 members of a channel:

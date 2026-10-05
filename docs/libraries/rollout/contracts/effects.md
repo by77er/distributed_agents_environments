@@ -1,5 +1,10 @@
 # Effects
 
+For whoever implements a runner or a receiver of effects: the operations that leave program code, their identity,
+completion and deduplication.
+
+**Read first:** [Determinism](../determinism.md). **Next:** [Model endpoint](model-endpoint.md).
+
 Code: `rollout.contracts.effects`, `rollout.harness.model` (`Effects`) · See
 [API reference](../../../guide/reference.md#effectkind), [determinism](../determinism.md)
 
@@ -54,7 +59,7 @@ safe to request again depends on its receiver:
 
 | Effect | Receiver | Safe to request again |
 |---|---|---|
-| `model.sample` | the gateway returns the recorded result for an `effect_id` it has recorded | yes |
+| `model.sample` | the [gateway](../../rollout-train/gateway.md) returns the recorded result for an `effect_id` it has recorded | yes |
 | `model.sample` | a direct adapter does not deduplicate | yes: it samples again, and nothing is lost |
 | `tool.call` of a tool whose `retry_class` is `PURE` or `IDEMPOTENT` | any tool set | yes |
 | `tool.call` of a tool whose `retry_class` is `SIDE_EFFECTING` or `UNKNOWN` | a [`DeduplicatingToolSet`](../../../guide/reference.md#deduplicatingtoolset) whose `deduplicates` is true | yes: the tool set performs it at most once |

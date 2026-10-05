@@ -1,4 +1,10 @@
-# Writing an environment others can import
+# Import an environment from git
+
+For environment authors who keep an environment in a git repository of its own: what the repository holds, what it may
+depend on, and what a cluster checks when it imports it.
+
+**Read first:** [checking an environment](testing.md#checking-an-environment). **Next:** [Train a
+model](../train/README.md).
 
 An environment in a git repository can be imported into a cluster from the monitor (**Import from git** on its
 Environments page, [importing from git](../libraries/rollout-train/monitor.md#importing-from-git)), with nothing
@@ -6,7 +12,7 @@ redeployed: the platform fetches its source at a commit, keeps it in the blob st
 environment it will run in, and records a version that launchers then offer. This page says what such a repository
 holds, what its project may depend on, and what the import checks (`rollout_train.publishing`).
 
-## The project
+## What the repository holds
 
 An environment is imported from a Python project: a directory with a `pyproject.toml`, at the repository's root or in
 a subdirectory the import names. The project declares its environment as an entry point in the group
@@ -38,7 +44,7 @@ times and modes, so that the same files are the same bytes. It leaves out `.git`
 caches of pytest, mypy and ruff, compiled bytecode, and symbolic links; it holds 256 MiB at most. Data an environment
 reads goes in the project, read relative to its module (`Path(__file__).parent`).
 
-## Its dependencies
+## Dependencies on the platform
 
 The project's code runs beside the platform's: the run's training loop and runners import it in the same process. So
 the platform's packages are the platform's own, and an environment depends on them by name, without a version
@@ -66,7 +72,7 @@ An import is refused, with the reason the monitor shows under its form, where:
 | The dependencies | one is no requirement |
 | Its Python | Ray could not build its runtime environment (uv could not install the dependencies left) |
 | Loading | the entry point does not import in its runtime environment |
-| The checks | one of the checks `rollout env check` runs without a model fails: its rows build (keys and titles unique, `counts_for` naming rows it has), its description and version say something, one seed draws one start and its eval data is the same each time, training draws no eval start; and one episode played with a scripted model ends, with a reward in the range its description gives and a result that says what it says it does ([checking an environment](testing.md#checking-an-environment)). The episode is not played where the environment's program imports a tool set or declares a sandbox, which an import cannot serve: that finding passes, flagged |
+| The checks | one of the checks `rollout env check` runs without a model fails: its rows build (keys and titles unique, `counts_for` naming rows it has), its description and version say something, one seed draws one start and its eval data is the same each time, training draws no eval start; and one [episode](../libraries/rollout-train/episodes.md) played with a scripted model ends, with a reward in the range its description gives and a result that says what it says it does ([checking an environment](testing.md#checking-an-environment)). The episode is not played where the environment's program imports a tool set or declares a sandbox, which an import cannot serve: that finding passes, flagged |
 
 The checks run in a Ray job on the cluster, in the version's runtime environment, so an environment that imports in
 the job is one a run can play. Before pushing, the same checks run in a checkout of the platform, with the project's
@@ -76,14 +82,15 @@ directory (or its `src/`) on the path:
 PYTHONPATH=path/to/say-the-word uv run rollout env check words:environment
 ```
 
-## Versions
+## Environment versions
 
 A version's id is the SHA-256 of the project's zip: the same files are the same version, from whatever URL or ref they
-were fetched, and importing them again returns the version recorded, without checking it again. A changed file is a
-new version. The ledger keeps each version beside it (`rollout_train.published`): its name, source URL, the ref asked
-for and the commit it was, its subdirectory, entry point, the blob, its runtime environment, what it says of itself
-(its version, description, rows, eval data, curriculum and the kinds of sandbox its program declares, `sandboxes`, as
-its check found them) and the check's findings, and when it was imported.
+were fetched, and importing them again returns the version recorded, without checking it again. A changed file is a new
+version. The [ledger](../libraries/rollout-train/checkpoints.md#the-ledger) keeps each version beside it
+(`rollout_train.published`): its name, source URL, the ref asked for and the commit it was, its subdirectory, entry
+point, the blob, its runtime environment, what it says of itself (its version, description, rows, eval data, curriculum
+and the kinds of sandbox its program declares, `sandboxes`, as its check found them) and the check's findings, and when
+it was imported.
 
 Every launcher on Ray offers every version the ledger keeps, by `NAME@VERSION`, with each of its profiles that has a
 pool of every kind of sandbox the version declares (a version that declares none goes with every profile), and the New

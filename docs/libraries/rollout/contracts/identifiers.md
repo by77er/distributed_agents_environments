@@ -1,5 +1,9 @@
 # Identifiers
 
+For whoever reads or writes records: what each identifier means and what makes it.
+
+**Read first:** [Contracts](README.md). **Next:** [Canonical content](canonical-content.md).
+
 Code: `rollout.contracts.identifiers` · See
 [API reference](../../../guide/reference.md#effectidentity)
 
@@ -20,9 +24,9 @@ A ULID is 48 bits of Unix time in milliseconds and 80 random bits, written as 26
 Identifiers made from one sort by the time they were made. Runners and services make them; task code does not: its
 randomness is `run.random`, seeded from the run's id ([determinism](../determinism.md)).
 
-Identifiers above the harness are defined where they are used: a training run, a group, an episode and an attempt
-in [rollouts](../../rollout-train/rollouts.md), a channel's weights version in
-[channels](../../rollout-train/channels.md#publishing-weights).
+Identifiers above the harness are defined where they are used: a training run, a group, an
+[episode](../../rollout-train/episodes.md) and an attempt in [rollouts](../../rollout-train/rollouts.md), a channel's
+weights version in [channels](../../rollout-train/channels.md#publishing-weights).
 
 ## Rules
 

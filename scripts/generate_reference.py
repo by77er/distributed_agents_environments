@@ -101,9 +101,12 @@ def render() -> str:
     lines = [
         "# API reference",
         "",
-        "Generated from the source by `scripts/generate_reference.py`; do not edit by hand. Every public name,",
-        "grouped by module, alphabetically. Types and defaults appear as written in the source. The",
-        "[guide](README.md) explains how the pieces fit together.",
+        "Every public name, grouped by module, alphabetically, for anyone who knows what they are looking for. Types",
+        "and defaults appear as written in the source. Generated from the source by `scripts/generate_reference.py`;",
+        "do not edit by hand.",
+        "",
+        "**Read first:** [Start here](../start/README.md), and the section for your task in the",
+        "[documentation home](../README.md), for how the pieces fit together.",
         "",
     ]
     sections: list[tuple[str, str, list[Definition]]] = []

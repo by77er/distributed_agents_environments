@@ -1,5 +1,9 @@
 # Run events
 
+For whoever reads runs' records: the events a run records, their order, and what reads them.
+
+**Read first:** [What a run records](../../../guide/runs-and-events.md). **Next:** [Effects](effects.md).
+
 Code: `rollout.contracts.events` · See [`RunEvent`](../../../guide/reference.md#runevent),
 [`RunEventType`](../../../guide/reference.md#runeventtype), [guide: runs and events](../../../guide/runs-and-events.md)
 

@@ -1,5 +1,9 @@
 # Model endpoint
 
+For whoever implements a model endpoint: what an endpoint is asked, what it answers, its errors and its guarantees.
+
+**Read first:** [Canonical content](canonical-content.md). **Next:** [The gateway](../../rollout-train/gateway.md).
+
 Code: `rollout.contracts.model_endpoint`, `rollout.harness.model` · See
 [`ModelEndpoint`](../../../guide/reference.md#modelendpoint),
 [guide: agents](../../../guide/agents.md#the-model-interface)
@@ -9,7 +13,7 @@ code reaches it only through [`Model`](../../../guide/reference.md#model) (`run.
 
 | Implementation | Serves | Code |
 |---|---|---|
-| The gateway's endpoint | a trainable channel, with everything training needs recorded | [the gateway](../../rollout-train/gateway.md#a-runner-served-by-the-gateway) |
+| The gateway's endpoint | a trainable [channel](../../rollout-train/channels.md), with everything training needs recorded | [the gateway](../../rollout-train/gateway.md#a-runner-served-by-the-gateway) |
 | A direct adapter | a provider's API; nothing is recorded | [guide: models](../../../guide/models.md) |
 | `ScriptedModelEndpoint` | a script, in tests | [guide: testing](../../../guide/testing.md) |
 
@@ -70,7 +74,8 @@ that leaves the program fails the run ([failures](../README.md#failures)).
 ## Guarantees
 
 - **Idempotency.** The gateway returns the recorded result for an `effect_id` it has recorded: the turn is in the
-  ledger, so a runner started again gets it back too. A direct adapter samples again.
+  [ledger](../../rollout-train/checkpoints.md#the-ledger), so a runner started again gets it back too. A direct adapter
+  samples again.
 - **A stable contract.** A slot's capability contract does not weaken during a run.
 - **One session per slot per run.** The `session_id` is `{run_id}/{model_slot}` ([identifiers](identifiers.md)).
 

@@ -1,5 +1,10 @@
 # Qwen renderers
 
+For whoever trains a Qwen model or adds a model family: the token formats of Qwen3.5 and Qwen3.
+
+**Read first:** [renderers](../libraries/rollout-train/recorder.md#renderers). **Next:** [Gemma
+renderers](rollout-gemma.md).
+
 Code: `rollout_qwen`
 
 A [`Renderer`](../guide/reference.md#renderer) is a model family's token format: it renders canonical messages and
@@ -14,12 +19,12 @@ This package has the renderers of two Qwen families. It is installed with `uv sy
 
 ## What a renderer function is called with
 
-A [profile](../guide/deploying.md) names one for a channel (`renderer = "rollout_qwen:qwen35"`) and calls it with the
-channel's `model`. Given a checkpoint's name or path, the function loads that checkpoint's tokenizer
-([`tokenizer_of`](../guide/reference.md#tokenizer_of)).
-Given a tokenizer, it uses it as it is. Either way it returns a
-[`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer): prompts are rendered with the tokenizer's own
-chat template, and a turn ends at `<|im_end|>`, or at the end of text (`<|endoftext|>`), where the models stop too.
+A [profile](../guide/deploying.md) names one for a [channel](../libraries/rollout-train/channels.md) (`renderer =
+"rollout_qwen:qwen35"`) and calls it with the channel's `model`. Given a
+[checkpoint](../libraries/rollout-train/checkpoints.md)'s name or path, the function loads that checkpoint's tokenizer
+([`tokenizer_of`](../guide/reference.md#tokenizer_of)). Given a tokenizer, it uses it as it is. Either way it returns a
+[`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer): prompts are rendered with the tokenizer's own chat
+template, and a turn ends at `<|im_end|>`, or at the end of text (`<|endoftext|>`), where the models stop too.
 
 Each function says the models it renders ([`renders`](../guide/reference.md#renders)): `qwen35` those whose name holds
 `qwen3.5`, `qwen3` those whose name holds `qwen3` not followed by `.`, another digit or `-coder`, case ignored. A
@@ -35,7 +40,7 @@ Both families write thinking between `<think>` and `</think>`
 |---|---|---|
 | Who opens the block | The generation prompt ends inside it (`prompt_opens`) | The model |
 | A sample that never closes it | All of it is reasoning | All of it is reasoning if the model opened the block, else text |
-| Thinking that runs out of its budget | The gateway appends `forced_close` (a newline, `</think>`, two newlines) and samples the answer | The same, if the model opened the block within the budget |
+| Thinking that runs out of its budget | The [gateway](../libraries/rollout-train/gateway.md) appends `forced_close` (a newline, `</think>`, two newlines) and samples the answer | The same, if the model opened the block within the budget |
 
 What precedes the last close becomes a `Reasoning` block of the canonical message; what follows is text and tool
 calls. How the gateway holds thinking to its budget is described under

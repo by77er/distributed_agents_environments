@@ -1,5 +1,10 @@
 # Determinism
 
+For anyone writing task, agent or program code: what the code sees of time and randomness, and the rules that keep its
+effects identified and its draws reproducible.
+
+**Read first:** [What a run records](../../guide/runs-and-events.md). **Next:** [Hooks](hooks.md).
+
 Code: `rollout.local.context` · See [effects](contracts/effects.md)
 
 Task, agent and program code is ordinary `async` Python, and a runner runs it once. What it reaches outside itself
@@ -20,8 +25,8 @@ and the rules that keep a run's effects identified and its draws reproducible.
 
 The k-th effect a run requests is `{run_id}:0:{k}` ([effects](contracts/effects.md#identity)). Receivers use it to
 perform an effect once ([receivers that deduplicate](contracts/effects.md#receivers-that-deduplicate)): `Model.sample`
-retries a failing endpoint under one `effect_id`, and the gateway answers a sample asked for again under an
-`effect_id` it has recorded with the turn it recorded.
+retries a failing endpoint under one `effect_id`, and the [gateway](../rollout-train/gateway.md) answers a sample asked
+for again under an `effect_id` it has recorded with the turn it recorded.
 
 ## Rules
 

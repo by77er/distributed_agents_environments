@@ -1,10 +1,15 @@
 # Tasks
 
-A task is the environment an agent acts in, in the reinforcement-learning sense. It produces the first
-observation, answers every reply, defines the tools, and scores the episode. One task instance serves one run, so
-keep episode state on `self`.
+For environment authors: how to write a task, the world an agent acts in, with its hooks, observations, rewards, endings
+and extra model slots.
 
-## Anatomy
+**Read first:** [Run a first episode](getting-started.md). **Next:** [Give the model tools](tools.md).
+
+A task is the environment an agent acts in, in the reinforcement-learning sense. It produces the first observation,
+answers every reply, defines the tools, and scores the [episode](../libraries/rollout-train/episodes.md). One task
+instance serves one run, so keep episode state on `self`.
+
+## The parts of a task
 
 ```py
 class MyTask(Task):
@@ -143,14 +148,15 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## Other model slots
+## More model slots: judges and other players
 
-A task can sample models itself, for example a simulated user, an opponent or a judge. Declare the slot in `models`
-and sample it through `run.models[...]`. Only the `policy` slot's replies form the agent's turns. Which endpoint serves
-each slot is the run's binding's to say ([models](models.md)). A slot declared `ModelSlot(trained=False)` (a fixed
-opponent) is recorded and never trained on, and a run binds it to a channel by name (`slots.SLOT`). A judge is
-declared `ModelSlot(trained=False, judge=True)`: a run binds it to a channel serving the run's own checkpoints only
-with `self_judging` ([Judging](../products/judging.md)).
+A task can sample models itself, for example a simulated user, an opponent or a judge. Declare the slot in `models` and
+sample it through `run.models[...]`. Only the `policy` slot's replies form the agent's turns. Which endpoint serves each
+slot is the run's binding's to say ([models](models.md)). A slot declared `ModelSlot(trained=False)` (a fixed opponent)
+is recorded and never trained on, and a run binds it to a [channel](../libraries/rollout-train/channels.md) by name
+(`slots.SLOT`). A judge is declared `ModelSlot(trained=False, judge=True)`: a run binds it to a channel serving the
+run's own [checkpoints](../libraries/rollout-train/checkpoints.md) only with `self_judging`
+([Judging](../products/judging.md)).
 
 ```python
 from rollout.harness import ModelSlot

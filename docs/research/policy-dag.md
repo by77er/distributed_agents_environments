@@ -1,7 +1,12 @@
 # The checkpoint graph
 
-Code: `rollout_train.monitor.lineage` (the view of what exists) · See [checkpoints, runs and the ledger](../libraries/rollout-train/checkpoints.md),
-[training](../libraries/rollout-train/training.md), [the monitor](../libraries/rollout-train/monitor.md#the-checkpoints-view)
+**Status: proposed.** The monitor's view of the checkpoints that exist is built. A design note: see [Design
+notes](README.md) for the others.
+
+Code: `rollout_train.monitor.lineage` (the view of what exists) · See [checkpoints, runs and the
+ledger](../libraries/rollout-train/checkpoints.md),
+[training](../libraries/rollout-train/training.md), [the
+monitor](../libraries/rollout-train/monitor.md#the-checkpoints-view)
 
 **A proposal.** It describes the graph of every checkpoint and the records behind it: training, distillation,
 trainers and their queues, and the way from written weights to served ones. The monitor's Checkpoints view

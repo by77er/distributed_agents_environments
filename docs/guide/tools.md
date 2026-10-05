@@ -1,5 +1,10 @@
 # Tools
 
+For environment authors: how to give the model an action space, with `@tool` methods, their schemas, results and errors,
+and tool sets imported by name.
+
+**Read first:** [Write a task](tasks.md). **Next:** [Choose what the model sees](agents.md).
+
 Tools are the task's action space: functions the model can call. Declare them as methods decorated with `@tool`.
 The default `respond` executes the reply's tool calls and returns their results as the next observation.
 
@@ -57,7 +62,7 @@ assert specification.input_schema == {
 - `@tool` methods are collected when the class is defined (`Task.declared_tools`); subclasses inherit them.
   Two tools with the same name in one class hierarchy are an error.
 
-## Options
+## Tool options
 
 ```py
 @tool(name="search_catalog", retry_class=RetryClass.IDEMPOTENT, timeout=timedelta(seconds=10))
@@ -81,7 +86,7 @@ The return value becomes a `ToolResult` in a TOOL message:
 | a `ToolResult` | exactly that result (use it to set `structured`, `is_error`, …) |
 | anything else | its JSON as text, and the same value in `structured` |
 
-## Errors are observations
+## Tool errors are observations
 
 Tool failures are shown to the model so it can react, instead of failing the run. Each of these produces a result
 with `is_error=True` and a message:
@@ -94,7 +99,7 @@ with `is_error=True` and a message:
 ## Tool calls in an episode
 
 With the default `respond`, a reply that makes tool calls gets their results back, and a reply without tool calls
-ends the episode. `score` can then judge the final answer.
+ends the [episode](../libraries/rollout-train/episodes.md). `score` can then judge the final answer.
 
 ```python
 import asyncio

@@ -1,12 +1,18 @@
 # verifiers environments
 
+For whoever wants Prime Intellect's verifiers environments here: installing, GSM8K, how an environment and an
+[episode](../libraries/rollout-train/episodes.md) map, and checking one.
+
+**Read first:** [Train any harness over HTTP](../libraries/rollout-train/harness-endpoint.md). **Next:**
+[Contracts](../libraries/rollout/contracts/README.md).
+
 Code: `rollout_verifiers` · See [harnesses over HTTP](../libraries/rollout-train/harness-endpoint.md),
 [Prime Intellect's verifiers](../research/prime-compat.md)
 
 Prime Intellect's [`verifiers`](https://github.com/PrimeIntellect-ai/verifiers) v1 describes an environment as a
 **taskset** (its tasks, and how each is scored) played by a **harness** (the program the model runs in) in a
 **runtime**, one rollout per task. This package wraps any such environment, a package from the Environments Hub or
-one built into verifiers, as an [environment](../guide/reference.md#rolloutenvironmentenvironment) that runs train
+one built into verifiers, as an [environment](../guide/reference.md#environment) that runs train
 on and evals play.
 
 It is a uv project of its own, with its own lock, outside the workspace: verifiers ships development releases daily
@@ -48,8 +54,9 @@ number after `#### `; the taskset's reward runs `math-verify` on it against the 
 | `gsm8k-test-100` | eval data: its first 100 problems, the same starts |
 | Description | rewards in [0, 1], `solved` at 1, duration in turns |
 
-Eval data is the environment's own; a suite names it in an entry, with how its episodes play. The suite `math`, in the
-shared ledger, has one entry: `gsm8k-test-100`, one episode of each start, 1,024 tokens of thinking and 512 of answer:
+Eval data is the environment's own; a [suite](../libraries/rollout-train/evals.md#suites) names it in an entry, with how
+its episodes play. The suite `math`, in the shared [ledger](../libraries/rollout-train/checkpoints.md#the-ledger), has
+one entry: `gsm8k-test-100`, one episode of each start, 1,024 tokens of thinking and 512 of answer:
 
 ```bash
 uv run rollout suite make math --environment rollout_verifiers.environments:gsm8k --data gsm8k-test-100 \
@@ -63,9 +70,10 @@ that name it, and its page says it does not load, with what the ledger has of it
 
 `examples` has two profiles for it, both on the shared ledger `sqlite:///~/.cache/rollout/ledger.db`:
 
-- **`gsm8k_tinker.toml`**: the base `Qwen/Qwen3.5-9B` sampled at Tinker, through a gateway that hosts the channel
-  in the workspace's environment (with its `tinker` extra), while the eval's runner plays GSM8K in this one
-  ([a gateway elsewhere that hosts channels](../libraries/rollout-train/gateway.md#a-gateway-elsewhere-that-hosts-channels),
+- **`gsm8k_tinker.toml`**: the base `Qwen/Qwen3.5-9B` sampled at Tinker, through a gateway that hosts the
+  [channel](../libraries/rollout-train/channels.md) in the workspace's environment (with its `tinker` extra), while the
+  eval's runner plays GSM8K in this one ([a gateway elsewhere that hosts
+  channels](../libraries/rollout-train/gateway.md#a-gateway-elsewhere-that-hosts-channels),
   [Tinker](rollout-tinker.md#evals-through-a-gateway)):
 
   ```bash

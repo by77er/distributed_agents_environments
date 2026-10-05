@@ -1,14 +1,20 @@
 # The harness
 
-Code: `rollout.harness` · See [developer guide](../../guide/README.md), [contracts](contracts/README.md)
+For environment authors who need more than a task: the loop, programs, run specifications, runners, and how failures end
+a run.
 
-The harness is the loop that runs one episode and the interfaces around it. The loop drives a **task** (the
-environment the agent acts in) with an **agent** (the policy side). A **runner** executes runs of it.
+**Read first:** [Write a task](../../guide/tasks.md). **Next:** [Sandboxes](sandboxes.md).
 
-Writing tasks, tools and agents is covered by the developer guide. This page covers the rest: the loop, programs,
-run specifications and runners. Agent products and long-lived conversational runs are built in the separate
-rollout-agents repository. The fields and signatures of every type
-named here are in the [API reference](../../guide/reference.md#rolloutharness).
+Code: `rollout.harness` · See [Write an environment](../../guide/README.md), [contracts](contracts/README.md)
+
+The harness is the loop that runs one [episode](../rollout-train/episodes.md) and the interfaces around it. The loop
+drives a **task** (the environment the agent acts in) with an **agent** (the policy side). A **runner** executes runs of
+it.
+
+Writing tasks, tools and agents is covered by [Write an environment](../../guide/README.md). This page covers the rest:
+the loop, programs, run specifications and runners. Agent products and long-lived conversational runs are built in the
+separate rollout-agents repository. The fields and signatures of every type named here are in the [API
+reference](../../guide/reference.md#rolloutharness).
 
 | Page | Covers |
 |---|---|
@@ -25,7 +31,7 @@ named here are in the [API reference](../../guide/reference.md#rolloutharness).
 ## The loop
 
 `rollout(task, agent, run)` runs one episode (`rollout.harness.loop`). The order of a task's hooks is in
-[tasks](../../guide/tasks.md#anatomy). The loop guarantees:
+[tasks](../../guide/tasks.md#the-parts-of-a-task). The loop guarantees:
 
 - Every observation that `start` and `respond` return is checked against the
   [validation rules](../../guide/tasks.md#validation) before it is recorded. A violation raises `InvalidObservation`.
@@ -62,7 +68,7 @@ A run names its program with a [`ProgramReference`](../../guide/reference.md#pro
 | `resolve(name)` | get the class a name refers to: registered, or imported |
 | `instantiate(reference)` | create the program. A task, an agent or a program is constructed with its parameters, or with no arguments when they are `None`. |
 | `with_row(reference, row)` | get the same program for another row of parameters. For the loop, the row replaces the task's parameters. |
-| `bind(reference, channel)` | get a `RunBinding` that serves every model slot from one recorded channel, each import from the tool set registered under the import's name unless `tools` says otherwise, and each kind of sandbox from the pool registered under the kind's name unless `pools` says otherwise |
+| `bind(reference, channel)` | get a `RunBinding` that serves every model slot from one recorded [channel](../rollout-train/channels.md), each import from the tool set registered under the import's name unless `tools` says otherwise, and each kind of sandbox from the pool registered under the kind's name unless `pools` says otherwise |
 
 ## Run specifications
 
@@ -114,9 +120,9 @@ A `LocalRunHandle` also has `context`, the run's `LocalRunContext`.
 |---|---|
 | A hook returns an observation that breaks the validation rules | `run.failed` with class `invalid_observation`; `RunOutcome.failure_class` is `RunFailureClass.INVALID_OBSERVATION` |
 | Any other exception leaves the program: a hook raised (`setup` included), the agent returned a message that is not from the assistant, an endpoint error went unhandled | `run.failed` with class `task_error` and detail `ExceptionType: message`; `RunFailureClass.TASK_ERROR` |
-| A `@tool` body raises or times out, its arguments do not validate, or the model calls a tool that does not exist | no failure: the model receives an error result ([tools](../../guide/tools.md#errors-are-observations)) |
+| A `@tool` body raises or times out, its arguments do not validate, or the model calls a tool that does not exist | no failure: the model receives an error result ([tools](../../guide/tools.md#tool-errors-are-observations)) |
 | An imported tool set raises | no failure: the effect completes as `failed` and the model receives an error result |
 | A binding leaves a model slot or an import unserved | `LocalRunner.start` raises `ValueError` |
-| The process crashes | its runs are lost; an episode runner's episodes are open again in the ledger, and are played again |
+| The process crashes | its runs are lost; an episode runner's episodes are open again in the [ledger](../rollout-train/checkpoints.md#the-ledger), and are played again |
 
 `teardown` has run by the time a run fails or is cancelled.

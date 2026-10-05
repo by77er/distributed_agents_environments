@@ -1,5 +1,8 @@
 # RunPod pods as inference and training providers
 
+**Status: in progress.** The images, the code on the pods and the clients of RunPod and step-ca are built; the provider
+kinds are declared but do not start pods yet. A design note: see [Design notes](README.md) for the others.
+
 GPU pods rented by the hour on RunPod, serving a run's channel or taking its training steps, reached over mutual TLS.
 This page says what is built (the images, the code on the pods, the launcher's clients of RunPod and step-ca, and how
 a gateway reaches a pod by its identity), the two provider kinds the [runtime design](runtime-design.md)'s provider

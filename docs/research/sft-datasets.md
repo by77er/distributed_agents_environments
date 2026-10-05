@@ -1,5 +1,8 @@
 # SFT datasets by rejection sampling
 
+**Status: built.** A measurement of dataset rules on one ledger. A design note: see [Design notes](README.md) for the
+others.
+
 Measured on curriculum-9's ledger on 4 October 2026. Datasets are built as described under
 [a dataset as a record](#a-dataset-as-a-record) ([datasets](../libraries/rollout-train/datasets.md)): the episode
 rules solved-all, best-of-group and capped-per-task, the turn filter "actions that worked"

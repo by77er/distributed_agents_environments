@@ -1,5 +1,10 @@
 # Episodes
 
+For people who design training: what a finished episode carries for training, and how it is assembled from the recorded
+turns.
+
+**Read first:** [Episode runners](rollouts.md). **Next:** [The training loop](training.md).
+
 Code: `rollout_train.rollouts.episodes` · See [`Episode`](../../guide/reference.md#episode),
 [`Trajectory`](../../guide/reference.md#trajectory), [`Segment`](../../guide/reference.md#segment),
 [rollouts](rollouts.md)
@@ -13,7 +18,7 @@ Nothing else about the run is needed to compute a loss, and nothing in an episod
 ## How an episode is assembled
 
 A [runner](rollouts.md#a-runner) assembles an episode when its run ends, from the run's [events](../rollout/contracts/run-events.md) and from
-what the gateway recorded of each of its model slots.
+what the [gateway](gateway.md) recorded of each of its model slots.
 
 | Part of the episode | Comes from |
 |---|---|
@@ -26,8 +31,8 @@ what the gateway recorded of each of its model slots.
 
 A run that could not start is a failed episode whose `detail` says why, with no trajectories.
 
-The runner stores the episode as it is assembled: a small record in the ledger, and its trajectories and its run's
-events as blobs ([the record](rollouts.md#the-record)).
+The runner stores the episode as it is assembled: a small record in the [ledger](checkpoints.md#the-ledger), and its
+trajectories and its run's events as blobs ([the record](rollouts.md#the-record)).
 
 ## Rewards
 

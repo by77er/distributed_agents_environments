@@ -1,5 +1,10 @@
 # Checkpoints, runs and the ledger
 
+For people who train and operate: the graph of checkpoints and how checkpoints are kept, bridged and thinned, the ledger
+and its fences, and the registry of names.
+
+**Read first:** [The training loop](training.md). **Next:** [Datasets and supervised steps](datasets.md).
+
 Code: `rollout_train.checkpoints`, `rollout_train.registry`, `rollout_train.ledger` · See [training](training.md),
 [datasets](datasets.md),
 [`Checkpoints`](../../guide/reference.md#checkpoints), [`Checkpoint`](../../guide/reference.md#checkpoint),
@@ -68,9 +73,9 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
     it in between is seen (the file is put back), and a put just after finds no file and writes it again.
   - An S3 store looks at an object's time and deletes it in two requests: a put that finds the object between the two
     is not seen.
-  - Datasets', episodes' and batches' blobs are never deleted, and do not count as names: only checkpoints' files are
-    deleted. One of them would be lost only if a released checkpoint had a file of exactly its bytes (a trajectory, a
-    dataset's examples, a batch's list of segments).
+  - Datasets', [episodes](episodes.md)' and batches' blobs are never deleted, and do not count as names: only
+    checkpoints' files are deleted. One of them would be lost only if a released checkpoint had a file of exactly its
+    bytes (a trajectory, a dataset's examples, a batch's list of segments).
 
 ## Full weights and merges
 

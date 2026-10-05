@@ -1,5 +1,10 @@
 # Sandboxes
 
+For environment authors whose programs need something outside their own code, such as a game server or a container:
+declaring sandboxes, pools and leases, and serving pools over HTTP.
+
+**Read first:** [the harness](README.md). **Next:** [Determinism](determinism.md).
+
 Code: `rollout.harness.sandboxes`, `rollout_train.sandboxes` · See [tools](../../guide/tools.md),
 [rollouts](../rollout-train/rollouts.md), [API reference](../../guide/reference.md#sandboxspec)
 
@@ -29,7 +34,7 @@ The parts and what they exchange:
 | A pool | leases, how full it is, the operations on its sandboxes | specs and keys; releases |
 | A provider | sandboxes of one kind, made and deleted; operations on them | what a pool asks |
 | The leases table | where each lease is kept | what a pool writes |
-| A keeper (training) | releases of leases whose claim no longer holds | the ledger's claims and the runners' beats |
+| A keeper (training) | releases of leases whose claim no longer holds | the [ledger](../rollout-train/checkpoints.md#the-ledger)'s claims and the runners' beats |
 
 Where each part runs is the deployment's business: a pool in the runner's process, or on a machine of its own served
 over HTTP, is the same pool to everything else.
@@ -37,9 +42,9 @@ over HTTP, is the same pool to everything else.
 ## Declaring sandboxes
 
 A program declares its sandboxes in `Program.sandboxes()`, by name; a task declares them in its `sandboxes` class
-attribute, as it declares `imports`. Each is a [`SandboxSpec`](../../guide/reference.md#sandboxspec), and the
-program's parameters may decide it (the Minecraft episode's world is made from its task, seeds and team). A sandbox
-for each slot is one entry per slot:
+attribute, as it declares `imports`. Each is a [`SandboxSpec`](../../guide/reference.md#sandboxspec), and the program's
+parameters may decide it (the Minecraft [episode](../rollout-train/episodes.md)'s world is made from its task, seeds and
+team). A sandbox for each slot is one entry per slot:
 
 ```py
 def sandboxes(self) -> Mapping[str, SandboxSpec]:

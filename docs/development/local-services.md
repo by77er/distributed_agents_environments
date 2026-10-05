@@ -1,9 +1,15 @@
-# Local services
+# Local Postgres and S3 for development
+
+For developers and single-machine setups: Postgres and an S3-compatible store in Docker Compose, for the tests and for a
+cluster config.
+
+**Read first:** [Choose a setup](../deploy/setups.md). **Next:** [Postgres and S3](../deploy/stores.md).
 
 Code: `deploy/local`
 
-Runners that share state need two services: Postgres for the ledger and object storage for blobs.
-`deploy/local/compose.yaml` runs both, and the tests can use them too:
+Runners that share state need two services: Postgres for the
+[ledger](../libraries/rollout-train/checkpoints.md#the-ledger) and object storage for blobs. `deploy/local/compose.yaml`
+runs both, and the tests can use them too:
 
 | Service | Image | Port | Credentials |
 |---|---|---|---|
@@ -25,7 +31,7 @@ set -a; . deploy/local/services.env; set +a
 | `ROLLOUT_LEDGER_URL` | `postgresql://rollout:rollout@localhost:5432/rollout` | a cluster config's `[ledger] url_env` |
 | `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | the storage service and its credentials | boto3 |
 
-## Tests
+## Run the tests against them
 
 The tests that need Postgres or S3 start their own by default (`pgembed`, `moto`). With `ROLLOUT_TEST_POSTGRES` and
 `ROLLOUT_TEST_S3` set, they use the services instead: every Postgres test creates a database of its own on the
@@ -35,7 +41,7 @@ server, and every S3 test a bucket of its own.
 uv run pytest
 ```
 
-## A cluster config
+## Point a cluster config at them
 
 A [cluster config](../guide/cluster.md) whose runners share these services names them so:
 

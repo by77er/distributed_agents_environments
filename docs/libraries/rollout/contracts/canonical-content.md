@@ -1,13 +1,19 @@
 # Canonical content
 
+For whoever implements a model endpoint or a renderer: the model-agnostic form of everything a model reads or writes.
+
+**Read first:** [Messages, files and digests](../../../guide/content.md). **Next:** [Run events](run-events.md).
+
 Code: `rollout.contracts.content`, `rollout.contracts.digests` · See [guide: content](../../../guide/content.md),
 [API reference](../../../guide/reference.md#message)
 
 Canonical content is the model-agnostic form of everything a model reads or writes. Task and agent code, run events,
-tool sets and the model endpoint use only this form. Rendering to a model's tokens happens in the gateway's renderer
-([recording](../../rollout-train/recorder.md#renderers)) or inside a direct adapter, and nowhere else.
+tool sets and the model endpoint use only this form. Rendering to a model's tokens happens in the
+[gateway](../../rollout-train/gateway.md)'s renderer ([recording](../../rollout-train/recorder.md#renderers)) or inside
+a direct adapter, and nowhere else.
 
-Building and reading messages is shown in the [guide](../../../guide/content.md). This page gives the rules.
+Building and reading messages is shown in [messages, files and digests](../../../guide/content.md). This page gives the
+rules.
 
 ## Messages and blocks
 

@@ -1,5 +1,10 @@
 # Harnesses over HTTP
 
+For people who connect a harness that brings its own loop: the gateway's OpenAI and Anthropic APIs, what a request
+means, and its errors.
+
+**Read first:** [The gateway](gateway.md). **Next:** [Evaluate a model](../../evaluate/README.md).
+
 Code: `rollout_train.recorder.compat`, served by `rollout_train.gateway` · See [the gateway](gateway.md),
 [recording](recorder.md), [endpoints with an address](../rollout/contracts/model-endpoint.md#endpoints-with-an-address)
 
@@ -16,10 +21,10 @@ address = run.model.address()          # ModelAddress(base_url, api_key, model)
 A harness inside a sandbox is handed its address without any of that: a sandbox's spec names the slots it samples,
 and the runner puts each one's address in the sandbox's environment ([sandboxes](../rollout/sandboxes.md#harnesses-inside-a-sandbox)).
 
-The address is the [gateway](gateway.md)'s, and the key one it signed for the run's slot. What the harness samples
-there is recorded for the slot like any other sample and ends up in the episode's trajectory. Whichever API it speaks,
-each request is rendered with the channel's renderer and sampled by the channel, so the recorded tokens and logprobs
-are exactly what the policy sampled.
+The address is the [gateway](gateway.md)'s, and the key one it signed for the run's slot. What the harness samples there
+is recorded for the slot like any other sample and ends up in the [episode](episodes.md)'s trajectory. Whichever API it
+speaks, each request is rendered with the [channel](channels.md)'s renderer and sampled by the channel, so the recorded
+tokens and logprobs are exactly what the policy sampled.
 
 | Path | API |
 |---|---|

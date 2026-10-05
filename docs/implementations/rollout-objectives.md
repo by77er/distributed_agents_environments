@@ -1,6 +1,13 @@
 # Objectives in torch
 
-Code: `rollout_objectives` · See [objectives](../libraries/rollout-train/training.md#objectives), [LoRA trainer](rollout-lora.md),
+For whoever changes or adds an objective: how the local trainers compute an objective's loss from its components, the
+step, and its metrics.
+
+**Read first:** [objectives](../libraries/rollout-train/training.md#objectives). **Next:** [Tinker trainer and
+engine](rollout-tinker.md).
+
+Code: `rollout_objectives` · See [objectives](../libraries/rollout-train/training.md#objectives), [LoRA
+trainer](rollout-lora.md),
 [Tinker trainer](rollout-tinker.md)
 
 `rollout_objectives` computes what [`rollout_train.objectives`](../libraries/rollout-train/training.md#objectives)
@@ -46,7 +53,7 @@ Four logprobs of each sampled token meet in it:
 
 | Logprob | Computed by | When |
 |---|---|---|
-| behavior | the engine | while sampling, under whichever checkpoint was served then (recorded in the segment) |
+| behavior | the engine | while sampling, under whichever [checkpoint](../libraries/rollout-train/checkpoints.md) was served then (recorded in the segment) |
 | old | the trainer, without a gradient | at the start of the step, on the weights the step starts from |
 | now | the trainer, with a gradient | in each minibatch, as the step updates the weights |
 | reference | the trainer, without a gradient | under the reference model: the base with the adapter switched off, or a frozen copy |
@@ -85,9 +92,10 @@ its advantage (1 for a dataset's). No logprob but now is read.
 
 ### A preference loss
 
-Each side of an item is one or more segments (an episode's turns); its log-likelihood is the sum of its sampled tokens'
-logprobs, or their mean (`length_normalized`), and `rho` is that less the reference's (or the likelihood alone, for a
-loss without a reference). For a pair, with `h = rho_chosen - rho_rejected`:
+Each side of an item is one or more segments (an [episode](../libraries/rollout-train/episodes.md)'s turns); its
+log-likelihood is the sum of its sampled tokens' logprobs, or their mean (`length_normalized`), and `rho` is that less
+the reference's (or the likelihood alone, for a loss without a reference). For a pair, with `h = rho_chosen -
+rho_rejected`:
 
 | `preference.loss` | Loss |
 |---|---|

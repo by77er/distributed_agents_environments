@@ -1,5 +1,10 @@
 # Agents
 
+For environment authors, and anyone tuning what a model is shown: the default agent, context selection and hints, and
+how an agent turns the model's output into one reply.
+
+**Read first:** [Give the model tools](tools.md). **Next:** [Messages, files and digests](content.md).
+
 An agent is the policy side of the loop. Each turn it decides what the model sees and turns the model's output into
 one reply. Any agent runs on any task, so training and evaluation can vary one while holding the other fixed.
 
@@ -29,8 +34,9 @@ Override `select_context` to change what the model sees, `act` to change how a r
 
 ## What the model sees
 
-`History.messages(hints)` returns the episode as messages: each turn's reply, then its observation. Tasks state
-how much history is useful with `context_hints`; agents should honor them, and the default agent does.
+`History.messages(hints)` returns the [episode](../libraries/rollout-train/episodes.md) as messages: each turn's reply,
+then its observation. Tasks state how much history is useful with `context_hints`; agents should honor them, and the
+default agent does.
 
 | `HistoryShape` | The model sees |
 |---|---|

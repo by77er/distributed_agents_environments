@@ -1,5 +1,11 @@
 # Memory
 
+For environment authors with long [episodes](../rollout-train/episodes.md): a context that fits any model, made of the
+recent turns as they were and a summary of the rest.
+
+**Read first:** [Choose what the model sees](../../guide/agents.md). **Next:** [the Minecraft
+team](../../products/minecraft-team.md), an environment that uses it.
+
 Code: `rollout.harness.memory` · See [`Memory`](../../guide/reference.md#memory),
 [`CompactingAgent`](../../guide/reference.md#compactingagent)
 

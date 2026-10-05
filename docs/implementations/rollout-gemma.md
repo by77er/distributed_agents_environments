@@ -1,5 +1,9 @@
 # Gemma renderers
 
+For whoever trains a Gemma model: the token format of Gemma 4.
+
+**Read first:** [Qwen renderers](rollout-qwen.md). **Next:** [verifiers environments](rollout-verifiers.md).
+
 Code: `rollout_gemma`
 
 A [`Renderer`](../guide/reference.md#renderer) is a model family's token format (see [Qwen renderers](rollout-qwen.md)
@@ -11,10 +15,11 @@ model = "google/gemma-4-12B-it"
 renderer = "rollout_gemma:gemma4"
 ```
 
-`gemma4` is called with the channel's `model` (a checkpoint's name or path, whose tokenizer it loads with
+`gemma4` is called with the [channel](../libraries/rollout-train/channels.md)'s `model` (a
+[checkpoint](../libraries/rollout-train/checkpoints.md)'s name or path, whose tokenizer it loads with
 [`tokenizer_of`](../guide/reference.md#tokenizer_of), or a tokenizer) and returns a
-[`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer) over the tokenizer's own chat template, which
-Gemma 4 ships beside its weights. It renders the models whose name holds `gemma4` or `gemma-4`
+[`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer) over the tokenizer's own chat template, which Gemma
+4 ships beside its weights. It renders the models whose name holds `gemma4` or `gemma-4`
 ([`renders`](../guide/reference.md#renders)).
 
 ## The format
@@ -34,8 +39,9 @@ as one.
 
 ## How thinking is delimited
 
-Gemma's template asks for thinking with `enable_thinking`, and opens the thought channel in the generation prompt
-itself only after a tool's response. The renderer opens it in every generation prompt (`<|channel>thought` and a
-newline: [`ThinkingFormat`](../guide/reference.md#thinkingformat) with `prompt_opens`), so that the gateway can hold
-thinking to its budget: thinking that runs out of it is closed with a newline and `<channel|>`, unsampled, and the
-answer is sampled after it. An earlier turn's thinking is not shown again, as the template has it.
+Gemma's template asks for thinking with `enable_thinking`, and opens the thought channel in the generation prompt itself
+only after a tool's response. The renderer opens it in every generation prompt (`<|channel>thought` and a newline:
+[`ThinkingFormat`](../guide/reference.md#thinkingformat) with `prompt_opens`), so that the
+[gateway](../libraries/rollout-train/gateway.md) can hold thinking to its budget: thinking that runs out of it is closed
+with a newline and `<channel|>`, unsampled, and the answer is sampled after it. An earlier turn's thinking is not shown
+again, as the template has it.

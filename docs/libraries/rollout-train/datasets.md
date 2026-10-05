@@ -1,5 +1,10 @@
 # Datasets and supervised steps
 
+For people who train with supervised steps: making a dataset from runs' [episodes](episodes.md), and taking supervised
+fine-tuning (SFT) steps on it.
+
+**Read first:** [Checkpoints, runs and the ledger](checkpoints.md). **Next:** [Channels and engines](channels.md).
+
 Code: `rollout_train.datasets`, `rollout_train.imitation` · See [training](training.md#imitation),
 [checkpoints](checkpoints.md), [`Dataset`](../../guide/reference.md#dataset),
 [`make_dataset`](../../guide/reference.md#make_dataset), [the first datasets](../../research/sft-datasets.md)

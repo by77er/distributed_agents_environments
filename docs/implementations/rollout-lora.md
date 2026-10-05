@@ -1,5 +1,11 @@
 # LoRA trainer
 
+For whoever trains on their own GPU: the LoRA (low-rank adaptation) and full-weight trainers, their settings, the memory
+bound, and measurements.
+
+**Read first:** [the trainer protocol](../libraries/rollout-train/training.md#the-trainer). **Next:** [Objectives in
+torch](rollout-objectives.md).
+
 Code: `rollout_lora`
 
 `LoraTrainer` implements the [`Trainer`](../guide/reference.md#trainer) protocol: it trains a LoRA adapter over the
@@ -21,9 +27,10 @@ rank = 32
 segment_tokens = 8000
 ```
 
-A [profile](../guide/deploying.md) calls `LoraTrainer(model, **settings)` with the model of the channel it trains.
-Every key of `[trainer]` other than `kind`, `channel`, `start`, `bookmark` and `colocated` is a setting. A run's
-`objective.*` settings ([objectives](../libraries/rollout-train/training.md#objectives)) reach it as its `objective`.
+A [profile](../guide/deploying.md) calls `LoraTrainer(model, **settings)` with the model of the
+[channel](../libraries/rollout-train/channels.md) it trains. Every key of `[trainer]` other than `kind`, `channel`,
+`start`, `bookmark` and `colocated` is a setting. A run's `objective.*` settings
+([objectives](../libraries/rollout-train/training.md#objectives)) reach it as its `objective`.
 
 ### Every weight
 

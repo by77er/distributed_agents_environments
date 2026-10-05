@@ -1,5 +1,8 @@
 # Prime Intellect's verifiers environments, here
 
+**Status: built**, as `rollout_verifiers`; the parts still proposed are marked. A design note: see [Design
+notes](README.md) for the others.
+
 See [verifiers environments](../implementations/rollout-verifiers.md),
 [harnesses over HTTP](../libraries/rollout-train/harness-endpoint.md), [evals](../libraries/rollout-train/evals.md),
 [Thinking Machines' API](thinking-machines.md#prime-intellect-for-contrast)

@@ -1,10 +1,11 @@
 # Objectives design: families, components, presets, distillation and judges
 
-Status: the composable objective, the preference family and the distillation family are built (steps 1, 2 and 4 of
-the [order of work](#order-of-work)): the declaration is `rollout_train.objectives`, the torch implementation
-`rollout_objectives` ([objectives in torch](../implementations/rollout-objectives.md),
+**Status: in progress.** The composable objective, the preference family and the distillation family are built
+(steps 1, 2 and 4 of the [order of work](#order-of-work)): the declaration is `rollout_train.objectives`, the torch
+implementation `rollout_objectives` ([objectives in torch](../implementations/rollout-objectives.md),
 [objectives](../libraries/rollout-train/training.md#objectives)). Distillation is library code: the loop does not yet
-ask teachers to score its episodes. Judges are proposed. Each section says which of its parts are built.
+ask teachers to score its episodes. Judges are proposed. Each section says which of its parts are built. A design
+note: see [Design notes](README.md) for the others.
 
 ## Goals
 

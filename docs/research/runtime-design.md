@@ -1,5 +1,9 @@
 # Runtime design: one cluster config, run settings, providers, roles on Ray, one gateway
 
+**Status: in progress.** The cluster config, run settings and presets, provider declarations, bridges, validation,
+engine hosts and published environments are built ([the cluster config](../guide/cluster.md)); runs submitted as Ray
+jobs are being built. A design note: see [Design notes](README.md) for the others.
+
 A design, to be carried out in the sequence of commits at its end. It removes profiles and every path that runs
 without Ray, and describes what replaces them: one config per cluster, a run's own settings (with presets), inference
 providers and trainers with declared capabilities and bridges between their formats, an environment worker that is

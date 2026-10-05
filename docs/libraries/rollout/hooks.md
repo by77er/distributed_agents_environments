@@ -1,5 +1,9 @@
 # Hooks
 
+For anyone who watches runs as they happen, for logging, metrics or a live view.
+
+**Read first:** [What a run records](../../guide/runs-and-events.md). **Next:** [Memory for long episodes](memory.md).
+
 Code: `rollout.harness.hooks` · See [`RunHooks`](../../guide/reference.md#runhooks),
 [`ModelSample`](../../guide/reference.md#modelsample)
 
@@ -34,5 +38,5 @@ Rules:
   through the gateway, not the runner's endpoints ([which gateway tells the hooks](../rollout-train/gateway.md#a-runner-served-by-the-gateway)).
 - Hooks are observers. They cannot change a request or a reply; code that must is a `ModelEndpoint`.
 
-The [monitor](../rollout-train/monitor.md) is built on hooks. Episode runners and the training loop have hooks of
-their own ([`Hooks`](../rollout-train/rollouts.md#watching)).
+The [monitor](../rollout-train/monitor.md) is built on hooks. [Episode](../rollout-train/episodes.md) runners and the
+training loop have hooks of their own ([`Hooks`](../rollout-train/rollouts.md#watching)).

@@ -1,5 +1,8 @@
 # Curricula and evaluation suites
 
+**Status: proposed.** `Curriculum`, suites and evals are built. A design note: see [Design notes](README.md) for the
+others.
+
 Code: `rollout.curriculum` · See [training](../libraries/rollout-train/training.md#the-curriculum),
 [the Minecraft team](../products/minecraft-team.md#tasks-and-curriculum), [evals](../libraries/rollout-train/evals.md)
 

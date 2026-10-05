@@ -1,5 +1,8 @@
 # Ledger guarantees
 
+**Status: built.** Each guarantee is held by a test. The last section, the HTTP ledger service, is proposed. A design
+note: see [Design notes](README.md) for the others.
+
 Code: `rollout_train.ledger`, `rollout_train.database`, `rollout_train.rollouts.scheduler`, `rollout_train.sandboxes`,
 `rollout.harness.sandboxes`, `rollout_train.checkpoints`, `rollout_train.loop` · Tests:
 `tests/research/test_ledger_guarantees.py` · See

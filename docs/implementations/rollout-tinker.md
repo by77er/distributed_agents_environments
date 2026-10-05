@@ -1,7 +1,14 @@
 # Tinker trainer and engine
 
-Code: `rollout_tinker` · See [Thinking Machines' API](../research/thinking-machines.md), [training](../libraries/rollout-train/training.md),
-[channels and engines](../libraries/rollout-train/channels.md), [checkpoints](../libraries/rollout-train/checkpoints.md),
+For whoever trains or samples at Thinking Machines: installing, the key, the objective as Tinker's losses, what a
+checkpoint holds, serving Tinker's adapters on your own engines, and costs.
+
+**Read first:** [LoRA trainer](rollout-lora.md). **Next:** [Qwen renderers](rollout-qwen.md).
+
+Code: `rollout_tinker` · See [Thinking Machines' API](../research/thinking-machines.md),
+[training](../libraries/rollout-train/training.md),
+[channels and engines](../libraries/rollout-train/channels.md),
+[checkpoints](../libraries/rollout-train/checkpoints.md),
 [LoRA trainer](rollout-lora.md), [objectives in torch](rollout-objectives.md)
 
 `TinkerTrainer` implements the [`Trainer`](../guide/reference.md#trainer) protocol and `TinkerEngine` the
@@ -87,8 +94,9 @@ uv run rollout gateway implementations/rollout-verifiers/examples/gsm8k_tinker.t
 ```
 
 and the eval from `implementations/rollout-verifiers` ([GSM8K](rollout-verifiers.md#gsm8k)). Its first run,
-`gsm8k-tinker-base` on 2026-10-04, played the suite `math` (`gsm8k-test-100`, one episode each, 1,024 tokens of
-thinking and 512 of answer) in four minutes, eight episodes at once:
+`gsm8k-tinker-base` on 2026-10-04, played the [suite](../libraries/rollout-train/evals.md#suites) `math`
+(`gsm8k-test-100`, one [episode](../libraries/rollout-train/episodes.md) each, 1,024 tokens of thinking and 512 of
+answer) in four minutes, eight episodes at once:
 
 | | |
 |---|---|

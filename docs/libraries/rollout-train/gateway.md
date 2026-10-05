@@ -1,5 +1,10 @@
 # The gateway
 
+For people who train, deploy or connect a harness: the service that samples channels and records every turn, its keys,
+its turn store, and how to run it.
+
+**Read first:** [Record turns for training](recorder.md). **Next:** [Train any harness over HTTP](harness-endpoint.md).
+
 Code: `rollout_train.gateway` · See [`Gateway`](../../guide/reference.md#gateway),
 [`TurnStore`](../../guide/reference.md#turnstore), [`Keyring`](../../guide/reference.md#keyring),
 [`GatewayEndpoints`](../../guide/reference.md#gatewayendpoints), [recording](recorder.md),
@@ -18,9 +23,9 @@ samples: a runner's recorded slots sample through it, a gateway in the runner's 
 6. replies in the request's own API.
 
 It keeps no session. Everything a turn needs is in the request and its key, and everything it leaves is in the
-ledger and the blob store, so any replica answers any request, and a replica can die at any moment. Only caches are
-kept in memory: the turns' blobs a replica has read, and what each run's channel should serve and what its servers
-have, asked again every few seconds.
+[ledger](checkpoints.md#the-ledger) and the blob store, so any replica answers any request, and a replica can die at any
+moment. Only caches are kept in memory: the turns' blobs a replica has read, and what each run's channel should serve
+and what its servers have, asked again every few seconds.
 
 ```python
 routes = Routes({"policy": Route(renderer, "Qwen/Qwen3-0.6B", ("http://router:8000",))}, ledger)
@@ -432,9 +437,9 @@ uv run rollout eval profile.toml SUITE --name NAME  # in the environment's: samp
 ```
 
 - **What it guarantees.** When it opens, the runner asks the gateway's `GET /v1/models` for each hosted channel's
-  `contract`, asking again for up to a minute while the gateway cannot be reached; a channel the gateway does not
-  host stops it from opening. A binding's thinking and answer room (a suite entry's limits) replace the channel's
-  own, as for any channel.
+  `contract`, asking again for up to a minute while the gateway cannot be reached; a channel the gateway does not host
+  stops it from opening. A binding's thinking and answer room (a [suite](evals.md#suites) entry's limits) replace the
+  channel's own, as for any channel.
 - **What it samples.** The engines the gateway started, as they are: the base model. A hosted channel is not
   trained, and an eval of a checkpoint cannot be served on one: the runner refuses both.
 - **What both need.** The same ledger and the same blob store (an explicit `[blobs]` table, since a runner's

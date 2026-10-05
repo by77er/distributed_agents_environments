@@ -1,5 +1,8 @@
 # Hosted training: Thinking Machines' Tinker, and Prime Intellect for contrast
 
+**Status: built**, as `rollout_tinker`; the few parts still proposed are marked. A design note: see [Design
+notes](README.md) for the others.
+
 See [training](../libraries/rollout-train/training.md), [channels and engines](../libraries/rollout-train/channels.md),
 [checkpoints](../libraries/rollout-train/checkpoints.md), [deploying](../guide/deploying.md),
 [LoRA trainer](../implementations/rollout-lora.md), [the checkpoint graph](policy-dag.md)

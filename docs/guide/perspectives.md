@@ -1,13 +1,19 @@
 # Three ways in
 
+The platform seen from where you stand: building an environment, designing training, or deploying. Each part says what
+you write, what you are given and what you never see; read the one that matches your work.
+
+**Read first:** [Start here](../start/README.md). **Next:** [Write an environment](README.md), [Train a
+model](../train/README.md) or [Deploy the platform](../deploy/README.md).
+
 Three people use this system, and each has one surface. They meet in two places only: the **session** (how anything
 gets a model) and the **episode** (the labelled trajectory that comes out).
 
 | You are | You write | You are given | You never see | You import |
 |---|---|---|---|---|
 | Building an environment | A world and its rulebook: its situations, what a player perceives, what it can do, how it went | A model per player: messages and tools in, a message out | Tokens, context limits, engines, trainers, where anything runs | `rollout` |
-| Designing training | What to run, how to group it, what each episode counts for | A ledger to ask for episodes in, the finished episodes back, somewhere to publish weights | Worlds, servers, which machine ran what | `rollout_train` |
-| Deploying | A profile: channels and their engines, the trainer, the runner, where tool sets live | The same protocols in process or over the network | Tasks and algorithms | Nothing: a profile names implementations |
+| Designing training | What to run, how to group it, what each [episode](../libraries/rollout-train/episodes.md) counts for | A [ledger](../libraries/rollout-train/checkpoints.md#the-ledger) to ask for episodes in, the finished episodes back, somewhere to publish weights | Worlds, servers, which machine ran what | `rollout_train` |
+| Deploying | A profile: [channels](../libraries/rollout-train/channels.md) and their engines, the trainer, the runner, where tool sets live | The same protocols in process or over the network | Tasks and algorithms | Nothing: a profile names implementations |
 
 ## Building an environment
 
