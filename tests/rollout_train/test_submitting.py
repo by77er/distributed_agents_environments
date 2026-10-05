@@ -1,8 +1,11 @@
 """Starting a run's job: `submit` records the launch and the run, and starts `python -m rollout_train.jobs LAUNCH` as a
-Ray job (handed the cluster config, in a published version's runtime environment where it plays one) or as a RayJob
-made from the cluster's template; `followed` notes what the job's status says, and `stopped` stops it."""
+Ray job (handed the cluster config, in a published version's runtime environment where it plays one, asking for its
+driver's CPUs) or as a RayJob made from the cluster's template, sized from the run's demand and, with Kueue, suspended
+in its queue; `followed` notes what the job's status says (a RayJob Kueue holds waits for admission, saying why), and
+`stopped` stops it."""
 
 import json
+import tomllib
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,7 +14,8 @@ import pytest
 import yaml
 from pydantic import JsonValue
 
-from rollout_train.cluster import HANDED, Cluster, load
+from rollout_train.cluster import HANDED, Cluster, load, parsed
+from rollout_train.demand import demand
 from rollout_train.launches import ENDED, FAILED, RUNNING, STOPPED, STOPPING, SUBMITTED, TRAIN, launch_of, launches_of
 from rollout_train.published import environment_versions_of
 from rollout_train.run_settings import RunSettings
@@ -46,6 +50,16 @@ namespace = "rollout"
 rayjob = "rayjob.yaml"
 api = "https://kubernetes.test"
 """
+QUEUE = """queue = "runs"
+"""
+ROOT = Path(__file__).resolve().parents[2]
+EXAMPLE = parsed(tomllib.loads((ROOT / "deploy" / "clusters" / "example.toml").read_text()))
+ACCEPTANCE: dict[str, JsonValue] = {
+    "kind": TRAIN, "environment": "rollout_verifiers.environments:gsm8k", "trainer.provider": "tinker-lora",
+    "channels.policy.provider": "local-vllm", "channels.policy.model": "Qwen/Qwen3.5-4B",
+    "channels.policy.renderer": "rollout_qwen:qwen35",
+}  # fmt: skip
+"""The acceptance run's shape on the example cluster: a local engine host and the peft-from-tinker bridge."""
 TEMPLATE: dict[str, Any] = {
     "apiVersion": "ray.io/v1",
     "kind": "RayJob",
@@ -62,10 +76,10 @@ TEMPLATE: dict[str, Any] = {
 WORDS = "tests.rollout_train.rollouts.games:words"
 
 
-def a_cluster(root: Path, *, kubernetes: bool = False) -> Cluster:
+def a_cluster(root: Path, *, kubernetes: bool = False, queue: bool = False) -> Cluster:
     (root / "verifiers").mkdir(exist_ok=True)
     path = root / "cluster.toml"
-    path.write_text(CLUSTER.format(root=root) + (KUBERNETES if kubernetes else ""))
+    path.write_text(CLUSTER.format(root=root) + (KUBERNETES if kubernetes else "") + (QUEUE if queue else ""))
     (root / "rayjob.yaml").write_text(yaml.safe_dump(TEMPLATE))
     return load(path)
 
@@ -112,7 +126,8 @@ async def test_a_run_is_submitted_as_a_ray_job_handed_the_cluster_config(tmp_pat
     (run,) = await stores.registry.runs()
     assert (run.id, run.name) == (launch.run, "words-1")  # (registered when it was asked for)
     (given,) = jobs.submitted
-    assert given["entrypoint"] == f"python -m rollout_train.jobs {launch.id}" and given["entrypoint_num_cpus"] == 1
+    assert given["entrypoint"] == f"python -m rollout_train.jobs {launch.id}"
+    assert given["entrypoint_num_cpus"] == 2  # (its driver's: the loop, and one runner)
     assert json.loads(given["runtime_env"]["env_vars"][HANDED]) == dict(cluster.described)
     assert given["submission_id"] == launch.job and given["metadata"]["launch"] == launch.id
     gsm8k = await submit(settings(environment="rollout_verifiers.environments:gsm8k", name="gsm8k"), cluster,
@@ -197,16 +212,59 @@ def test_a_rayjob_is_made_from_the_clusters_template(tmp_path: Path) -> None:
     assert TEMPLATE["metadata"].get("generateName") == "run-"  # (the template itself is left as it was)
 
 
+def test_a_rayjob_is_sized_from_the_runs_demand_and_suspended_in_kueues_queue() -> None:
+    from rollout_train.launches import Asked, new_launch
+
+    launch = new_launch(Asked(TRAIN, "gsm8k", {"environment": ACCEPTANCE["environment"]}), "run_1")
+    template = json.loads(json.dumps(TEMPLATE))
+    (container,) = template["spec"]["rayClusterSpec"]["headGroupSpec"]["template"]["spec"]["containers"]
+    container["resources"] = {"requests": {"cpu": "1", "memory": "4Gi"},
+                              "limits": {"memory": "14Gi", "nvidia.com/gpu": 1}}  # fmt: skip
+    asked = demand(RunSettings(ACCEPTANCE), EXAMPLE)
+    made = rendered(template, launch, "python -m rollout_train.jobs L", {}, "rollout", asked=asked, queue="runs")
+    assert made["metadata"]["labels"]["kueue.x-k8s.io/queue-name"] == "runs" and made["spec"]["suspend"] is True
+    spec = made["spec"]
+    assert spec["entrypointNumCpus"] == 2  # (the driver: the loop and one runner)
+    head = spec["rayClusterSpec"]["headGroupSpec"]
+    assert head["rayStartParams"]["num-cpus"] == "5" and head["rayStartParams"]["num-gpus"] == "1"
+    (sized,) = head["template"]["spec"]["containers"]
+    assert sized["resources"] == {  # (Ray's 5 CPUs and 3 GiB, and room for Ray's own processes)
+        "requests": {"cpu": "6", "memory": "5120Mi", "nvidia.com/gpu": 1},
+        "limits": {"memory": "14Gi", "nvidia.com/gpu": 1},
+    }
+    assert "workerGroupSpecs" not in spec["rayClusterSpec"]
+    alone = rendered(template, launch, "x", {}, "rollout", asked=demand(RunSettings({**ACCEPTANCE,
+                     "channels.policy.provider": "tinker"}), EXAMPLE))  # fmt: skip
+    (tinker,) = alone["spec"]["rayClusterSpec"]["headGroupSpec"]["template"]["spec"]["containers"]
+    assert tinker["resources"] == {"requests": {"cpu": "3", "memory": "4096Mi"}, "limits": {"memory": "14Gi"}}
+    assert "suspend" not in alone["spec"] and "kueue.x-k8s.io/queue-name" not in alone["metadata"]["labels"]
+    two = rendered(template, launch, "x", {}, "rollout", asked=demand(RunSettings({**ACCEPTANCE,
+                   "channels.policy.replicas": 2}), EXAMPLE))  # fmt: skip
+    cluster = two["spec"]["rayClusterSpec"]
+    assert cluster["headGroupSpec"]["rayStartParams"]["num-gpus"] == "0"  # (the driver and the bridge)
+    (engines,) = cluster["workerGroupSpecs"]
+    assert (engines["groupName"], engines["replicas"], engines["maxReplicas"]) == ("engines-0", 2, 2)
+    assert engines["rayStartParams"] == {"num-cpus": "1", "num-gpus": "1"}
+    (worker,) = engines["template"]["spec"]["containers"]
+    assert worker["name"] == "ray-worker" and worker["resources"]["requests"]["nvidia.com/gpu"] == 1
+
+
 class FakeKubernetes:
-    """The RayJob part of a Kubernetes API server, in memory: what was created, read and deleted."""
+    """The RayJob part of a Kubernetes API server, in memory: what was created, read and deleted; and Kueue's
+    Workloads, by their job's uid."""
 
     def __init__(self) -> None:
         self.jobs: dict[str, dict[str, Any]] = {}
         self.deleted: list[str] = []
         self.tokens: set[str] = set()
+        self.workloads: list[dict[str, Any]] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.tokens.add(request.headers.get("authorization", ""))
+        if request.url.path == "/apis/kueue.x-k8s.io/v1beta2/namespaces/rollout/workloads":
+            uid = request.url.params["labelSelector"].removeprefix("kueue.x-k8s.io/job-uid=")
+            items = [each for each in self.workloads if each["metadata"]["labels"]["kueue.x-k8s.io/job-uid"] == uid]
+            return httpx.Response(200, json={"items": items})
         prefix = "/apis/ray.io/v1/namespaces/rollout/rayjobs"
         if not request.url.path.startswith(prefix):
             return httpx.Response(404, json={"kind": "Status", "reason": "NotFound"})
@@ -254,3 +312,31 @@ async def test_a_run_on_kubernetes_is_a_rayjob_made_read_and_deleted_through_the
     assert stopping.state == STOPPING and server.deleted == [other.job]
     gone = await followed(stopping, launches, cluster, backends=backends)
     assert gone.state == FAILED and "is gone" in str(gone.detail)
+
+
+async def test_a_rayjob_kueue_holds_waits_for_admission_and_says_why(tmp_path: Path) -> None:
+    cluster = a_cluster(tmp_path, kubernetes=True, queue=True)
+    assert cluster.kubernetes is not None and cluster.kubernetes.queue == "runs"
+    stores = Stores.open(cluster)
+    launches = launches_of(stores.ledger)
+    assert launches is not None
+    server = FakeKubernetes()
+    api = KubernetesApi(cluster.kubernetes.api, token="t", transport=httpx.MockTransport(server.handle))
+    backends = {"kubernetes": RayJobResources(cluster.kubernetes, api)}
+    launch = await submit(settings(), cluster, stores.ledger, backend=backends["kubernetes"])
+    made = server.jobs[str(launch.job)]
+    assert made["spec"]["suspend"] is True and made["metadata"]["labels"]["kueue.x-k8s.io/queue-name"] == "runs"
+    held = await followed(launch, launches, cluster, backends=backends)
+    assert held.state == SUBMITTED and held.detail == "waits for admission by Kueue (queue runs)"
+    made["metadata"]["uid"] = "u-1"
+    pending = "couldn't assign flavors to pod set head: insufficient unused quota for nvidia.com/gpu in flavor rollout"
+    server.workloads.append({
+        "metadata": {"labels": {"kueue.x-k8s.io/job-uid": "u-1"}},
+        "status": {"conditions": [{"type": "QuotaReserved", "status": "False", "reason": "Pending",
+                                   "message": pending}]},
+    })  # fmt: skip
+    why = await followed(held, launches, cluster, backends=backends)
+    assert why.detail == f"waits for admission by Kueue (queue runs): {pending}"
+    made["spec"]["suspend"] = False  # (admitted)
+    made["status"] = {"jobDeploymentStatus": "Running", "jobStatus": "RUNNING"}
+    assert (await followed(why, launches, cluster, backends=backends)).state == RUNNING

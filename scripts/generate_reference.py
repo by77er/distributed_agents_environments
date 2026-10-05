@@ -35,6 +35,7 @@ PUBLIC_MODULES = [
     ("rollout_train.recorder", "What recording a trainable channel takes: renderers, the thinking budget, segments."),
     ("rollout_train.gateway", "The stateless gateway: samples channels for harnesses and records every turn."),
     ("rollout_train.jobs", "A run's job: built from its settings and the cluster config, claiming what it needs."),
+    ("rollout_train.demand", "What a run's scheduled parts need, and the placement group that reserves them together."),
     ("rollout_train.launching", "Asking for a run: its settings in layers, the facts validation reads, the offers."),
     ("rollout_train.submitting", "Starting a run's job as a Ray job or a RayJob, and reading how it goes."),
     ("rollout_train.launches", "Runs asked for, the jobs they became, and how each goes."),

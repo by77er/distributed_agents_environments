@@ -23,12 +23,13 @@ do not edit by hand.
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rollout_trainrecorderrendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#run), [`run_directory`](#run_directory), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
-- **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_capacity`](#ray_capacity), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
-- **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
+- **[`rollout_train.demand`](#rollout_traindemand)** — What a run's scheduled parts need, and the placement group that reserves them together. [`BRIDGE`](#bridge), [`bridge_asks`](#bridge_asks), [`Bundle`](#bundle), [`colocating`](#colocating), [`Demand`](#demand), [`demand`](#demand), [`HEADROOM`](#headroom), [`Part`](#part), [`placed`](#placed), [`played_channel`](#played_channel), [`Pod`](#rollout_traindemandpod), [`pods`](#pods), [`requested`](#requested), [`reserve`](#reserve), [`Resources`](#resources), [`SUBMITTER`](#submitter), [`TRAINER`](#trainer)
+- **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
+- **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
 - **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
-- **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`KubernetesSection`](#kubernetessection), [`LedgerSection`](#ledgersection), [`load`](#load), [`located`](#located), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
+- **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`CapacitySection`](#capacitysection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`KubernetesSection`](#kubernetessection), [`LedgerSection`](#ledgersection), [`load`](#load), [`located`](#located), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, allocation, routing. [`ALLOCATIONS`](#allocations), [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Distillation`](#distillation), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
@@ -49,7 +50,7 @@ do not edit by hand.
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls)
 - **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 - **[`rollout_s3`](#rollout_s3)** — Blobs in S3 or any S3-compatible object store. [`S3BlobStore`](#s3blobstore)
-- **[`rollout_runpod`](#rollout_runpod)** — GPU pods on RunPod, and certificates for them from step-ca. [`fingerprint`](#fingerprint), [`Pod`](#pod), [`PodSpec`](#podspec), [`RunPod`](#runpod), [`RunPodError`](#runpoderror), [`StepCa`](#stepca)
+- **[`rollout_runpod`](#rollout_runpod)** — GPU pods on RunPod, and certificates for them from step-ca. [`fingerprint`](#fingerprint), [`Pod`](#rollout_runpodpod), [`PodSpec`](#podspec), [`RunPod`](#runpod), [`RunPodError`](#runpoderror), [`StepCa`](#stepca)
 - **[`rollout_tinker`](#rollout_tinker)** — A trainer and an engine at Thinking Machines (Tinker). [`TinkerEngine`](#tinkerengine), [`TinkerSettings`](#tinkersettings), [`TinkerTrainer`](#tinkertrainer)
 
 ## `rollout.harness`
@@ -4162,18 +4163,20 @@ asks Ray for.
 | `options` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` |  |
 | `gpus` | `float` | `0.0` | GPUs it asks for: a fraction shares a card. |
 | `resources` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Custom resources it asks for (`[placement.engines]`), which steer it to the nodes that have them. |
+| `cpus` | `float` | `1.0` | CPUs it asks for (what a run's demand counts for it: `rollout_train.demand`). |
 
 ### `started`
 
 *function* · `libraries/rollout-train/src/rollout_train/inference/hosts.py`
 
 ```python
-def started(name: str, spec: HostSpec, ledger_at: Mapping[str, Any], blobs_at: Mapping[str, Any], *, bound: Collection[Binding] = (), replica: tuple[int, int] = (0, 1), namespace: str | None = None, detached: bool = False, directory: str = SCRATCH, every: float = 2.0, beating: float = 15.0) -> Any
+def started(name: str, spec: HostSpec, ledger_at: Mapping[str, Any], blobs_at: Mapping[str, Any], *, bound: Collection[Binding] = (), replica: tuple[int, int] = (0, 1), namespace: str | None = None, detached: bool = False, directory: str = SCRATCH, every: float = 2.0, beating: float = 15.0, placement: Mapping[str, Any] | None = None) -> Any
 ```
 
 An engine host started as a Ray actor named `name` on the cluster this process is connected to, asking for
-what `spec` says and started again whenever it dies; its handle. A run's own host goes with the job that started it;
-a pool's is `detached`, and lives until it is ended.
+what `spec` says and started again whenever it dies; its handle. A run's own host goes with the job that started it,
+in its bundle of the run's placement group (`placement`: the options `rollout_train.demand.placed` gives); a pool's
+is `detached`, and lives until it is ended.
 
 ## `rollout_train.recorder`
 
@@ -4932,6 +4935,9 @@ A run being built from its settings, and what it started: everything the loop of
 | `objective` | `Mapping[str, JsonValue] \| None` | `None` | The objective its trainer is made with, where the run's settings do not say it all (an imitate run's). |
 | `waiting` | `Waiting` | `field(default_factory=Waiting)` |  |
 | `trainer_handle` | `Any` | `None` |  |
+| `sandboxes` | `frozenset[str]` | `frozenset()` | The kinds of sandbox its environment's programs declare. |
+| `demand` | `Demand \| None` | `None` | What its scheduled parts need (`rollout_train.demand`). |
+| `group` | `Any` | `None` | The placement group that reserves them. |
 
 **Methods**
 
@@ -4939,11 +4945,11 @@ A run being built from its settings, and what it started: everything the loop of
 - `@property def checkpoints(self) -> Checkpoints`
 - `@property def kind(self) -> str`
 - `@property def channel(self) -> str` — The channel the run trains or plays: the trained one, else the first its settings name.
-- `async def start(self, stack: contextlib.AsyncExitStack, *, training: bool) -> None` — Start what the run needs, registering with `stack` how each is stopped: the environment, the trainer (with
-  `training`), each channel's engines, the gateway, the pools and the runner; then wait for what Ray has yet to
-  give.
+- `async def start(self, stack: contextlib.AsyncExitStack, *, training: bool) -> None` — Start what the run needs, registering with `stack` how each is stopped: its placement group, reserved
+  before anything is started in it; the trainer (with `training`), each channel's engines, the gateway, the
+  pools and the runner; then wait for what Ray has yet to give.
 - `def hosted(self, channel: str, provider: str, model: str) -> list[Any]` — The servers of a channel on a `vllm` provider: engine hosts of the run's own, one per replica, each bound to
-  the run's channel and asking Ray for its share of a GPU.
+  the run's channel, asking Ray for its share of a GPU and its CPU in its bundle of the run's placement group.
 - `def binding(self, environment: Environment) -> Any` — How an environment's episodes are played: each slot from the channel the settings bind it to (the run's
   channel unless said), each import and pool where the cluster serves it.
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve a checkpoint on a channel: on engines in this process (Tinker's), loaded now; elsewhere, its engine
@@ -5015,6 +5021,247 @@ as itself), and what it takes between steps is changed there.
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
 
+## `rollout_train.demand`
+
+What a run's scheduled parts need, and the placement group that reserves them together.
+
+### `BRIDGE`
+
+*constant* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+BRIDGE = 'bridge'
+```
+
+The bridge's part, by name.
+
+### `bridge_asks`
+
+*function* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+def bridge_asks(bridge: Bridge, cluster: Cluster) -> Resources
+```
+
+What a bridge's task asks Ray for: its declared CPUs and memory, or what `[bridges."NAME"]` says.
+
+### `Bundle`
+
+*class* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+class Bundle
+```
+
+One bundle of a run's placement group: the parts placed in it, and whether it is on the driver's node.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `parts` | `tuple[Part, ...]` | required |  |
+| `on_driver` | `bool` | `False` |  |
+
+**Methods**
+
+- `@property def resources(self) -> Resources`
+
+### `colocating`
+
+*function* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+def colocating(settings: 'RunSettings', cluster: Cluster) -> bool
+```
+
+Whether the run's trainer shares the GPU of its trained channel's engine hosts (`colocate_with`).
+
+### `Demand`
+
+*class* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+class Demand
+```
+
+What a run's scheduled parts need: its driver's (the job's entrypoint), and its placement group's bundles.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `driver` | `Resources` | required |  |
+| `bundles` | `tuple[Bundle, ...]` | `()` |  |
+| `strategy` | `str` | `PACK` |  |
+
+**Methods**
+
+- `@property def reserved(self) -> Resources` — What its placement group reserves.
+- `@property def total(self) -> Resources` — The driver's and the placement group's.
+- `@property def parts(self) -> dict[str, Part]`
+- `def index(self, name: str) -> int | None` — The bundle a part is placed in, by its name; none for a part the demand does not count.
+- `def asks(self, name: str) -> Resources | None` — What a part asks Ray for, by its name.
+- `def to_json(self) -> dict[str, JsonValue]`
+
+### `demand`
+
+*function* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+def demand(settings: 'RunSettings', cluster: Cluster, *, sandboxes: Collection[str] = ()) -> Demand
+```
+
+What a run with these settings needs on this cluster (the module's docstring); `sandboxes` are the kinds of
+sandbox its environment's programs declare. Parts the cluster does not offer are left out (validation refuses
+them).
+
+### `HEADROOM`
+
+*constant* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+HEADROOM = Resources(cpus=1.0, memory_gib=2.0)
+```
+
+Room a pod of a run's Ray cluster keeps beyond what Ray schedules: Ray's own processes (its GCS, raylet, dashboard
+and object store) and the memory its GPU processes hold outside Ray's count.
+
+### `Part`
+
+*class* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+class Part
+```
+
+One actor or task of a run, by name (`trainer`, `engine/CHANNEL/N`, `bridge`), and what it asks Ray for.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `asks` | `Resources` | required |  |
+
+### `placed`
+
+*function* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+def placed(group: Any, asked: Demand | None, part: str) -> dict[str, Any]
+```
+
+The options that place a part in its bundle of `group` (none where there is no group, or the demand does not
+count the part).
+
+### `played_channel`
+
+*function* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+def played_channel(settings: 'RunSettings') -> str
+```
+
+The channel a run trains or plays: the trained one, else the first its settings name.
+
+### `Pod` {#rollout_traindemandpod}
+
+*class* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+class Pod
+```
+
+One kind of pod of a run's Ray cluster on Kubernetes: the head (`head`) or a worker group (`engines-N`), what
+Ray schedules on each (whole CPUs and GPUs, as Ray starts a node with), and how many there are.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `group` | `str` | required |  |
+| `ray` | `Resources` | required |  |
+| `replicas` | `int` | `1` |  |
+
+**Methods**
+
+- `@property def requests(self) -> Resources` — What each pod asks Kubernetes for: what Ray schedules on it, and `HEADROOM`.
+
+### `pods`
+
+*function* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+def pods(asked: Demand, most: Resources | None = None, *, known: Collection[str] = ()) -> tuple[Pod, ...]
+```
+
+The pods of a run's Ray cluster: one head pod for all of it where its requests fit `most` (a pod's upper bound,
+in the resources `known`: the template's limits, one node's worth); else the head holds the driver, the trainer's
+bundle and the bundles with no GPU (the bridge's), and each other bundle (an engine host's) is a worker pod,
+grouped by size (`engines-0`, `engines-1`, ...).
+
+### `requested`
+
+*function* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+def requested(asked: Demand, *, kubernetes: bool = False, most: Resources | None = None, known: Collection[str] = ()) -> Resources
+```
+
+What a run's Ray cluster asks for in all: each pod's requests (`pods`), and on Kubernetes the pod that submits
+its job.
+
+### `reserve`
+
+*function* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+def reserve(asked: Demand, name: str) -> Any
+```
+
+A placement group for a run's demand on the Ray cluster this process is connected to, named `name`: its bundles
+in order, the trainer's pinned to this process's node. Ray reserves every bundle at once or none (`ready()` says
+when); none where the demand has no bundle.
+
+### `Resources`
+
+*class* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+class Resources
+```
+
+CPUs, memory, GPUs and custom resources (`[placement.ROLE]`), as Ray counts them.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `cpus` | `float` | `0.0` |  |
+| `memory_gib` | `float` | `0.0` |  |
+| `gpus` | `float` | `0.0` |  |
+| `custom` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
+
+**Methods**
+
+- `def most(self, other: 'Resources') -> 'Resources'` — Each resource the larger of the two.
+- `def beyond(self, room: 'Resources', *, known: Collection[str] = ('cpus', 'memory_gib', 'gpus')) -> list[str]` — What of this exceeds `room` (only the resources in `known`, and the custom ones `room` names), each as
+  `CPUs (9 for 8)`.
+- `def bundle(self) -> dict[str, float]` — As a Ray placement group bundle (memory in bytes), leaving out what is zero. A share of GPUs above one is
+  rounded up to whole GPUs: Ray takes fractions of one GPU only.
+- `def said(self) -> str` — In words: `1 GPU, 2 CPUs, 1 GiB`.
+- `def to_json(self) -> dict[str, JsonValue]`
+
+### `SUBMITTER`
+
+*constant* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+SUBMITTER = Resources(cpus=0.5, memory_gib=0.2)
+```
+
+The pod KubeRay starts to submit a RayJob's job (its default requests), which Kueue counts with the job's.
+
+### `TRAINER`
+
+*constant* · `libraries/rollout-train/src/rollout_train/demand.py`
+
+```python
+TRAINER = 'trainer'
+```
+
+The trainer's part, by name (an engine host's is `engine/CHANNEL/N`).
+
 ## `rollout_train.launching`
 
 Asking for a run: its settings in layers, the facts validation reads, the offers.
@@ -5035,7 +5282,7 @@ machine; none where no beat says.
 *function* · `libraries/rollout-train/src/rollout_train/launching.py`
 
 ```python
-async def checked(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, loaded: 'Environment | None' = None, own: str | None = None, gpus: float | None = None, gpus_free: float | None = None) -> list[Finding]
+async def checked(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, loaded: 'Environment | None' = None, own: str | None = None, gpus: float | None = None, free: Resources | None = None) -> list[Finding]
 ```
 
 Everything wrong with a run's settings on this cluster (`rollout_train.validation.check`), with the facts
@@ -5086,7 +5333,7 @@ it trains.
 *function* · `libraries/rollout-train/src/rollout_train/launching.py`
 
 ```python
-async def examined(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, loaded: 'Environment | None' = None, own: str | None = None, gpus: float | None = None, gpus_free: float | None = None) -> Examined
+async def examined(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, loaded: 'Environment | None' = None, own: str | None = None, gpus: float | None = None, free: Resources | None = None) -> Examined
 ```
 
 A run's settings checked on this cluster with the facts gathered now (`checked`), with those facts' environment,
@@ -5107,12 +5354,12 @@ A name no run has: the one wanted, else it with the first number after it that n
 *function* · `libraries/rollout-train/src/rollout_train/launching.py`
 
 ```python
-async def ledger_facts(settings: RunSettings, ledger: Ledger, *, own: str | None = None, gpus: float | None = None, gpus_free: float | None = None) -> LedgerFacts
+async def ledger_facts(settings: RunSettings, ledger: Ledger, *, own: str | None = None, gpus: float | None = None, free: Resources | None = None) -> LedgerFacts
 ```
 
 What validation reads of the ledger: each checkpoint the settings name (the start, a fixed channel's), the
-suites their evals name, the names other runs have (`own`, the run's id, is left out), and the GPUs the caller
-knows of.
+suites their evals name, the names other runs have (`own`, the run's id, is left out), and the GPUs and free
+resources the caller knows of.
 
 ### `offers`
 
@@ -5124,16 +5371,16 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
 
 What a run can be asked for here (the module's docstring), as JSON.
 
-### `ray_capacity`
+### `ray_free`
 
 *function* · `libraries/rollout-train/src/rollout_train/launching.py`
 
 ```python
-def ray_capacity() -> tuple[float | None, float | None]
+def ray_free() -> Resources | None
 ```
 
-The GPUs the Ray cluster this process is connected to has free (none: not connected). Its total is not said:
-an autoscaled cluster has more than its nodes now.
+What the Ray cluster this process is connected to has free now: CPUs, memory, GPUs and custom resources (none:
+not connected). Its total is not said: an autoscaled cluster has more than its nodes now.
 
 ### `Refused` {#rollout_trainlaunchingrefused}
 
@@ -5194,7 +5441,8 @@ Where runs' jobs go: Ray's job API, or RayJobs on Kubernetes.
 
 **Methods**
 
-- `async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str` — Start a launch's job; its name (a Ray job's submission id, a RayJob's name).
+- `async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], asked: Demand | None = None) -> str` — Start a launch's job, sized for what its run needs (`asked`); its name (a Ray job's submission id, a
+  RayJob's name).
 - `async def status(self, job: str) -> JobState` — How a job goes now.
 - `async def stop(self, job: str) -> None` — Ask a job to stop: its driver is interrupted, and notes its run stopped.
 
@@ -5208,6 +5456,17 @@ def backend_of(cluster: Cluster) -> Backend
 
 Where a cluster's runs' jobs go: RayJobs where its config has `[kubernetes]`, else Ray's job API at `[ray]
 jobs`.
+
+### `demand_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+async def demand_of(launch: Launch, cluster: Cluster, ledger: Ledger) -> Demand
+```
+
+What a launch's run needs (`rollout_train.demand`), with the sandboxes its environment declares where they are
+known here (an environment in a project's Python of its own is not imported here: none).
 
 ### `entrypoint_of`
 
@@ -5276,6 +5535,7 @@ default the pod's own), over `transport` where given (a test's).
 - `def __init__(self, base: str = 'https://kubernetes.default.svc', *, token: str | None = None, ca: str | None = None, transport: httpx.AsyncBaseTransport | None = None) -> None`
 - `async def create(self, namespace: str, resource: Mapping[str, Any]) -> dict[str, Any]`
 - `async def get(self, namespace: str, name: str) -> dict[str, Any] | None`
+- `async def workloads(self, namespace: str, uid: str) -> list[dict[str, Any]]` — Kueue's Workloads of a job, by the job's uid (none where Kueue is not installed).
 - `async def delete(self, namespace: str, name: str) -> None`
 
 ### `RayJobResources`
@@ -5297,7 +5557,7 @@ Runs' jobs as RayJobs in a Kubernetes namespace, each made from the cluster conf
 
 - `def __init__(self, section: KubernetesSection, api: KubernetesApi | None = None) -> None`
 - `def template(self) -> dict[str, Any]`
-- `async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str`
+- `async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], asked: Demand | None = None) -> str`
 - `async def status(self, job: str) -> JobState`
 - `async def stop(self, job: str) -> None`
 
@@ -5320,7 +5580,7 @@ like it).
 
 - `def __init__(self, address: str, client: Any = None) -> None`
 - `def client(self) -> Any`
-- `async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str`
+- `async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], asked: Demand | None = None) -> str`
 - `async def status(self, job: str) -> JobState`
 - `async def stop(self, job: str) -> None`
 
@@ -5329,12 +5589,14 @@ like it).
 *function* · `libraries/rollout-train/src/rollout_train/submitting.py`
 
 ```python
-def rendered(template: Mapping[str, Any], launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], namespace: str) -> dict[str, Any]
+def rendered(template: Mapping[str, Any], launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], namespace: str, *, asked: Demand | None = None, queue: str | None = None) -> dict[str, Any]
 ```
 
 The RayJob of a launch's job, made from `template` (a RayJob as YAML reads it: its Ray cluster, image, volumes,
-retries): its name and labels, its entrypoint and the driver's CPU, its runtime environment (as YAML, as KubeRay
-takes it), its job's submission id and metadata. Everything else is the template's.
+retries): its name and labels, its entrypoint and the driver's CPUs, its runtime environment (as YAML, as KubeRay
+takes it), its job's submission id and metadata. With `asked`, its Ray cluster is sized from the run's demand
+(`sized`). With `queue`, it is labelled with Kueue's queue and made suspended: Kueue starts it once it admits it.
+Everything else is the template's.
 
 ### `runtime_env_of` {#rollout_trainsubmittingruntime_env_of}
 
@@ -5347,6 +5609,20 @@ async def runtime_env_of(launch: Launch, cluster: Cluster, ledger: Ledger) -> di
 The Ray runtime environment of a launch's job: the cluster config as JSON (`ROLLOUT_CLUSTER_JSON`), in the
 runtime environment of the published version it plays, if it plays one. Raises `KeyError` for a published version
 the ledger does not keep.
+
+### `sized`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+def sized(cluster: Mapping[str, Any], asked: Demand) -> dict[str, Any]
+```
+
+A RayJob's Ray cluster (`rayClusterSpec`) sized from a run's demand (`rollout_train.demand.pods`): its head pod
+asks for the driver's and the placement group's resources and `HEADROOM`, where that fits the head's limits (one
+node's worth); else the head holds the driver, the trainer's bundle and the bridge's, and each engine host's bundle
+is a worker pod of a worker group made from the head's template. Ray starts each node with what its pod holds
+(`rayStartParams`).
 
 ### `start`
 
@@ -5873,6 +6149,23 @@ What a bridge's task asks for, where the cluster says more than the bridge decla
 | `cpus` | `float \| None` | `None` |  |
 | `memory_gib` | `float \| None` | `None` |  |
 
+### `CapacitySection`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class CapacitySection
+```
+
+The most the cluster can schedule for one run (`[capacity]`): on Kubernetes with Kueue, its queue's quota. A run
+whose demand exceeds it is refused (`rollout_train.demand`). Each is unbounded where it is not said.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `cpus` | `float \| None` | `None` |  |
+| `memory_gib` | `float \| None` | `None` |  |
+| `gpus` | `float \| None` | `None` |  |
+
 ### `Cluster`
 
 *class* · `libraries/rollout-train/src/rollout_train/cluster.py`
@@ -5903,6 +6196,7 @@ A cluster, as its config describes it. It holds no secret, only references to se
 | `environments` | `Mapping[str, EnvironmentSection]` | `field(default_factory=dict[str, EnvironmentSection])` |  |
 | `placement` | `Mapping[str, Mapping[str, float]]` | `field(default_factory=dict[str, Mapping[str, float]])` | Custom resources each role asks for, by role. |
 | `bridges` | `Mapping[str, BridgeSection]` | `field(default_factory=dict[str, BridgeSection])` |  |
+| `capacity` | `CapacitySection \| None` | `None` |  |
 | `described` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue], repr=False, compare=False)` | The config as it was read (relative paths made absolute): what is handed on as JSON, and `parsed` reads back. |
 
 **Methods**
@@ -6012,6 +6306,7 @@ with its service account).
 | `namespace` | `str` | required |  |
 | `rayjob` | `str` | required |  |
 | `api` | `str` | `'https://kubernetes.default.svc'` |  |
+| `queue` | `str \| None` | `None` | The Kueue LocalQueue in `namespace` that admits runs' RayJobs: each is made suspended, with the label `kueue.x-k8s.io/queue-name`, and starts when Kueue admits it whole. None: each starts when it is made. |
 
 ### `LedgerSection`
 
@@ -6676,13 +6971,15 @@ A pair of formats with no path between them, and why.
 *function* · `libraries/rollout-train/src/rollout_train/bridges.py`
 
 ```python
-async def on_ray(ledger_at: Mapping[str, Any], blobs_at: Mapping[str, Any], fence: Fence, checkpoint: str, chain: Sequence[Bridge], *, target: str | None = None, settings: Mapping[str, Mapping[str, JsonValue]] | None = None, scratch: str = SCRATCH) -> Manifest
+async def on_ray(ledger_at: Mapping[str, Any], blobs_at: Mapping[str, Any], fence: Fence, checkpoint: str, chain: Sequence[Bridge], *, target: str | None = None, settings: Mapping[str, Mapping[str, JsonValue]] | None = None, scratch: str = SCRATCH, placement: Mapping[str, Any] | None = None) -> Manifest
 ```
 
 `bridged`, with each bridge of `chain` a Ray task of its own on the cluster this process is connected to
-(`ray.init`), asking for the CPUs and memory the bridge declares. `ledger_at` and `blobs_at` say where a worker
-finds the ledger and the blob store; `scratch` is where it works, on its own machine. A chain whose bridges write
-nothing (`none`) serves the checkpoint's own files.
+(`ray.init`), asking for the CPUs and memory the bridge declares, or those its `settings` say (`cpus`,
+`memory_gib`: the cluster's `[bridges."NAME"]`). `placement` places each task (a run's: in the bridge's bundle of
+its placement group, `rollout_train.demand.placed`). `ledger_at` and `blobs_at` say where a worker finds the ledger
+and the blob store; `scratch` is where it works, on its own machine. A chain whose bridges write nothing (`none`)
+serves the checkpoint's own files.
 
 ### `path`
 
@@ -7986,7 +8283,7 @@ What the ledger and the live cluster say, asked beforehand.
 | `suites` | `Mapping[str, SuiteFacts]` | `field(default_factory=dict[str, SuiteFacts])` |  |
 | `names_taken` | `frozenset[str]` | `frozenset()` |  |
 | `gpus` | `float \| None` | `None` | GPUs the cluster has in all (none: not known). |
-| `gpus_free` | `float \| None` | `None` |  |
+| `free` | `Resources \| None` | `None` | What the cluster has free now (none: not known). |
 
 ### `refusals`
 
@@ -8016,7 +8313,7 @@ class Rule
 *constant* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', "more GPUs than the cluster has, counting the run's scheduled parts"), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
+RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
 ```
 
 Every rule `check` applies, in the order it reports them.
@@ -9092,7 +9389,7 @@ def fingerprint(root: bytes) -> str
 The SHA-256 fingerprint of a certificate (PEM), in lowercase hexadecimal: what step-ca's clients trust a root
 by.
 
-### `Pod`
+### `Pod` {#rollout_runpodpod}
 
 *class* · `implementations/rollout-runpod/src/rollout_runpod/api.py`
 

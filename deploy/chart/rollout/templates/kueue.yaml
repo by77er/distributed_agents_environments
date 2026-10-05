@@ -1,0 +1,36 @@
+{{- if .Values.kueue.enabled }}
+# Kueue's objects for runs (Kueue itself is installed outside the chart: deploy/k3s/README.md): a ResourceFlavor for the
+# node, a ClusterQueue whose quota bounds the CPUs, memory and GPUs every run's RayJob together asks for, taking RayJobs
+# only from the release's namespace, and the LocalQueue there that each RayJob names (`kueue.x-k8s.io/queue-name`).
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: {{ .Values.kueue.flavor }}
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: {{ .Values.kueue.clusterQueue }}
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchLabels: {kubernetes.io/metadata.name: {{ .Release.Namespace }}}
+  resourceGroups:
+    - coveredResources: [cpu, memory, nvidia.com/gpu]
+      flavors:
+        - name: {{ .Values.kueue.flavor }}
+          resources:
+            - {name: cpu, nominalQuota: {{ .Values.kueue.quota.cpus | quote }}}
+            - {name: memory, nominalQuota: {{ printf "%vGi" .Values.kueue.quota.memoryGib | quote }}}
+            - {name: nvidia.com/gpu, nominalQuota: {{ .Values.kueue.quota.gpus | quote }}}
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: {{ .Values.kueue.queue }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  clusterQueue: {{ .Values.kueue.clusterQueue }}
+{{- end }}

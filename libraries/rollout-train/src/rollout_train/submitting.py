@@ -6,23 +6,26 @@ LAUNCH` (`rollout_train.jobs`), handed the cluster config as JSON (`ROLLOUT_CLUS
 cluster config's to say (`backend_of`):
 
 - **Ray's job API** (`RayJobs`), on a cluster without `[kubernetes]`: a Ray job submitted to `[ray] jobs`, its
-  submission id `run-LAUNCH`, asking for one CPU for its driver. A run on a published environment
-  (`rollout_train.published`) is submitted in its version's Ray runtime environment, so its driver imports the
-  environment from the version's source.
+  submission id `run-LAUNCH`, asking for its driver's CPUs (`rollout_train.demand`: the loop, its runners and sandbox
+  pools). A run on a published environment (`rollout_train.published`) is submitted in its version's Ray runtime
+  environment, so its driver imports the environment from the version's source.
 - **A RayJob** (`RayJobResources`), on a cluster with `[kubernetes]`: a RayJob custom resource made from the template
   `[kubernetes] rayjob` names (its Ray cluster, image, volumes, `backoffLimit`), with the run's entrypoint, runtime
-  environment and metadata filled in (`rendered`), created in `[kubernetes] namespace` through the API server
-  (`KubernetesApi`). KubeRay starts a Ray cluster for it, runs the driver there, and removes the cluster when it ends.
+  environment and metadata filled in and its Ray cluster sized from the run's demand (`rendered`), created in
+  `[kubernetes] namespace` through the API server (`KubernetesApi`). With `[kubernetes] queue`, it is made suspended
+  and labelled with Kueue's queue, and Kueue starts it when the queue's quota holds all of it. KubeRay starts a Ray
+  cluster for it, runs the driver there, and removes the cluster when it ends.
 
 A job's driver notes on its launch when it runs and how it ends; `followed` reads the job's status for a launch that is
 going and notes what the driver could not (a job that waits for its resources, one that died without a word), and
-`stopped` asks a job to stop.
+`stopped` asks a job to stop. A RayJob that Kueue holds says so (`waits for admission`, with Kueue's reason).
 """
 
 import asyncio
 import contextlib
 import copy
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -33,6 +36,7 @@ import httpx
 from pydantic import JsonValue
 
 from rollout_train.cluster import HANDED, Cluster, KubernetesSection
+from rollout_train.demand import Demand, Pod, Resources, demand, pods
 from rollout_train.launches import (
     ASKED,
     ENDED,
@@ -60,11 +64,13 @@ __all__ = [
     "RayJobs",
     "ask",
     "backend_of",
+    "demand_of",
     "entrypoint_of",
     "followed",
     "job_name",
     "rendered",
     "runtime_env_of",
+    "sized",
     "start",
     "stopped",
     "submit",
@@ -75,6 +81,13 @@ TAIL = 2000
 GROUP = "ray.io"
 VERSION = "v1"
 """The RayJob custom resource's API group and version (KubeRay 1.x)."""
+QUEUE_LABEL = "kueue.x-k8s.io/queue-name"
+"""The label that names the Kueue LocalQueue a RayJob is admitted through."""
+JOB_UID_LABEL = "kueue.x-k8s.io/job-uid"
+"""The label Kueue gives a job's Workload: the job's uid."""
+KUEUE = "kueue.x-k8s.io/v1beta2"
+"""Kueue's API group and version (Kueue 0.15 and after)."""
+GPU = "nvidia.com/gpu"
 
 
 @dataclass(frozen=True)
@@ -90,8 +103,11 @@ class Backend(Protocol):
 
     name: str
 
-    async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str:
-        """Start a launch's job; its name (a Ray job's submission id, a RayJob's name)."""
+    async def start(
+        self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], asked: Demand | None = None
+    ) -> str:
+        """Start a launch's job, sized for what its run needs (`asked`); its name (a Ray job's submission id, a
+        RayJob's name)."""
         ...
 
     async def status(self, job: str) -> JobState:
@@ -128,12 +144,15 @@ class RayJobs:
             self._client = JobSubmissionClient(self.address)
         return self._client
 
-    async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str:
+    async def start(
+        self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], asked: Demand | None = None
+    ) -> str:
         metadata = {"kind": launch.asked.kind, "launch": launch.id, "name": launch.asked.name}
+        cpus = asked.driver.cpus if asked is not None else 1
         return str(
             await asyncio.to_thread(
                 self.client().submit_job, entrypoint=entrypoint, submission_id=job_name(launch),
-                runtime_env=dict(runtime_env), entrypoint_num_cpus=1, metadata=metadata,
+                runtime_env=dict(runtime_env), entrypoint_num_cpus=cpus, metadata=metadata,
             )
         )  # fmt: skip
 
@@ -213,6 +232,16 @@ class KubernetesApi:
         response.raise_for_status()
         return cast(dict[str, Any], response.json())
 
+    async def workloads(self, namespace: str, uid: str) -> list[dict[str, Any]]:
+        """Kueue's Workloads of a job, by the job's uid (none where Kueue is not installed)."""
+        async with self._client() as client:
+            response = await client.get(f"/apis/{KUEUE}/namespaces/{namespace}/workloads",
+                                        params={"labelSelector": f"{JOB_UID_LABEL}={uid}"})  # fmt: skip
+        if response.status_code == 404:
+            return []
+        response.raise_for_status()
+        return cast(list[dict[str, Any]], response.json().get("items") or [])
+
     async def delete(self, namespace: str, name: str) -> None:
         async with self._client() as client:
             response = await client.request("DELETE", self._path(namespace, name), json={"propagationPolicy":
@@ -222,11 +251,20 @@ class KubernetesApi:
 
 
 def rendered(
-    template: Mapping[str, Any], launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], namespace: str
+    template: Mapping[str, Any],
+    launch: Launch,
+    entrypoint: str,
+    runtime_env: Mapping[str, JsonValue],
+    namespace: str,
+    *,
+    asked: Demand | None = None,
+    queue: str | None = None,
 ) -> dict[str, Any]:
     """The RayJob of a launch's job, made from `template` (a RayJob as YAML reads it: its Ray cluster, image, volumes,
-    retries): its name and labels, its entrypoint and the driver's CPU, its runtime environment (as YAML, as KubeRay
-    takes it), its job's submission id and metadata. Everything else is the template's."""
+    retries): its name and labels, its entrypoint and the driver's CPUs, its runtime environment (as YAML, as KubeRay
+    takes it), its job's submission id and metadata. With `asked`, its Ray cluster is sized from the run's demand
+    (`sized`). With `queue`, it is labelled with Kueue's queue and made suspended: Kueue starts it once it admits it.
+    Everything else is the template's."""
     import yaml
 
     made: dict[str, Any] = copy.deepcopy(dict(template))
@@ -238,15 +276,125 @@ def rendered(
     labels = dict(metadata.get("labels") or {})
     labels |= {"app.kubernetes.io/managed-by": "rollout", "rollout/launch": launch.id.lower().replace("_", "-"),
                "rollout/kind": launch.asked.kind}  # fmt: skip
+    if queue is not None:
+        labels[QUEUE_LABEL] = queue
     metadata |= {"name": name, "namespace": namespace, "labels": labels}
     made["metadata"] = metadata
     spec = dict(made.get("spec") or {})
+    if queue is not None:
+        spec["suspend"] = True
     spec["entrypoint"] = entrypoint
-    spec["entrypointNumCpus"] = 1
+    spec["entrypointNumCpus"] = asked.driver.cpus if asked is not None else 1
+    if asked is not None:
+        spec["rayClusterSpec"] = sized(spec.get("rayClusterSpec") or {}, asked)
     spec["jobId"] = name
     spec["runtimeEnvYAML"] = yaml.safe_dump(json.loads(json.dumps(dict(runtime_env))), sort_keys=True)
     spec["metadata"] = {"kind": launch.asked.kind, "launch": launch.id, "name": launch.asked.name}
     made["spec"] = spec
+    return made
+
+
+def _quantity(text: object) -> float:
+    """A Kubernetes quantity as a number: CPUs (`500m` is 0.5), or memory in GiB (`14Gi`, `512Mi`, `2G`)."""
+    said = str(text).strip()
+    units = {"Ki": 2**10, "Mi": 2**20, "Gi": 2**30, "Ti": 2**40, "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12}
+    for suffix, factor in units.items():
+        if said.endswith(suffix):
+            return float(said.removesuffix(suffix)) * factor / 2**30
+    if said.endswith("m"):
+        return float(said.removesuffix("m")) / 1000
+    return float(said)
+
+
+def _bound(limits: Mapping[str, Any]) -> tuple[Resources, list[str]]:
+    """The most one pod may have, from a container's limits, and which resources they bound."""
+    known: list[str] = []
+    cpus = memory = gpus = 0.0
+    if "cpu" in limits:
+        cpus, known = _quantity(limits["cpu"]), [*known, "cpus"]
+    if "memory" in limits:
+        memory, known = _quantity(limits["memory"]), [*known, "memory_gib"]
+    if GPU in limits:
+        gpus, known = float(limits[GPU]), [*known, "gpus"]
+    return Resources(cpus, memory, gpus), known
+
+
+def _mib(gib: float) -> str:
+    return f"{math.ceil(gib * 1024)}Mi"
+
+
+def _cpus(cpus: float) -> str:
+    return f"{round(cpus, 3):g}"
+
+
+def _pod(template: Mapping[str, Any], pod: Pod, *, container: str | None = None) -> dict[str, Any]:
+    """A pod template sized for `pod`: its first container asks for what it needs (CPUs and memory, and whole GPUs
+    where it holds any), its limits kept where they are larger (the template's are the most a pod may have)."""
+    made: dict[str, Any] = copy.deepcopy(dict(template))
+    spec = made.setdefault("spec", {})
+    containers: list[dict[str, Any]] = spec.setdefault("containers", [{}])
+    first = containers[0]
+    if container is not None:
+        first["name"] = container
+    resources = dict(first.get("resources") or {})
+    requests = dict(resources.get("requests") or {})
+    limits = dict(resources.get("limits") or {})
+    asked = pod.requests
+    requests |= {"cpu": _cpus(asked.cpus), "memory": _mib(asked.memory_gib)}
+    if "memory" in limits and _quantity(limits["memory"]) < asked.memory_gib:
+        limits["memory"] = _mib(asked.memory_gib)
+    if "cpu" in limits and _quantity(limits["cpu"]) < asked.cpus:
+        limits["cpu"] = _cpus(asked.cpus)
+    if pod.ray.gpus:
+        requests[GPU] = limits[GPU] = int(pod.ray.gpus)
+    else:
+        requests.pop(GPU, None)
+        limits.pop(GPU, None)
+    resources["requests"] = requests
+    if limits:
+        resources["limits"] = limits
+    else:
+        resources.pop("limits", None)
+    first["resources"] = resources
+    return made
+
+
+def _started(given: Mapping[str, Any] | None, pod: Pod) -> dict[str, Any]:
+    """`rayStartParams` for a pod: Ray starts its node with the pod's CPUs, GPUs and custom resources."""
+    params = dict(given or {})
+    params["num-cpus"] = str(int(pod.ray.cpus))
+    params["num-gpus"] = str(int(pod.ray.gpus))
+    if pod.ray.custom:
+        params["resources"] = json.dumps(json.dumps(dict(pod.ray.custom), sort_keys=True))
+    return params
+
+
+def sized(cluster: Mapping[str, Any], asked: Demand) -> dict[str, Any]:
+    """A RayJob's Ray cluster (`rayClusterSpec`) sized from a run's demand (`rollout_train.demand.pods`): its head pod
+    asks for the driver's and the placement group's resources and `HEADROOM`, where that fits the head's limits (one
+    node's worth); else the head holds the driver, the trainer's bundle and the bridge's, and each engine host's bundle
+    is a worker pod of a worker group made from the head's template. Ray starts each node with what its pod holds
+    (`rayStartParams`)."""
+    made: dict[str, Any] = copy.deepcopy(dict(cluster))
+    head = dict(made.get("headGroupSpec") or {})
+    template = dict(head.get("template") or {})
+    containers = cast(list[dict[str, Any]], dict(template.get("spec") or {}).get("containers") or [{}])
+    most, known = _bound(dict(dict(containers[0].get("resources") or {}).get("limits") or {}))
+    first, *workers = pods(asked, most if known else None, known=known)
+    head["template"] = _pod(template, first)
+    head["rayStartParams"] = _started(head.get("rayStartParams"), first)
+    made["headGroupSpec"] = head
+    groups = list(made.get("workerGroupSpecs") or [])
+    for each in workers:
+        params = {key: value for key, value in dict(head.get("rayStartParams") or {}).items()
+                  if key not in ("dashboard-host",)}  # fmt: skip
+        groups.append({
+            "groupName": each.group, "replicas": each.replicas, "minReplicas": each.replicas,
+            "maxReplicas": each.replicas, "rayStartParams": _started(params, each),
+            "template": _pod(template, each, container="ray-worker"),
+        })  # fmt: skip
+    if groups:
+        made["workerGroupSpecs"] = groups
     return made
 
 
@@ -268,9 +416,12 @@ class RayJobResources:
             raise ValueError(f"{self.section.rayjob} is not a RayJob (a YAML mapping)")
         return cast(dict[str, Any], loaded)
 
-    async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str:
+    async def start(
+        self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], asked: Demand | None = None
+    ) -> str:
         template = await asyncio.to_thread(self.template)
-        resource = rendered(template, launch, entrypoint, runtime_env, self.section.namespace)
+        resource = rendered(template, launch, entrypoint, runtime_env, self.section.namespace, asked=asked,
+                            queue=self.section.queue)  # fmt: skip
         made = await self.api.create(self.section.namespace, resource)
         return str(made.get("metadata", {}).get("name") or resource["metadata"]["name"])
 
@@ -290,9 +441,34 @@ class RayJobResources:
             return JobState(FAILED, f"RayJob {job} failed: {message[-TAIL:]}".rstrip(": "))
         if job_status == "RUNNING":
             return JobState(RUNNING)
+        if dict(found.get("spec") or {}).get("suspend"):
+            return JobState(SUBMITTED, await self._admission(found))
         waiting = {"": "its Ray cluster is being made", "Initializing": "its Ray cluster is starting",
                    "Waiting": "waits for its Ray cluster", "Retrying": "its job is started again"}  # fmt: skip
         return JobState(SUBMITTED, message or waiting.get(deployment, f"its RayJob is {deployment.lower()}"))
+
+    async def _admission(self, found: Mapping[str, Any]) -> str:
+        """Why Kueue holds a suspended RayJob: its queue, and what its Workload says (the quota it waits for)."""
+        metadata = dict(found.get("metadata") or {})
+        queue = dict(metadata.get("labels") or {}).get(QUEUE_LABEL)
+        said = f"waits for admission by Kueue (queue {queue})" if queue else "waits for admission by Kueue"
+        uid = metadata.get("uid")
+        if not uid:
+            return said
+        try:
+            workloads = await self.api.workloads(self.section.namespace, str(uid))
+        except Exception:  # (Kueue's API is not readable here: its queue is enough)
+            return said
+        for workload in workloads:
+            for condition in cast(list[dict[str, Any]], dict(workload.get("status") or {}).get("conditions") or []):
+                message = str(condition.get("message") or "")
+                if (
+                    condition.get("type") in ("QuotaReserved", "Admitted")
+                    and condition.get("status") == "False"
+                    and message
+                ):
+                    return f"{said}: {message}"
+        return said
 
     async def stop(self, job: str) -> None:
         await self.api.delete(self.section.namespace, job)
@@ -363,6 +539,17 @@ async def ask(
     return await launches.ask(Asked(settings.kind, name, given, preset, resumes), run)
 
 
+async def demand_of(launch: Launch, cluster: Cluster, ledger: Ledger) -> Demand:
+    """What a launch's run needs (`rollout_train.demand`), with the sandboxes its environment declares where they are
+    known here (an environment in a project's Python of its own is not imported here: none)."""
+    from rollout_train.launching import environment_facts
+
+    asked = launch.asked
+    settings = RunSettings({**asked.settings, "kind": asked.kind, "name": asked.name})
+    facts = await environment_facts(asked.environment, cluster, ledger)
+    return demand(settings, cluster, sandboxes=facts.sandboxes if facts is not None else ())
+
+
 async def start(launch: Launch, cluster: Cluster, ledger: Ledger, backend: Backend | None = None) -> Launch:
     """Start a recorded launch's job; the launch, submitted (or failed, saying why the job could not be made)."""
     launches = launches_of(ledger)
@@ -370,7 +557,8 @@ async def start(launch: Launch, cluster: Cluster, ledger: Ledger, backend: Backe
     backend = backend or backend_of(cluster)
     try:
         runtime_env = await runtime_env_of(launch, cluster, ledger)
-        job = await backend.start(launch, entrypoint_of(launch, cluster), runtime_env)
+        asked = await demand_of(launch, cluster, ledger)
+        job = await backend.start(launch, entrypoint_of(launch, cluster), runtime_env, asked)
     except Exception as error:  # (a job that cannot be made is a failed launch)
         return await launches.note(launch.id, expect=(ASKED,), state=FAILED, detail=f"{type(error).__name__}: {error}")
     noted = await launches.note(launch.id, expect=(ASKED,), state=SUBMITTED, job=job, backend=backend.name)

@@ -14,6 +14,14 @@ temp_dir = "/tmp/ray"                         # the container's own disk
 [kubernetes]                                  # each run's job is a RayJob with a Ray cluster of its own
 namespace = "{{ .Release.Namespace }}"
 rayjob = "/etc/rollout/rayjob.yaml"
+{{- if .Values.kueue.enabled }}
+queue = "{{ .Values.kueue.queue }}"                              # Kueue admits each RayJob whole
+
+[capacity]                                    # the ClusterQueue's quota: a run that asks for more is refused
+cpus = {{ .Values.kueue.quota.cpus }}
+memory_gib = {{ .Values.kueue.quota.memoryGib }}
+gpus = {{ .Values.kueue.quota.gpus }}
+{{- end }}
 
 [ledger]
 url = "{{ include "rollout.ledgerUrl" . }}"  # the password is PGPASSWORD's

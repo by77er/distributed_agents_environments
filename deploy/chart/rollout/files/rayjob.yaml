@@ -1,8 +1,10 @@
-# What each run's job is made from (the cluster config's [kubernetes] rayjob): a RayJob whose Ray cluster is one head
-# pod of the platform's image, with the GPU share `rayjob.gpus` names (the run's trainer runs on the driver's node, its
-# engine hosts beside it), torn down when the job ends. `rollout_train.submitting.rendered` fills in each run's name,
-# entrypoint, runtime environment and metadata; the rest is this file's. When the driver or its pod is lost, the job is
-# submitted again up to `backoffLimit` times, and the run goes on from the ledger.
+# What each run's job is made from (the cluster config's [kubernetes] rayjob): a RayJob whose Ray cluster is a head pod
+# of the platform's image (the run's driver and trainer, and its engine hosts and bridge where the pod holds them),
+# torn down when the job ends. `rollout_train.submitting.rendered` fills in each run's name, entrypoint, runtime
+# environment and metadata, sizes the head from the run's demand (its requests, Ray's CPUs and GPUs) within this pod's
+# limits, adds worker pods made from it where one pod cannot hold the run, and, with Kueue, its queue's label and
+# `suspend`; the rest is this file's. When the driver or its pod is lost, the job is submitted again up to
+# `backoffLimit` times, and the run goes on from the ledger.
 apiVersion: ray.io/v1
 kind: RayJob
 metadata:

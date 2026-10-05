@@ -1,5 +1,6 @@
-# The monitors' account: a monitor submits each run asked for from its page as a RayJob, reads how it goes, and deletes
-# it to stop it (`rollout_train.submitting.RayJobResources`), in the namespace the chart is installed into.
+# The monitors' account: a monitor submits each run asked for from its page as a RayJob, reads how it goes (with Kueue,
+# why its Workload waits), and deletes it to stop it (`rollout_train.submitting.RayJobResources`), in the namespace the
+# chart is installed into.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -18,6 +19,11 @@ rules:
   - apiGroups: [ray.io]
     resources: [rayjobs/status]
     verbs: [get, list, watch]
+  {{- if .Values.kueue.enabled }}
+  - apiGroups: [kueue.x-k8s.io]
+    resources: [workloads]
+    verbs: [get, list, watch]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

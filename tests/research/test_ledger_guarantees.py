@@ -651,7 +651,9 @@ class Jobs:
         self.stopped: list[str] = []
         self.while_starting: Callable[[], Awaitable[object]] | None = None
 
-    async def start(self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue]) -> str:
+    async def start(
+        self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], asked: object = None
+    ) -> str:
         if self.while_starting is not None:
             await self.while_starting()
         self.made.append(f"run-{launch.id}")

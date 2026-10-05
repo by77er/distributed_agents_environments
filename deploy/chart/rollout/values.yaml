@@ -55,14 +55,29 @@ ray:
     cpus: "4"
     resources: {requests: {cpu: "1", memory: 2Gi}, limits: {memory: 4Gi}}
 
-# Each run's job: a RayJob with a Ray cluster of its own (files/rayjob.yaml), one head pod holding `gpus` of the card
-# (its trainer and its engine hosts share it), started again up to backoffLimit times when its driver is lost, and
-# removed ttlSeconds after it ends.
+# Each run's job: a RayJob with a Ray cluster of its own (files/rayjob.yaml), started again up to backoffLimit times
+# when its driver is lost, and removed ttlSeconds after it ends. Its pods are sized from what the run needs (its driver,
+# trainer, engine hosts and bridge, and room for Ray's own processes: rollout_train.demand), so a run on Tinker alone
+# asks for no GPU. `resources.limits` is the most one pod may have, one node's worth (a run that needs more gets worker
+# pods); `resources.requests` is what a pod asks for where the run's demand is not given; `gpus` is the most GPUs one
+# pod holds.
 rayjob:
   gpus: 1
   backoffLimit: 2
   ttlSeconds: 30
-  resources: {requests: {cpu: "8", memory: 8Gi}, limits: {memory: 14Gi, nvidia.com/gpu: 1}}
+  resources: {requests: {cpu: "1", memory: 4Gi}, limits: {memory: 14Gi, nvidia.com/gpu: 1}}
+
+# Kueue, installed outside the chart (deploy/k3s/README.md), admits each run's RayJob whole: the RayJob is made
+# suspended in the LocalQueue `queue`, and starts once the ClusterQueue's quota holds every pod it asks for, so two runs
+# never hold half of what each needs. The chart makes a ResourceFlavor, the ClusterQueue with `quota` for the runs'
+# pods (sized for one node with one GPU; the platform's own pods are outside it), and the LocalQueue; the cluster
+# config names the queue and states the quota as its [capacity], so a run that asks for more is refused.
+kueue:
+  enabled: false
+  queue: runs                 # the LocalQueue, in the release's namespace
+  clusterQueue: rollout
+  flavor: rollout
+  quota: {cpus: 12, memoryGib: 16, gpus: 1}
 
 gateway:
   replicas: 1

@@ -186,3 +186,36 @@ def test_every_monitor_asks_for_runs_and_imports_with_the_cluster_config_and_rea
         assert monitor["command"][-1] == "--cluster"
         names = {each["name"] for each in monitor["env"]}
         assert {"ROLLOUT_CLUSTER", "RAY_AUTH_MODE", "RAY_AUTH_TOKEN", "AWS_ACCESS_KEY_ID"} <= names
+
+
+def test_with_kueue_runs_are_admitted_whole_through_a_queue_the_chart_makes(rendered: list[dict[str, Any]]) -> None:
+    assert not [each for each in rendered if each["apiVersion"].startswith("kueue.x-k8s.io")]  # (off by default)
+    on = render("--set", "kueue.enabled=true")
+    kinds = {each["kind"]: each for each in on if each["apiVersion"] == "kueue.x-k8s.io/v1beta2"}
+    assert set(kinds) == {"ResourceFlavor", "ClusterQueue", "LocalQueue"}
+    queue = kinds["ClusterQueue"]["spec"]
+    assert queue["namespaceSelector"] == {"matchLabels": {"kubernetes.io/metadata.name": "rollout"}}
+    (group,) = queue["resourceGroups"]
+    assert group["coveredResources"] == ["cpu", "memory", "nvidia.com/gpu"]
+    (flavor,) = group["flavors"]
+    assert flavor["name"] == kinds["ResourceFlavor"]["metadata"]["name"]
+    assert {each["name"]: each["nominalQuota"] for each in flavor["resources"]} == {
+        "cpu": "12",
+        "memory": "16Gi",
+        "nvidia.com/gpu": "1",
+    }
+    local = kinds["LocalQueue"]
+    assert local["metadata"]["namespace"] == "rollout"
+    assert local["spec"]["clusterQueue"] == kinds["ClusterQueue"]["metadata"]["name"]
+    cluster = parsed(tomllib.loads(config_of(on)["cluster.toml"]))
+    assert cluster.kubernetes is not None and cluster.kubernetes.queue == local["metadata"]["name"]
+    assert cluster.capacity is not None
+    assert (cluster.capacity.cpus, cluster.capacity.memory_gib, cluster.capacity.gpus) == (12, 16, 1)
+    (role,) = [each for each in on if each["kind"] == "Role" and each["metadata"]["name"] == "monitor"]
+    (workloads,) = [rule for rule in role["rules"] if rule["resources"] == ["workloads"]]
+    assert workloads["apiGroups"] == ["kueue.x-k8s.io"] and "list" in workloads["verbs"]
+    for key, text in config_of(on).items():  # (every preset fits the queue's quota)
+        if key.startswith("presets_"):
+            settings = flattened(tomllib.loads(text))
+            kind = "train" if "trainer.provider" in settings else "check"
+            assert [each for each in check(RunSettings({**settings, "kind": kind}), cluster) if each.refuses] == [], key
