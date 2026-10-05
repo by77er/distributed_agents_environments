@@ -303,18 +303,18 @@ class DatabaseRegistry:
     async def runs(self) -> list[Entry]:
         return await asyncio.to_thread(self.database.read, _runs)
 
-    async def create(self, name: str, id: str | None = None) -> Entry:
+    async def create(self, name: str, id: str | None = None, created: float | None = None) -> Entry:
         made = id or new_run_id()
 
-        def created(connection: Connection) -> Entry:
+        def registered(connection: Connection) -> Entry:
             runs = _runs(connection)
             if any(each.id == made for each in runs):
                 raise Taken(f"there is a run {made} already")
-            entry = Entry(made, checked(name, made, runs), round(time.time(), 1))
+            entry = Entry(made, checked(name, made, runs), round(time.time(), 1) if created is None else created)
             sql(connection, "INSERT INTO runs (id, name, created) VALUES (:id, :name, :created)", asdict(entry))
             return entry
 
-        return await asyncio.to_thread(self.database.write, created, exclusive="registry")
+        return await asyncio.to_thread(self.database.write, registered, exclusive="registry")
 
     async def rename(self, who: str, name: str) -> Entry:
         def renamed(connection: Connection) -> Entry:
@@ -549,7 +549,7 @@ async def copy(source: Ledger, target: DatabaseLedger) -> int:
     count = await asyncio.to_thread(target.database.write, copied, exclusive="ledger:copy")
     if (registered := registry_of(source)) is not None:
         for entry in await registered.runs():
-            await target.registry.create(entry.name, entry.id)
+            await target.registry.create(entry.name, entry.id, entry.created)
         for mark in await registered.bookmarks():
             await target.registry.bookmark(mark.name, mark.checkpoint)
         for each in await registered.datasets():

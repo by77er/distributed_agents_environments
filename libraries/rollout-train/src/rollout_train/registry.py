@@ -90,8 +90,9 @@ class Registry(Protocol):
         """Every run registered, oldest first."""
         ...
 
-    async def create(self, name: str, id: str | None = None) -> Entry:
-        """Register a run under `name`, with `id` (a new one by default). Raises `Taken`."""
+    async def create(self, name: str, id: str | None = None, created: float | None = None) -> Entry:
+        """Register a run under `name`, with `id` (a new one by default) and `created` (now by default). Raises
+        `Taken`."""
         ...
 
     async def rename(self, who: str, name: str) -> Entry:
@@ -174,18 +175,18 @@ class FileRegistry:
     async def runs(self) -> list[Entry]:
         return await asyncio.to_thread(lambda: self._read()[0])
 
-    async def create(self, name: str, id: str | None = None) -> Entry:
-        def created() -> Entry:
+    async def create(self, name: str, id: str | None = None, created: float | None = None) -> Entry:
+        def registered() -> Entry:
             with locked(self.directory):
                 runs, marks = self._read()
                 made = id or new_run_id()
                 if any(each.id == made for each in runs):
                     raise Taken(f"there is a run {made} already")
-                entry = Entry(made, checked(name, made, runs), round(time.time(), 1))
+                entry = Entry(made, checked(name, made, runs), round(time.time(), 1) if created is None else created)
                 self._write([*runs, entry], marks)
                 return entry
 
-        return await asyncio.to_thread(created)
+        return await asyncio.to_thread(registered)
 
     async def rename(self, who: str, name: str) -> Entry:
         def renamed() -> Entry:

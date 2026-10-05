@@ -2,6 +2,7 @@
 reference to a checkpoint finds one by a bookmark, by the run and step that made it, or by its id."""
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -131,7 +132,7 @@ async def test_a_reference_finds_a_version_by_bookmark_run_and_step_or_id(tmp_pa
 
 
 async def test_a_copy_into_a_database_keeps_the_runs_the_bookmarks_the_suites_and_the_wanted_settings(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     files, database = ledger_of(tmp_path, "files"), ledger_of(tmp_path, "database")
     registry = registered(files)
@@ -144,6 +145,7 @@ async def test_a_copy_into_a_database_keeps_the_runs_the_bookmarks_the_suites_an
     fence = await files.take(scope(run.id))
     await files.append(table(run.id, GROUPS), "1", {"episodes": 1}, fence)
     assert isinstance(database, DatabaseLedger)
+    monkeypatch.setattr(time, "time", lambda: run.created + 60)  # (copied later: the run keeps when it was made)
     await copy(files, database)
     assert await database.registry.runs() == [run]
     assert [(each.name, each.checkpoint) for each in await database.registry.bookmarks()] == [
