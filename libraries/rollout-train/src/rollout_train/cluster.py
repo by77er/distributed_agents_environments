@@ -33,8 +33,10 @@ from urllib.parse import urlsplit
 from pydantic import JsonValue
 
 from rollout_train.providers import (
+    ALLOCATIONS,
     INFERENCE_KINDS,
     TRAINER_KINDS,
+    Allocation,
     Auth,
     InferenceProvider,
     ModelOffer,
@@ -491,6 +493,7 @@ def _inference(name: str, described: dict[str, Any], tls: Tls | None) -> Inferen
         raise ClusterError(f"{where} is reached over mutual TLS: the cluster needs [tls] ca, certificate and key")
     gpus = said.number("gpus", 1 if kind_name == "vllm" else 0)
     replicas = said.whole("replicas", 1, least=1)
+    allocation, concurrency = _allocation(said, where, kind.allocation, gpus)
     models: dict[str, ModelOffer] = {}
     for model, each in said.tables("models").items():
         offer = _Table(each, f'{where}.models."{model}"')
@@ -523,7 +526,7 @@ def _inference(name: str, described: dict[str, Any], tls: Tls | None) -> Inferen
         capabilities = replace(capabilities, top_logprobs=said.whole("max_logprobs", least=0))
     settings = said.rest()
     if unknown := sorted(set(settings) - set(kind.fields)):
-        fields = ("kind", "auth", "gpus", "replicas", "models", *kind.fields)
+        fields = ("kind", "auth", "gpus", "replicas", "allocation", "concurrency", "models", *kind.fields)
         raise ClusterError(f"{where} has no {', '.join(unknown)} (a {kind_name} provider has {', '.join(fields)})")
     endpoints: tuple[str, ...] = ()
     if kind_name == "vllm":
@@ -537,7 +540,34 @@ def _inference(name: str, described: dict[str, Any], tls: Tls | None) -> Inferen
         raise ClusterError(f'{where} names its endpoint (endpoint = "module:name")')
     if (problem := auth_problem(where, auth, endpoints)) is not None:
         raise ClusterError(problem)
-    return InferenceProvider(name, kind_name, capabilities, models, auth, gpus, replicas, endpoints, settings, secrets)
+    return InferenceProvider(
+        name,
+        kind_name,
+        capabilities,
+        models,
+        auth,
+        gpus,
+        replicas,
+        endpoints,
+        settings,
+        secrets,
+        allocation=allocation,
+        concurrency=concurrency,
+    )
+
+
+def _allocation(said: "_Table", where: str, default: Allocation, gpus: float) -> tuple[Allocation, int | None]:
+    """A provider's or trainer's allocation (its kind's unless said) and concurrency: one with GPUs here is scheduled,
+    and only a metered one has a concurrency."""
+    allocation = said.text("allocation", default)
+    if allocation not in ALLOCATIONS:
+        raise ClusterError(f"{where} allocation is metered or scheduled, not {allocation!r}")
+    if allocation == "metered" and gpus:
+        raise ClusterError(f"{where} asks for GPUs of the cluster's, so it is scheduled, not metered")
+    concurrency = said.whole("concurrency", None, least=1)
+    if concurrency is not None and allocation != "metered":
+        raise ClusterError(f"{where} concurrency bounds a metered provider; a scheduled one is bounded by its capacity")
+    return allocation, concurrency
 
 
 def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:
@@ -569,6 +599,8 @@ def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:
             raise ClusterError(f'{where}.costs."{model}" is a model it trains, priced as cost is')
         costs[model] = numbers
     secrets = {each: secret for each in kind.secrets if (secret := said.secret(each)) is not None}
+    gpus = said.number("gpus", 0.0)
+    allocation, concurrency = _allocation(said, where, kind.allocation, gpus)
     provider = TrainerProvider(
         name=name,
         kind=kind_name,
@@ -576,15 +608,18 @@ def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:
         models=tuple(str(each) for each in cast(list[str], models)),
         auth=auth,
         segment_tokens=said.whole("segment_tokens", None, least=1),
-        gpus=said.number("gpus", 0.0),
+        gpus=gpus,
         colocate_with=said.text("colocate_with", None),
         cost=cost,
         costs=costs,
         secrets=secrets,
+        allocation=allocation,
+        concurrency=concurrency,
     )
     settings = said.rest()
     if unknown := sorted(set(settings) - set(kind.fields)):
-        fields = ("kind", "auth", "models", "segment_tokens", "gpus", "colocate_with", "cost", "costs", *kind.fields)
+        fields = ("kind", "auth", "models", "segment_tokens", "gpus", "colocate_with", "cost", "costs", "allocation",
+                  "concurrency", *kind.fields)  # fmt: skip
         raise ClusterError(f"{where} has no {', '.join(unknown)} (a {kind_name} trainer has {', '.join(fields)})")
     if kind_name == "runpod-trainer":
         runs = settings.get("trainer", "lora")

@@ -19,10 +19,12 @@ from rollout_train.validation import (
     EnvironmentFacts,
     Finding,
     LedgerFacts,
+    Spend,
     SuiteFacts,
     check,
     estimated_spend,
     refusals,
+    spend_of,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -675,7 +677,10 @@ def test_a_spend_limit_below_one_step_is_refused() -> None:
     ]
     assert refused("spend", findings({"limits.spend": 3}, cluster=dear)) == []
     unknown = findings(environment=None)
-    assert refused("spend", unknown) == [] and "could not be estimated" in noted("spend", unknown)[0]
+    assert refused("spend", unknown) == [] and noted("spend", unknown) == [
+        "one step's spend cannot be estimated yet (the environment's numbers are not known here): the run still ends "
+        "once its spend reaches $2"
+    ]
 
 
 def test_a_trainer_prices_each_model_it_trains_by_its_own_costs() -> None:
@@ -685,6 +690,51 @@ def test_a_trainer_prices_each_model_it_trains_by_its_own_costs() -> None:
     assert estimated_spend(settings, priced, ENVIRONMENT) == pytest.approx(trained * 3.0 / 1e6)
     other = RunSettings({**ACCEPTANCE, "trainer.model": "Qwen/Qwen3.5-9B"})
     assert estimated_spend(other, priced, ENVIRONMENT) == pytest.approx(trained * 1.0 / 1e6)
+
+
+def test_only_the_metered_parts_are_spent_by_the_step() -> None:
+    sampled, prompts = 16 * 1536, 16 * 200
+    on_tinker = spend_of(RunSettings({**ACCEPTANCE, "channels.policy.provider": "tinker"}), CLUSTER, ENVIRONMENT)
+    assert on_tinker.parts == {
+        "tinker-lora": pytest.approx((sampled + prompts) * 0.737 / 1e6),
+        "tinker": pytest.approx((sampled * 1.005 + prompts * 0.33) / 1e6),
+    }
+    assert on_tinker.dollars == pytest.approx(sum(on_tinker.parts.values()))
+    acceptance = RunSettings(ACCEPTANCE)
+    assert spend_of(acceptance, CLUSTER, ENVIRONMENT).parts.keys() == {"tinker-lora"}  # (local-vllm is placed)
+    assert spend_of(RunSettings({**ACCEPTANCE, **LOCAL_LORA}), CLUSTER, ENVIRONMENT) == Spend(0.0)
+    turns = dataclasses.replace(ENVIRONMENT, turns_per_episode=None)
+    assert spend_of(RunSettings(ACCEPTANCE), CLUSTER, turns) == Spend(
+        None, why="the environment does not say how many turns an episode takes"
+    )
+    hourly = with_trainer(CLUSTER, "tinker-lora", costs={}, cost={"hour": 2.0})
+    assert spend_of(RunSettings(ACCEPTANCE), hourly, ENVIRONMENT).why == "the tinker-lora trainer is priced by the hour"
+    grouped = dataclasses.replace(ENVIRONMENT, episodes_per_group=None)  # (the objective's group size: 4)
+    assert spend_of(acceptance, CLUSTER, grouped) == spend_of(acceptance, CLUSTER, ENVIRONMENT)
+
+
+def test_a_run_on_metered_parts_with_no_spend_limit_is_told_so() -> None:
+    assert noted("spend", findings(without=("limits.spend",))) == [
+        "tinker-lora is metered, and no limits.spend bounds what the run spends"
+    ]
+    on_tinker = findings({"channels.policy.provider": "tinker"}, without=("limits.spend",))
+    assert noted("spend", on_tinker) == [
+        "tinker, tinker-lora are metered, and no limits.spend bounds what the run spends"
+    ]
+    assert noted("spend", findings(LOCAL_LORA, without=("limits.spend",))) == []
+
+
+def test_only_scheduled_parts_ask_for_the_clusters_gpus() -> None:
+    lab: dict[str, JsonValue] = {
+        **LOCAL_LORA, "channels.policy.provider": "lab", "trainer.provider": "tinker-lora",
+        "channels.policy.model": "Qwen/Qwen3-0.6B",
+    }  # fmt: skip
+    placed = with_provider(CLUSTER, "lab", gpus=2.0)
+    assert refused("capacity", findings(lab, cluster=placed)) == [
+        "the run needs 2 GPUs, and the cluster has 1: it would never start"
+    ]
+    metered = with_provider(CLUSTER, "lab", gpus=2.0, allocation="metered")
+    assert refused("capacity", findings(lab, cluster=metered)) == []
 
 
 # name

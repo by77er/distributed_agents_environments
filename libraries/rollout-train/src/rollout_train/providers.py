@@ -15,6 +15,11 @@ logprobs and the entropy, and the formats a run may start from. The cluster conf
 models, the longest segment this hardware trains on, its GPUs, colocation and cost. A trainer's own settings (its
 rank, learning rate, clips) are read from its settings dataclass by `settings_of`, without importing torch.
 
+Every provider and trainer is either **metered** or **scheduled** (`ALLOCATIONS`: its kind says which, unless its
+table does). A metered one (Tinker, hosted APIs) has nothing to place: a run is bounded by its spend limit, the
+provider's rate limits and an optional `concurrency` (requests at once). A scheduled one (GPUs here, RunPod pods, the
+cluster's nodes) is finite capacity a run is placed on.
+
 Every provider declares how it is reached (`Auth`): `mtls` (the cluster's CA, a client certificate, the server's SPIFFE
 identity checked), `bearer` (a token named by an environment variable or a file), `vendor` (the vendor's SDK reads its
 own key, as Tinker's does) or `none` (allowed only for an endpoint on this machine). `Auth.connection` turns that into
@@ -43,6 +48,7 @@ from rollout_train.objectives import FAMILIES
 from rollout_train.recorder.segments import TOKEN_LEVEL
 
 __all__ = [
+    "ALLOCATIONS",
     "AUTHS",
     "INFERENCE_KINDS",
     "ROUTING",
@@ -63,6 +69,9 @@ __all__ = [
     "settings_of",
 ]
 
+type Allocation = Literal["metered", "scheduled"]
+ALLOCATIONS: tuple[Allocation, ...] = ("metered", "scheduled")
+"""Metered (bounded by spend, rate limits and a concurrency cap) or scheduled (capacity a run is placed on)."""
 type AuthKind = Literal["mtls", "bearer", "vendor", "none"]
 AUTHS: tuple[AuthKind, ...] = ("mtls", "bearer", "vendor", "none")
 """How a provider is reached: mutual TLS with the cluster's CA, a bearer token, the vendor's SDK, or nothing (only on
@@ -254,6 +263,8 @@ class InferenceKind:
     """`module:name` of what samples it, where one module does."""
     remote: bool = False
     """Whether its servers are reached at addresses (and so need an auth other than `none` unless local)."""
+    allocation: Allocation = "scheduled"
+    """Metered or scheduled, when the cluster config does not say."""
 
 
 def _token_level(
@@ -329,6 +340,7 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
             fields=("project",),
             secrets=("project",),
             implementation="rollout_tinker:TinkerEngine",
+            allocation="metered",
         ),
         InferenceKind(
             "api",
@@ -347,6 +359,7 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
             auths=("vendor", "bearer"),
             auth=None,
             fields=("endpoint",),
+            allocation="metered",
         ),
         InferenceKind(
             "runpod-inference",
@@ -399,6 +412,9 @@ class InferenceProvider:
     """The rest of its table: its kind's own settings, none of them a secret."""
     secrets: Mapping[str, Secret] = field(default_factory=dict[str, Secret])
     """The secrets its table names, beyond its auth's (RunPod's API key, Tinker's project)."""
+    allocation: Allocation = "scheduled"
+    concurrency: int | None = None
+    """For a metered provider, the most requests it is sent at once (none: as many as runs send)."""
 
     @property
     def local(self) -> bool:
@@ -449,6 +465,8 @@ class TrainerKind:
     secrets: tuple[str, ...] = ()
     not_settings: Mapping[str, str] = field(default_factory=dict[str, str])
     """Fields of its settings dataclass a run does not set, and why."""
+    allocation: Allocation = "scheduled"
+    """Metered or scheduled, when the cluster config does not say."""
 
 
 _EVERY_FAMILY = frozenset(FAMILIES)
@@ -500,6 +518,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             fields=("project", "implementation"),
             secrets=("project",),
             not_settings={**_OBJECTIVE, "project": "the cluster config says it ([trainers.NAME] project)"},
+            allocation="metered",
         ),
         TrainerKind(
             "runpod-trainer",
@@ -539,6 +558,9 @@ class TrainerProvider:
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """The rest of its table: its kind's own settings, none of them a secret."""
     secrets: Mapping[str, Secret] = field(default_factory=dict[str, Secret])
+    allocation: Allocation = "scheduled"
+    concurrency: int | None = None
+    """For a metered trainer, the most requests it is sent at once (none: as many as the run sends)."""
 
     def cost_of(self, model: str) -> Mapping[str, float]:
         """What training `model` here costs: its own entry in `costs`, else `cost`."""

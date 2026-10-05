@@ -137,8 +137,8 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 | `[monitor]` | `listen`, `feed_episodes` | |
 | `[runners]` | `places` | |
 | `[guards]` | `runs_gib`, `training_gib` | |
-| `[inference.NAME]` | `kind`, `auth`, `gpus`, `replicas`, `models`, and the kind's own | Below |
-| `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, `costs`, and the kind's own | Below |
+| `[inference.NAME]` | `kind`, `auth`, `gpus`, `replicas`, `allocation`, `concurrency`, `models`, and the kind's own | Below |
+| `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, `costs`, `allocation`, `concurrency`, and the kind's own | Below |
 | `[sandboxes.KIND]` | `provider`, `python`, `size`, `cpus`, `memory_gib`, `pools`, the provider's settings | |
 | `[tools.NAME]` | `url`, `auth` | Tool sets served elsewhere |
 | `[environments."NAME"]` | `python = "platform"` or `project = PATH`; `interpreter` | A relative project is from the config file's directory. A run on it starts in `interpreter`, by default `PROJECT/.venv/bin/python` for a project and the platform's for `python = "platform"` |
@@ -152,8 +152,15 @@ from), a `cost` table (dollars per million tokens by class: `input`, `cached_inp
 A trainer's `cost` is dollars per million tokens trained (`train`, every token of each trained segment: its prompts and
 what was sampled) or per `hour`. Where the price depends on the model, `costs` gives each model its own table
 (`costs = { "Qwen/Qwen3.5-9B" = { train = 1.463 } }`), and `cost` covers the rest. One step's estimated spend
-(`limits.spend`) counts every trained token at the trainer's price for the model, and the sampled and prompt tokens
-at the dearest provider's prices, prompts uncached.
+(`limits.spend`, `spend_of`) counts the run's metered parts: every trained token at a metered trainer's price for the
+model, and the sampled and prompt tokens at the dearest metered provider's prices, prompts uncached.
+
+**Metered or scheduled.** Each inference provider and trainer says how it is allocated (`allocation`), by default as
+its kind is: `tinker` and `api` are `metered`; `vllm`, `vllm-servers`, `runpod-inference`, `runpod-trainer`, `lora` and
+`full` are `scheduled`. A metered one is always available: a run is bounded by its `limits.spend`, the provider's rate
+limits and its `concurrency` (requests sent at once; none: unbounded), which only a metered one takes. A scheduled
+one is capacity a run is placed on: its GPUs count toward the capacity rule. One that asks for the cluster's GPUs is
+scheduled.
 
 ### Secrets
 
@@ -201,6 +208,7 @@ rollout bookmark diamonds first:20 --cluster lab
 | streaming | no | no | no | yes | no |
 | loads | `peft`, `full` | `peft` | `tinker` | nothing | `peft` |
 | bills | nothing | nothing | tokens | tokens | hours |
+| allocation | scheduled | scheduled | metered | metered | scheduled |
 | auth | `none`, `bearer`, `mtls` (default `none`) | `none`, `bearer`, `mtls` (must say) | `vendor` | `vendor`, `bearer` (must say) | `mtls` (each pod's identity from its heartbeat) |
 | its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs` | `addresses`, `via`, `loader`, `max_logprobs` | `project` / `project_env` | `endpoint` | `image`, `gpu_types`, `pods`, `idle_stop`, `volume_gb`, `secrets`, `step_ca`, `max_logprobs`, `api_key_env` |
 
@@ -242,6 +250,7 @@ given).
 | scores given tokens | yes | yes | yes | yes |
 | starts from | `peft`, `full` | `full` | `tinker` | as the trainer it runs |
 | auth | `none` | `none` | `vendor` | `mtls` |
+| allocation | scheduled | scheduled | metered | scheduled |
 | settings | `rollout_lora.settings:LoraSettings`, less `frozen_reference` | the same, less `rank` | `rollout_tinker.settings:TinkerSettings`, less `project` and `weights` | `LoraSettings` |
 
 `settings_of(kind)` reads a trainer's settings from its dataclass, without importing the trainer or torch: each field
@@ -378,8 +387,8 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | `evals` | a suite that does not exist (a name never becomes a suite by itself), a version it lacks, a suite's environment not offered |
 | `distillation` | a distillation (or a policy gradient's distillation term) with no teachers, a teacher channel without a provider, or no route for the environment the run plays (routes for some of its rows only: a note); a teacher's provider without prompt logprobs, with fewer top logprobs than `objective.distillation.top_k`, or with them only unchecked (Tinker); the trainer does not score; the teacher's renderer family differs |
 | `environment` | not offered, does not load, needs a sandbox kind with no pool or a tool set not served |
-| `capacity` | more GPUs than the cluster has (more than are free: a note, it waits) |
-| `spend` | `limits.spend` below one step's estimated cost (`estimated_spend`) |
+| `capacity` | more GPUs than the cluster has, counting the run's scheduled parts (more than are free: a note, it waits) |
+| `spend` | `limits.spend` below one step's estimated cost on its metered parts (`spend_of`); a note where it cannot be estimated yet, or where the run uses metered parts and sets no `limits.spend` |
 | `name` | not a name, or taken |
 
 ```python

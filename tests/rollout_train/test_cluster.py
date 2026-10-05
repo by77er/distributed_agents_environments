@@ -275,3 +275,39 @@ def test_a_runpod_trainer_takes_the_capabilities_of_the_trainer_it_runs() -> Non
     assert (full.capabilities.produces, full.capabilities.format) == ("full", "full")
     with pytest.raises(ClusterError, match="trainer is lora or full"):
         cluster_of(SMALL + tls + trainer.format(runs="tinker"))
+
+
+def test_each_provider_and_trainer_is_metered_or_scheduled_by_its_kind_unless_it_says() -> None:
+    cluster = load(EXAMPLE)
+    assert {name: each.allocation for name, each in cluster.inference.items()} == {
+        "local-vllm": "scheduled", "tinker": "metered",
+    }  # fmt: skip
+    assert {name: each.allocation for name, each in cluster.trainers.items()} == {
+        "local-lora": "scheduled", "local-full": "scheduled", "tinker-lora": "metered",
+    }  # fmt: skip
+    hosted = cluster_of(
+        SMALL
+        + '\n[inference.openai]\nkind = "api"\nendpoint = "rollout_openai:ResponsesEndpoint"\nconcurrency = 16\n'
+        + 'auth = { kind = "vendor", key_env = "OPENAI_API_KEY" }\n[inference.openai.models."gpt-5"]\ncontext = 8\n'
+        + '\n[inference.lab]\nkind = "vllm-servers"\naddresses = ["http://127.0.0.1:8000"]\nauth = "none"\n'
+        + 'allocation = "metered"\n'
+        + '[inference.lab.models."m"]\ncontext = 8\n'
+    )
+    assert (hosted.inference["openai"].allocation, hosted.inference["openai"].concurrency) == ("metered", 16)
+    assert hosted.inference["lab"].allocation == "metered" and hosted.inference["local"].concurrency is None
+
+
+@pytest.mark.parametrize(
+    ("table", "says"),
+    [
+        ('[inference.more]\nkind = "vllm"\nallocation = "spot"\n', "allocation is metered or scheduled, not 'spot'"),
+        ('[inference.more]\nkind = "vllm"\nallocation = "metered"\n', "asks for GPUs of the cluster's, so it is"),
+        ('[inference.more]\nkind = "vllm"\nconcurrency = 4\n', "concurrency bounds a metered provider"),
+        ('[trainers.more]\nkind = "lora"\nmodels = ["m"]\ngpus = 1\nallocation = "metered"\n', "so it is scheduled"),
+        ('[trainers.more]\nkind = "tinker"\nmodels = ["m"]\nconcurrency = 0\n', "concurrency is a whole number"),
+    ],
+)
+def test_an_allocation_is_metered_or_scheduled_and_only_a_metered_one_has_a_concurrency(table: str, says: str) -> None:
+    model = '[inference.more.models."m"]\ncontext = 8\n' if table.startswith("[inference") else ""
+    with pytest.raises(ClusterError, match=says):
+        cluster_of(f"{SMALL}\n{table}{model}")

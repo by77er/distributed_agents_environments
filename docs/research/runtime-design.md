@@ -1161,7 +1161,7 @@ Where commits would collide, one owns the file:
 
 The pure parts of 3, 4, 5 and 8 are in as modules of their own, wired into nothing
 ([the cluster config and run settings](../guide/cluster.md)): `rollout_train.cluster` (the schema, `find`, `load`,
-secrets by name, `inspect`), `rollout_train.providers` (kinds, capabilities, `auth`, routing,
+secrets by name, `inspect`), `rollout_train.providers` (kinds, capabilities, `auth`, allocation, routing,
 `settings_of`), `rollout_train.bridges` (the registry by format pair, `path`, `rank_factor`, `format_of`),
 `rollout_train.run_settings` (the schema `KEYS`, layers, `--set` and files, `recorded`, `diff`),
 `rollout_train.presets` (`FilePresets`, `DatabasePresets`, `presets_of`) and `rollout_train.validation` (`check`, its

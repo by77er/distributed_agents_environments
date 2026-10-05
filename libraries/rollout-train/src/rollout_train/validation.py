@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from pydantic import JsonValue
 
-from rollout_train.algorithm import needs_of
+from rollout_train.algorithm import algorithm_for, needs_of
 from rollout_train.bridges import AUTO, Bridge, NoBridge, path, rank_factor
 from rollout_train.cluster import Cluster, auth_problem
 from rollout_train.distillation import routes_of
@@ -37,10 +37,12 @@ __all__ = [
     "Finding",
     "LedgerFacts",
     "Rule",
+    "Spend",
     "SuiteFacts",
     "check",
     "estimated_spend",
     "refusals",
+    "spend_of",
 ]
 
 
@@ -89,7 +91,7 @@ RULES: tuple[Rule, ...] = (
         "whose logprobs are unchecked, or of another renderer family",
     ),
     Rule("environment", "not offered, does not load, or needs sandboxes or tool sets the cluster lacks"),
-    Rule("capacity", "more GPUs than the cluster has"),
+    Rule("capacity", "more GPUs than the cluster has, counting the run's scheduled parts"),
     Rule("spend", "a spend limit below one step's estimated cost"),
     Rule("name", "not a name, or taken"),
 )
@@ -735,12 +737,12 @@ def _capacity(run: _Run) -> None:
     engines: dict[str, float] = {}
     for channel in run.settings.channels:
         for name, provider in run.providers(channel):
-            if provider.kind != "vllm":
+            if provider.allocation != "scheduled":
                 continue
             replicas = run.settings[f"channels.{channel}.replicas"]
             count = replicas if isinstance(replicas, int) else provider.replicas
             engines[name] = max(engines.get(name, 0.0), count * provider.gpus)
-    trainer = run.trainer.gpus if run.trainer is not None else 0.0
+    trainer = run.trainer.gpus if run.trainer is not None and run.trainer.allocation == "scheduled" else 0.0
     shared = run.trainer.colocate_with if run.trainer is not None else None
     if shared in engines:
         engines[shared] = max(engines[shared], trainer)
@@ -753,52 +755,99 @@ def _capacity(run: _Run) -> None:
         run.note("capacity", "trainer.provider", f"the run needs {needs:g} GPUs, and {free:g} are free: it waits")
 
 
-def estimated_spend(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> float | None:
-    """Dollars one step is estimated to cost, at most: every token trained (each turn's prompt and its sampled tokens,
-    every turn filling its budgets) times the trainer's cost for the model, plus the sampled tokens times the dearest
-    provider's cost to sample them and the prompts' tokens times its cost to read them, uncached. None where it cannot
-    be estimated: budgets or the environment's numbers unknown, or a provider or trainer that bills by the hour."""
+@dataclass(frozen=True)
+class Spend:
+    """One step's estimated spend on the run's metered parts (its trainer, the providers of its trained channel), at
+    most: every token trained times the trainer's cost for the model, and the sampled and prompt tokens times the
+    dearest metered provider's costs to sample and read them, uncached. Its scheduled parts are capacity the run is
+    placed on, not spent per step."""
+
+    dollars: float | None
+    """None where it cannot be estimated (`why`)."""
+    parts: Mapping[str, float] = field(default_factory=dict[str, float])
+    """Each metered part's dollars, by provider or trainer."""
+    why: str = ""
+    """Why it cannot be estimated."""
+
+
+def spend_of(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> Spend:
+    """One step's estimated spend (`Spend`), or why it cannot be estimated: not a training run, no trainer, the
+    environment's numbers or the budgets unknown, or a metered part priced by the hour. Episodes a group are the
+    environment's, else the objective's group size."""
     trained = settings.trained
     trainer = cluster.trainers.get(str(settings["trainer.provider"]))
-    if trained is None or trainer is None or environment is None:
-        return None
-    if environment.episodes_per_group is None or environment.turns_per_episode is None:
-        return None
+    if trained is None:
+        return Spend(None, why="only a training run's spend is estimated")
+    if trainer is None:
+        return Spend(None, why="it has no trainer")
+    model = str(settings.get(f"channels.{trained}.model"))
+    metered = [(name, cluster.inference[name]) for name in settings.providers(trained)
+               if name in cluster.inference and cluster.inference[name].allocation == "metered"]  # fmt: skip
+    if trainer.allocation != "metered" and not metered:
+        return Spend(0.0)
+    if environment is None:
+        return Spend(None, why="the environment's numbers are not known here")
+    episodes = environment.episodes_per_group
+    if episodes is None:
+        try:
+            episodes = algorithm_for(objective_in(settings)).group_size
+        except ValueError:
+            return Spend(None, why="its objective is not one")
+    if environment.turns_per_episode is None:
+        return Spend(None, why="the environment does not say how many turns an episode takes")
     thinking, answer = settings[f"channels.{trained}.thinking_tokens"], settings[f"channels.{trained}.answer_tokens"]
     if not isinstance(thinking, int) and not isinstance(answer, int):
-        return None
+        return Spend(None, why=f"channel {trained} has no thinking or answer budget")
     groups = settings["groups_per_step"]
-    turns = (groups if isinstance(groups, int) else 4) * environment.episodes_per_group * environment.turns_per_episode
+    turns = (groups if isinstance(groups, int) else 4) * episodes * environment.turns_per_episode
     sampled = turns * ((thinking if isinstance(thinking, int) else 0) + (answer if isinstance(answer, int) else 0))
     prompts = turns * (environment.prompt_tokens or 0)
-    model = str(settings.get(f"channels.{trained}.model"))
-    priced = trainer.cost_of(str(settings.get("trainer.model") or model))
-    if "hour" in priced:
-        return None
-    spend = (sampled + prompts) * priced.get("train", 0.0) / 1e6
-    dearest = 0.0
-    for name in settings.providers(trained):
-        provider = cluster.inference.get(name)
-        offer = provider.models.get(model) if provider is not None else None
+    parts: dict[str, float] = {}
+    if trainer.allocation == "metered":
+        priced = trainer.cost_of(str(settings.get("trainer.model") or model))
+        if "hour" in priced:
+            return Spend(None, why=f"the {trainer.name} trainer is priced by the hour")
+        parts[trainer.name] = (sampled + prompts) * priced.get("train", 0.0) / 1e6
+    dearest: tuple[str, float] | None = None
+    for name, provider in metered:
+        offer = provider.models.get(model)
         if offer is None:
             continue
-        if "hour" in offer.cost or (provider is not None and provider.capabilities.bills == "hours"):
-            return None
-        dearest = max(dearest, (sampled * offer.cost.get("output", 0.0) + prompts * offer.cost.get("input", 0.0)) / 1e6)
-    return spend + dearest
+        if "hour" in offer.cost or provider.capabilities.bills == "hours":
+            return Spend(None, why=f"provider {name} is priced by the hour")
+        cost = (sampled * offer.cost.get("output", 0.0) + prompts * offer.cost.get("input", 0.0)) / 1e6
+        if dearest is None or cost > dearest[1]:
+            dearest = (name, cost)
+    if dearest is not None:
+        parts[dearest[0]] = dearest[1]
+    return Spend(sum(parts.values()), parts)
+
+
+def estimated_spend(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> float | None:
+    """Dollars one step is estimated to cost on the run's metered parts, at most (`spend_of`); none where it cannot be
+    estimated."""
+    return spend_of(settings, cluster, environment).dollars
 
 
 def _spend(run: _Run) -> None:
-    limit = run.settings["limits.spend"]
-    if not isinstance(limit, int | float) or isinstance(limit, bool) or run.kind != "train":
+    if run.kind != "train":
         return
-    estimate = estimated_spend(run.settings, run.cluster, run.environment)
-    if estimate is None:
-        run.note("spend", "limits.spend", "one step's spend could not be estimated before the run (budgets, the "
-                 "environment's numbers, or an hourly price unknown): the run still ends once its spend reaches "
-                 f"${limit:g}")  # fmt: skip
-    elif estimate > limit:
-        run.refuse("spend", "limits.spend", f"one step is estimated at up to ${estimate:.2f}, above limits.spend "
+    limit = run.settings["limits.spend"]
+    if not isinstance(limit, int | float) or isinstance(limit, bool):
+        metered = sorted({name for channel in run.settings.channels for name, provider in run.providers(channel)
+                          if provider.allocation == "metered"}
+                         | ({run.trainer.name} if run.trainer is not None and run.trainer.allocation == "metered"
+                            else set()))  # fmt: skip
+        if metered:
+            run.note("spend", "limits.spend", f"{', '.join(metered)} {'is' if len(metered) == 1 else 'are'} metered, "
+                     "and no limits.spend bounds what the run spends")  # fmt: skip
+        return
+    spend = spend_of(run.settings, run.cluster, run.environment)
+    if spend.dollars is None:
+        run.note("spend", "limits.spend", f"one step's spend cannot be estimated yet ({spend.why}): the run still ends "
+                 f"once its spend reaches ${limit:g}")  # fmt: skip
+    elif spend.dollars > limit:
+        run.refuse("spend", "limits.spend", f"one step is estimated at up to ${spend.dollars:.2f}, above limits.spend "
                    f"${limit:g}: the run would stop before its first step")  # fmt: skip
 
 

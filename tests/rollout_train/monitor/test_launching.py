@@ -125,6 +125,7 @@ async def test_the_page_is_offered_what_the_cluster_config_and_the_ledger_hold(t
     (provider,) = offers["inference"]
     assert provider["name"] == "local" and provider["capabilities"]["token_exact"]
     assert [each["model"] for each in provider["models"]] == ["tiny"]
+    assert (provider["allocation"], provider["concurrency"], trainer["allocation"]) == ("scheduled", None, "scheduled")
     assert offers["pairs"] == [{"trainer": "steps", "inference": "local", "bridge": ["verbatim"]}]
     (preset,) = offers["presets"]
     assert preset["id"] == "small@1" and preset["settings"]["trainer.provider"] == "steps"

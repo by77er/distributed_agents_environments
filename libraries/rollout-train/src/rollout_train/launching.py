@@ -303,6 +303,7 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
             "format": trainer.capabilities.format, "models": list(trainer.models), "gpus": trainer.gpus,
             "colocate_with": trainer.colocate_with, "segment_tokens": trainer.segment_tokens,
             "cost": dict(trainer.cost), "families": sorted(trainer.capabilities.families), "settings": specs,
+            "allocation": trainer.allocation, "concurrency": trainer.concurrency,
         })  # fmt: skip
     inference: list[dict[str, Any]] = []
     for name, provider in cluster.inference.items():
@@ -317,7 +318,8 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
         ]  # fmt: skip
         inference.append({
             "name": name, "kind": provider.kind, "gpus": provider.gpus, "replicas": provider.replicas,
-            "capabilities": capabilities, "models": models,
+            "allocation": provider.allocation, "concurrency": provider.concurrency, "capabilities": capabilities,
+            "models": models,
         })  # fmt: skip
     pairs: list[dict[str, Any]] = []
     for trainer_name, trainer in cluster.trainers.items():
