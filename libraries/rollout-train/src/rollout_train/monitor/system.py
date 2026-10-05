@@ -346,7 +346,8 @@ class System:
     async def check(self, body: Mapping[str, Any]) -> dict[str, Any]:
         """What a launch's body would be refused for, and the notes beside (each with the setting it is about), on
         this monitor's cluster (`rollout_train.launching.examined`); the settings it would run with, what it trains,
-        one step's estimated spend on its metered parts (or why it cannot be estimated yet), and the slots its
+        its estimated spend on its metered parts (one step's, or an eval's: `per`; or why it cannot be estimated
+        yet), and the slots its
         environment's programs declare, where they are known here. Raises `Taken` where this monitor has no cluster
         config, or for a body it cannot read."""
         if self._cluster is None:
@@ -361,7 +362,8 @@ class System:
             "refusals": [asdict(each) for each in found.findings if each.refuses],
             "notes": [asdict(each) for each in found.findings if not each.refuses],
             "settings": dict(settings.values), "preset": preset, "weights": found.weights,
-            "spend": {"dollars": found.spend.dollars, "parts": dict(found.spend.parts), "why": found.spend.why},
+            "spend": {"dollars": found.spend.dollars, "parts": dict(found.spend.parts), "why": found.spend.why,
+                      "per": found.spend.per},
             "environment": slots,
         }  # fmt: skip
 

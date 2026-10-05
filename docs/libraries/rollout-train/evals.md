@@ -111,6 +111,18 @@ what its serving records say, its files made by the bridges from the checkpoint'
 ([bridges](checkpoints.md#bridges)). Without a trainer, the channel's longest turn is what its engines accept. When it
 ends, however it ends, it deletes what it fetched under its directory (`bases/`, `checkpoints/`).
 
+**A hosted model.** An eval of a model behind a hosted API plays on a channel of an `api` provider:
+`channels.policy.provider = "openai"` (or `"anthropic"`) and `channels.policy.model` one of its models, with no
+renderer and no checkpoint ([hosted APIs](../../guide/cluster.md#hosted-apis)). Its driver starts no engines; the
+gateway in it samples each turn through the provider's endpoint and records what it cost. Its estimated spend (the
+whole eval's: `spend_of`, from the suite's starts, each entry's episodes and the budgets, at the model's catalog
+prices) is said when it is checked, and `limits.spend` ends it, failed, once it spends that.
+
+```bash
+uv run rollout eval math --provider anthropic --model claude-sonnet-5-5 --set limits.spend=5 \
+    --set channels.policy.thinking_tokens=2048 --set channels.policy.answer_tokens=1024
+```
+
 `evaluate(checkpoints, run=…, suite=…, subject=…, …)` does the work. It takes the entries' environments
 (`environments=`, by `module:name`; any not given are imported), how an environment's episodes are bound (`binding=`, by
 default every slot from the channel), and, for a suite of several entries, the run of each (`parts=`, by its number
@@ -180,10 +192,12 @@ numbers.
 The **Run this suite** form takes who plays (a base model the cluster's inference providers offer, the first by default;
 a bookmark; or any checkpoint whose weights are kept, by where it came from and its short id), the version (the newest
 by default), the episodes a start (the version's by default), a preset (by default one whose channel serves the base
-model played) and the eval's name. It asks for an eval run (`POST /api/launches`, [launching a
+model played), for a base model the provider it plays on (those that serve it, each said metered or scheduled), and
+the eval's name. On a metered provider (a hosted API), the form shows the model's prices and the eval's estimated
+spend (`POST /api/launches/check`), and takes a limit (`limits.spend`). It asks for an eval run (`POST /api/launches`, [launching a
 run](monitor.md#launching-a-run)), with the preset's channel settings, the suite's version (`eval.suite`, by id), the
-checkpoint (`start`) or the base model (`channels.policy.model`; where the preset's provider does not serve that model,
-one that does) and the episodes. The monitor gives it the suite's first environment, checks it as it checks any run, and
+checkpoint (`start`) or the base model (`channels.policy.model`, on the provider chosen; else the preset's where it
+serves that model, else one that does; a hosted API's channel names no renderer), the episodes and the limit. The monitor gives it the suite's first environment, checks it as it checks any run, and
 submits its job ([launching runs](launching.md)). The suite's page shows the launch and how it goes.
 
 A checkpoint's page (`#/checkpoint/ID`) has the same form the other way round, **Run an eval**: it takes the suite, its
@@ -197,7 +211,7 @@ line](monitor.md#scores-along-a-line)).
 
 A base model's page (`#/base/NAME`, a root of the checkpoints' graph: every base model with history, and every one the
 cluster offers) has the same **Run an eval** form, with the base model as `channels.policy.model`, and a link to start a
-training run from it. The launches of evals of it follow, with how each goes.
+training run from it (not for a model only hosted APIs serve: it is played, never trained). The launches of evals of it follow, with how each goes.
 
 The **Evals** page lists every checkpoint and base model that has had an eval, the one evaluated last first, and each
 opens its history (`#/evals/checkpoint/ID`, `#/evals/model/NAME`; a checkpoint's page links to it): every eval it has

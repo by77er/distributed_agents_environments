@@ -21,6 +21,7 @@ from rollout_train.validation import (
     Finding,
     LedgerFacts,
     Spend,
+    SuiteEntryFacts,
     SuiteFacts,
     check,
     completed,
@@ -41,14 +42,6 @@ EXTRA = """
 ca = "~/.config/rollout/ca.pem"
 certificate = "~/.config/rollout/gateway.crt"
 key = "~/.config/rollout/gateway.key"
-
-[inference.openai]
-kind = "api"
-endpoint = "rollout_openai:ResponsesEndpoint"
-auth = { kind = "vendor", key_env = "OPENAI_API_KEY" }
-[inference.openai.models."gpt-5"]
-context = 400000
-cost = { input = 1.25, output = 10.0 }
 
 [inference.lab]
 kind = "vllm-servers"
@@ -217,7 +210,7 @@ JUDGED = dataclasses.replace(
 )
 """An environment whose policy answers and whose judge, not trained, scores the answer."""
 JUDGE: dict[str, JsonValue] = {
-    "channels.judge.provider": "openai", "channels.judge.model": "gpt-5", "channels.judge.mode": "fixed",
+    "channels.judge.provider": "openai", "channels.judge.model": "gpt-6-luna", "channels.judge.mode": "fixed",
     "slots.judge": "judge",
 }  # fmt: skip
 
@@ -240,7 +233,7 @@ def test_a_slot_the_program_declares_must_be_bound() -> None:
 
 def test_a_judges_channel_needs_a_provider_that_offers_its_model() -> None:
     assert refused("models", findings({**JUDGE, "channels.judge.model": "gpt-9"}, environment=JUDGED)) == [
-        "provider openai does not serve gpt-9 (it serves gpt-5)"
+        "provider openai does not serve gpt-9 (it serves gpt-6-astra, gpt-6.1-sol, gpt-6-luna)"
     ]
     unprovided = refused("settings", findings({**JUDGE, "channels.judge.provider": None}, environment=JUDGED))
     assert unprovided == ["channel judge, which slot judge samples, needs a provider"]
@@ -282,7 +275,9 @@ def test_providers_refuse_what_the_cluster_does_not_offer() -> None:
         "the cluster offers no trainer nowhere (it offers local-lora, local-full, tinker-lora)"
     ]
     reasons = refused("providers", findings({"channels.policy.provider": "elsewhere"}))
-    assert reasons == ["the cluster offers no inference provider elsewhere (it offers local-vllm, tinker, openai, lab)"]
+    assert reasons == [
+        "the cluster offers no inference provider elsewhere (it offers local-vllm, tinker, openai, anthropic, lab)"
+    ]
     assert refused("providers", findings()) == []
 
 
@@ -303,13 +298,17 @@ def test_auth_none_is_refused_away_from_this_machine() -> None:
 # capabilities
 
 
+HOSTED = (
+    "channel policy is trained, and provider openai (api) returns text, not the exact tokens it sampled or their "
+    "behaviour logprobs: what it samples is never trained on. A hosted API serves evals and slots that are not "
+    "trained, such as judges"
+)
+
+
 def test_a_trained_channel_on_a_text_api_is_refused_with_its_reason() -> None:
     reasons = refused("capabilities", findings({**LOCAL_LORA, "channels.policy.provider": "openai",
-                                                "channels.policy.model": "gpt-5"}))  # fmt: skip
-    assert reasons == [
-        "channel policy is trained, and provider openai (api) returns text, not the sampled token ids and their "
-        "logprobs, which the importance weight needs"
-    ]
+                                                "channels.policy.model": "gpt-6-luna"}))  # fmt: skip
+    assert reasons == [HOSTED]
 
 
 def test_a_trained_channel_needs_honoured_sampling() -> None:
@@ -322,7 +321,7 @@ def test_a_trained_channel_needs_honoured_sampling() -> None:
 
 
 def test_another_channel_may_be_any_provider() -> None:
-    judge: dict[str, JsonValue] = {"channels.judge.provider": "openai", "channels.judge.model": "gpt-5"}
+    judge: dict[str, JsonValue] = {"channels.judge.provider": "openai", "channels.judge.model": "gpt-6-luna"}
     assert refused("capabilities", findings(judge)) == []
 
 
@@ -545,7 +544,7 @@ def test_a_component_the_family_does_not_accept_and_a_combination_that_means_not
 
 
 def test_an_importance_correction_needs_behaviour_logprobs_and_a_preference_loss_does_not() -> None:
-    api = {**LOCAL_LORA, "channels.policy.provider": "openai", "channels.policy.model": "gpt-5"}
+    api = {**LOCAL_LORA, "channels.policy.provider": "openai", "channels.policy.model": "gpt-6-luna"}
     capabilities = dataclasses.replace(CLUSTER.inference["local-vllm"].capabilities, sampled_logprobs=False)
     without = with_provider(CLUSTER, "local-vllm", capabilities=capabilities)
     assert refused("capabilities", findings(LOCAL_LORA, cluster=without)) == [
@@ -554,16 +553,9 @@ def test_an_importance_correction_needs_behaviour_logprobs_and_a_preference_loss
     ]
     exact: dict[str, JsonValue] = {"objective.preset": "reinforce", "objective.importance.paper_exact": True}
     assert refused("capabilities", findings({**LOCAL_LORA, **exact}, cluster=without)) == []
-    assert refused("capabilities", findings({**api, **exact})) == [
-        "channel policy is trained by a policy gradient, and provider openai (api) does not return the exact tokens "
-        "it sampled"
-    ]
-    assert refused("capabilities", findings({**api, "objective.preset": "reinforce"})) == [
-        "channel policy is trained, and provider openai (api) returns text, not the sampled token ids and their "
-        "logprobs, which the importance weight needs"
-    ]
-    for preset in ("dpo", "simpo", "kto", "sft"):
-        assert refused("capabilities", findings({**api, "objective.preset": preset})) == [], preset
+    for preset in ("reinforce", "dpo", "simpo", "kto", "sft"):  # (a hosted API's turns hold no tokens to train on)
+        assert refused("capabilities", findings({**api, "objective.preset": preset})) == [HOSTED], preset
+    assert refused("capabilities", findings({**api, **exact})) == [HOSTED]
 
 
 def test_a_k1_kl_penalty_in_the_loss_is_refused_and_one_in_the_reward_is_not() -> None:
@@ -668,7 +660,7 @@ def test_a_teacher_needs_the_logprobs_distillation_reads() -> None:
         "provider tinker's prompt logprobs and top logprobs are declared by its SDK but not yet confirmed by a live "
         "test: it cannot teach until they are"
     ]
-    assert refused("distillation", findings(teacher("openai", "gpt-5", "rollout_openai:text"))) == [
+    assert refused("distillation", findings(teacher("openai", "gpt-6-luna", "rollout_openai:text"))) == [
         "the teacher's provider openai (api) does not return prompt logprobs, to score the student's tokens",
         "the teacher renders as rollout_openai:text, of another family than the student's rollout_qwen:qwen35: their "
         "tokens do not compare",
@@ -868,3 +860,68 @@ def test_a_name_must_be_one_and_free() -> None:
     ]
     assert refused("name", findings({"name": "team-8"})) == ["another run is called 'team-8'"]
     assert refused("name", findings({"name": "team-9"})) == []
+
+
+# hosted APIs
+
+
+HOSTED_EVAL: dict[str, JsonValue] = {
+    "kind": "eval", "environment": GSM8K, "eval.suite": "math", "channels.policy.provider": "openai",
+    "channels.policy.model": "gpt-6-luna", "channels.policy.thinking_tokens": 1024,
+    "channels.policy.answer_tokens": 512,
+}  # fmt: skip
+SUITE = LedgerFacts(suites={"math": SuiteFacts("math", 1, frozenset({GSM8K}), (SuiteEntryFacts(GSM8K, 10, 2),))})
+"""The suite of ten starts, two episodes each."""
+
+
+def test_an_eval_of_a_hosted_model_needs_no_renderer_and_is_estimated_from_the_suites_starts() -> None:
+    settings = RunSettings(HOSTED_EVAL)
+    assert refusals(check(settings, CLUSTER, ENVIRONMENT, SUITE)) == []
+    assert "channels.policy.renderer" not in completed(settings, CLUSTER).values  # (it renders messages itself)
+    turns = 10 * 2 * 1  # (starts, episodes of each, turns of an episode)
+    dollars = (turns * (1024 + 512) * 0.50 + turns * 200 * 0.10) / 1e6  # (sampled at the output price, read at input)
+    assert spend_of(settings, CLUSTER, ENVIRONMENT, SUITE) == Spend(dollars, {"openai": dollars}, per="eval")
+    fewer = RunSettings({**HOSTED_EVAL, "eval.episodes": 1})
+    assert spend_of(fewer, CLUSTER, ENVIRONMENT, SUITE).dollars == pytest.approx(dollars / 2)
+    limited = SuiteEntryFacts(
+        GSM8K, 10, 2, thinking_tokens=0, answer_tokens=100
+    )  # (the entry's budgets, over the channel's)
+    own = LedgerFacts(suites={"math": SuiteFacts("math", 1, frozenset({GSM8K}), (limited,))})
+    assert spend_of(settings, CLUSTER, ENVIRONMENT, own).dollars == pytest.approx(
+        (turns * 100 * 0.5 + turns * 200 * 0.1) / 1e6
+    )
+    assert spend_of(settings, CLUSTER, ENVIRONMENT, LEDGER) == Spend(
+        None, why="the suite's starts are not known here", per="eval"
+    )
+    local = RunSettings(
+        {**HOSTED_EVAL, "channels.policy.provider": "local-vllm", "channels.policy.model": "Qwen/Qwen3.5-4B"}
+    )
+    assert spend_of(local, CLUSTER, ENVIRONMENT, SUITE) == Spend(0.0, per="eval")  # (nothing metered)
+
+
+def test_an_evals_spend_limit_is_noted_where_it_would_end_the_eval_early() -> None:
+    def notes(changes: dict[str, JsonValue]) -> list[str]:
+        return noted("spend", check(RunSettings({**HOSTED_EVAL, **changes}), CLUSTER, ENVIRONMENT, SUITE))
+
+    assert notes({}) == ["openai is metered, and no limits.spend bounds what the eval spends"]
+    assert notes({"limits.spend": 0.01}) == [
+        "the eval is estimated at up to $0.02, above limits.spend $0.01: it ends once it spends $0.01, before every "
+        "start is played"
+    ]
+    assert notes({"limits.spend": 1}) == []
+    assert (
+        refused("spend", check(RunSettings({**HOSTED_EVAL, "limits.spend": 0.01}), CLUSTER, ENVIRONMENT, SUITE)) == []
+    )
+
+
+def test_a_hosted_api_serves_untrained_slots_and_shares_a_channel_with_no_other_provider() -> None:
+    claude = {**JUDGE, "channels.judge.provider": "anthropic", "channels.judge.model": "claude-haiku-4-5-20251001"}
+    assert refusals(findings(claude, environment=JUDGED)) == []
+    shared: dict[str, JsonValue] = {
+        **JUDGE,
+        "channels.judge.provider": None,
+        "channels.judge.providers": ["openai", "lab"],
+    }
+    assert refused("providers", findings(shared, environment=JUDGED)) == [
+        "channel judge is on the hosted API openai, which shares a channel with no other provider"
+    ]

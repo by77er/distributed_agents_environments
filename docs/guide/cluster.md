@@ -148,13 +148,17 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 
 A model a provider offers (`models."MODEL"`) has a `context`, and optionally a `base` (the model it was quantized
 from), a `cost` table (dollars per million tokens by class: `input`, `cached_input`, `output`, `thinking`; or
-`hour`) and `options` (what its engines are started with; `max_lora_rank` is the highest adapter rank it loads).
+`hour`; cached input is priced as input and thinking as output where the table does not say) and `options` (what its
+engines are started with; `max_lora_rank` is the highest adapter rank it loads; a hosted API's model says what it
+takes, [below](#hosted-apis)).
 
 A trainer's `cost` is dollars per million tokens trained (`train`, every token of each trained segment: its prompts and
 what was sampled) or per `hour`. Where the price depends on the model, `costs` gives each model its own table
-(`costs = { "Qwen/Qwen3.5-9B" = { train = 1.463 } }`), and `cost` covers the rest. One step's estimated spend
-(`limits.spend`, `spend_of`) counts the run's metered parts: every trained token at a metered trainer's price for the
-model, and the sampled and prompt tokens at the dearest metered provider's prices, prompts uncached.
+(`costs = { "Qwen/Qwen3.5-9B" = { train = 1.463 } }`), and `cost` covers the rest. A training run's estimated spend
+(`spend_of`) is one step's on its metered parts: every trained token at a metered trainer's price for the model, and
+the sampled and prompt tokens at the dearest metered provider's prices, prompts uncached. An eval's is the whole
+eval's: every episode of the suite's starts, each turn's thinking and answer budgets sampled and its prompt read at the
+dearest metered provider of the channel it plays.
 
 **Metered or scheduled.** Each inference provider and trainer says how it is allocated (`allocation`), by default as
 its kind is: `tinker` and `api` are `metered`; `vllm`, `vllm-servers`, `runpod-inference`, `runpod-trainer`, `lora` and
@@ -210,8 +214,8 @@ rollout bookmark diamonds first:20 --cluster lab
 | loads | `peft`, `full` | `peft` | `tinker` | nothing | `peft` |
 | bills | nothing | nothing | tokens | tokens | hours |
 | allocation | scheduled | scheduled | metered | metered | scheduled |
-| auth | `none`, `bearer`, `mtls` (default `none`) | `none`, `bearer`, `mtls` (must say) | `vendor` | `vendor`, `bearer` (must say) | `mtls` (each pod's identity from its heartbeat) |
-| its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs` | `addresses`, `via`, `loader`, `max_logprobs` | `project` / `project_env` | `endpoint` | `image`, `gpu_types`, `pods`, `idle_stop`, `volume_gb`, `secrets`, `step_ca`, `max_logprobs`, `api_key_env` |
+| auth | `none`, `bearer`, `mtls` (default `none`) | `none`, `bearer`, `mtls` (must say) | `vendor` | `vendor`, `bearer` (default `vendor`: the key `api_key_env` names) | `mtls` (each pod's identity from its heartbeat) |
+| its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs` | `addresses`, `via`, `loader`, `max_logprobs` | `project` / `project_env` | `endpoint`, `base_url`, `api_key_env` / `api_key_file` | `image`, `gpu_types`, `pods`, `idle_stop`, `volume_gb`, `secrets`, `step_ca`, `max_logprobs`, `api_key_env` |
 
 Tinker's prompt and top-k logprobs are declared as its SDK says (`Capabilities.unchecked`): the SDK takes prompt
 logprobs and a top k at prompt and sampled positions, whose width Tinker's server bounds without the SDK saying how
@@ -236,7 +240,48 @@ given).
 
 **Several providers.** A channel may name several providers (`channels.NAME.providers`), shared by a routing rule
 (`channels.NAME.routing`): `spill` fills the first and sends the rest to the next; `weighted` shares turns by
-`channels.NAME.weights`.
+`channels.NAME.weights`. A hosted API shares a channel with no other provider.
+
+### Hosted APIs
+
+A provider of the kind `api` is a hosted model's API: OpenAI's Responses API (`endpoint = "rollout_openai:hosted"`)
+or Anthropic's Messages API (`endpoint = "rollout_anthropic:hosted"`, [rollout-anthropic](../implementations/rollout-anthropic.md)).
+It is metered, takes messages and returns text, with no exact tokens and no behaviour logprobs: what it samples is
+never trained on. It serves evals of its models and the slots of a run that are not trained (a judge, a fixed
+opponent); validation refuses it for a trained channel or one following it, and asks no renderer of its channels.
+
+```toml
+[inference.anthropic]
+kind = "api"
+endpoint = "rollout_anthropic:hosted"
+api_key_env = "ANTHROPIC_API_KEY"             # the key, named: read where the channel samples, when it does
+concurrency = 16                              # requests at once, from each gateway (and each run's driver)
+[inference.anthropic.models."claude-sonnet-5-5"]
+context = 1000000
+cost = { input = 2.0, cached_input = 0.20, output = 10.0 }   # dollars per million tokens
+options = { max_output_tokens = 128000, thinking = "adaptive", sampling = false, forced_tool_choice = false }
+```
+
+- **The key** is `api_key_env` (or `api_key_file`), else the auth's key or token. It is read the first time a channel
+  on the provider samples; a provider whose key is not set refuses each turn with the variable's name, and
+  `rollout cluster check` says it is missing. The chart reads the keys from the Secret `providers`
+  ([Helm](../deploy/helm.md#provider-keys)).
+- **`base_url`** is where the API is reached, where it is not the vendor's own (a proxy, a compatible server).
+- **A model's catalog entry** gives its `context`, its prices (`cost`) and what it takes (`options`):
+  `max_output_tokens`, the most one reply writes (by default its context); for an Anthropic model, how it thinks
+  (`thinking`: `adaptive`, steered by an `effort`; `budget`, a number of thinking tokens; none), whether it takes
+  temperature and top-p (`sampling`) and a forced tool choice (`forced_tool_choice`); for an OpenAI model, the
+  `reasoning_effort` a turn is sampled with where its binding says none.
+- **A turn** is sampled with the binding's temperature and top-p and its thinking and answer budgets (else the
+  channel's): the budgets added up are the most it writes. Its record keeps its reply (text, tool calls, usage) and no
+  tokens (`sampled_with` empty), with what it cost: its usage (input, cached input, output, thinking tokens) at the
+  model's prices.
+- **Rate limits and an overloaded API** (429, 5xx, 529) are asked again with backoff (`retry-after` honoured);
+  credentials refused or a request rejected end the episode as failed, with the reason.
+- **An eval's `limits.spend`** ends it once what it spent on hosted APIs reaches the limit, failed with that reason.
+
+The example config (`deploy/clusters/example.toml`) and the chart's offer `openai` and `anthropic`, their current
+models priced from each vendor's pricing page, with the date the prices were checked.
 
 ## Trainers
 
@@ -314,7 +359,7 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `groups_per_step` | 4 | Changeable |
 | `max_lag` | 1 | Changeable |
 | `evals.suite`, `evals.every`, `evals.episodes` | , 1, | Changeable |
-| `limits.spend` | | Changeable: dollars; the run ends once its estimated spend reaches it |
+| `limits.spend` | | Changeable: dollars. An eval ends once it spends this on hosted APIs; a training run whose one step is estimated above it is refused |
 
 Settings are given in layers, each over the last (`layered`): the schema's defaults, a preset, a file
 (`from_file`: TOML or JSON, dotted keys or tables; JSON's `null` unsets a key), then the flags (`from_flags`:
@@ -377,9 +422,9 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | Rule | Refuses when |
 |---|---|
 | `settings` | a key the kind does not take; a wrong type or a value out of range; a required key missing; a channel that contradicts itself (`provider` and `providers`, `channels.NAME.weights` without `weighted`, a mode on the trained channel, following nothing); a slot naming no channel; a slot the program declares and the run does not bind (one that is not trained has no default); a channel a slot samples without a provider or a model; a judge bound to the trained channel, or one following it, without `self_judging` (`rollout_train.slots`) |
-| `providers` | the trainer or a channel's provider is not offered |
+| `providers` | the trainer or a channel's provider is not offered; a hosted API sharing a channel with another provider |
 | `auth` | a provider is reached with no auth away from this machine |
-| `capabilities` | a provider of the trained channel is not token-exact, for a policy gradient; or returns no sampled-token logprobs or does not honour sampling, for one with an importance correction. A preference loss and a likelihood read neither |
+| `capabilities` | a provider of the trained channel is a hosted API, whatever the objective (it returns text: no exact tokens or behaviour logprobs, so nothing it samples is trained on); is not token-exact, for a policy gradient; or returns no sampled-token logprobs or does not honour sampling, for one with an importance correction. A preference loss and a likelihood read neither |
 | `bridge` | no bridge from the trainer's format (or a checkpoint's) to what a provider of the channel loads |
 | `weights` | a trainer that makes the other kind than the run's `weights`; a provider serving the run's checkpoints that cannot serve them (a LoRA without adapters; full weights, or a LoRA merged by `merge-quantize`, without full-weight reload); a checkpoint a fixed channel serves on a provider that cannot |
 | `models` | `trainer.model` not among the trainer's; a channel's model not among its provider's; a channel serving the run's checkpoints with a model that is neither `trainer.model` nor quantized from it; a start trained over another model |
@@ -391,7 +436,7 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | `distillation` | a distillation (or a policy gradient's distillation term) with no teachers, a teacher channel without a provider, or no route for the environment the run plays (routes for some of its rows only: a note); a teacher's provider without prompt logprobs, with fewer top logprobs than `objective.distillation.top_k`, or with them only unchecked (Tinker); the trainer does not score; the teacher's renderer family differs |
 | `environment` | not offered, does not load, needs a sandbox kind with no pool or a tool set not served |
 | `capacity` | more CPUs, memory or GPUs than `[capacity]` gives one run, counting the run's scheduled parts and room for Ray's own processes; more GPUs than the cluster has (more than are free: a note, it waits) |
-| `spend` | `limits.spend` below one step's estimated cost on its metered parts (`spend_of`); a note where it cannot be estimated yet, or where the run uses metered parts and sets no `limits.spend` |
+| `spend` | a training run's `limits.spend` below one step's estimated cost on its metered parts (`spend_of`); a note where it cannot be estimated yet, or where the run uses metered parts and sets no `limits.spend`. For an eval, notes only: no limit on a metered provider, or a limit below the eval's estimate (it ends early) |
 | `name` | not a name, or taken |
 
 ```python

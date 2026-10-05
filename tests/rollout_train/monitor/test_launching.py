@@ -158,7 +158,7 @@ async def test_a_run_is_checked_asked_for_from_the_page_and_stopped(tmp_path: Pa
     async with client:
         checked = (await client.post("/api/launches/check", json=asked)).json()
         assert checked["refusals"] == [] and checked["preset"] == "small@1" and checked["weights"] == "lora"
-        assert checked["spend"] == {"dollars": 0.0, "parts": {}, "why": ""}  # (nothing metered)
+        assert checked["spend"] == {"dollars": 0.0, "parts": {}, "why": "", "per": "step"}  # (nothing metered)
         assert checked["environment"] == {"slots": ["policy"], "untrained": [], "judges": []}
         assert checked["settings"]["trainer.learning_rate"] == 3e-5 and checked["settings"]["groups"] == 2
         refusals = (await client.post("/api/launches/check", json=wrong)).json()["refusals"]

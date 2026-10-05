@@ -15,6 +15,16 @@ with any checkpoint or a base model, and how to run evals on a schedule while a 
    [a subject's history](../libraries/rollout-train/monitor.md#a-subjects-history): how the monitor shows a
    checkpoint's evals and the scores along a line of checkpoints.
 
+## Hosted models
+
+A model behind OpenAI's or Anthropic's API is evaluated as any base model is: the cluster config declares the hosted
+API as an inference provider of the kind `api` ([hosted APIs](../guide/cluster.md#hosted-apis)), with each model's
+prices, and an eval plays a suite on a channel of it (`channels.policy.provider = "anthropic"`, a model, no renderer).
+The eval forms offer its models among the base models, say the provider is metered with the eval's estimated spend,
+and take a limit (`limits.spend`), which ends the eval once it spends that ([an eval of a hosted
+model](../libraries/rollout-train/evals.md#an-eval)). Its turns are recorded with what each cost, and never trained on.
+The same providers serve the slots of a training run that are not trained, such as a [judge](../products/judging.md).
+
 ## Related pages
 
 - [Judging](../products/judging.md): open-ended answers scored by a judge, a model slot that is not trained,

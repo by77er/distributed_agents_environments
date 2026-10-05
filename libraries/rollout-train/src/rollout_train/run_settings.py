@@ -208,8 +208,8 @@ KEYS: tuple[Key, ...] = (
         ("float", "null"),
         None,
         True,
-        TRAINING,
-        "Dollars: the run ends once its estimate reaches this",
+        TRAINING | {"eval"},
+        "Dollars: an eval ends once it spends this; a training run whose step is estimated above it is refused",
         least=0,
     ),
     # The objective: its preset, fixed, and its components (fixed or changeable, each as `COMPONENTS` says).

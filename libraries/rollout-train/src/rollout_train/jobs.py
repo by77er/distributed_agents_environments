@@ -19,8 +19,9 @@ job, or as a RayJob on Kubernetes; `rollout train --here` runs it in the calling
 3. samples every channel its settings name through a gateway in its own process (`rollout_train.gateway.Gateway`):
    a channel on engine hosts or on servers elsewhere (`vllm-servers`, RunPod pods) is a routed channel, sampled by
    checkpoint name from what the run's serving records say (`rollout_train.inference.Routes`); a channel on Tinker is
-   sampled by engines in this process. Its start records its settings, so the cluster's gateway can serve its
-   channels on providers it reaches (`rollout_train.gateway.ChannelDirectory`);
+   sampled by engines in this process; a channel on a hosted API (`api`) is sampled through its provider's endpoint
+   (`rollout_train.inference.api.ApiChannel`), its turns never trained on. Its start records its settings, so the
+   cluster's gateway can serve its channels on providers it reaches (`rollout_train.gateway.ChannelDirectory`);
 4. plays its episodes with a runner in its own process (`rollout_train.rollouts.EpisodeRunner` over
    `rollout.local.LocalRunner`), with the sandbox pools of the cluster's `[sandboxes]` its environment's programs
    declare, the tool sets of its `[tools]`, and the gateway, served on this node for harnesses;
@@ -28,6 +29,9 @@ job, or as a RayJob on Kubernetes; `rollout train --here` runs it in the calling
    bridge bundle (`rollout_train.bridges.on_ray`) where the trained channel's provider loads another format than the
    trainer makes;
 6. on the way out, ends what it started (Ray ends the actors with the job in any case), and notes how it ended.
+
+An eval with `limits.spend` ends once what it and its parts spent on hosted APIs reaches the limit (`SpendReached`),
+failed with that reason: the gateway samples no more on them for it from then on.
 
 A run's channel on a `vllm` provider gets engine hosts of its own (`Run.start`, `hosted`).
 """
@@ -64,13 +68,14 @@ from rollout_train.colocated import Colocated
 from rollout_train.demand import BRIDGE, TRAINER, Demand, Resources, colocating, demand, placed, played_channel, reserve
 from rollout_train.gateway import Gateway, GatewayEndpoints, Keyring, TurnStore
 from rollout_train.inference import Channel, Limits, Route, Routes
+from rollout_train.inference.api import ApiChannel, Hosted
 from rollout_train.inference.channel import MAX_LAG
 from rollout_train.launching import Refused, checked, declared, ray_free
 from rollout_train.ledger import Fence
 from rollout_train.machine import measured
 from rollout_train.presence import presence_of
 from rollout_train.providers import INFERENCE_KINDS, TrainerProvider, settings_of
-from rollout_train.record import ENDS, STARTS, ending, scope, start_header, table, trained_objective
+from rollout_train.record import ENDS, STARTS, end, ending, scope, start_header, table, trained_objective
 from rollout_train.record import FAILED as RUN_FAILED
 from rollout_train.registry import Entry, registry_of, resolved
 from rollout_train.rollouts.scheduler import EpisodeRunner
@@ -85,6 +90,7 @@ if TYPE_CHECKING:
 __all__ = [
     "NotEnoughMemory",
     "Run",
+    "SpendReached",
     "TrainerActor",
     "TrainerClient",
     "driven",
@@ -106,6 +112,10 @@ FEED = "feed"
 
 class NotEnoughMemory(Exception):
     """Stopping is better than exhausting the machine (a host may shut down rather than kill one process)."""
+
+
+class SpendReached(Exception):
+    """A run spent what its `limits.spend` allows."""
 
 
 def available_memory_gib() -> float:
@@ -263,6 +273,8 @@ class Run:
     """The engine hosts of each channel, by channel."""
     channels: dict[str, Channel] = field(default_factory=dict[str, Channel])
     """The channels whose engines are in this process (Tinker's)."""
+    on_apis: dict[str, ApiChannel] = field(default_factory=dict[str, ApiChannel])
+    """The channels on hosted APIs."""
     routes: Routes | None = None
     gateway: Gateway | None = None
     recorder: GatewayEndpoints | None = None
@@ -425,14 +437,17 @@ class Run:
 
     def _channels(self) -> None:
         """Each channel's engines: engine hosts for a `vllm` provider, servers elsewhere for a provider reached at
-        addresses, engines in this process for Tinker."""
+        addresses, engines in this process for Tinker, the provider's endpoint for a hosted API (each provider's
+        concurrency shared by its channels)."""
         routes: dict[str, Route] = {}
+        reached: dict[str, Hosted] = {}
         sequence = self._sequence()
         for channel in self.settings.channels:
             providers = self.settings.providers(channel)
             model = self.settings.get(f"channels.{channel}.model")
             renderer = self.settings.get(f"channels.{channel}.renderer")
-            if not providers or model is None or renderer is None:
+            kinds = {self.cluster.inference[each].kind for each in providers}
+            if not providers or model is None or (renderer is None and "api" not in kinds):
                 continue  # (a channel no slot samples: validation refused one a slot does)
             thinking = self.settings.get(f"channels.{channel}.thinking_tokens")
             answer = self.settings.get(f"channels.{channel}.answer_tokens")
@@ -441,16 +456,19 @@ class Run:
                 answer if isinstance(answer, int) else None,
                 sequence=sequence if channel == self.settings.trained else None,
             )
-            made = named(str(renderer))(str(model))
-            kinds = {self.cluster.inference[each].kind for each in providers}
             first = providers[0]
+            if "api" in kinds:
+                if len(providers) > 1:
+                    raise ValueError(f"channel {channel}: a channel on a hosted API has no other provider")
+                provider = reached.setdefault(first, Hosted.of(self.cluster.inference[first]))
+                self.on_apis[channel] = ApiChannel(channel, provider, str(model), limits)
+                continue
+            made = named(str(renderer))(str(model))
             if "tinker" in kinds:
                 if len(providers) > 1:
                     raise ValueError(f"channel {channel}: a channel Tinker samples has no other provider")
                 self.channels[channel] = self._tinker(channel, first, str(model), made, limits)
                 continue
-            if "api" in kinds:
-                raise ValueError(f"channel {channel}: an api provider's channel is sampled by the cluster's gateway")
             servers: list[Any] = []
             connection = None
             for name in providers:
@@ -564,7 +582,7 @@ class Run:
             if self.settings.get(f"channels.{name}.model") is not None
         }  # fmt: skip
         store = TurnStore(self.ledger, self.stores.blobs)
-        self.gateway = Gateway(store, keyring, self.channels, self.routes, models, hooks=[feed])
+        self.gateway = Gateway(store, keyring, self.channels, self.routes, models, hooks=[feed], hosted=self.on_apis)
         port = _free_port()
         self.recorder = GatewayEndpoints.of(self.gateway, f"http://127.0.0.1:{port}")
         _background(stack, _serve(self.gateway, port))
@@ -613,6 +631,8 @@ class Run:
         for name, channel in (self.routes.channels() if self.routes is not None else {}).items():
             servers: list[JsonValue] = list(channel.servers())
             channels.append({"channel": name, **channel.take(), "servers": servers})
+        for name, each in self.on_apis.items():
+            channels.append({"channel": name, "provider": each.provider.name, "model": each.model, **each.take()})
         return {
             "host": socket.gethostname(), "directory": str(self.directory), "machine": measured(self.directory),
             "run": self.run.id, "channels": channels, **self._held(),
@@ -907,19 +927,44 @@ async def _evaluate(run: Run) -> None:
             run.started["directory"] = str(live.directory)
             run.started["environment"] = suite.environments[0]
             async with ending(run.ledger, run.run.id):
-                said = await evaluate(
+                said = await _within_spend(live, evaluate(
                     run.checkpoints, run=run.run.id, suite=suite, subject=subject,
                     base=str(run.settings.get(f"channels.{live.channel}.model")), channel=live.channel,
                     directory=live.directory / "checkpoints", publish=live.publish, environments=played,
                     binding=live.binding, parts=part, episodes=cast(int | None, episodes), started=run.started,
                     reshard=reshard if chain else None, hooks=[live.feed],
-                )  # fmt: skip
+                ))  # fmt: skip
     finally:  # (the files fetched to serve the checkpoint are needed only while it plays; a full one is a whole model)
         for fetched in ("bases", "checkpoints"):
             await asyncio.to_thread(shutil.rmtree, run_directory(run.cluster, run.run.id) / fetched, ignore_errors=True)
     for each in said["entries"]:
         solved = f"solved {each['solved']} of {each['played']}" if each["solved"] is not None else str(each["played"])
         print(f"{suite.id} {each['environment']}: {solved} episodes (mean reward {each['reward']})", flush=True)
+
+
+async def _within_spend[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
+    """Do a run's work, ending it once what it and the runs it plays spent on hosted APIs reaches its `limits.spend`
+    (`SpendReached`, with the parts it played ended failed with the same reason); without a limit, just do it."""
+    limit = live.settings["limits.spend"]
+    gateway = live.gateway
+    if not isinstance(limit, int | float) or isinstance(limit, bool) or gateway is None or gateway.spending is None:
+        return await work
+    spending = gateway.spending
+    cap = spending.cap(live.runs, float(limit))
+    task = asyncio.ensure_future(work)
+    reached = asyncio.ensure_future(cap.reached.wait())
+    try:
+        await asyncio.wait([task, reached], return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        reached.cancel()
+    if task.done():
+        return task.result()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    why = f"it spent ${await spending.total(live.runs):.2f}, which reaches limits.spend ${float(limit):g}"
+    for each in sorted(live.runs - {live.run.id}):
+        await end(live.ledger, each, RUN_FAILED, f"{SpendReached.__name__}: {why}")
+    raise SpendReached(why)
 
 
 def imitated(settings: RunSettings, kind: str) -> "Objective":

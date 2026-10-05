@@ -14,7 +14,7 @@ evals, distillation, environment, capacity, spend, name.
 """
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from pydantic import JsonValue
 
@@ -39,6 +39,7 @@ __all__ = [
     "LedgerFacts",
     "Rule",
     "Spend",
+    "SuiteEntryFacts",
     "SuiteFacts",
     "check",
     "completed",
@@ -73,12 +74,13 @@ class Rule:
 
 RULES: tuple[Rule, ...] = (
     Rule("settings", "a key the kind does not take, a wrong type or range, a required key missing, contradictions"),
-    Rule("providers", "the trainer or a channel's provider is not offered"),
+    Rule("providers", "the trainer or a channel's provider is not offered, or a hosted API shares a channel"),
     Rule("auth", "a provider reached with no auth away from this machine"),
     Rule(
         "capabilities",
-        "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured "
-        "sampling (an importance correction)",
+        "the trained channel's provider is a hosted API (no exact tokens or behaviour logprobs, whatever the "
+        "objective), is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an "
+        "importance correction)",
     ),
     Rule("bridge", "no bridge from the checkpoint's format to what the provider loads"),
     Rule(
@@ -112,7 +114,7 @@ RULES: tuple[Rule, ...] = (
         "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting "
         "the run's scheduled parts",
     ),
-    Rule("spend", "a spend limit below one step's estimated cost"),
+    Rule("spend", "a training run's spend limit below one step's estimated cost"),
     Rule("name", "not a name, or taken"),
 )
 """Every rule `check` applies, in the order it reports them."""
@@ -157,11 +159,25 @@ class CheckpointFacts:
 
 
 @dataclass(frozen=True)
+class SuiteEntryFacts:
+    """One entry of the version of a suite the settings name: what an eval of it plays."""
+
+    environment: str
+    starts: int
+    episodes: int
+    """Of each start, unless the eval says another number."""
+    thinking_tokens: int | None = None
+    answer_tokens: int | None = None
+
+
+@dataclass(frozen=True)
 class SuiteFacts:
     name: str
     newest: int
     """Its newest version's number."""
     environments: frozenset[str] = frozenset()
+    entries: tuple[SuiteEntryFacts, ...] = ()
+    """The entries of the version the settings name (its newest, where they name none)."""
 
 
 @dataclass(frozen=True)
@@ -385,11 +401,16 @@ def _providers(run: _Run) -> None:
         offered = ", ".join(cluster.trainers) or "none"
         run.refuse("providers", "trainer.provider", f"the cluster offers no trainer {trainer} (it offers {offered})")
     for channel in run.settings.channels:
-        for name in run.settings.providers(channel):
+        providers = run.settings.providers(channel)
+        for name in providers:
             if name not in cluster.inference:
                 key = f"channels.{channel}.provider"
                 offered = ", ".join(cluster.inference) or "none"
                 run.refuse("providers", key, f"the cluster offers no inference provider {name} (it offers {offered})")
+        hosted = [name for name in providers if name in cluster.inference and cluster.inference[name].kind == "api"]
+        if hosted and len(providers) > 1:
+            run.refuse("providers", f"channels.{channel}.providers", f"channel {channel} is on the hosted API "
+                       f"{hosted[0]}, which shares a channel with no other provider")  # fmt: skip
 
 
 def _auth(run: _Run) -> None:
@@ -415,6 +436,15 @@ def _capabilities(run: _Run) -> None:
     trained = run.settings.trained
     if trained is None:
         return
+    for name, provider in run.providers(trained):
+        offered = provider.capabilities
+        if not offered.token_exact and not offered.sampled_logprobs:  # (a hosted API: nothing it samples is trained on)
+            run.refuse(
+                "capabilities", f"channels.{trained}.provider",
+                f"channel {trained} is trained, and provider {name} ({provider.kind}) returns text, not the exact "
+                "tokens it sampled or their behaviour logprobs: what it samples is never trained on. A hosted API "
+                "serves evals and slots that are not trained, such as judges",
+            )  # fmt: skip
     objective = _objective_of(run) or DEFAULT
     needs = needs_of(objective)
     if not needs:  # (a preference loss and a likelihood read neither exact tokens nor behaviour logprobs)
@@ -423,6 +453,8 @@ def _capabilities(run: _Run) -> None:
     for name, provider in run.providers(trained):
         offered = provider.capabilities
         key = f"channels.{trained}.provider"
+        if not offered.token_exact and not offered.sampled_logprobs:
+            continue  # (refused above)
         if weighs and not offered.token_exact and not offered.sampled_logprobs:
             run.refuse(
                 "capabilities", key,
@@ -956,10 +988,11 @@ def _short(needs: Resources, free: Resources) -> str:
 
 @dataclass(frozen=True)
 class Spend:
-    """One step's estimated spend on the run's metered parts (its trainer, the providers of its trained channel), at
-    most: every token trained times the trainer's cost for the model, and the sampled and prompt tokens times the
-    dearest metered provider's costs to sample and read them, uncached. Its scheduled parts are capacity the run is
-    placed on, not spent per step."""
+    """A run's estimated spend on its metered parts, at most. For a training run, one step's (`per` is `step`): every
+    token trained times the trainer's cost for the model, and the sampled and prompt tokens times the dearest metered
+    provider's costs to sample and read them, uncached. For an eval, the whole eval's (`per` is `eval`): every
+    episode of the suite's starts, each turn's thinking and answer budgets sampled and its prompt read at the
+    dearest metered provider of the channel it plays. Scheduled parts are capacity the run is placed on, not spent."""
 
     dollars: float | None
     """None where it cannot be estimated (`why`)."""
@@ -967,16 +1000,78 @@ class Spend:
     """Each metered part's dollars, by provider or trainer."""
     why: str = ""
     """Why it cannot be estimated."""
+    per: str = "step"
+    """What it is the spend of: one step of a training run (`step`), or a whole eval (`eval`)."""
 
 
-def spend_of(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> Spend:
-    """One step's estimated spend (`Spend`), or why it cannot be estimated: not a training run, no trainer, the
-    environment's numbers or the budgets unknown, or a metered part priced by the hour. Episodes a group are the
-    environment's, else the objective's group size."""
+def _priced(
+    metered: list[tuple[str, InferenceProvider]], model: str, sampled: float, prompts: float
+) -> tuple[str, float] | Spend | None:
+    """The dearest of the metered providers to sample `sampled` tokens and read `prompts` tokens of `model`, uncached
+    (none: none of them serves it); a `Spend` that says why not where one is priced by the hour."""
+    dearest: tuple[str, float] | None = None
+    for name, provider in metered:
+        offer = provider.models.get(model)
+        if offer is None:
+            continue
+        if "hour" in offer.cost or provider.capabilities.bills == "hours":
+            return Spend(None, why=f"provider {name} is priced by the hour")
+        cost = (sampled * offer.cost.get("output", 0.0) + prompts * offer.cost.get("input", 0.0)) / 1e6
+        if dearest is None or cost > dearest[1]:
+            dearest = (name, cost)
+    return dearest
+
+
+def _eval_spend(
+    settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None, ledger: LedgerFacts | None
+) -> Spend:
+    """An eval's estimated spend (`Spend`, `per` eval), or why it cannot be estimated."""
+    channel = played_channel(settings)
+    metered = [(name, cluster.inference[name]) for name in settings.providers(channel)
+               if name in cluster.inference and cluster.inference[name].allocation == "metered"]  # fmt: skip
+    if not metered:
+        return Spend(0.0, per="eval")
+    reference = settings["eval.suite"]
+    suite = ledger.suites.get(str(reference).partition("@")[0]) if ledger is not None and reference else None
+    if suite is None or not suite.entries:
+        return Spend(None, why="the suite's starts are not known here", per="eval")
+    if environment is None or environment.turns_per_episode is None:
+        return Spend(None, why="the environment does not say how many turns an episode takes", per="eval")
+    asked = settings["eval.episodes"]
+    thinking, answer = settings[f"channels.{channel}.thinking_tokens"], settings[f"channels.{channel}.answer_tokens"]
+    sampled = prompts = 0.0
+    for entry in suite.entries:
+        turns = entry.starts * (asked if isinstance(asked, int) else entry.episodes) * environment.turns_per_episode
+        think = entry.thinking_tokens if entry.thinking_tokens is not None else thinking
+        reply = entry.answer_tokens if entry.answer_tokens is not None else answer
+        if not isinstance(think, int) and not isinstance(reply, int):
+            return Spend(None, why=f"channel {channel} has no thinking or answer budget", per="eval")
+        sampled += turns * ((think if isinstance(think, int) else 0) + (reply if isinstance(reply, int) else 0))
+        prompts += turns * (environment.prompt_tokens or 0)
+    found = _priced(metered, str(settings.get(f"channels.{channel}.model")), sampled, prompts)
+    if isinstance(found, Spend):
+        return replace(found, per="eval")
+    if found is None:
+        return Spend(0.0, per="eval")
+    return Spend(found[1], {found[0]: found[1]}, per="eval")
+
+
+def spend_of(
+    settings: RunSettings,
+    cluster: Cluster,
+    environment: EnvironmentFacts | None,
+    ledger: LedgerFacts | None = None,
+) -> Spend:
+    """A run's estimated spend (`Spend`), or why it cannot be estimated: one step of a training run, or a whole eval
+    (from the suite's starts in `ledger`); not for other runs; for a training run, not without a trainer; not where the
+    environment's numbers or the budgets are unknown, or a metered part is priced by the hour. Episodes a group are
+    the environment's, else the objective's group size."""
+    if settings.kind == "eval":
+        return _eval_spend(settings, cluster, environment, ledger)
     trained = settings.trained
     trainer = cluster.trainers.get(str(settings["trainer.provider"]))
     if trained is None:
-        return Spend(None, why="only a training run's spend is estimated")
+        return Spend(None, why="only a training run's or an eval's spend is estimated")
     if trainer is None:
         return Spend(None, why="it has no trainer")
     model = str(settings.get(f"channels.{trained}.model"))
@@ -1007,28 +1102,29 @@ def spend_of(settings: RunSettings, cluster: Cluster, environment: EnvironmentFa
         if "hour" in priced:
             return Spend(None, why=f"the {trainer.name} trainer is priced by the hour")
         parts[trainer.name] = (sampled + prompts) * priced.get("train", 0.0) / 1e6
-    dearest: tuple[str, float] | None = None
-    for name, provider in metered:
-        offer = provider.models.get(model)
-        if offer is None:
-            continue
-        if "hour" in offer.cost or provider.capabilities.bills == "hours":
-            return Spend(None, why=f"provider {name} is priced by the hour")
-        cost = (sampled * offer.cost.get("output", 0.0) + prompts * offer.cost.get("input", 0.0)) / 1e6
-        if dearest is None or cost > dearest[1]:
-            dearest = (name, cost)
+    dearest = _priced(metered, model, sampled, prompts)
+    if isinstance(dearest, Spend):
+        return dearest
     if dearest is not None:
         parts[dearest[0]] = dearest[1]
     return Spend(sum(parts.values()), parts)
 
 
-def estimated_spend(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None) -> float | None:
-    """Dollars one step is estimated to cost on the run's metered parts, at most (`spend_of`); none where it cannot be
-    estimated."""
-    return spend_of(settings, cluster, environment).dollars
+def estimated_spend(
+    settings: RunSettings,
+    cluster: Cluster,
+    environment: EnvironmentFacts | None,
+    ledger: LedgerFacts | None = None,
+) -> float | None:
+    """Dollars one step (of an eval: the eval) is estimated to cost on the run's metered parts, at most
+    (`spend_of`); none where it cannot be estimated."""
+    return spend_of(settings, cluster, environment, ledger).dollars
 
 
 def _spend(run: _Run) -> None:
+    if run.kind == "eval":
+        _eval_limit(run)
+        return
     if run.kind != "train":
         return
     limit = run.settings["limits.spend"]
@@ -1048,6 +1144,27 @@ def _spend(run: _Run) -> None:
     elif spend.dollars > limit:
         run.refuse("spend", "limits.spend", f"one step is estimated at up to ${spend.dollars:.2f}, above limits.spend "
                    f"${limit:g}: the run would stop before its first step")  # fmt: skip
+
+
+def _eval_limit(run: _Run) -> None:
+    """An eval on metered providers: noted where no limit bounds it, or where it is estimated above its limit (it ends
+    once it spends the limit, before every start is played)."""
+    channel = played_channel(run.settings)
+    metered = sorted(name for name, provider in run.providers(channel) if provider.allocation == "metered")
+    if not metered:
+        return
+    limit = run.settings["limits.spend"]
+    if not isinstance(limit, int | float) or isinstance(limit, bool):
+        run.note("spend", "limits.spend", f"{', '.join(metered)} {'is' if len(metered) == 1 else 'are'} metered, and "
+                 "no limits.spend bounds what the eval spends")  # fmt: skip
+        return
+    spend = spend_of(run.settings, run.cluster, run.environment, run.ledger)
+    if spend.dollars is None:
+        run.note("spend", "limits.spend", f"the eval's spend cannot be estimated yet ({spend.why}): it still ends "
+                 f"once it spends ${limit:g}")  # fmt: skip
+    elif spend.dollars > limit:
+        run.note("spend", "limits.spend", f"the eval is estimated at up to ${spend.dollars:.2f}, above limits.spend "
+                 f"${limit:g}: it ends once it spends ${limit:g}, before every start is played")  # fmt: skip
 
 
 def _name(run: _Run) -> None:

@@ -161,9 +161,10 @@ runs, which a test calls on a `Run` built directly:
    ([the gateway](gateway.md)): a channel on engine hosts, or on servers at addresses (`vllm-servers`,
    `runpod-inference`: their `via` or their addresses, reached as their auth says), is a routed channel, sampled by
    checkpoint name from what each run's serving records say (its evals' and their parts' too); a channel on Tinker
-   is sampled by engines in the driver's process. A channel on an `api` provider is not sampled by a run. The trained
-   channel's longest turn is the trainer's longest segment (`trainer.segment_tokens`, else the trainer's in the
-   config).
+   is sampled by engines in the driver's process; a channel on an `api` provider is sampled through its provider's
+   endpoint, with the key the driver's environment has (`ApiChannel`, [hosted APIs](gateway.md#hosted-apis)), its
+   turns never trained on. The trained channel's longest turn is the trainer's longest segment
+   (`trainer.segment_tokens`, else the trainer's in the config).
 5. **The runner.** An episode runner in the driver's process (`run/RUN`), with `episodes_at_once` places, over a
    runner whose harnesses reach the gateway on this node (a free port on `127.0.0.1`); a pool of each kind of sandbox
    the environment's programs declare, from the cluster's `[sandboxes.KIND]` (its provider made with the run's
@@ -177,6 +178,10 @@ runs, which a test calls on a `Run` built directly:
    `ID-PART`, played by the same runner.
 7. **The way out**: what it started is stopped in reverse, the actors ended, and the launch noted `ended`, `failed`
    (with why) or `stopped`.
+
+An eval with `limits.spend` is bounded by it: once what the eval and its parts spent on hosted APIs reaches the limit
+(each turn's `spend`, over what the eval's earlier starts recorded), the gateway samples no more on them for it, and
+the driver ends it (`SpendReached`): the eval and its parts end `failed`, saying what was spent and the limit.
 
 The run's directory is `[scratch]/runs/RUN` on the driver's node: the monitor's feed, the checkpoints in use, fetched
 bases. Its start records, beside what the loop records: the environment (and the published version), the blob store,

@@ -44,6 +44,7 @@ from rollout_train.validation import (
     Finding,
     LedgerFacts,
     Spend,
+    SuiteEntryFacts,
     SuiteFacts,
     check,
     completed,
@@ -221,7 +222,16 @@ async def ledger_facts(
         newest = await suite_of(ledger, name)
         if newest is not None and versions:
             environments = frozenset(each for version in versions for each in version.environments)
-            suites[name] = SuiteFacts(name, max(version.number for version in versions), environments)
+            try:
+                played = await suite_of(ledger, named)
+            except (KeyError, ValueError):
+                played = None
+            entries = tuple(
+                SuiteEntryFacts(each.environment, len(each.starts), each.episodes, each.thinking_tokens,
+                                each.answer_tokens)
+                for each in (played.entries if played is not None else ())
+            )  # fmt: skip
+            suites[name] = SuiteFacts(name, max(version.number for version in versions), environments, entries)
     runs = await registry.runs() if registry is not None else []
     taken = frozenset(each.name for each in runs if each.id != own)
     return LedgerFacts(checkpoints=checkpoints, suites=suites, names_taken=taken, gpus=gpus, free=free)
@@ -244,8 +254,8 @@ async def checked(
 
 @dataclass(frozen=True)
 class Examined:
-    """A run's settings, checked: the findings, what is known of its environment, one step's estimated spend and what
-    it trains."""
+    """A run's settings, checked: the findings, what is known of its environment, its estimated spend (one step's, or
+    an eval's) and what it trains."""
 
     findings: list[Finding]
     environment: EnvironmentFacts | None
@@ -264,13 +274,16 @@ async def examined(
     free: Resources | None = None,
 ) -> Examined:
     """A run's settings checked on this cluster with the facts gathered now (`checked`), with those facts' environment,
-    one step's estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`)."""
+    its estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`)."""
     settings = completed(settings, cluster)
     environment = settings.get("environment")
     facts = await environment_facts(str(environment) if environment else None, cluster, ledger, loaded=loaded)
     known = await ledger_facts(settings, ledger, own=own, gpus=gpus, free=free)
     return Examined(
-        check(settings, cluster, facts, known), facts, spend_of(settings, cluster, facts), weights_of(settings, cluster)
+        check(settings, cluster, facts, known),
+        facts,
+        spend_of(settings, cluster, facts, known),
+        weights_of(settings, cluster),
     )
 
 
