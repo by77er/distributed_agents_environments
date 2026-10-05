@@ -1,7 +1,10 @@
-# The gridworld with Qwen/Qwen3-0.6B on the cluster's vLLM engines, with the budgets its check played it with (thinking
-# 384 tokens, answers 128, prompts within 4,096), and a LoRA trainer that shares the card (the engines sleep while it
-# steps). No sandbox and no tool set: the game runs in the run's driver.
+# The gridworld with Qwen/Qwen3-0.6B on the cluster's vLLM engines, and a LoRA trainer that shares the card (the
+# engines sleep while it steps). No sandbox and no tool set: the game runs in the run's driver. An action is one tool
+# call with a short message, so the budgets are small (thinking 384 tokens, answers 128, prompts about 1,500 of the
+# context's 4,096), and groups are of eight episodes: a row the team solves now and then gives a group with solved and
+# unsolved episodes twice as often as in groups of four (docs/products/gridworld.md, "Training it").
 environment = "gridworld.environment:environment"
+group_size = 8
 episodes_at_once = 8                  # a group's episodes at once, each two to four agents sampled together every turn
 
 "trainer.provider" = "local-lora"

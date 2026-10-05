@@ -67,6 +67,11 @@ rate is at least ½. A row's weight is a moving average (`smoothing` 0.5) of whe
 differed, plus `floor` (0.05). Untried rows weigh 1.0. A group counts for its row and for every row in `counts_for`.
 A group in which no episode completed counts for nothing until `FAILED_GROUPS` (3) of them in a row.
 
+An environment may supply its own. The gridworld's ([gridworld](../products/gridworld.md#the-curriculum)) unlocks a row
+once two of its groups are recorded and its success average reaches ½ or its progress average 0.7, and weighs rows
+by mixed outcomes: 0.1 plus the "rewards differed" average scaled by 0.5 + 0.5 × 4p(1−p). Its rewards give progress
+credit, so its rows that nobody solves still differ.
+
 | Right | Wrong |
 |---|---|
 | It samples for signal, not for success: a group-relative update learns nothing from a group whose scores are all equal, which is DAPO's filter applied before playing instead of after | "Rewards differed" is a weak proxy. It counts a group where everyone solved and only the diamond count varied the same as a group with both solved and unsolved episodes. The easy rows t003, t005 and t006 drew 17 of 72 groups |
