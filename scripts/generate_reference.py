@@ -263,7 +263,9 @@ def render_definition(definition: Definition, given: str = "") -> list[str]:
     lines = [f"### `{definition.name}`{given}", "", f"*{definition.kind}* · `{definition.path}`", ""]
     if isinstance(node, ast.ClassDef):
         bases = ", ".join(ast.unparse(base) for base in node.bases)
-        lines += ["```python", f"class {node.name}({bases})" if bases else f"class {node.name}", "```", ""]
+        parameters = ", ".join(ast.unparse(each) for each in node.type_params)
+        name = f"{node.name}[{parameters}]" if parameters else node.name
+        lines += ["```python", f"class {name}({bases})" if bases else f"class {name}", "```", ""]
     elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
         lines += ["```python", signature(node), "```", ""]
     elif isinstance(node, ast.TypeAlias | ast.Assign | ast.AnnAssign):

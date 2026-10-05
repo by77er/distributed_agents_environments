@@ -49,6 +49,12 @@ released pod stays warm for a few minutes for the next run, and a reaper deletes
 | `runpod-trainer` | `[trainers.NAME]` | `ghcr.io/by77er/rollout-trainer`: the training service | A pod for its steps |
 | `runpod-host` | `[inference.NAME]`, with a `runpod-trainer` whose `colocate_with` names it | `ghcr.io/by77er/rollout-host`: both on one GPU | One pod for the trained channel and the steps |
 
+RunPod keeps an image only on the machine that pulled it, so a new pod usually pulls its image whole. Each image is a
+public one as it is published, with 85 to 170 MB of the platform's on top: `vllm/vllm-openai` for the inference and
+host images (8.8 GB compressed), `pytorch/pytorch` for the trainer image (3.2 GB). The platform's packages run on the
+public image's Python, PyTorch and CUDA libraries, with everything else at the versions `uv.lock` pins; a machine that
+has the public image pulls only the platform's layers. `deploy/images/README.md` has what is in each and why.
+
 ### How a run uses its pods
 
 - **Claimed when it starts.** After its placement group is reserved, the run's driver claims its pods. It first takes a

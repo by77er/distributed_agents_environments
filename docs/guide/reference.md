@@ -2817,7 +2817,7 @@ start (none: 4, and 1 for a distillation, which compares nothing).
 *class* · `libraries/rollout-train/src/rollout_train/algorithm.py`
 
 ```python
-class Batch(Generic[Each])
+class Batch[Each: Item]
 ```
 
 What an algorithm makes of a group of episodes: items of one kind (`Each`).

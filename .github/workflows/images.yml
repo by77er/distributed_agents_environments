@@ -70,6 +70,9 @@ jobs:
           context: .
           file: deploy/images/${{ matrix.role }}/Dockerfile
           build-args: VLLM_VERSION=${{ steps.versions.outputs.vllm }}
+          # (the layers built before, so that a change to the sources alone pushes only the last one)
+          cache-from: type=gha,scope=${{ matrix.role }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.role }}
           push: true
           tags: ghcr.io/by77er/rollout-${{ matrix.role }}:${{ steps.versions.outputs.version }}
           labels: |

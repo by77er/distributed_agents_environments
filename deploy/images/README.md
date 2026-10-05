@@ -1,7 +1,7 @@
 # Images
 
 `platform/` is the image the K3s cluster runs (Ray's pods, each run's RayJob, the gateway, the monitors), built in the
-cluster ([deploy/k3s](../k3s/README.md#images)). The other two are for GPU pods rented elsewhere (RunPod), each reached
+cluster ([deploy/k3s](../k3s/README.md#images)). The other three are for GPU pods rented elsewhere (RunPod), each reached
 at a public TCP port over mutual TLS:
 
 | Image | Directory | What runs in it |
@@ -15,11 +15,44 @@ They are built by `.github/workflows/images.yml` on a version tag (`v*`) or when
 (the tag without its `v`, or `sha-COMMIT` for a run by hand); the run's summary has each pushed image's digest, which is
 what a cluster's configuration should name.
 
-What both share is in `common/`:
+## What is in them
+
+Each is a widely used public image, as it is published, with a thin layer of the platform's on top:
+
+| Image | Base | Compressed | The platform's layers |
+|---|---|---|---|
+| inference | `vllm/vllm-openai:vVLLM_VERSION` (8.7 GB) | 8.8 GB | 85 MB: Envoy and step (51 MB), the follower's dependencies (31 MB), the platform's packages (2 MB) |
+| host | `vllm/vllm-openai:vVLLM_VERSION` | 8.8 GB | 110 MB: Envoy and step, the follower's and rollout-lora's dependencies (57 MB), the packages (2 MB) |
+| trainer | `pytorch/pytorch:TORCH-cuda13.0-cudnn9-runtime` (3.0 GB) | 3.2 GB | 170 MB: Envoy and step, rollout-lora's dependencies (transformers, accelerate, flash-linear-attention, …: 116 MB), the packages (2 MB) |
+
+- **One PyTorch.** The platform's packages run on the base image's Python (3.12), in `/opt/rollout/venv`: a virtual
+  environment that sees the image's packages. A package the image has at `uv.lock`'s version is not installed again,
+  and the image's PyTorch, Triton and CUDA libraries are the only ones. `/opt/rollout/venv/added.txt` lists what the
+  virtual environment adds.
+- **The base's layers are the public image's**, byte for byte, so a machine that has pulled that image pulls only
+  the platform's layers.
+- **What changes often comes last.** Envoy and step first, then the dependencies, installed from a list exported from
+  `uv.lock` alone (so that layer is built again only when the list changes), then the scripts and Envoy's
+  configuration, and the platform's packages last: with the build's cache (the workflow keeps one for each image), a
+  change to the sources builds and pushes 2 MB.
+- **The cluster's versions.** In `/opt/rollout/venv` every package is the version `uv.lock` pins, as the cluster runs
+  it, but for PyTorch's own build (`+cu130`) and the CUDA libraries and Triton built with it, which are the image's;
+  the build fails unless the image's torch is `uv.lock`'s release (the trainer image's tag names it). So the adapters
+  and weights a pod's trainer writes are made by the transformers, safetensors and torch the cluster's bridges and vLLM
+  read them with, and the follower speaks to the ledger service and the blob store with the cluster's pydantic, httpx
+  and boto3. The build also checks that every requirement of what is in the virtual environment is met there or by
+  the image (`pip check`). Ray and uv's own package, which the pods do not run, are left out.
+- **Python 3.12.** The packages the pods run (rollout, rollout-train, rollout-s3, rollout-objectives, rollout-lora)
+  require Python 3.12 or later, and ruff and pyright check them for 3.12 (`pyproject.toml`); the rest of the workspace
+  requires 3.13.
+- vLLM's own processes see the image's packages alone. The trainer image has no vLLM. Both bases have the C compiler
+  Triton builds its kernels' launchers with.
+
+What they share is in `common/`:
 
 | File | Does |
 |---|---|
-| `install.sh` | Installs workspace packages, with their dependencies exactly as `uv.lock` pins them, into `/opt/rollout/venv` on a Python 3.13 of its own |
+| `install.sh` | Exports the locked dependencies, and installs them and the workspace packages into `/opt/rollout/venv` on the image's Python ([What is in them](#what-is-in-them)) |
 | `pki.sh` | The pod's certificate from step-ca: the first with a one-time token, then renewed by the pod itself, each new one published for Envoy |
 | `supervise.sh` | Starts the pod's processes and ends them all when one ends, so the container exits and RunPod starts it again |
 | `sds/certificate.yaml`, `sds/ca.yaml` | Where Envoy reads the pod's certificate and the cluster's root: `/certs/current`, which `pki.sh` swaps in one rename |

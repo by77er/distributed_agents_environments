@@ -2,7 +2,7 @@
 name = "rollout-lora"
 version = "0.0.0"
 description = "A Trainer for 4-bit checkpoints with LoRA"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "rollout",
     "rollout-train",

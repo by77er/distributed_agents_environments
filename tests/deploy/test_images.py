@@ -1,7 +1,7 @@
 """The pods' images, read as files: Envoy passes on only the requests each pod's role needs, from the gateway's
 certificate alone, with limits; the certificates' paths agree across Envoy and the script that writes them; the images
-are built from the workspace's vLLM; every variable the pods read is documented. (CI runs `envoy --mode validate` on
-both configurations and builds the images.)"""
+are built from the workspace's vLLM and PyTorch, and what they run is checked for their Python; every variable the pods
+read is documented. (CI runs `envoy --mode validate` on both configurations and builds the images.)"""
 
 import re
 import tomllib
@@ -174,6 +174,38 @@ def test_the_inference_image_is_the_workspace_s_vllm() -> None:
         (envoy_image,) = re.findall(r"FROM (envoyproxy/envoy:\S+) AS envoy", dockerfile)
         assert f"ENVOY_IMAGE: {envoy_image}" in workflow  # (validated with the Envoy the image runs)
         assert f"EXPOSE {PORT}" in dockerfile
+
+
+def test_the_trainer_image_is_pytorch_s_of_the_workspace_s_torch() -> None:
+    lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    torch = next(package["version"] for package in lock["package"] if package["name"] == "torch")
+    dockerfile = (IMAGES / "trainer" / "Dockerfile").read_text()
+    (image,) = re.findall(r"ARG TORCH_IMAGE=(\S+)", dockerfile)
+    assert image.startswith(f"pytorch/pytorch:{torch}-") and image.endswith("-runtime")
+    assert "FROM ${TORCH_IMAGE} AS base" in dockerfile
+    assert "vllm" not in dockerfile.lower()  # (the trainer carries no vLLM)
+
+
+@pytest.mark.parametrize("role", ROLES)
+def test_what_a_pod_runs_is_checked_for_the_python_of_its_image(role: str) -> None:
+    """The packages a pod installs run on its base image's Python (3.12): each says it does, and ruff and pyright check
+    them for it. Dependencies come from uv.lock alone, apart from the source, so that a change to the source rebuilds
+    only the last layer."""
+    dockerfile = (IMAGES / role / "Dockerfile").read_text().replace("\\\n", " ")
+    image = dockerfile.split("\nFROM base\n")[1]  # (the image itself, after the stage that exports the lock)
+    (packages,) = [line for line in image.splitlines() if "install.sh packages" in line]
+    directories = packages.split("install.sh packages")[1].split()
+    assert "libraries/rollout-train" in directories
+    root = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    environments = root["tool"]["pyright"]["executionEnvironments"]
+    checked = {each["root"] for each in environments if each["pythonVersion"] == "3.12"}
+    targets = root["tool"]["ruff"]["per-file-target-version"]
+    for directory in directories:
+        project = tomllib.loads((ROOT / directory / "pyproject.toml").read_text())["project"]
+        assert project["requires-python"] == ">=3.12", directory
+        assert f"{directory}/src" in checked and targets[f"{directory}/**"] == "py312", directory
+    order = [image.index(each) for each in ("install.sh dependencies", "COPY --chmod=755", "install.sh packages")]
+    assert order == sorted(order)
 
 
 def _read(path: Path) -> set[str]:

@@ -2,33 +2,36 @@
 # certificate's renewal, and Envoy in front with mutual TLS (deploy/images/trainer/README.md).
 # Built from the repository's root, by .github/workflows/images.yml:
 #   docker build -f deploy/images/trainer/Dockerfile .
-# PyTorch's wheels bring their CUDA libraries; the pod's driver is the host's.
+# PyTorch's image, of uv.lock's PyTorch, and the CUDA libraries its wheels bring; the pod's driver is the host's. The
+# platform's packages run on its Python, with its PyTorch (deploy/images/README.md). It has the C compiler Triton
+# builds its kernels' launchers with when a step first runs them.
+ARG TORCH_IMAGE=pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime
 FROM envoyproxy/envoy:v1.38.5 AS envoy
 FROM smallstep/step-cli:0.31.0 AS step
 FROM ghcr.io/astral-sh/uv:0.11.19 AS uv
+FROM ${TORCH_IMAGE} AS base
 
-FROM ubuntu:24.04
-# (a C compiler: Triton builds its kernels' launchers when a step first runs them)
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates gcc libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
+# The locked dependencies, apart: a change to the sources alone leaves this file, and the layer installed from it, as
+# they were.
+FROM base AS locked
+RUN --mount=type=bind,target=/source --mount=from=uv,source=/uv,target=/usr/local/bin/uv \
+    cd /source && deploy/images/common/install.sh export "rollout-train[http]" rollout-s3 rollout-lora >/locked.txt
+
+FROM base
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
 COPY --from=step /usr/local/bin/step /usr/local/bin/step
-COPY --from=uv /uv /usr/local/bin/uv
 RUN envoy --version && step version
-
-COPY . /opt/rollout/source
-WORKDIR /opt/rollout/source
-RUN deploy/images/common/install.sh "rollout-train[http]" rollout-s3 rollout-lora -- \
-        libraries/rollout libraries/rollout-train implementations/rollout-s3 implementations/rollout-objectives \
-        implementations/rollout-lora \
-    && mkdir -p /opt/rollout/bin /etc/envoy/sds \
-    && cp deploy/images/common/pki.sh deploy/images/common/supervise.sh deploy/images/trainer/entrypoint.sh \
-        /opt/rollout/bin/ \
-    && cp deploy/images/trainer/envoy.yaml /etc/envoy/envoy.yaml \
-    && cp deploy/images/common/sds/*.yaml /etc/envoy/sds/ \
-    && chmod +x /opt/rollout/bin/*.sh \
-    && cd / && rm -rf /opt/rollout/source /root/.cache/uv
+RUN --mount=from=locked,source=/locked.txt,target=/locked.txt \
+    --mount=type=bind,source=deploy/images/common/install.sh,target=/install.sh \
+    --mount=from=uv,source=/uv,target=/usr/local/bin/uv \
+    /install.sh dependencies /locked.txt
+COPY --chmod=755 deploy/images/common/pki.sh deploy/images/common/supervise.sh deploy/images/trainer/entrypoint.sh \
+    /opt/rollout/bin/
+COPY deploy/images/trainer/envoy.yaml /etc/envoy/envoy.yaml
+COPY deploy/images/common/sds/ /etc/envoy/sds/
+RUN --mount=type=bind,target=/source,rw --mount=from=uv,source=/uv,target=/usr/local/bin/uv \
+    cd /source && deploy/images/common/install.sh packages libraries/rollout libraries/rollout-train \
+        implementations/rollout-s3 implementations/rollout-objectives implementations/rollout-lora
 WORKDIR /
 
 EXPOSE 8443

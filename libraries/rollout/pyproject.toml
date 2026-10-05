@@ -2,7 +2,7 @@
 name = "rollout"
 version = "0.0.0"
 description = "Agents and environments: tasks, agents, programs, tools, sandboxes, and a runner in this process"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.11",
     "rfc8785>=0.1.4",

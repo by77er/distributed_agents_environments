@@ -74,6 +74,13 @@ src = [
     ".",
 ]
 
+[tool.ruff.per-file-target-version]  # (what the pods run, which they run on the vLLM image's Python: deploy/images)
+"libraries/rollout/**" = "py312"
+"libraries/rollout-train/**" = "py312"
+"implementations/rollout-s3/**" = "py312"
+"implementations/rollout-objectives/**" = "py312"
+"implementations/rollout-lora/**" = "py312"
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
 # Task subclasses declare `models`, `imports` and hints as plain class attributes; the base declares the ClassVar.
@@ -102,6 +109,13 @@ extraPaths = [
 ]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
+executionEnvironments = [  # (what the pods run, which they run on the vLLM image's Python: deploy/images/README.md)
+    { root = "libraries/rollout/src", pythonVersion = "3.12" },
+    { root = "libraries/rollout-train/src", pythonVersion = "3.12" },
+    { root = "implementations/rollout-s3/src", pythonVersion = "3.12" },
+    { root = "implementations/rollout-objectives/src", pythonVersion = "3.12" },
+    { root = "implementations/rollout-lora/src", pythonVersion = "3.12" },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "environments"]

@@ -35,7 +35,7 @@ import random
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Generic, Protocol, TypeVar
+from typing import Protocol
 
 from pydantic import JsonValue
 
@@ -44,12 +44,9 @@ from rollout_train.recorder.segments import Segment
 from rollout_train.rollouts import Episode
 from rollout_train.trainer import Budget, Distilled, Item, Labelled, Pair, Weighted, segments_of
 
-Each = TypeVar("Each", bound=Item, covariant=True, default=Item)
-"""The kind of item a batch holds."""
-
 
 @dataclass(frozen=True)
-class Batch(Generic[Each]):
+class Batch[Each: Item]:
     """What an algorithm makes of a group of episodes: items of one kind (`Each`)."""
 
     items: Sequence[Each] = ()

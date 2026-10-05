@@ -35,3 +35,7 @@ From the repository's root (CI builds it; this is the same command):
 ```bash
 docker build -f deploy/images/trainer/Dockerfile -t rollout-trainer .
 ```
+
+It starts from `TORCH_IMAGE`, PyTorch's image of the torch `uv.lock` pins
+(`pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime`); the build fails if that image's torch is another
+([deploy/images](../README.md#what-is-in-them)).

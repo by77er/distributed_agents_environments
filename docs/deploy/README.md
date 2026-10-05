@@ -39,7 +39,7 @@ Also in this section:
 |---|---|
 | `deploy/chart/rollout` | The Helm chart: the stores, a Ray cluster, the gateway and the monitor, in one namespace |
 | `deploy/images/platform` | The image every pod of the platform runs |
-| `deploy/images/inference`, `deploy/images/trainer` | Images for GPU pods rented elsewhere, reached over mutual TLS |
+| `deploy/images/inference`, `deploy/images/trainer`, `deploy/images/host` | Images for GPU pods rented elsewhere, reached over mutual TLS |
 | `deploy/k3s` | A one-node K3s cluster with a GPU: values for the device plugin, a retaining storage class, an in-cluster registry and BuildKit |
 | `deploy/clusters/example.toml` | A cluster config for one machine without Kubernetes |
 | `deploy/local` | Postgres and an S3-compatible store in Docker Compose, for development |
