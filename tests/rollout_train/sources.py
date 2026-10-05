@@ -123,8 +123,13 @@ def a_version(
     """A published version as an import records it, without importing anything: its id the hash of `source`; its
     environment declares the kinds of sandbox `sandboxes` (none: its description does not say)."""
     id = hashlib.sha256(source.encode()).hexdigest()
-    said: dict[str, JsonValue] = {"version": "1", "rows": [{"key": "say-yes", "title": "say yes"}]}
-    said |= {"evals": {"words-eval": []}} | ({"sandboxes": list[JsonValue](sandboxes)} if sandboxes is not None else {})
+    said: dict[str, JsonValue] = {
+        "version": "1",
+        "rows": [{"key": "say-yes", "title": "say yes"}],
+        "evals": {"words-eval": []},
+    }
+    if sandboxes is not None:
+        said["sandboxes"] = list[JsonValue](sandboxes)
     return EnvironmentVersion(
         name=name, version=id, source="https://example.com/words.git", ref=None, commit="c0ffee" * 6 + "c0ff",
         subdirectory="", entry_point="words:environment", blob={"uri": "s3://b/k", "sha256": id, "size": 3},
