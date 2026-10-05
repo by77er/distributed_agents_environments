@@ -1,6 +1,6 @@
 # Images
 
-`platform/` is the image the K3s cluster runs (Ray's pods, the launchers, the gateway, the monitors), built in the
+`platform/` is the image the K3s cluster runs (Ray's pods, each run's RayJob, the gateway, the monitors), built in the
 cluster ([deploy/k3s](../k3s/README.md#images)). The other two are for GPU pods rented elsewhere (RunPod), each reached
 at a public TCP port over mutual TLS:
 
@@ -49,7 +49,7 @@ and a `step ca renew --daemon` beside the gateway.
 
 | Variable | Says |
 |---|---|
-| `ROLLOUT_POD_NAME` | The pod's name, as the launcher gave it (lowercase letters, digits, hyphens): its identity is `spiffe://rollout/pod/NAME` |
+| `ROLLOUT_POD_NAME` | The pod's name, as its starter gave it (lowercase letters, digits, hyphens): its identity is `spiffe://rollout/pod/NAME` |
 | `ROLLOUT_LEDGER` | Where the ledger is, as JSON: `{"kind": "rollout_train.database:DatabaseLedger", "url": "postgresql://…"}` |
 | `ROLLOUT_BLOBS` | Where the blob store is, as JSON: `{"kind": "rollout_s3:S3BlobStore", "bucket": "…", "endpoint_url": "…"}` |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3` | The blob store's credentials and endpoint (an R2 or S3 bucket), as RunPod secrets |

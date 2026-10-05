@@ -1,0 +1,11 @@
+# GSM8K played by the base Qwen/Qwen3.5-9B, sampled at Tinker: evals of the `math` suite (`rollout eval math --preset
+# gsm8k-tinker`), in rollout-verifiers' own Python (the cluster's [environments] entry for GSM8K). Tinker bills each
+# token: the room is capped here, and by the suite's entry.
+environment = "rollout_verifiers.environments:gsm8k"
+episodes_at_once = 8
+
+"channels.policy.provider" = "tinker"
+"channels.policy.model" = "Qwen/Qwen3.5-9B"
+"channels.policy.renderer" = "rollout_qwen:qwen35"
+"channels.policy.thinking_tokens" = 1024
+"channels.policy.answer_tokens" = 512

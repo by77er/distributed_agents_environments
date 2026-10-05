@@ -53,7 +53,7 @@ bootstrap() {
 renew() {
     need STEP_CA_URL
     # --daemon renews at about two thirds of the certificate's life (with jitter), for as long as step-ca renews it:
-    # a certificate the launcher had revoked is not renewed, and lapses.
+    # a certificate its starter had revoked is not renewed, and lapses.
     exec step ca renew --daemon --ca-url "$STEP_CA_URL" --root "$LIVE/ca.crt" \
         --exec "$0 publish" "$LIVE/tls.crt" "$LIVE/tls.key"
 }
@@ -63,7 +63,7 @@ publish() {
     version=$CERTS/.v$(date +%s%N)
     mkdir -m 700 "$version"
     cp "$LIVE/tls.crt" "$LIVE/tls.key" "$LIVE/ca.crt" "$version/"
-    # (the serial the pod's beats say, so that the launcher can have this certificate revoked; empty if unread)
+    # (the serial the pod's beats say, so that its starter can have this certificate revoked; empty if unread)
     step certificate inspect "$LIVE/tls.crt" --format json |
         "$PYTHON" -c 'import json, sys; print(json.load(sys.stdin)["serial_number"])' >"$version/serial" ||
         : >"$version/serial"

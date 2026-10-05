@@ -1,0 +1,40 @@
+# What each run's job is made from (the cluster config's [kubernetes] rayjob): a RayJob whose Ray cluster is one head
+# pod of the platform's image, with the GPU share `rayjob.gpus` names (the run's trainer runs on the driver's node, its
+# engine hosts beside it), torn down when the job ends. `rollout_train.submitting.rendered` fills in each run's name,
+# entrypoint, runtime environment and metadata; the rest is this file's. When the driver or its pod is lost, the job is
+# submitted again up to `backoffLimit` times, and the run goes on from the ledger.
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  labels:
+    app.kubernetes.io/part-of: rollout
+spec:
+  shutdownAfterJobFinishes: true
+  ttlSecondsAfterFinished: {{ .Values.rayjob.ttlSeconds }}
+  backoffLimit: {{ .Values.rayjob.backoffLimit }}
+  rayClusterSpec:
+    rayVersion: {{ .Values.ray.version | quote }}
+    headGroupSpec:
+      rayStartParams:
+        dashboard-host: 0.0.0.0
+        num-gpus: {{ .Values.rayjob.gpus | quote }}
+      template:
+        metadata:
+          labels: {app: run}
+        spec:
+          {{- if .Values.rayjob.gpus }}
+          runtimeClassName: nvidia
+          {{- end }}
+          containers:
+            - name: ray-head
+              image: {{ include "rollout.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              workingDir: /opt/rollout/source
+              env:
+                {{- include "rollout.env" . | nindent 16 }}
+                - {name: RAY_ENABLE_UV_RUN_RUNTIME_ENV, value: "0"}
+              volumeMounts:
+                {{- include "rollout.volumeMounts" . | nindent 16 }}
+              resources: {{- toYaml .Values.rayjob.resources | nindent 16 }}
+          volumes:
+            {{- include "rollout.volumes" . | nindent 12 }}

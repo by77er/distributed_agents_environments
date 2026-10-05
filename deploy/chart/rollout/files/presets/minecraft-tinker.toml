@@ -1,0 +1,28 @@
+# Minecraft with the full Qwen3.5-9B (bfloat16), trained and sampled at Thinking Machines (Tinker); the Paper servers and
+# the run's driver stay in the cluster, and nothing uses its GPU. Its settings are minecraft-one-gpu's where they still
+# apply. Cost, from curriculum-9's numbers: about $8 to $18 a step of 384 segments, $230 to $520 for a run as long as
+# curriculum-9's 72 groups and 31 steps.
+#
+# Served on the cluster's GPU instead (`channels.policy.provider = "local-vllm"`, Tinker's adapters bridged to PEFT's
+# layout): the full model does not fit the 16 GB card even in FP8 (10.8 GiB of weights, 0.25 GiB left for the cache at
+# 0.88 of the card: not one 8,192-token turn). What fits is minecraft-one-gpu's 4-bit checkpoint serving Tinker's
+# adapter (trained over bfloat16: `kl_floor` and `mean_mismatch` measure the difference), as
+# `channels.policy.model = "cyankiwi/Qwen3.5-9B-AWQ-4bit"`. Tinker's q, k and v of a linear-attention layer joined make
+# rank 32 into 96, which the cluster's `max_lora_rank` for that model allows.
+environment = "minecraft_team.environment:environment"
+episodes_at_once = 6                  # each with a world of its own: memory, not a GPU, is the limit
+
+"trainer.provider" = "tinker-lora"
+"trainer.model" = "Qwen/Qwen3.5-9B"
+"trainer.rank" = 32
+"trainer.learning_rate" = 1e-4        # minecraft-one-gpu's 5e-5, doubled: Tinker's adapters are scaled half as much
+"trainer.segment_tokens" = 8000       # curriculum-9's longest segment was 7,094 tokens
+"trainer.segments_per_step" = 384
+"trainer.tokens_per_step" = 16384     # about six updates a step (curriculum-9 made twenty at 4,096); one (a larger
+                                      # number) needs no pass for where the step starts, and halves the training's cost
+
+"channels.policy.provider" = "tinker"
+"channels.policy.model" = "Qwen/Qwen3.5-9B"  # Tinker's id and the Hub's: rollout_qwen:qwen35 loads its tokenizer there
+"channels.policy.renderer" = "rollout_qwen:qwen35"
+"channels.policy.thinking_tokens" = 1024
+"channels.policy.answer_tokens" = 400

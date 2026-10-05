@@ -1,7 +1,7 @@
 # The platform: every workspace package with every extra (vLLM, the trainers, Tinker) in /opt/rollout/venv,
 # rollout-verifiers (a project locked apart) in /opt/rollout/verifiers, a C compiler for the kernels torch and Triton
 # compile at run time, a Java runtime for Paper and Node for the Minecraft harness. Ray's pods (KubeRay), the gateway,
-# the monitor and the launchers all run it.
+# the monitors and each run's RayJob all run it.
 # Built from the repository's root:
 #   buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=deploy/images/platform ...
 FROM ghcr.io/astral-sh/uv:0.11.19 AS uv
@@ -31,7 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --all-packages --all-extras --no-dev \
     && cd environments/minecraft/harness && npm ci --omit=dev \
     && ray --version && java -version 2>&1 | head -1 && node --version
-# rollout-verifiers in a Python environment of its own, from its own lock: GSM8K's launcher and the evals it starts;
+# rollout-verifiers in a Python environment of its own, from its own lock: the runs on GSM8K start in it;
 # rsync, for copying run directories onto the state volume.
 RUN apt-get update && apt-get install -y --no-install-recommends rsync && rm -rf /var/lib/apt/lists/*
 RUN --mount=type=cache,target=/root/.cache/uv \

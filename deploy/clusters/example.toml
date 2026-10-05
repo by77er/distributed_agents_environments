@@ -48,6 +48,9 @@ options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 64
 base = "Qwen/Qwen3.5-9B"                      # an adapter trained over the base is served on it as it is
 context = 8192
 options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 96 }  # rank 32 from Tinker, times 3
+[inference.local-vllm.models."Qwen/Qwen3-0.6B"]
+context = 4096
+options = { gpu_memory_utilization = 0.45, max_num_seqs = 32, max_lora_rank = 16 }
 
 [inference.tinker]
 kind = "tinker"                               # auth vendor: Tinker's SDK reads TINKER_API_KEY
@@ -87,6 +90,8 @@ cpus = 2
 memory_gib = 1.5
 
 [environments."minecraft_team.environment:environment"]
+python = "platform"
+[environments."gridworld.environment:environment"]
 python = "platform"
 [environments."rollout_verifiers.environments:gsm8k"]    # its own lock, built into a cached virtualenv
 project = "~/Code/distributed_agents_environments/implementations/rollout-verifiers"

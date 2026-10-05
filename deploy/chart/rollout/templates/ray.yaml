@@ -1,7 +1,8 @@
-# The Ray cluster the launchers submit runs to, long-lived: a head that runs no tasks, a GPU group and a CPU group the
-# autoscaler starts from zero when a job waits for one and removes after `ray.idleSeconds` idle. Its pods run the
-# platform's image and mount what every pod of the platform mounts, so a run's job finds its profile, its directory
-# and the stores. Clients present the cluster's token, which KubeRay keeps in a Secret named after the cluster.
+# The long-lived Ray cluster, where the monitors check environments imported from their source: a head that runs no
+# tasks, a GPU group and a CPU group the autoscaler starts from zero when a job waits for one and removes after
+# `ray.idleSeconds` idle. Its pods run the platform's image and mount what every pod of the platform mounts, so a job
+# finds the cluster config and the stores. Clients present the cluster's token, which KubeRay keeps in a Secret named
+# after the cluster. Each run's job has a Ray cluster of its own (files/rayjob.yaml).
 {{- define "rollout.rayContainer" -}}
 image: {{ include "rollout.image" .root }}
 imagePullPolicy: {{ .root.Values.image.pullPolicy }}

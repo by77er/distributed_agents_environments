@@ -1,0 +1,18 @@
+# Minecraft on one machine with one 16 GB GPU: the 4-bit Qwen3.5-9B on the cluster's vLLM engines, and a LoRA trainer
+# that shares their card (the engines sleep while it steps). Saved as the preset `minecraft-one-gpu` by
+# `rollout preset load` (the chart runs it at install; on one machine, run it with this directory).
+environment = "minecraft_team.environment:environment"
+episodes_at_once = 6                  # each with a world of its own (the cluster's [sandboxes.minecraft]), and up to
+                                      # four agents' requests: about fifteen at once, which the engine's 20 sequences hold
+
+"trainer.provider" = "local-lora"
+"trainer.rank" = 32
+"trainer.learning_rate" = 5e-5
+"trainer.segment_tokens" = 8000       # peak 12.4 GiB at 8,000 tokens; past the card's memory a step crawls
+"trainer.segments_per_step" = 384     # 4 to 8 s each: about half an hour a step
+
+"channels.policy.provider" = "local-vllm"
+"channels.policy.model" = "cyankiwi/Qwen3.5-9B-AWQ-4bit"
+"channels.policy.renderer" = "rollout_qwen:qwen35"
+"channels.policy.thinking_tokens" = 1024  # thoughts here run to a median of 530 tokens and a 95th percentile of 820
+"channels.policy.answer_tokens" = 400     # a tool call takes about 40; a summary of old turns up to this

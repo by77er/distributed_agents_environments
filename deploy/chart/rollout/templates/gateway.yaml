@@ -1,5 +1,6 @@
-# The gateway: stateless replicas that sample the channels of `gateway.profile` and record every turn, behind a
-# Service (what runs in the cluster reaches) and an Ingress (what reaches it through Traefik).
+# The gateway: stateless replicas that sample every channel a run's start names on the cluster config's providers
+# whose servers it reaches, and record every turn, behind a Service (what runs in the cluster reach) and an Ingress
+# (what reaches it through Traefik).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,7 +19,7 @@ spec:
           command:
             - rollout
             - gateway
-            - /etc/rollout/profiles/{{ .Values.gateway.profile }}
+            - --cluster
             - --listen
             - 0.0.0.0:{{ .Values.gateway.port }}
             - --proxied

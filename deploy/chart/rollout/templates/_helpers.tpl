@@ -12,7 +12,7 @@ postgresql://rollout@postgres.{{ .Release.Namespace }}:5432/rollout
 {{- end }}
 
 {{/* What every process of the platform is given: the cluster config, and the stores' endpoint and credentials. The
-ledger's URL (in the cluster config and the profiles) holds no password: PGPASSWORD does. */}}
+ledger's URL (in the cluster config) holds no password: PGPASSWORD does. */}}
 {{- define "rollout.env" -}}
 - name: ROLLOUT_CLUSTER
   value: /etc/rollout/cluster.toml
@@ -56,7 +56,8 @@ after the cluster, and gives it to Ray's own pods itself). */}}
     name: rollout
     items:
       - {key: cluster.toml, path: cluster.toml}
-      {{- range $path, $_ := .Files.Glob "files/profiles/**.toml" }}
+      - {key: rayjob.yaml, path: rayjob.yaml}
+      {{- range $path, $_ := .Files.Glob "files/presets/*.toml" }}
       - {key: {{ trimPrefix "files/" $path | replace "/" "_" }}, path: {{ trimPrefix "files/" $path }}}
       {{- end }}
 - name: gateway-keys

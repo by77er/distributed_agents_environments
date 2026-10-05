@@ -1,5 +1,6 @@
-# The platform in the namespace it is installed into (`rollout`), by role: the stores, a Ray cluster, the launchers,
-# the gateway, the monitor. Secrets are made outside the chart and named here (deploy/k3s/README.md).
+# The platform in the namespace it is installed into (`rollout`), by role: the stores, a Ray cluster, the gateway, the
+# monitors, and the RayJob each run's job is made from. Secrets are made outside the chart and named here
+# (deploy/k3s/README.md).
 
 image:
   repository: localhost:30500/rollout-platform  # deploy/images/platform, built in the cluster
@@ -38,9 +39,8 @@ stores:
   bucket: rollout-blobs
   prefix: blobs/
 
-# One long-lived Ray cluster: the launchers submit each run to it as a Ray job. The head runs no tasks; a run that asks
-# for a GPU gets the GPU group's pod, a run that asks for none the CPU group's. The autoscaler starts either from zero
-# when a job waits, and removes it after idleSeconds without work.
+# One long-lived Ray cluster, where the monitors check environments imported from git: a head that runs no tasks, a
+# GPU group and a CPU group the autoscaler starts from zero when work waits for one and removes after idleSeconds idle.
 ray:
   name: ray
   version: "2.59.0"
@@ -55,54 +55,28 @@ ray:
     cpus: "4"
     resources: {requests: {cpu: "1", memory: 2Gi}, limits: {memory: 4Gi}}
 
-# Each launcher offers the profiles under files/profiles/PROFILES and the environments it names, and the environments
-# imported from git (each run on one a Ray job in its own runtime environment); it beats as launcher/launcher-NAME/NAME,
-# and submits the runs it claims to the Ray cluster, each asking for `gpus`. It runs in the Python environment that can
-# import the environments it names.
-launchers:
-  minecraft:
-    python: /opt/rollout/venv/bin/python
-    workingDir: /opt/rollout/source
-    profiles: minecraft
-    environments: [minecraft_team.environment:environment]
-    atOnce: 1
-    gpus: 1
-    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
-  gridworld:
-    python: /opt/rollout/venv/bin/python
-    workingDir: /opt/rollout/source
-    profiles: gridworld
-    environments: [gridworld.environment:environment]
-    atOnce: 1
-    gpus: 1
-    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
-  gsm8k:
-    python: /opt/rollout/verifiers/bin/python
-    workingDir: /opt/rollout/source/implementations/rollout-verifiers
-    profiles: gsm8k
-    environments: [rollout_verifiers.environments:gsm8k]
-    atOnce: 2
-    gpus: 0
-    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
+# Each run's job: a RayJob with a Ray cluster of its own (files/rayjob.yaml), one head pod holding `gpus` of the card
+# (its trainer and its engine hosts share it), started again up to backoffLimit times when its driver is lost, and
+# removed ttlSeconds after it ends.
+rayjob:
+  gpus: 1
+  backoffLimit: 2
+  ttlSeconds: 600
+  resources: {requests: {cpu: "4", memory: 8Gi}, limits: {memory: 14Gi, nvidia.com/gpu: 1}}
 
 gateway:
-  profile: gsm8k/gsm8k_tinker.toml
   replicas: 1
   port: 8900
   host: gateway.localhost
   resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
 
-# Each monitor serves the page over a run's directory (its ledger, and every run in that ledger) or a ledger's URL, and
-# imports environments from git with the cluster config's blob store and Ray cluster.
+# Each monitor serves the page over the cluster config's ledger (and every run in it), or over `where` (a run's
+# directory under state.path, or a ledger's URL) where it names one; asks for runs on the cluster config; and imports
+# environments from their source with its blob store and the long-lived Ray cluster.
 monitors:
   main:
-    where: runs/curriculum-9   # under state.path
     host: monitor.localhost
     resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 3Gi}}
-  astra:
-    where: evaluations/astra-t054u
-    host: astra.monitor.localhost
-    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
 
 ingress:
   className: traefik

@@ -1,7 +1,7 @@
-"""The Helm chart (deploy/chart/rollout), rendered: its cluster config and profiles read as the code reads them and name
-the cluster's stores; every container says what it needs and the most memory it may take; every volume is of the
-class `storageClass` names. Skipped where helm is not
-installed."""
+"""The Helm chart (deploy/chart/rollout), rendered: its cluster config reads as the code reads it, names the cluster's
+stores and makes each run's job a RayJob from its template, which renders into a run's RayJob; its presets are run
+settings that cluster takes; the monitors' account may make RayJobs; every container says what it needs and the most
+memory it may take; every volume is of the class `storageClass` names. Skipped where helm is not installed."""
 
 import shutil
 import tomllib
@@ -12,7 +12,10 @@ import pytest
 import yaml
 
 from rollout_train.cluster import parsed
-from rollout_train.profile import Profile
+from rollout_train.launches import TRAIN, Asked, new_launch
+from rollout_train.run_settings import RunSettings, flattened
+from rollout_train.submitting import rendered as made_from
+from rollout_train.validation import check
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 CHART = ROOT / "deploy" / "chart" / "rollout"
@@ -46,7 +49,7 @@ def config_of(rendered: list[dict[str, Any]]) -> dict[str, str]:
     return config["data"]
 
 
-def test_the_cluster_config_reads_and_names_the_stores(rendered: list[dict[str, Any]]) -> None:
+def test_the_cluster_config_reads_names_the_stores_and_makes_runs_rayjobs(rendered: list[dict[str, Any]]) -> None:
     cluster = parsed(tomllib.loads(config_of(rendered)["cluster.toml"]))
     assert cluster.name == "k3s" and cluster.ledger.url == LEDGER and cluster.ledger.url_secret is None
     assert cluster.blobs.kind == BLOBS["kind"] and dict(cluster.blobs.settings) == {
@@ -56,28 +59,67 @@ def test_the_cluster_config_reads_and_names_the_stores(rendered: list[dict[str, 
     assert (
         cluster.gateway.url == "http://gateway.rollout:8900" and cluster.ray.jobs == "http://ray-head-svc.rollout:8265"
     )
+    assert cluster.kubernetes is not None
+    assert (cluster.kubernetes.namespace, cluster.kubernetes.rayjob) == ("rollout", "/etc/rollout/rayjob.yaml")
     assert set(cluster.environments) == {
         "minecraft_team.environment:environment",
         "gridworld.environment:environment",
         "rollout_verifiers.environments:gsm8k",
     }
+    gsm8k = cluster.environments["rollout_verifiers.environments:gsm8k"]
+    assert gsm8k.runs_in == "/opt/rollout/verifiers/bin/python"
 
 
-def test_every_profile_reads_and_names_the_stores(rendered: list[dict[str, Any]], tmp_path: Path) -> None:
-    profiles = {key: text for key, text in config_of(rendered).items() if key.startswith("profiles_")}
-    assert set(profiles) == {
-        "profiles_gsm8k_gsm8k_tinker.toml",
-        "profiles_minecraft_one-gpu.toml",
-        "profiles_minecraft_tinker.toml",
-        "profiles_gridworld_qwen3-0.6b.toml",
+def test_a_runs_rayjob_is_made_from_the_charts_template(rendered: list[dict[str, Any]]) -> None:
+    template = yaml.safe_load(config_of(rendered)["rayjob.yaml"])
+    launch = new_launch(Asked(TRAIN, "team 8", {"environment": "minecraft_team.environment:environment"}), "run_1")
+    made = made_from(template, launch, f"python -m rollout_train.jobs {launch.id}", {"env_vars": {}}, "rollout")
+    assert made["kind"] == "RayJob" and made["metadata"]["namespace"] == "rollout"
+    spec = made["spec"]
+    assert spec["shutdownAfterJobFinishes"] is True and spec["backoffLimit"] == 2 and spec["entrypointNumCpus"] == 1
+    head = spec["rayClusterSpec"]["headGroupSpec"]
+    assert head["rayStartParams"]["num-gpus"] == "1"
+    pod = head["template"]["spec"]
+    (container,) = pod["containers"]
+    assert container["image"] == "localhost:30500/rollout-platform:dev" and pod["runtimeClassName"] == "nvidia"
+    assert {"ROLLOUT_CLUSTER", "PGPASSWORD", "AWS_ACCESS_KEY_ID"} <= {each["name"] for each in container["env"]}
+    assert container["resources"]["limits"]["nvidia.com/gpu"] == 1
+    assert {each["mountPath"] for each in container["volumeMounts"]} >= {"/etc/rollout", "/root/.cache/rollout"}
+
+
+def test_every_preset_is_run_settings_the_cluster_takes(rendered: list[dict[str, Any]]) -> None:
+    config = config_of(rendered)
+    cluster = parsed(tomllib.loads(config["cluster.toml"]))
+    presets = {key: text for key, text in config.items() if key.startswith("presets_")}
+    assert set(presets) == {
+        "presets_minecraft-one-gpu.toml",
+        "presets_minecraft-tinker.toml",
+        "presets_gridworld-qwen3-0.6b.toml",
+        "presets_gsm8k-tinker.toml",
     }
-    for key, text in profiles.items():
-        path = tmp_path / key
-        path.write_text(text)
-        profile = Profile.load(path)
-        assert profile.ledger == {"kind": "rollout_train.database:DatabaseLedger", "url": LEDGER}, key
-        assert profile.blobs == BLOBS, key
-        assert str(profile.directory).startswith("/root/.cache/rollout/runs/"), key
+    for key, text in presets.items():
+        settings = flattened(tomllib.loads(text))
+        kind = "train" if "trainer.provider" in settings else "check"  # (gsm8k-tinker's channels play its evals)
+        refused = [each for each in check(RunSettings({**settings, "kind": kind}), cluster) if each.refuses]
+        assert refused == [], key
+    (job,) = [each for each in rendered if each["kind"] == "Job" and each["metadata"]["name"] == "presets"]
+    assert job["metadata"]["annotations"]["helm.sh/hook"] == "post-install,post-upgrade"
+    (container,) = job["spec"]["template"]["spec"]["containers"]
+    assert container["command"] == ["rollout", "preset", "load", "/etc/rollout/presets", "--cluster"]
+
+
+def test_the_monitors_may_make_read_and_delete_rayjobs(rendered: list[dict[str, Any]]) -> None:
+    (role,) = [each for each in rendered if each["kind"] == "Role" and each["metadata"]["name"] == "monitor"]
+    (rayjobs,) = [rule for rule in role["rules"] if rule["resources"] == ["rayjobs"]]
+    assert {"create", "get", "list", "delete"} <= set(rayjobs["verbs"]) and rayjobs["apiGroups"] == ["ray.io"]
+    (binding,) = [each for each in rendered if each["kind"] == "RoleBinding" and each["metadata"]["name"] == "monitor"]
+    assert binding["subjects"] == [{"kind": "ServiceAccount", "name": "monitor", "namespace": "rollout"}]
+    monitors = [
+        each["spec"]["template"]["spec"]
+        for each in rendered
+        if each["kind"] == "Deployment" and each["spec"]["template"]["metadata"]["labels"].get("app") == "monitor"
+    ]
+    assert monitors and all(pod["serviceAccountName"] == "monitor" for pod in monitors)
 
 
 def test_every_container_asks_for_what_it_needs_and_is_held_to_a_memory_limit(rendered: list[dict[str, Any]]) -> None:
@@ -93,7 +135,7 @@ def test_every_container_asks_for_what_it_needs_and_is_held_to_a_memory_limit(re
         return []
 
     containers = [container for each in rendered for pod in pods(each) for container in pod["containers"]]
-    assert len(containers) == 12  # the stores, the bucket job, Ray (3), the launchers, the gateway, the monitors
+    assert len(containers) == 9  # the stores, the bucket job, the presets job, Ray (3), the gateway, the monitor
     for container in containers:
         assert container["resources"]["requests"]["memory"] and container["resources"]["limits"]["memory"], container[
             "name"
@@ -130,19 +172,16 @@ def containers_of(rendered: list[dict[str, Any]], app: str) -> list[dict[str, An
     ]
 
 
-def test_a_launcher_offers_the_gridworld_with_its_profile_on_the_gpu(rendered: list[dict[str, Any]]) -> None:
-    (gridworld,) = [each for each in containers_of(rendered, "launcher") if "gridworld" in each["command"]]
-    command = gridworld["command"]
-    assert command[command.index("--profiles") + 1] == "/etc/rollout/profiles/gridworld"
-    assert command[command.index("--environment") + 1] == "gridworld.environment:environment"
-    assert command[command.index("--gpus") + 1] == "1" and "--ray" in command
+def test_the_gateway_serves_the_cluster_configs_channels(rendered: list[dict[str, Any]]) -> None:
+    (gateway,) = containers_of(rendered, "gateway")
+    assert gateway["command"][:3] == ["rollout", "gateway", "--cluster"]
 
 
-def test_every_monitor_imports_with_the_cluster_config_and_reaches_ray_with_its_token(
+def test_every_monitor_asks_for_runs_and_imports_with_the_cluster_config_and_reaches_ray_with_its_token(
     rendered: list[dict[str, Any]],
 ) -> None:
     monitors = containers_of(rendered, "monitor")
-    assert len(monitors) == 2
+    assert len(monitors) == 1
     for monitor in monitors:
         assert monitor["command"][-1] == "--cluster"
         names = {each["name"] for each in monitor["env"]}

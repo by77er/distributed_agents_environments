@@ -1,15 +1,19 @@
-# The K3s cluster on this machine, in docs/guide/cluster.md's format: the ledger in Postgres, blobs in versitygw's S3,
-# the Ray cluster KubeRay keeps, one 16 GB GPU, Tinker, the Minecraft worlds, the gridworld, and GSM8K in
-# rollout-verifiers' Python.
+# The cluster the chart is installed into, in docs/guide/cluster.md's format: the ledger in Postgres, blobs in
+# versitygw's S3, each run a RayJob made from rayjob.yaml, one 16 GB GPU, Tinker, the Minecraft worlds, the gridworld,
+# and GSM8K in rollout-verifiers' Python.
 # Every pod finds it at /etc/rollout/cluster.toml (ROLLOUT_CLUSTER). Secrets are named, never written: PGPASSWORD,
 # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY come from the Secret `stores`, TINKER_API_KEY (or credentials.json)
 # from `tinker`, the gateway's keys from `gateway-keys`.
 name = "k3s"
 
 [ray]
-address = "auto"                              # in a Ray pod: the cluster it is part of
-jobs = "http://{{ .Values.ray.name }}-head-svc.{{ .Release.Namespace }}:8265"
+address = "auto"                              # in a Ray pod: the cluster it is part of (a run's: its RayJob's)
+jobs = "http://{{ .Values.ray.name }}-head-svc.{{ .Release.Namespace }}:8265"  # the long-lived cluster: imports' checks
 temp_dir = "/tmp/ray"                         # the container's own disk
+
+[kubernetes]                                  # each run's job is a RayJob with a Ray cluster of its own
+namespace = "{{ .Release.Namespace }}"
+rayjob = "/etc/rollout/rayjob.yaml"
 
 [ledger]
 url = "{{ include "rollout.ledgerUrl" . }}"  # the password is PGPASSWORD's
@@ -91,3 +95,4 @@ python = "platform"
 
 [environments."rollout_verifiers.environments:gsm8k"]
 project = "/opt/rollout/source/implementations/rollout-verifiers"
+interpreter = "/opt/rollout/verifiers/bin/python"  # where the image built its Python

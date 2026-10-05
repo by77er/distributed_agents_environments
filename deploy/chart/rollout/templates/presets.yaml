@@ -1,0 +1,25 @@
+# The presets (files/presets), saved beside the ledger at each install and upgrade: each NAME.toml as the preset NAME,
+# a new version only where its newest one holds other settings (`rollout preset load`).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: presets
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6  # (the ledger may be starting as the chart is installed)
+  template:
+    metadata: {labels: {app: presets}}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: presets
+          image: {{ include "rollout.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [rollout, preset, load, /etc/rollout/presets, --cluster]
+          env: {{- include "rollout.env" . | nindent 12 }}
+          volumeMounts: {{- include "rollout.volumeMounts" . | nindent 12 }}
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
+      volumes: {{- include "rollout.volumes" . | nindent 8 }}

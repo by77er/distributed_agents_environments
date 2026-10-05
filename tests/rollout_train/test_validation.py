@@ -35,10 +35,6 @@ ca = "~/.config/rollout/ca.pem"
 certificate = "~/.config/rollout/gateway.crt"
 key = "~/.config/rollout/gateway.key"
 
-[inference.local-vllm.models."Qwen/Qwen3-0.6B"]
-context = 8192
-options = { max_lora_rank = 32 }
-
 [inference.openai]
 kind = "api"
 endpoint = "rollout_openai:ResponsesEndpoint"
@@ -412,7 +408,7 @@ def test_the_rank_the_provider_sees_must_fit() -> None:
     ]
     assert refused("rank", findings({"trainer.rank": 21})) == []
     assert refused("rank", findings({**LOCAL_LORA, "trainer.rank": 64})) == [
-        "trainer.rank 64 is 64, above provider local-vllm's max_lora_rank 32 for Qwen/Qwen3-0.6B"
+        "trainer.rank 64 is 64, above provider local-vllm's max_lora_rank 16 for Qwen/Qwen3-0.6B"
     ]
 
 
@@ -636,7 +632,7 @@ def test_tinker_trains_the_policy_gradient_form_of_distillation_and_not_the_top_
 
 def test_the_environment_must_be_offered_load_and_find_what_it_needs() -> None:
     assert refused("environment", findings({"environment": "nowhere:env"})) == [
-        f"this cluster does not offer nowhere:env (it offers {MINECRAFT}, {GSM8K})"
+        f"this cluster does not offer nowhere:env (it offers {MINECRAFT}, gridworld.environment:environment, {GSM8K})"
     ]
     broken = dataclasses.replace(ENVIRONMENT, loads=False, why="ModuleNotFoundError: verifiers")
     assert refused("environment", findings(environment=broken)) == [

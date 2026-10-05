@@ -1,5 +1,6 @@
-# What every pod of the platform mounts: the local state's volume, and the cluster config with the profiles the
-# commands take (files/), which name the stores at their in-cluster addresses.
+# What every pod of the platform mounts: the local state's volume, and the cluster config (files/cluster.toml), the
+# RayJob each run's job is made from (files/rayjob.yaml) and the presets (files/presets), which name the stores at their
+# in-cluster addresses.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -20,40 +21,9 @@ metadata:
 data:
   cluster.toml: |
     {{- tpl (.Files.Get "files/cluster.toml") . | nindent 4 }}
-  {{- range $path, $_ := .Files.Glob "files/profiles/**.toml" }}
+  rayjob.yaml: |
+    {{- tpl (.Files.Get "files/rayjob.yaml") . | nindent 4 }}
+  {{- range $path, $_ := .Files.Glob "files/presets/*.toml" }}
   {{ trimPrefix "files/" $path | replace "/" "_" }}: |
-    {{- tpl ($.Files.Get $path) $ | nindent 4 }}
+    {{- $.Files.Get $path | nindent 4 }}
   {{- end }}
----
-# The launchers' account: it may manage RayJobs and RayClusters (and read their pods), for runs started as RayJobs
-# (docs/research/runtime-design.md). The launchers submit runs to the Ray cluster's job server, which needs none of it.
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: launcher
-  labels: {{- include "rollout.labels" . | nindent 4 }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: launcher
-  labels: {{- include "rollout.labels" . | nindent 4 }}
-rules:
-  - apiGroups: [ray.io]
-    resources: [rayjobs, rayclusters]
-    verbs: [get, list, watch, create, update, patch, delete]
-  - apiGroups: [ray.io]
-    resources: [rayjobs/status, rayclusters/status]
-    verbs: [get, list, watch]
-  - apiGroups: [""]
-    resources: [pods, pods/log, services]
-    verbs: [get, list, watch]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: launcher
-  labels: {{- include "rollout.labels" . | nindent 4 }}
-subjects:
-  - {kind: ServiceAccount, name: launcher, namespace: {{ .Release.Namespace }}}
-roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: launcher}
