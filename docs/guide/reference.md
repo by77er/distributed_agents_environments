@@ -4753,7 +4753,9 @@ An open profile: its `run`, the checkpoint it trains from (`origin`), the `check
   (the engines last). With `plays`, a runner and nothing else (`rollout runner`): no run is registered in the
   directory and no trainer is made; the runner plays those runs (by id), or with none named every run whose
   channels it reaches, and the channels whose engines serve in this process follow what the one run named says
-  they should serve (`rollout_train.following`).
+  they should serve (`rollout_train.following`). Without, every channel of this process but the trained one
+  follows what the run says it serves: nothing, unless its start says the channel follows another or is fixed on
+  a checkpoint (`rollout_train.serving.source_of`).
 - `@property def layout(self) -> str | None` — The bridge, by name, that makes the files the trained channel's engines load, if one does.
 - `async def reshard(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — The files the trained channel's engines load for a checkpoint, made by its bridge: as a Ray task when the
   profile names a Ray cluster, else here.
