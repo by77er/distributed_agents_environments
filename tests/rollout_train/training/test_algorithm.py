@@ -1,12 +1,28 @@
 """The group algorithm on made-up episodes: advantages, the tie-break and what a step trains on."""
 
 import random
+import statistics
 from typing import Any
 
+import pytest
+
 from rollout_train import Budget, Grpo, group_advantages
-from rollout_train.algorithm import fastest_of_the_saturated, spread
+from rollout_train.algorithm import (
+    Preferences,
+    advantages_of,
+    algorithm_for,
+    equal_scores,
+    fastest_of_the_saturated,
+    group_mean,
+    group_std,
+    leave_one_out,
+    spread,
+    within,
+)
+from rollout_train.objectives import PRESETS, Advantage
 from rollout_train.recorder import TOKEN_LEVEL, Segment, Span
 from rollout_train.rollouts import Episode, Outcome, Trajectory
+from rollout_train.trainer import Labelled, Pair
 
 
 def episode(
@@ -37,21 +53,21 @@ def test_the_fastest_of_the_episodes_that_saturated_the_task_scores_a_point_more
     assert fastest_of_the_saturated([full(0.2), episode(5.0, saturated=True), full(0.3)]) == [1.0, 0.0, 0.0]
     group = [full(0.4), full(0.1), full(0.3)]
     tied = Grpo().batch(group, Budget(), random.Random(0))
-    assert tied.notes == {"speed_bonus": [0.0, 1.0, 0.0]} and len(tied.segments) == 12
-    assert sorted({round(weighted.advantage, 3) for weighted in tied.segments}) == [-0.333, 0.667]
+    assert tied.notes == {"speed_bonus": [0.0, 1.0, 0.0]} and len(tied.items) == 12
+    assert sorted({round(weighted.advantage, 3) for weighted in tied.items}) == [-0.333, 0.667]
     untied = Grpo(tie_break=False).batch(group, Budget(), random.Random(0))  # nothing to compare them by
-    assert not untied.segments and untied.skipped == "every episode scored the same"
+    assert not untied.items and untied.skipped == "every episode scored the same"
 
 
 def test_a_step_trains_on_every_slots_sequences_of_the_episodes_that_differ_from_the_mean() -> None:
     group = [episode(0.0), episode(0.0), episode(3.0), episode(1.0)]  # advantages -1, -1, 2, 0
     batch = Grpo().batch(group, Budget(), random.Random(0))
-    assert batch.skipped is None and [weighted.advantage for weighted in batch.segments] == [-1.0] * 8 + [2.0] * 4
+    assert batch.skipped is None and [weighted.advantage for weighted in batch.items] == [-1.0] * 8 + [2.0] * 4
     limited = Grpo().batch(group, Budget(segments=6), random.Random(0))
-    assert [w.advantage for w in limited.segments] == [-1.0] * 4 + [2.0] * 2  # each keeps its share
+    assert [w.advantage for w in limited.items] == [-1.0] * 4 + [2.0] * 2  # each keeps its share
     failed = Episode("train", 1, 9, "r9", {}, Outcome.FAILED, detail="it raised")
-    assert [w.advantage for w in Grpo().batch([*group, failed], Budget(), random.Random(0)).segments] == [
-        weighted.advantage for weighted in batch.segments
+    assert [w.advantage for w in Grpo().batch([*group, failed], Budget(), random.Random(0)).items] == [
+        weighted.advantage for weighted in batch.items
     ]  # an episode that did not complete is no part of the comparison
     assert Grpo().batch([group[0], failed], Budget(), random.Random(0)).skipped == "1 of 2 episodes completed"
 
@@ -68,11 +84,58 @@ def test_an_update_takes_an_even_share_of_every_episodes_sequences() -> None:
 
 def test_a_group_with_a_segment_sampled_without_behaviour_logprobs_is_not_trained_on() -> None:
     refused = Grpo().batch([episode(0.0), episode(3.0, sampled_with=()), episode(0.0)], Budget(), random.Random(0))
-    assert not refused.segments
+    assert not refused.items
     assert refused.skipped == "turns of channel `policy` were sampled without their exact tokens or behaviour logprobs"
     exact = [episode(0.0), episode(3.0, sampled_with=("token_exact",)), episode(0.0)]
     said = Grpo().batch(exact, Budget(), random.Random(0)).skipped
     assert said == "turns of channel `policy` were sampled without behaviour logprobs"
     # An episode whose advantage is zero is not trained on: what it was sampled with does not matter.
     middle = [episode(0.0), episode(1.0, sampled_with=()), episode(2.0)]
-    assert len(Grpo().batch(middle, Budget(), random.Random(0)).segments) == 8
+    assert len(Grpo().batch(middle, Budget(), random.Random(0)).items) == 8
+
+
+def test_the_advantage_components() -> None:
+    scores = [1.0, 0.0, 0.0, 1.0, 0.5]
+    assert group_mean(scores) == pytest.approx([0.5, -0.5, -0.5, 0.5, 0.0])
+    assert leave_one_out(scores) == pytest.approx([1 - 1.5 / 4, -2.5 / 4, -2.5 / 4, 1 - 1.5 / 4, 0.5 - 2 / 4])
+    deviation = statistics.stdev(scores)  # (the sample's)
+    assert group_std(group_mean(scores), scores) == pytest.approx([each / deviation for each in group_mean(scores)])
+    assert group_std([0.0, 0.0], [1.0, 1.0]) == [0.0, 0.0]  # (scores that do not vary: nothing to compare)
+    assert equal_scores([2.0, 2.0]) and equal_scores([3.0]) and not equal_scores([1.0, 2.0])
+    assert advantages_of([2.0, 2.0], Advantage(filter="none")) == [0.0, 0.0]
+    assert advantages_of([2.0, 2.0], Advantage(baseline="none", filter="none")) == [2.0, 2.0]  # (REINFORCE)
+    assert advantages_of([2.0, 2.0]) is None  # (DAPO's dynamic sampling: the default)
+    assert advantages_of([1.0, 0.0], PRESETS["rloo"].objective.advantage) == [1.0, -1.0]
+
+
+def test_the_algorithm_follows_the_objectives_family_and_what_it_reads() -> None:
+    assert isinstance(algorithm_for(PRESETS["default"].objective), Grpo)
+    assert isinstance(algorithm_for(PRESETS["dpo"].objective), Preferences)
+    assert algorithm_for(PRESETS["kto"].objective) == Preferences(labelled=True)
+    reinforce = algorithm_for(PRESETS["reinforce"].objective)
+    assert isinstance(reinforce, Grpo) and reinforce.needs == ("token_exact",)  # (no correction: no logprobs needed)
+    # A policy gradient with no importance correction trains on turns without behaviour logprobs, not on inexact ones.
+    without = [episode(0.0, sampled_with=("token_exact",)), episode(3.0, sampled_with=("token_exact",))]
+    assert reinforce.batch(without, Budget(), random.Random(0)).items
+    inexact = [episode(0.0, sampled_with=()), episode(3.0, sampled_with=())]
+    assert reinforce.batch(inexact, Budget(), random.Random(0)).skipped is not None
+    assert algorithm_for(PRESETS["sft"].objective).batch(inexact, Budget(), random.Random(0)).items
+
+
+def test_a_groups_best_episode_is_preferred_to_its_worst() -> None:
+    group = [episode(0.5, number=1), episode(1.0, number=2), episode(0.0, number=3, sampled_with=()), episode(1.0)]
+    batch = Preferences().batch(group, Budget(), random.Random(0))
+    (pair,) = batch.items
+    assert isinstance(pair, Pair) and pair.source == "train/1/2>3"  # (the first of the best; the worst)
+    assert len(pair.chosen) == len(pair.rejected) == 4  # (every turn of each, both slots': the start is shared)
+    assert pair.rejected[0].lacks  # (turns without behaviour logprobs: a preference loss does not read them)
+    assert Preferences().batch([episode(1.0), episode(1.0)], Budget(), random.Random(0)).skipped == (
+        "every episode scored the same"
+    )
+    labelled = Preferences(labelled=True).batch(group, Budget(), random.Random(0)).items
+    assert [(each.source, each.desirable) for each in labelled if isinstance(each, Labelled)] == [
+        ("train/1/1", False), ("train/1/2", True), ("train/1/3", False), ("train/1/1", True)
+    ]  # fmt: skip
+    # Within a budget of segments: a pair holds both sides'.
+    pairs = [Pair((segment,) * 3, (segment,) * 3) for segment in group[0].trajectories["ada"].segments * 5]
+    assert len(within(pairs, 30, random.Random(0))) == 5 and len(within(pairs, None, random.Random(0))) == 10
