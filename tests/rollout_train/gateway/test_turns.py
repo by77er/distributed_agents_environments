@@ -7,6 +7,7 @@ import lzma
 import math
 import random
 from array import array
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,14 @@ from pydantic import JsonValue
 
 from rollout.contracts import FinishReason, Message, SampleResult, Usage
 from rollout_train.gateway import Link, TurnRecord, TurnStore, turns_table, unaccepted
-from rollout_train.gateway.turns import COMPRESSION, TURN, _Unpacked  # pyright: ignore[reportPrivateUsage]
+from rollout_train.gateway.turns import (
+    COMPRESSION,
+    SAMPLE,
+    SCORE,
+    TURN,
+    _Unpacked,  # pyright: ignore[reportPrivateUsage]
+)
+from rollout_train.inference import Scores
 from rollout_train.ledger import Fenced
 from rollout_train.recorder.segments import TOKEN_LEVEL, segments_of
 from tests.rollout_train.gateway.support import stores
@@ -199,3 +207,26 @@ async def test_a_turn_recorded_without_saying_what_it_was_sampled_with_was_sampl
     )
     (back,) = await store.turns("train", "r_1")
     assert back.sampled_with == TOKEN_LEVEL
+
+
+async def test_a_scoring_turn_reads_back_with_its_scores_and_is_left_out_of_the_segments(tmp_path: Path) -> None:
+    ledger, blobs = stores(tmp_path)
+    store = TurnStore(ledger, blobs, chunk_tokens=4)
+    fence = await ledger.take("runs/train/episodes/1/1")
+    sample = turn("a", list(range(1, 11)), [20, 21], [True, True])
+    exact = Scores(3, [-0.5, -0.25], [[4, 9, 8], [5, 1, 2]], [[-0.5, -1.0, -2.0], [-0.25, -3.0, -4.0]])
+    inexact = Scores(1, [-0.1, -0.2, -1 / 3])  # (not exact in 32 bits, and no most likely tokens)
+    teacher = replace(turn("s", [*range(1, 11), 20, 21], [], []), slot="teacher", use=SCORE, scores=exact)
+    short = replace(turn("t", [1, 2, 3, 4], [], []), slot="teacher", use=SCORE, scores=inexact)
+    grown = turn("b", [*range(1, 11), 20, 21, 30], [31], [True])
+    for each in (sample, teacher, short, grown):
+        await store.record(each, fence)
+    back = await store.turns("train", "r_1")
+    assert [(each.use, each.scores) for each in back] == [(SAMPLE, None), (SCORE, exact), (SCORE, inexact),
+                                                          (SAMPLE, None)]  # fmt: skip
+    assert [list(each.prompt) for each in back] == [list(each.prompt) for each in (sample, teacher, short, grown)]
+    assert (await store.sessions("train", "r_1")) == {"policy": segments_of([sample, grown])}
+    recorded = await store.reply("train", "r_1", "s")
+    assert recorded is not None and recorded.scores == exact
+    index = await ledger.read(turns_table("train", "r_1"))
+    assert [entry.get("use") for entry in index.values() if isinstance(entry, dict)] == [None, SCORE, SCORE, None]

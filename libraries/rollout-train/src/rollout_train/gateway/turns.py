@@ -14,6 +14,10 @@ A turn is two things:
 The ledger record is what makes a turn count: a blob no record names is never read. A turn whose fence was taken again
 since its key was minted (a newer attempt of its episode, a runner started again) is refused (`Fenced`).
 
+A turn has a use (`use`): `sample`, a reply sampled from the policy, or `score`, the logprobs a channel gave tokens it
+was handed (a teacher scoring a student's tokens). A scoring turn samples nothing: its tokens are its prompt, it has no
+completion, and its blob holds the scores. Only samples are trained on.
+
 **A turn stores only the tokens it adds.** A session's prompts repeat each other: each turn's prompt begins with most
 of an earlier turn's tokens (its prompt and what it sampled), all of them where the context only grew, up to the first
 edit where it was edited (an observation shortened once it is no longer the current one). A turn names that earlier
@@ -44,6 +48,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from rollout.contracts import BlobReference, SampleResult, SessionIdentity
 from rollout.harness.blobs import Blobs
+from rollout_train.inference.channel import Scores
 from rollout_train.ledger import Fence, Ledger
 from rollout_train.recorder.segments import TOKEN_LEVEL, Segment, segments_of
 
@@ -58,6 +63,8 @@ TURN = "application/x-rollout-turn"
 COMPRESSION = [{"id": lzma.FILTER_LZMA2, "preset": 6}]
 FORMAT = 1
 MARK = 16
+SAMPLE, SCORE = "sample", "score"
+"""A turn's uses: a reply sampled from the policy, and the logprobs of given tokens."""
 """Bytes of a mark: a BLAKE2b digest."""
 COMPACTION_ATTEMPT, COMPACTION = "compaction_attempt", "compaction"
 """Links a harness declares when it compacts: from the request it compacts to the request that asks for the summary
@@ -116,6 +123,10 @@ class TurnRecord:
     sampled_with: tuple[str, ...] = TOKEN_LEVEL
     """What it was sampled with, of `TOKEN_LEVEL`: what its sampler could do (a turn recorded without saying was
     sampled with all of them)."""
+    use: str = SAMPLE
+    """`sample`, or `score`: the logprobs the channel gave the prompt's tokens (`scores`), with nothing sampled."""
+    scores: Scores | None = None
+    """A scoring turn's scores."""
 
     @property
     def version(self) -> int:
@@ -139,6 +150,8 @@ class Reply:
     """Whether it was recorded before (False: by the call that returned it)."""
     timings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """The turn's timings (`TurnRecord.timings`), as recorded."""
+    scores: Scores | None = None
+    """A scoring turn's scores (`TurnRecord.scores`)."""
 
 
 class TurnStore:
@@ -164,7 +177,8 @@ class TurnStore:
         entry = (index if index is not None else await self.index(run, run_id)).get(effect_id)
         if entry is None:
             return None
-        header = (await self._unpacked(entry)).header
+        unpacked = await self._unpacked(entry)
+        header = unpacked.header
         return Reply(
             effect_id,
             str(header["slot"]),
@@ -172,6 +186,7 @@ class TurnStore:
             int(header["depth"]),
             SampleResult.model_validate(header["result"]),
             timings=header.get("timings", {}),
+            scores=unpacked.scores,
         )
 
     async def record(self, turn: TurnRecord, fence: Fence, index: Mapping[str, JsonValue] | None = None) -> Reply:
@@ -196,8 +211,12 @@ class TurnStore:
             "sampled": sum(turn.mask),
             "at": round(time.time(), 3),
         }
+        if turn.use != SAMPLE:
+            entry["use"] = turn.use
         if await self.ledger.append(turns_table(turn.run, turn.run_id), turn.effect_id, entry, fence):
-            return Reply(turn.effect_id, turn.slot, turn.checkpoint, turn.depth, turn.result, replayed=False)
+            return Reply(
+                turn.effect_id, turn.slot, turn.checkpoint, turn.depth, turn.result, replayed=False, scores=turn.scores
+            )
         found = await self.reply(turn.run, turn.run_id, turn.effect_id)  # (ours, from an append retried, or another's)
         assert found is not None, "an append refused for its key leaves the key there"
         return found
@@ -244,15 +263,18 @@ class TurnStore:
                     links=tuple(Link(str(link["type"]), str(link["source"])) for link in header["links"]),
                     timings=header["timings"],
                     sampled_with=tuple(header.get("sampled_with", TOKEN_LEVEL)),
+                    use=str(header.get("use", SAMPLE)),
+                    scores=each.scores,
                 )
             )
         return turns
 
     async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]:
-        """What each model slot of a program's run exports, by slot (`segments_of` its turns). With `accepted_only`,
-        what a compaction attempt sampled is trained on only if its harness went on from it."""
+        """What each model slot of a program's run exports, by slot (`segments_of` its samples: scoring turns are left
+        out). With `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from
+        it."""
         by_slot: dict[str, list[TurnRecord]] = {}
-        turns = await self.turns(run, run_id)
+        turns = [turn for turn in await self.turns(run, run_id) if turn.use == SAMPLE]
         for turn in turns:
             by_slot.setdefault(turn.slot, []).append(turn)
         untrained = unaccepted(turns) if accepted_only else set[str]()
@@ -301,6 +323,18 @@ class TurnStore:
             "timings": dict(turn.timings),
             "sampled_with": list(turn.sampled_with),
         }
+        if turn.use != SAMPLE:
+            header["use"] = turn.use
+        scored: list[bytes] = []
+        if (scores := turn.scores) is not None:
+            values = [*scores.logprobs, *(value for each in scores.top_logprobs for value in each)]
+            narrow_scores = array("f", values)
+            exact = array("d", narrow_scores).tobytes() == array("d", values).tobytes()
+            top = len(scores.top_tokens[0]) if scores.top_tokens else 0
+            header["scores"] = {"start": scores.start, "count": len(scores.logprobs), "top": top,
+                                "logprobs": "f" if exact else "d"}  # fmt: skip
+            top_tokens = array("i", (token for each in scores.top_tokens for token in each))
+            scored = [_bytes(narrow_scores if exact else array("d", values)), _bytes(top_tokens)]
         head = json.dumps(header, separators=(",", ":")).encode()
         body = [
             len(head).to_bytes(4, "little"),
@@ -309,6 +343,7 @@ class TurnStore:
             data[len(turn.prompt) * 4 :],
             _bytes(narrow if kind == "f" else array("d", sampled)),
             marks,
+            *scored,  # a scoring turn's logprobs, its most likely tokens' logprobs, and those tokens
         ]
         return lzma.compress(b"".join(body), format=lzma.FORMAT_RAW, filters=COMPRESSION)
 
@@ -350,6 +385,8 @@ class _Unpacked:
     sampled: "array[float]"
     """The logprobs of the sampled tokens."""
     marks: bytes
+    scores: Scores | None = None
+    """A scoring turn's scores."""
 
     @property
     def length(self) -> int:
@@ -372,7 +409,24 @@ class _Unpacked:
         completion, at = _array("i", body, at, int(header["completion"]))
         sampled_count = int(header["completion"]) - sum(end - start for start, end in header["forced"])
         sampled, at = _array(str(header["logprobs"]), body, at, sampled_count)
-        return cls(header, suffix, completion, sampled, body[at : at + int(header["marks"]) * MARK])
+        marks, at = body[at : at + int(header["marks"]) * MARK], at + int(header["marks"]) * MARK
+        return cls(header, suffix, completion, sampled, marks, _scores(header.get("scores"), body, at))
+
+
+def _scores(said: Any, data: bytes, at: int) -> Scores | None:
+    """A scoring turn's scores, read from its blob at `at` as its header says (`said`: none for a sample)."""
+    if said is None:
+        return None
+    count, top = int(said["count"]), int(said["top"])
+    values, at = _array(str(said["logprobs"]), data, at, count * (1 + top))
+    tokens, _ = _array("i", data, at, count * top)
+    rows = range(count) if top else range(0)
+    return Scores(
+        int(said["start"]),
+        list(values[:count]),
+        top_tokens=[list(tokens[row * top : (row + 1) * top]) for row in rows],
+        top_logprobs=[list(values[count + row * top : count + (row + 1) * top]) for row in rows],
+    )
 
 
 def _prefix_digests(data: bytes, lengths: Collection[int]) -> dict[int, bytes]:

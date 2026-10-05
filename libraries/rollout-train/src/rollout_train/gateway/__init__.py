@@ -2,7 +2,8 @@
 policy (docs/libraries/rollout-train/gateway.md).
 
 - `service`: `Gateway` renders a request, chooses the checkpoint, samples with the thinking budget, records the turn and
-  replies; `create_app` serves it in OpenAI's and Anthropic's APIs, and natively. It keeps no session.
+  replies; it also scores tokens it is handed (`ScoreRequest`), recording that as a turn too. `create_app` serves it
+  in OpenAI's and Anthropic's APIs, and natively. It keeps no session.
 - `keys`: `Grant`, what a signed key lets its holder do, and `Keyring`, the secrets that sign and verify keys.
 - `turns`: `TurnStore`, every turn in the ledger and the blob store, and the segments a program's run recorded.
 - `client`: `GatewayEndpoints`, what a runner needs to have its recorded slots served by the gateway.
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from rollout_train.gateway.client import Attempt, GatewayEndpoint, GatewayEndpoints
 from rollout_train.gateway.keys import Grant, KeyRefused, Keyring
-from rollout_train.gateway.service import Gateway, Refused, create_app
+from rollout_train.gateway.service import Gateway, Refused, ScoreRequest, create_app
 from rollout_train.gateway.turns import Link, Reply, TurnRecord, TurnStore, turns_table, unaccepted
 
 if TYPE_CHECKING:
@@ -33,6 +34,7 @@ __all__ = [
     "Link",
     "Refused",
     "Reply",
+    "ScoreRequest",
     "TurnRecord",
     "TurnStore",
     "create_app",

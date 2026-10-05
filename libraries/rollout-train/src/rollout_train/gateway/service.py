@@ -18,9 +18,13 @@ session: any replica answers any request, and a replica can die at any moment.
     POST {base}/v1/messages              Anthropic's Messages
     POST {base}/v1/messages/count_tokens a Messages request's prompt, counted with the channel's renderer
     POST {base}/v1/samples               a `SampleRequest`, answered with a `SampleResult` (for programs in a runner)
+    POST {base}/v1/scores                a `ScoreRequest`: the logprobs the channel gives the tokens it is handed
     GET  {base}/v1/models                the channels, as models (each this process hosts with its `contract`)
     GET  {base}/healthz                  alive
     GET  {base}/readyz                   ready: the ledger and the blob store answer
+
+A score request is recorded as a turn of its own use (`score`): the tokens it was handed are its prompt, it samples
+nothing, and it is never trained on. Its tokens count as tokens in, as a sample's prompt does.
 
 A reply says which checkpoint served it and at what depth (`X-Rollout-Checkpoint`, `X-Rollout-Depth`), the request id
 it was recorded under (`X-Rollout-Request-Id`), and whether it was recorded before (`X-Rollout-Replayed`). A request may
@@ -38,18 +42,28 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from rollout.contracts import CapabilityContract, ModelEndpointError, SampleRequest
+from rollout.contracts import (
+    CapabilityContract,
+    ContextOverflow,
+    FinishReason,
+    Message,
+    ModelEndpointError,
+    Role,
+    SampleRequest,
+    SampleResult,
+    Usage,
+)
 from rollout.harness.hooks import ModelSample, RunHooks
 from rollout_train.gateway.keys import Grant, KeyRefused, Keyring
-from rollout_train.gateway.turns import Link, Reply, TurnRecord, TurnStore
-from rollout_train.inference import Channel, Generation, Limits, Routes
-from rollout_train.inference.channel import Sampler, Unserved
+from rollout_train.gateway.turns import SCORE, Link, Reply, TurnRecord, TurnStore
+from rollout_train.inference import Channel, Generation, Limits, Routes, Scores
+from rollout_train.inference.channel import Sampler, Unserved, scored_range
 from rollout_train.inference.remote import NoReplica
 from rollout_train.ledger import Fenced
 from rollout_train.recorder.compat import SERVED_UNDER, chat, key, messages, refused, replied, requested, responses
@@ -65,6 +79,22 @@ ATTEMPTS = 3
 
 
 logger = logging.getLogger(__name__)
+
+
+class ScoreRequest(BaseModel):
+    """A request to score tokens: the logprobs the channel gives the tokens at positions `start` to `end` of `tokens`
+    (`end` absent: to the end), each given those before it, with the `top` most likely tokens at each."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    effect_id: str = Field(min_length=1)
+    """Its request id: a request under one that was recorded is answered with what was recorded."""
+    session_id: str
+    """The key's session."""
+    tokens: list[int] = Field(min_length=2)
+    start: int = Field(ge=1)
+    end: int | None = None
+    top: int = Field(default=0, ge=0)
 
 
 class Refused(Exception):
@@ -221,6 +251,87 @@ class Gateway:
             sampled_with=tuple(getattr(sampler, "sampled_with", TOKEN_LEVEL)),
         )
 
+    async def score(self, grant: Grant, request: ScoreRequest) -> Reply:
+        """The scores the grant's channel gives the request's tokens (`Reply.scores`), recorded as a turn of its own
+        use before they are returned: those recorded under the request's effect id, if there are any. Raises `Refused`
+        (`ValueError` from the channel, for a range or a `top` it does not take, is a request refused), or the
+        endpoint's `ModelEndpointError` (`ContextOverflow` for a sequence too long to score)."""
+        if request.session_id != grant.session_id:
+            raise Refused(Failure.KEY, f"this key is for session {grant.session_id}, not {request.session_id}")
+        try:
+            scored_range(len(request.tokens), request.start, request.end)
+        except ValueError as error:
+            raise Refused(Failure.REQUEST, str(error)) from None
+        index = await self.store.index(grant.run, grant.run_id)
+        recorded = await self.store.reply(grant.run, grant.run_id, request.effect_id, index)
+        if recorded is None:
+            turn = await self._scored(grant, request)
+            try:
+                recorded = await self.store.record(turn, grant.fence, index)
+            except Fenced:
+                raise Refused(
+                    Failure.KEY, "this key's attempt was taken over: its turns are no longer recorded"
+                ) from None
+        if recorded.slot != grant.slot or recorded.scores is None:
+            raise Refused(Failure.REQUEST, f"request id {request.effect_id} was used by another request of the run")
+        return recorded
+
+    async def _scored(self, grant: Grant, request: ScoreRequest) -> TurnRecord:
+        """A scoring turn, scored by the weights the session samples from when it begins, and scored again when they
+        stop being served before it ends (`Unserved`), up to `ATTEMPTS` times."""
+        sampler = self.sampler(grant)
+        failure: Exception | None = None
+        for attempt in range(1, ATTEMPTS + 1):
+            try:
+                return await self._score_turn(grant, sampler, request, attempt)
+            except Unserved as error:
+                failure = error
+            except NoReplica as error:
+                raise ModelEndpointError(str(error)) from None
+            except ValueError as error:
+                raise Refused(Failure.REQUEST, str(error).splitlines()[-1]) from None
+        raise ModelEndpointError(f"the scores were not served in {ATTEMPTS} attempts: {failure}")
+
+    async def _score_turn(self, grant: Grant, sampler: Sampler, request: ScoreRequest, attempt: int) -> TurnRecord:
+        started, began = time.time(), time.monotonic()
+        end = len(request.tokens) if request.end is None else request.end
+        adapter, version = await sampler.weights(request.session_id)
+        limit = sampler.context_limit
+        if limit and end >= limit:  # (vLLM generates a token after the sequence, and drops it)
+            raise ContextOverflow(limit - 1)
+        scores: Scores = await sampler.score(
+            request.tokens, start=request.start, end=request.end, top=request.top, adapter=adapter,
+            session=request.session_id, version=version, request=f"{request.effect_id}/{attempt}",
+        )  # fmt: skip
+        if scores.model is not None and adapter is not None and scores.model != adapter:
+            raise Unserved(f"{scores.model} answered for {adapter}")
+        held = getattr(sampler, "held", None) or getattr(sampler, "model", None)
+        usage = Usage(context_used=end, context_limit=limit or end, input_tokens=end, output_tokens=0)
+        return TurnRecord(
+            effect_id=request.effect_id,
+            run=grant.run,
+            run_id=grant.run_id,
+            slot=grant.slot,
+            channel=sampler.name,
+            checkpoint=adapter or held or self.models.get(sampler.name, BASE),
+            depth=version,
+            prompt=array("i", request.tokens[:end]),
+            completion=[],
+            mask=[],
+            logprobs=[],
+            result=SampleResult(message=Message(role=Role.ASSISTANT), finish_reason=FinishReason.STOP, usage=usage),
+            episode=grant.episode,
+            attempt=grant.attempt,
+            timings={
+                "started": round(started, 3),
+                "attempt": attempt,
+                "seconds": round(time.monotonic() - began, 4),
+            },
+            sampled_with=tuple(getattr(sampler, "sampled_with", TOKEN_LEVEL)),
+            use=SCORE,
+            scores=scores,
+        )
+
     def observe(self, grant: Grant, request: SampleRequest, reply: Reply, seconds: float) -> None:
         """Tell the hooks of a sample a harness asked for, newly recorded."""
         if reply.replayed or not self.hooks:
@@ -323,6 +434,27 @@ def create_app(gateway: Gateway) -> Starlette:
             return _native_error(type(error).__name__, str(error), getattr(error, "context_limit", None))
         return JSONResponse(reply.result.model_dump(mode="json"), headers=said(reply))
 
+    async def scores(request: Request) -> Response:
+        try:
+            grant = gateway.granted(key(request))
+            try:
+                asked = ScoreRequest.model_validate(await request.json())
+            except (ValidationError, ValueError, TypeError) as error:
+                raise Refused(Failure.REQUEST, f"the request could not be read: {error}") from None
+            reply = await gateway.score(grant, asked)
+        except Refused as error:
+            return _native_error(error.failure.value, str(error))
+        except ModelEndpointError as error:
+            return _native_error(type(error).__name__, str(error), getattr(error, "context_limit", None))
+        assert reply.scores is not None
+        said_scores = {
+            "start": reply.scores.start,
+            "logprobs": reply.scores.logprobs,
+            "top_tokens": reply.scores.top_tokens,
+            "top_logprobs": reply.scores.top_logprobs,
+        }
+        return JSONResponse(said_scores, headers=said(reply))
+
     async def healthy(request: Request) -> Response:
         return JSONResponse({"status": "ok"})
 
@@ -340,6 +472,7 @@ def create_app(gateway: Gateway) -> Starlette:
             Route(f"{SERVED_UNDER}/messages", answering(messages.FORMAT), methods=["POST"]),
             Route(f"{SERVED_UNDER}/messages/count_tokens", count_tokens, methods=["POST"]),
             Route(f"{SERVED_UNDER}/samples", samples, methods=["POST"]),
+            Route(f"{SERVED_UNDER}/scores", scores, methods=["POST"]),
         ]
     )
 

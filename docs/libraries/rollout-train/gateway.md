@@ -35,6 +35,7 @@ app = create_app(gateway)               # serve with uvicorn, as many replicas a
 | `POST /v1/messages` | Anthropic's Messages |
 | `POST /v1/messages/count_tokens` | how many tokens a Messages request's prompt renders to with the channel's renderer; nothing is recorded |
 | `POST /v1/samples` | a [`SampleRequest`](../../guide/reference.md#samplerequest), answered with a `SampleResult`, for programs in a runner |
+| `POST /v1/scores` | a [`ScoreRequest`](../../guide/reference.md#scorerequest): the logprobs the channel gives tokens it is handed ([scoring tokens](#scoring-tokens)) |
 | `GET /v1/models` | the channels, as models; each whose engines are in the replica's process with its `contract` (`context_limit`, `max_output_tokens`) |
 | `GET /healthz` | 200 while the process serves |
 | `GET /readyz` | 200 when the ledger and the blob store answer; 503, saying which does not, otherwise |
@@ -66,6 +67,41 @@ A reply's headers say what served it:
 - **A turn samples one checkpoint**, the one chosen when it began, through both phases of its thinking. An endpoint
   that unloads it in between has the turn sampled again from the start, on the next choice.
 - **The sampling parameters are the binding's**, carried in the key: what a client sends is ignored.
+
+## Scoring tokens
+
+A client holding a run's key can ask the key's channel for the logprobs of tokens it hands over, sampling nothing: a
+teacher scoring a student's tokens. `POST /v1/scores` takes a `ScoreRequest`:
+
+```json
+{"effect_id": "s1", "session_id": "r_1/teacher", "tokens": [151644, 872, ...], "start": 412, "top": 20}
+```
+
+| Field | Says |
+|---|---|
+| `effect_id` | the request id: a request under one that was recorded is answered with the recorded scores |
+| `session_id` | the key's session |
+| `tokens` | the sequence, at least two tokens |
+| `start`, `end` | the positions scored, `start` to `end` (absent: to the end). `start` is at least 1: the first token has nothing before it |
+| `top` | how many of the most likely tokens to give at each position (0 unless given) |
+
+The answer gives, for each position scored, the logprob of the token there given those before it, and the most likely
+tokens there with their logprobs, most likely first, under the checkpoint the session's channel serves, which the
+headers name as for a sample:
+
+```json
+{"start": 412, "logprobs": [-0.31, ...], "top_tokens": [[1734, 279, ...], ...], "top_logprobs": [[-0.31, -1.9, ...], ...]}
+```
+
+- **It is recorded first, as a turn of its own use** (`use: "score"`), in the run's table of turns under the key's slot
+  and fence: the tokens up to `end` are its prompt, it has no completion, and its blob holds the scores. Its ledger
+  record says `use`, how many prompt tokens it has and that it sampled none; its reply's usage counts the tokens as
+  tokens in. A scoring turn is never trained on: `sessions` leaves it out of the segments.
+- **It is scored by one checkpoint**, chosen as a turn's is, and scored again from the start when that checkpoint stops
+  being served before it ends, up to three times.
+- **Refused:** a session not the key's (401); a range that does not lie within the tokens, a `top` the channel does
+  not take, or a request id a sample used (400); a sequence that leaves no room for the one token vLLM generates after
+  it, `ContextOverflow` with the most tokens it takes (400).
 
 ## Keys
 
@@ -118,10 +154,12 @@ Every turn is two things ([`TurnStore`](../../guide/reference.md#turnstore)):
     say is read back as sampled with all three;
   - the reply: the parsed message, how it finished, usage;
   - the links its harness declared;
-  - timings: when it started, how long each generation took, and the whole turn.
+  - timings: when it started, how long each generation took, and the whole turn;
+  - for a scoring turn, its use (`score`) and its scores ([scoring tokens](#scoring-tokens)).
 - **A ledger record** naming the blob, appended under the request id to the table of the program's run,
   `runs/RUN/turns/RUN_ID`, under the fence the key names. Besides the blob it says the slot, the episode and
-  attempt, the checkpoint and depth, how many prompt tokens and sampled tokens the turn has, and when it was recorded.
+  attempt, the checkpoint and depth, how many prompt tokens and sampled tokens the turn has, when it was recorded, and
+its use where it is not a sample.
 
 The ledger record is what makes a turn count: a blob that no record names is never read.
 
