@@ -15,7 +15,7 @@ from rollout_tinker.weights import pointer
 from rollout_train.inference import Channel
 from rollout_train.ledger import FileLedger
 from rollout_train.recorder import Renderer
-from rollout_train.testing import PlainRenderer, admitted, recording, sample_request
+from rollout_train.testing import PlainRenderer, admitted, gateway_endpoints, sample_request
 from rollout_train.trainer import WEIGHTS
 from tests.rollout_tinker.support import segments
 
@@ -50,7 +50,9 @@ async def test_a_version_published_on_the_channel_is_sampled_at_once_and_the_one
     await trainer.step(segments(service, 4, seed=2), seed=2, parent=None, into=second)
     engine = TinkerEngine("tiny", service=service)
     channel = Channel("policy", [engine], cast(Renderer, PlainRenderer()))
-    recorder = recording(channel, ledger=FileLedger(tmp_path / "ledger"), blobs=FileBlobStore(tmp_path / "blobs"))
+    recorder = gateway_endpoints(
+        channel, ledger=FileLedger(tmp_path / "ledger"), blobs=FileBlobStore(tmp_path / "blobs")
+    )
     await admitted(recorder, "r_1")
     endpoint = recorder.endpoint(RecordedModel(channel="policy"))
 

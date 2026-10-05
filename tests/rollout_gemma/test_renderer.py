@@ -23,7 +23,7 @@ from rollout_gemma import arguments, gemma4
 from rollout_train.inference import Channel, Limits
 from rollout_train.ledger import FileLedger
 from rollout_train.recorder.renderers import Tokenizer
-from rollout_train.testing import ScriptedEngine, admitted, recording, sample_request
+from rollout_train.testing import ScriptedEngine, admitted, gateway_endpoints, sample_request
 
 MODEL = "google/gemma-4-12B-it"
 MINE = ToolSpecification(
@@ -112,7 +112,9 @@ async def test_a_thinking_budget_closes_the_channel_and_the_turn_is_recorded(
 ) -> None:
     engine = ScriptedEngine(tokenizer, [("I could go on thinking", "length"), ("Done.<turn|>", "stop")])
     channel = Channel("policy", [engine], gemma4(tokenizer), Limits(thinking=8, answer=32))
-    recorder = recording(channel, ledger=FileLedger(tmp_path / "ledger"), blobs=FileBlobStore(tmp_path / "blobs"))
+    recorder = gateway_endpoints(
+        channel, ledger=FileLedger(tmp_path / "ledger"), blobs=FileBlobStore(tmp_path / "blobs")
+    )
     await admitted(recorder, "r_1")
     result = await recorder.endpoint(RecordedModel(channel="policy")).sample(sample_request([Message.user("Hi")]))
     assert result.message.text == "Done." and result.finish_reason is FinishReason.STOP

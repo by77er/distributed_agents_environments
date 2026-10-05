@@ -32,7 +32,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#runtime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#problems), [`serving`](#serving), [`subject`](#subject)
-- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine)
+- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`SECRETS`](#secrets)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer), [`StepSettings`](#stepsettings)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
@@ -7066,6 +7066,28 @@ A tokenizer of one token per character.
 - `def encode(self, text: str, add_special_tokens: bool = False) -> list[int]`
 - `def decode(self, token_ids: Sequence[int], skip_special_tokens: bool = False) -> str`
 
+### `gateway_endpoints`
+
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+def gateway_endpoints(*channels: Channel, ledger: Ledger, blobs: Blobs, url: str | None = None, routes: Routes | None = None, hooks: Sequence[RunHooks] = (), models: Mapping[str, str] | None = None) -> GatewayEndpoints
+```
+
+Endpoints over a gateway in this process that samples `channels` (`models` names each one's base model, by
+channel) and those `routes` route, recording in `ledger` and `blobs`, with the keys of `SECRETS`; `url` is where it
+is served to harnesses, if it is, and `hooks` are told of the samples harnesses ask for there.
+
+### `keyring`
+
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+def keyring() -> Keyring
+```
+
+The keys of `SECRETS`.
+
 ### `plain_channel`
 
 *function* · `libraries/rollout-train/src/rollout_train/testing.py`
@@ -7119,27 +7141,15 @@ class Policy
 ```
 
 Channels whose engines are in this process, as a test's training loop and its runners see them: `publish` serves
-new weights on one (what a loop is given to publish with), and `recording` is what a runner records through.
+new weights on one (what a loop is given to publish with), and `gateway` is what a runner samples through.
 
 **Methods**
 
 - `def __init__(self, *channels: Channel) -> None`
 - `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int`
-- `def recording(self, ledger: Ledger, blobs: Blobs) -> GatewayEndpoints` — A gateway in this process over the channels, recording in `ledger` and `blobs`: one for each place the
+- `def gateway(self, ledger: Ledger, blobs: Blobs) -> GatewayEndpoints` — A gateway in this process over the channels, recording in `ledger` and `blobs`: one for each place the
   ledger is, so that a runner made first and an episode runner made after it over the same place share it (the
   runs it admits are the runs the runner plays).
-
-### `recording`
-
-*function* · `libraries/rollout-train/src/rollout_train/testing.py`
-
-```python
-def recording(*channels: Channel, ledger: Ledger, blobs: Blobs, url: str | None = None, routes: Routes | None = None, hooks: Sequence[RunHooks] = ()) -> GatewayEndpoints
-```
-
-A runner's recorder: endpoints over a gateway in this process that samples `channels` (and those `routes`
-route), recording in `ledger` and `blobs`; `url` is where it is served to harnesses, if it is, and `hooks` are told
-of the samples harnesses ask for there.
 
 ### `sample_request`
 
@@ -7200,6 +7210,16 @@ too.
 - `async def sleep(self) -> None`
 - `async def wake(self) -> None`
 - `def close(self) -> None`
+
+### `SECRETS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+SECRETS = [('k2', 'a-newer-secret-of-thirty-two-bytes!!'), ('k1', 'an-older-secret-of-thirty-two-bytes!')]
+```
+
+What a test's gateway (`gateway_endpoints`) signs keys with (the first) and takes keys signed with (each).
 
 ## `rollout_vllm`
 

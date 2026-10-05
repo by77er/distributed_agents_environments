@@ -22,7 +22,7 @@ from rollout.harness.blobs import FileBlobStore
 from rollout_train.check import checked
 from rollout_train.gateway import GatewayEndpoints, create_app
 from rollout_train.ledger import FileLedger
-from rollout_train.testing import admitted, plain_channel, recording
+from rollout_train.testing import admitted, gateway_endpoints, plain_channel
 from rollout_verifiers import VerifiersEnvironment, VerifiersProgram, play
 
 pytestmark = pytest.mark.skipif(shutil.which("uv") is None, reason="the null harness runs as a uv script")
@@ -64,7 +64,7 @@ async def gateway(tmp_path: Path) -> AsyncIterator[GatewayEndpoints]:
     """A gateway served over HTTP, whose policy says `apple` whatever it is asked, with run `r_1` admitted."""
     channel = plain_channel(always=[("apple\n", "stop")])
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
-    served = recording(channel, ledger=ledger, blobs=blobs, url=f"http://127.0.0.1:{PORT}")
+    served = gateway_endpoints(channel, ledger=ledger, blobs=blobs, url=f"http://127.0.0.1:{PORT}")
     await admitted(served, "r_1")
     assert served.gateway is not None
     app = create_app(served.gateway)
@@ -137,7 +137,7 @@ async def test_an_episode_verifiers_could_not_play_fails(tmp_path: Path) -> None
     start: Any = train.start(train.rows()[0], random.Random(0))
     channel = plain_channel(always=[("apple\n", "stop")])
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
-    unserved = recording(channel, ledger=ledger, blobs=blobs, url="http://127.0.0.1:9")
+    unserved = gateway_endpoints(channel, ledger=ledger, blobs=blobs, url="http://127.0.0.1:9")
     await admitted(unserved, "r_1")
     address = unserved.endpoint(RecordedModel(channel="policy")).address("r_1/policy")  # nothing listens there
     with pytest.raises(RuntimeError, match="the verifiers episode failed"):

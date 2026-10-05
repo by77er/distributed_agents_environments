@@ -15,7 +15,7 @@ from rollout_train.monitor import FeedReader, RunFeed, System
 from rollout_train.record import GROUPS, STARTS, scope, table
 from rollout_train.rollouts.episodes import Episode, Outcome, Trajectory, assemble, stored
 from rollout_train.rollouts.scheduler import EPISODES
-from rollout_train.testing import plain_channel, recording, sample_request
+from rollout_train.testing import gateway_endpoints, plain_channel, sample_request
 
 
 async def test_an_episodes_judge_turns_are_shown_by_slot_and_its_slot_untrained(tmp_path: Path) -> None:
@@ -25,7 +25,9 @@ async def test_an_episodes_judge_turns_are_shown_by_slot_and_its_slot_untrained(
     await ledger.append(table("train", STARTS), str(fence.number), start, fence)
     await ledger.append(table("train", GROUPS), "1", {"task": "t", "decided": 5.0, "episodes": 1}, fence)
     RunFeed(tmp_path / FEED).close()
-    endpoints = recording(plain_channel(always=[("an answer\n", "stop"), ("8\n", "stop")]), ledger=ledger, blobs=blobs)
+    endpoints = gateway_endpoints(
+        plain_channel(always=[("an answer\n", "stop"), ("8\n", "stop")]), ledger=ledger, blobs=blobs
+    )
     endpoints.admit("r_one", Attempt("train", await ledger.take("runs/train/episodes/1/1"), "1/1", 1))
     for slot, trained in (("policy", True), ("judge", False)):
         endpoint = endpoints.endpoint(RecordedModel(channel="policy", trained=trained))

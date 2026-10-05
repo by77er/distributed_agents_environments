@@ -23,7 +23,7 @@ from rollout_train.presence import FilePresence
 from rollout_train.record import scope
 from rollout_train.recorder import Renderer
 from rollout_train.serving import Serving, qualified, record_serving, wanted
-from rollout_train.testing import PlainRenderer, admitted, recording, sample_request
+from rollout_train.testing import PlainRenderer, admitted, gateway_endpoints, sample_request
 from tests.rollout_train.machines import MODEL, Saying, engine_host, fake_vllm, passing_on, served
 
 OPTIONS: dict[str, Any] = {"max_tokens": 20, "temperature": 1.0, "top_p": 1.0, "stop_token_ids": [10]}
@@ -58,7 +58,7 @@ def routed(checkpoints: Checkpoints, *servers: str, **route: Any) -> GatewayEndp
     """A runner's recorder, whose channel `policy` is sampled on `servers` as `route` says."""
     channel = Route(cast(Renderer, PlainRenderer()), MODEL, servers, **route)
     routes = Routes({"policy": channel}, checkpoints.ledger, every=0.05, patience=0.5)
-    return recording(ledger=checkpoints.ledger, blobs=checkpoints.blobs, routes=routes)
+    return gateway_endpoints(ledger=checkpoints.ledger, blobs=checkpoints.blobs, routes=routes)
 
 
 def routes_of(recorder: GatewayEndpoints) -> Routes:

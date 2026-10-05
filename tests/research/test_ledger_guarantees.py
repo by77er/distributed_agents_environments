@@ -43,7 +43,7 @@ from rollout_train.rollouts import EpisodeRunner, playing
 from rollout_train.rollouts.episodes import Outcome, Record
 from rollout_train.rollouts.scheduler import ADOPTED, CLAIMS, EPISODES, INTERRUPTED, holding, runner_scope
 from rollout_train.sandboxes import admits, leases_of, sweep
-from rollout_train.testing import plain_channel, recording
+from rollout_train.testing import gateway_endpoints, plain_channel
 from tests.rollout_train.support import ask_boxed
 
 BOX = SandboxSpec(kind="fake")
@@ -497,7 +497,7 @@ async def test_a_runner_whose_claim_lapsed_does_not_record_the_episode(tmp_path:
     await ask_boxed(ledger, {1: ({}, 1)}, KeyGated)
 
     def runner(name: str) -> EpisodeRunner:
-        recorder = recording(plain_channel(always=[("yes\n", "stop")]), ledger=ledger, blobs=blobs)
+        recorder = gateway_endpoints(plain_channel(always=[("yes\n", "stop")]), ledger=ledger, blobs=blobs)
         local = LocalRunner(recorder=recorder, pools={"boxes": pool})
         return EpisodeRunner(
             name, ledger, local, recorder, blobs, places=1, pools={"boxes": pool}, presence=beats, every=0.02,

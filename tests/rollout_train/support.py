@@ -56,7 +56,7 @@ from rollout_train.rollouts import (
     playing,
 )
 from rollout_train.stores import FILES
-from rollout_train.testing import PlainRenderer, Policy, plain_channel, recording
+from rollout_train.testing import PlainRenderer, Policy, gateway_endpoints, plain_channel
 from rollout_train.trainer import STATE, WEIGHTS
 from tests.rollout_train.rollouts.games import Guess
 
@@ -117,7 +117,7 @@ async def here(
 ) -> AsyncGenerator[EpisodeRunner]:
     """A runner that plays what runs ask for in `ledger`, while the block runs, recording through a gateway in this
     process over `recorder`'s channels."""
-    recorded = recorder.recording(ledger, blobs)
+    recorded = recorder.gateway(ledger, blobs)
     played = runner if runner is not None else LocalRunner(recorder=recorded)
     episodes = EpisodeRunner(name, ledger, played, recorded, blobs, places, hooks=hooks, every=0.01)
     async with playing(episodes):
@@ -256,7 +256,7 @@ def episode_runner(tmp_path: Path, pool: SandboxPool, url: str | None = None, **
     """An episode runner over the ledger and blobs in `tmp_path`, recording through a gateway in this process (served
     to harnesses at `url`, if given)."""
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
-    recorder = recording(plain_channel(always=[("yes\n", "stop")]), ledger=ledger, blobs=blobs, url=url)
+    recorder = gateway_endpoints(plain_channel(always=[("yes\n", "stop")]), ledger=ledger, blobs=blobs, url=url)
     return EpisodeRunner(
         "here",
         ledger,
@@ -287,7 +287,7 @@ def runner(
     """A runner over the ledger and blob store in `tmp_path`, whose policy says `says` in turn, for ever."""
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     channel = plain_channel(always=[(f"{word}\n", "stop") for word in says])
-    recorder = recording(channel, ledger=ledger, blobs=blobs)
+    recorder = gateway_endpoints(channel, ledger=ledger, blobs=blobs)
     seen = Seen()
     played = EpisodeRunner(
         name,

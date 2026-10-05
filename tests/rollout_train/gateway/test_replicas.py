@@ -18,7 +18,8 @@ import pytest
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.gateway import TurnStore
 from rollout_train.ledger import FileLedger
-from tests.rollout_train.gateway.support import SECRETS, converse, grant, keyring, recorded_undisturbed
+from rollout_train.testing import SECRETS, keyring
+from tests.rollout_train.gateway.support import converse, grant, recorded_undisturbed
 
 pytest.importorskip("uvicorn")
 import uvicorn

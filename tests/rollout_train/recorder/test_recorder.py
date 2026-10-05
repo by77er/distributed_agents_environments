@@ -26,7 +26,7 @@ from rollout_train.inference import Channel
 from rollout_train.ledger import FileLedger
 from rollout_train.recorder import Segment, Span
 from rollout_train.recorder.renderers import Tokenizer
-from rollout_train.testing import ScriptedEngine, admitted, plain_channel, recording, sample_request
+from rollout_train.testing import ScriptedEngine, admitted, gateway_endpoints, plain_channel, sample_request
 from tests.rollout_qwen.support import channel, qwen_tokenizer
 
 MINE = ToolSpecification(
@@ -47,7 +47,9 @@ def tokenizer() -> Tokenizer:
 
 async def recorded(served: Channel, directory: Path) -> GatewayEndpoints:
     """A gateway in this process over `served`, recording in `directory`, with run `r_1` admitted."""
-    endpoints = recording(served, ledger=FileLedger(directory / "ledger"), blobs=FileBlobStore(directory / "blobs"))
+    endpoints = gateway_endpoints(
+        served, ledger=FileLedger(directory / "ledger"), blobs=FileBlobStore(directory / "blobs")
+    )
     await admitted(endpoints, "r_1")
     return endpoints
 

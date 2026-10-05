@@ -26,8 +26,8 @@ from rollout.local import LocalRunner
 from rollout.local.context import LocalRunContext
 from rollout_train.gateway import Attempt, GatewayEndpoints, TurnStore, create_app, unaccepted
 from rollout_train.rollouts.episodes import Outcome, assemble, loaded, stored
-from rollout_train.testing import admitted, recording
-from tests.rollout_train.gateway.support import EchoEngine, echo_channel, gateway_over, keyring, stores
+from rollout_train.testing import admitted, gateway_endpoints, keyring
+from tests.rollout_train.gateway.support import EchoEngine, echo_channel, gateway_over, stores
 
 POLICY = RecordedModel(channel="policy")
 BINDING = RunBinding(models={"policy": ModelBinding(recorded=POLICY)})
@@ -93,7 +93,7 @@ async def test_an_episode_played_through_the_gateway_elsewhere_is_the_episode_on
     )  # (three turns: the two answers lost were not sampled again)
 
     here_ledger, here_blobs = stores(tmp_path / "here")
-    here = recording(echo_channel(), ledger=here_ledger, blobs=here_blobs)
+    here = gateway_endpoints(echo_channel(), ledger=here_ledger, blobs=here_blobs)
     here.admit("r_same", Attempt("train", await here_ledger.take("runs/train/episodes/1/1"), "1/1", 1))
     events = await played(LocalRunner(recorder=here), "r_same")
     in_process = assemble(events, await here.sessions("train", "r_same"), run="train", group=1, number=1)
@@ -134,7 +134,7 @@ async def test_the_turns_of_an_attempt_taken_over_are_not_recorded_further_nor_r
 
 async def test_the_links_a_program_declares_are_kept_with_its_turns(tmp_path: Path) -> None:
     ledger, blobs = stores(tmp_path)
-    endpoints = recording(echo_channel(), ledger=ledger, blobs=blobs)
+    endpoints = gateway_endpoints(echo_channel(), ledger=ledger, blobs=blobs)
     await admitted(endpoints, "r_mem")
     endpoint = endpoints.endpoint(POLICY)
     policy = EndpointModel(endpoint, "r_mem/policy", LocalRunContext("r_mem", {"policy": endpoint}))

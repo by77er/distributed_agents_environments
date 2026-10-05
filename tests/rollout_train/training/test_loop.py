@@ -67,7 +67,7 @@ def checkpoints_in(directory: Path) -> Checkpoints:
 @pytest.fixture
 def wiring(tmp_path: Path) -> tuple[Runner, Policy]:
     recorder = answering()
-    recorded = recorder.recording(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
+    recorded = recorder.gateway(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
     return LocalRunner(recorder=recorded), recorder
 
 

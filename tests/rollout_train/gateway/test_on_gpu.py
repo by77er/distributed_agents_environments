@@ -19,7 +19,8 @@ import pytest
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.gateway import TurnStore
 from rollout_train.ledger import FileLedger
-from tests.rollout_train.gateway.support import SECRETS, grant, keyring
+from rollout_train.testing import SECRETS, keyring
+from tests.rollout_train.gateway.support import grant
 
 pytestmark = pytest.mark.live
 

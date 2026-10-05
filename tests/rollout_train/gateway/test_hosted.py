@@ -22,7 +22,7 @@ from rollout_train.gateway import TurnStore
 from rollout_train.ledger import FileLedger
 from rollout_train.monitor.system import System
 from rollout_train.profile import Profile
-from tests.rollout_train.gateway.support import SECRETS
+from rollout_train.testing import SECRETS
 from tests.rollout_train.rollouts.games import words
 from tests.rollout_train.support import free_port
 

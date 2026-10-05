@@ -27,7 +27,7 @@ from rollout_train.gateway import GatewayEndpoints, create_app
 from rollout_train.ledger import FileLedger
 from rollout_train.record import GROUPS, scope, table
 from rollout_train.rollouts import Episode, EpisodeRunner, Outcome, Plan, episodes_of, plan, playing
-from rollout_train.testing import plain_channel, recording
+from rollout_train.testing import gateway_endpoints, plain_channel
 
 HARNESS: dict[str, Callable[[ModelAddress], Awaitable[str]]] = {}
 """The harness a test stands in for: given where the model is, it plays and returns what was said at the end."""
@@ -71,7 +71,7 @@ async def test_a_harness_given_only_an_address_plays_an_episode_that_is_recorded
     program = ProgramReference(program=register(Outsourced))
     ledger, blobs = FileLedger(tmp_path / "served" / "ledger"), FileBlobStore(tmp_path / "served" / "blobs")
     channel = plain_channel(always=[("yes\n", "stop")])
-    served.append(recording(channel, ledger=ledger, blobs=blobs, url="http://recorder", hooks=[seen]))
+    served.append(gateway_endpoints(channel, ledger=ledger, blobs=blobs, url="http://recorder", hooks=[seen]))
     won, lost = await played(ledger, blobs, served[0], program)
     assert (won[0].reward, lost[0].reward) == (1.0, 0.0) and won[0].info == {"solved": True}
     (segment,) = won[0].trajectories["policy"].segments  # what the harness sampled is the slot's trajectory
@@ -80,7 +80,7 @@ async def test_a_harness_given_only_an_address_plays_an_episode_that_is_recorded
     assert all(sample.slot == "policy" for sample in seen.samples)
 
     ledger, blobs = FileLedger(tmp_path / "alone" / "ledger"), FileBlobStore(tmp_path / "alone" / "blobs")
-    unserved = recording(channel, ledger=ledger, blobs=blobs)  # not served over HTTP: nothing to hand out
+    unserved = gateway_endpoints(channel, ledger=ledger, blobs=blobs)  # not served over HTTP: nothing to hand out
     failed, _ = await played(ledger, blobs, unserved, program)
     assert failed[0].outcome is Outcome.FAILED and "not served over HTTP" in str(failed[0].detail)
 

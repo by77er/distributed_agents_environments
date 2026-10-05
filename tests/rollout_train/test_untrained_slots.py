@@ -17,8 +17,8 @@ from rollout_train.ledger import Fence
 from rollout_train.recorder import TOKEN_LEVEL, Segment, Span
 from rollout_train.rollouts import Episode, Outcome, Trajectory
 from rollout_train.rollouts.episodes import Record, loaded, stored
-from rollout_train.testing import sample_request
-from tests.rollout_train.gateway.support import echo_channel, gateway_over, grant, keyring, stores
+from rollout_train.testing import keyring, sample_request
+from tests.rollout_train.gateway.support import echo_channel, gateway_over, grant, stores
 
 
 class Judged(Program):

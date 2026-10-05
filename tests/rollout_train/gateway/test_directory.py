@@ -22,8 +22,8 @@ from rollout_train.record import STARTS, scope, start_header, table
 from rollout_train.recorder import Renderer
 from rollout_train.run_settings import RunSettings, recorded
 from rollout_train.serving import Serving, record_serving, serving_of, wanted
-from rollout_train.testing import Characters, PlainRenderer, ScriptedEngine, admitted, sample_request
-from tests.rollout_train.gateway.support import client, keyring
+from rollout_train.testing import Characters, PlainRenderer, ScriptedEngine, admitted, keyring, sample_request
+from tests.rollout_train.gateway.support import client
 from tests.rollout_train.test_validation import the_cluster
 
 RENDERER = "rollout_train.testing:plain_renderer"

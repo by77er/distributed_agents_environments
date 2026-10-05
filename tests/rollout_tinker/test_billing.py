@@ -19,7 +19,7 @@ from rollout_tinker.testing import FakeSampler, FakeService
 from rollout_train.inference import Channel
 from rollout_train.ledger import FileLedger
 from rollout_train.recorder import Renderer
-from rollout_train.testing import PlainRenderer, admitted, recording, sample_request
+from rollout_train.testing import PlainRenderer, admitted, gateway_endpoints, sample_request
 from rollout_train.trainer import StepFailed
 from tests.rollout_tinker.support import segments
 
@@ -78,7 +78,7 @@ async def test_the_engine_refuses_every_turn_after_a_402_without_calling_tinker(
 
     channel = Channel("policy", [engine], cast(Renderer, PlainRenderer()))
     ledger = FileLedger(tmp_path / "ledger")
-    recorder = recording(channel, ledger=ledger, blobs=FileBlobStore(tmp_path / "blobs"))
+    recorder = gateway_endpoints(channel, ledger=ledger, blobs=FileBlobStore(tmp_path / "blobs"))
     await admitted(recorder, "r_1")
     with pytest.raises(ModelEndpointError, match="for billing"):  # (the gateway answers it as the endpoint failing)
         await recorder.endpoint(RecordedModel(channel="policy")).sample(sample_request([Message.user("Hi.")], "e1"))

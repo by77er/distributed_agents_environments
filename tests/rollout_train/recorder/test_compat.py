@@ -16,7 +16,7 @@ from rollout_train.inference import Channel, Limits
 from rollout_train.ledger import FileLedger
 from rollout_train.recorder import Renderer
 from rollout_train.recorder.renderers import Tokenizer
-from rollout_train.testing import Characters, ScriptedEngine, admitted, recording
+from rollout_train.testing import Characters, ScriptedEngine, admitted, gateway_endpoints
 
 pytest.importorskip("starlette")
 pytest.importorskip("openai")
@@ -50,7 +50,7 @@ async def served(
     engine = ScriptedEngine(cast(Tokenizer, Characters()), always=script)
     channel = Channel("policy", [engine], cast(Renderer, ThinkingRenderer()), Limits(**limits))
     ledger, blobs = FileLedger(directory / "ledger"), FileBlobStore(directory / "blobs")
-    endpoints = recording(channel, ledger=ledger, blobs=blobs, url="http://recorder")
+    endpoints = gateway_endpoints(channel, ledger=ledger, blobs=blobs, url="http://recorder")
     await admitted(endpoints, "r_1")
     address = endpoints.endpoint(RecordedModel(channel="policy")).address("r_1/policy")
     assert address.base_url == "http://recorder/v1" and address.model == "policy"

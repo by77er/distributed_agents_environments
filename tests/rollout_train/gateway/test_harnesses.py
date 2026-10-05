@@ -18,8 +18,8 @@ from rollout_train.inference import Channel, Limits
 from rollout_train.recorder import Renderer
 from rollout_train.recorder.compat import messages, responses
 from rollout_train.recorder.renderers import Tokenizer
-from rollout_train.testing import Characters, ScriptedEngine
-from tests.rollout_train.gateway.support import client, gateway_over, grant, keyring, stores
+from rollout_train.testing import Characters, ScriptedEngine, keyring
+from tests.rollout_train.gateway.support import client, gateway_over, grant, stores
 
 pytest.importorskip("anthropic")
 pytest.importorskip("openai")

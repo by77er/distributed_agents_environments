@@ -4,7 +4,7 @@ profile can be tried without a model or a GPU."""
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,21 +29,23 @@ from rollout_train.recorder import Renderer
 from rollout_train.recorder.renderers import Tokenizer
 
 __all__ = [
+    "SECRETS",
     "Characters",
     "PlainRenderer",
     "Policy",
     "ScriptedEngine",
     "admitted",
+    "gateway_endpoints",
+    "keyring",
     "plain_channel",
     "plain_renderer",
-    "recording",
     "sample_request",
     "scripted_engine",
     "scripted_top",
 ]
 
-SECRETS = [("tests", "a-secret-that-only-tests-sign-with")]
-"""What `recording`'s gateway signs keys with."""
+SECRETS = [("k2", "a-newer-secret-of-thirty-two-bytes!!"), ("k1", "an-older-secret-of-thirty-two-bytes!")]
+"""What a test's gateway (`gateway_endpoints`) signs keys with (the first) and takes keys signed with (each)."""
 
 
 class ScriptedEngine:
@@ -201,43 +203,49 @@ def plain_channel(script: Sequence[tuple[str, str]] = (), *, name: str = "policy
     return Channel(name, [engine], cast(Renderer, PlainRenderer()), Limits(**options))
 
 
-def recording(
+def keyring() -> Keyring:
+    """The keys of `SECRETS`."""
+    return Keyring.parse(SECRETS)
+
+
+def gateway_endpoints(
     *channels: Channel,
     ledger: Ledger,
     blobs: Blobs,
     url: str | None = None,
     routes: Routes | None = None,
     hooks: Sequence[RunHooks] = (),
+    models: Mapping[str, str] | None = None,
 ) -> GatewayEndpoints:
-    """A runner's recorder: endpoints over a gateway in this process that samples `channels` (and those `routes`
-    route), recording in `ledger` and `blobs`; `url` is where it is served to harnesses, if it is, and `hooks` are told
-    of the samples harnesses ask for there."""
+    """Endpoints over a gateway in this process that samples `channels` (`models` names each one's base model, by
+    channel) and those `routes` route, recording in `ledger` and `blobs`, with the keys of `SECRETS`; `url` is where it
+    is served to harnesses, if it is, and `hooks` are told of the samples harnesses ask for there."""
     by_name = {channel.name: channel for channel in channels}
-    gateway = Gateway(TurnStore(ledger, blobs), Keyring.parse(SECRETS), by_name, routes, hooks=hooks)
+    gateway = Gateway(TurnStore(ledger, blobs), keyring(), by_name, routes, dict(models or {}), hooks=hooks)
     return GatewayEndpoints.of(gateway, url)
 
 
 class Policy:
     """Channels whose engines are in this process, as a test's training loop and its runners see them: `publish` serves
-    new weights on one (what a loop is given to publish with), and `recording` is what a runner records through."""
+    new weights on one (what a loop is given to publish with), and `gateway` is what a runner samples through."""
 
     def __init__(self, *channels: Channel) -> None:
         self.channels = {channel.name: channel for channel in channels}
-        self._recorders: dict[str, GatewayEndpoints] = {}
+        self._gateways: dict[str, GatewayEndpoints] = {}
 
     async def publish(
         self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
     ) -> int:
         return await self.channels[channel].publish(adapter, path, version, full=full)
 
-    def recording(self, ledger: Ledger, blobs: Blobs) -> GatewayEndpoints:
+    def gateway(self, ledger: Ledger, blobs: Blobs) -> GatewayEndpoints:
         """A gateway in this process over the channels, recording in `ledger` and `blobs`: one for each place the
         ledger is, so that a runner made first and an episode runner made after it over the same place share it (the
         runs it admits are the runs the runner plays)."""
         where = str(getattr(ledger, "directory", id(ledger)))
-        if where not in self._recorders:
-            self._recorders[where] = recording(*self.channels.values(), ledger=ledger, blobs=blobs)
-        return self._recorders[where]
+        if where not in self._gateways:
+            self._gateways[where] = gateway_endpoints(*self.channels.values(), ledger=ledger, blobs=blobs)
+        return self._gateways[where]
 
 
 async def admitted(endpoints: GatewayEndpoints, run_id: str, run: str = "train") -> Attempt:

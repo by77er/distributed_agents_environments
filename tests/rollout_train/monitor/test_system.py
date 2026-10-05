@@ -28,7 +28,7 @@ from rollout_train.registry import registry_of
 from rollout_train.rollouts import EpisodeRunner, playing
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory, stored
 from rollout_train.rollouts.scheduler import CLAIMS, CLOSED, EPISODES, INTERRUPTED, runner_scope
-from rollout_train.testing import Policy, plain_channel, recording, sample_request
+from rollout_train.testing import Policy, gateway_endpoints, plain_channel, sample_request
 from rollout_train.trainer import STATE, WEIGHTS
 from tests.rollout_train.rollouts.games import Words
 from tests.rollout_train.support import monitor_client
@@ -59,7 +59,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     policy = Policy(plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")]))
     blobs = FileBlobStore(tmp_path / BLOBS)
     ledger = FileLedger(tmp_path / LEDGER)
-    recorder = policy.recording(ledger, blobs)
+    recorder = policy.gateway(ledger, blobs)
     checkpoints = Checkpoints(ledger, blobs)
     local = LocalRunner(recorder=recorder, hooks=[feed])
     presence = presence_of(ledger)
@@ -399,7 +399,9 @@ async def test_an_episode_whose_samples_a_gateway_elsewhere_recorded_shows_their
     created: JsonValue = {"labels": {"run": "train", "group": "1", "episode": "1"}}
     feed._write("r_one", {"kind": "event", "type": "run.created", "at": 6.0, "payload": created})  # pyright: ignore[reportPrivateUsage]
     feed.close()
-    endpoints = recording(plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")]), ledger=ledger, blobs=blobs)
+    endpoints = gateway_endpoints(
+        plain_channel(always=[("yes\n", "stop"), ("no\n", "stop")]), ledger=ledger, blobs=blobs
+    )
     endpoints.admit("r_one", Attempt("train", await ledger.take("runs/train/episodes/1/1"), "1/1", 1))
     endpoint = endpoints.endpoint(RecordedModel(channel="policy"))
     for turn in range(2):

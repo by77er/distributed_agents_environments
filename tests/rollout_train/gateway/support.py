@@ -1,5 +1,6 @@
 """What the gateway's tests share: an engine whose answer depends only on its prompt (so that replicas in other
-processes sample what one in this process does), a keyring, and a gateway over a channel of this process."""
+processes sample what one in this process does), and a gateway over a channel of this process (with the keys of
+`rollout_train.testing.SECRETS`)."""
 
 import asyncio
 import time
@@ -10,23 +11,15 @@ from typing import Any, cast
 import httpx
 
 from rollout.harness.blobs import FileBlobStore
-from rollout_train.gateway import Gateway, Grant, Keyring, TurnStore, create_app
+from rollout_train.gateway import Gateway, Grant, create_app
 from rollout_train.inference import Channel, Generation, Limits, Routes, Scores
 from rollout_train.inference.channel import scored_range
 from rollout_train.ledger import Fence, FileLedger, Ledger
 from rollout_train.recorder import Renderer
-from rollout_train.testing import PlainRenderer, scripted_top
-
-SECRETS = [("k2", "a-newer-secret-of-thirty-two-bytes!!"), ("k1", "an-older-secret-of-thirty-two-bytes!")]
-"""The signing secret first."""
-
+from rollout_train.testing import PlainRenderer, gateway_endpoints, keyring, scripted_top
 
 MAX_LOGPROBS = 5
 """The most tokens an echo engine gives at each position it scores."""
-
-
-def keyring() -> Keyring:
-    return Keyring.parse(SECRETS)
 
 
 class EchoEngine:
@@ -106,8 +99,12 @@ def gateway_over(
     channel: Channel | None, ledger: Ledger, blobs: FileBlobStore, routes: Routes | None = None
 ) -> Gateway:
     """A gateway sampling `channel` (its model's own weights named `base`), and the channels `routes` route."""
-    channels = {channel.name: channel} if channel is not None else {}
-    return Gateway(TurnStore(ledger, blobs), keyring(), channels, routes, dict.fromkeys(channels, "base"))
+    channels = [channel] if channel is not None else []
+    made = gateway_endpoints(
+        *channels, ledger=ledger, blobs=blobs, routes=routes, models={each.name: "base" for each in channels}
+    )
+    assert made.gateway is not None
+    return made.gateway
 
 
 async def grant(
