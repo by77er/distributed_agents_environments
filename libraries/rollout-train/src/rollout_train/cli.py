@@ -24,6 +24,7 @@ rollout runner PROFILE              play runs' episodes, and nothing else
 rollout pause RUN, rollout resume RUN
                                     pause a run, and resume it (in place, or launched again in its directory)
 rollout gateway PROFILE             serve a replica of the gateway: it samples PROFILE's channels and records every turn
+                                    (with --cluster, also every channel a run's start names)
 rollout cluster check               read the cluster config (`rollout_train.cluster`) and say what does not resolve here
 rollout preset list|show|save|delete
                                     presets: named, versioned run settings beside the ledger (`rollout_train.presets`)
@@ -348,6 +349,7 @@ async def _gateway(
     certificate: Path | None,
     private_key: Path | None,
     proxied: str,
+    cluster: str | None = None,
 ) -> None:
     import contextlib
 
@@ -363,7 +365,7 @@ async def _gateway(
     listening = listen or (described.gateway or GatewaySpec()).listen
     host, _, port = listening.rpartition(":")
     async with contextlib.AsyncExitStack() as stack:
-        gateway = await deployed(described, stack)
+        gateway = await deployed(described, stack, _cluster_of(cluster) if cluster is not None else None)
         app = create_app(gateway)
         presence = presence_of(ledger_of(described))
         if presence is not None:  # (the monitor shows the replicas alive)
@@ -1444,6 +1446,7 @@ def main() -> None:
     gateway.add_argument(
         "--proxied", default="127.0.0.1", help="addresses of proxies whose X-Forwarded-* headers are trusted ('*': any)"
     )
+    gateway.add_argument("--cluster", **_cluster_option("also every channel a run's start names, over its providers"))
     clusters = commands.add_parser("cluster", help="work with the cluster config")
     cluster_commands = clusters.add_subparsers(dest="cluster_command", required=True)
     cluster_checking = cluster_commands.add_parser(
@@ -1540,7 +1543,7 @@ def main() -> None:
         return
     if arguments.command == "gateway":
         work = _gateway(arguments.profile, arguments.directory, arguments.listen, arguments.certificate,
-                        arguments.private_key, arguments.proxied)  # fmt: skip
+                        arguments.private_key, arguments.proxied, arguments.cluster)  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "pool":
         work = _pool(arguments.factory, arguments.directory, arguments.ledger, arguments.name, arguments.host,

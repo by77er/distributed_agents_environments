@@ -9,7 +9,7 @@ policy (docs/libraries/rollout-train/gateway.md).
 - `client`: `GatewayEndpoints`, what a runner needs to have its recorded slots served by the gateway.
 - `directory`: `ChannelDirectory`, every channel a run's start names, built over its providers' servers.
 
-`deployed` makes a replica from a profile's `[gateway]` table.
+`deployed` makes a replica from a profile's `[gateway]` table, and, given a cluster config, its directory.
 """
 
 import asyncio
@@ -23,6 +23,7 @@ from rollout_train.gateway.service import Gateway, Refused, ScoreRequest, create
 from rollout_train.gateway.turns import Link, Reply, TurnRecord, TurnStore, turns_table, unaccepted
 
 if TYPE_CHECKING:
+    from rollout_train.cluster import Cluster
     from rollout_train.profile import Profile
 
 __all__ = [
@@ -48,10 +49,12 @@ __all__ = [
 ]
 
 
-async def deployed(profile: "Profile", stack: contextlib.AsyncExitStack) -> Gateway:
+async def deployed(profile: "Profile", stack: contextlib.AsyncExitStack, cluster: "Cluster | None" = None) -> Gateway:
     """A replica of the gateway a profile describes: its ledger and blob store, its `[gateway]` table's keys, and its
     channels, sampled as a runner samples them: those whose engines serve elsewhere routed to their servers (each run's
-    from what it says its channel serves), and any other with its engines started here (each closed by `stack`)."""
+    from what it says its channel serves), and any other with its engines started here (each closed by `stack`). With
+    a cluster config, also every channel a run's start names, over the servers of the config's providers
+    (`ChannelDirectory.of`)."""
     from pathlib import Path
 
     from rollout.harness.blobs import FileBlobStore
@@ -79,4 +82,7 @@ async def deployed(profile: "Profile", stack: contextlib.AsyncExitStack) -> Gate
     if routes is not None:
         stack.callback(routes.close)
     keyring = Keyring.load(Path(spec.keys).expanduser()) if spec.keys else Keyring.from_environment()  # noqa: ASYNC240
-    return Gateway(TurnStore(ledger, blobs), keyring, channels, routes, models)
+    directory = ChannelDirectory.of(cluster, ledger) if cluster is not None else None
+    if directory is not None:
+        stack.callback(directory.close)
+    return Gateway(TurnStore(ledger, blobs), keyring, channels, routes, models, directory=directory)

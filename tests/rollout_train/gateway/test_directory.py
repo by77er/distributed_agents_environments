@@ -24,6 +24,7 @@ from rollout_train.run_settings import RunSettings, recorded
 from rollout_train.serving import Serving, record_serving, serving_of, wanted
 from rollout_train.testing import Characters, PlainRenderer, ScriptedEngine, admitted, sample_request
 from tests.rollout_train.gateway.support import client, keyring
+from tests.rollout_train.test_validation import the_cluster
 
 RENDERER = "rollout_train.testing:plain_renderer"
 
@@ -215,3 +216,10 @@ async def test_a_following_channel_serves_the_followed_records_lag_behind_and_a_
     follower = Follower("engines", checkpoints, "r", channels, tmp_path / "following")
     assert await follower.follow()  # (an engine host loads what each channel serves)
     assert {f"load {first.id}", f"load {pinned.id}"} <= set(engine.told)
+
+
+def test_a_directory_over_the_cluster_config_knows_the_providers_reached_at_endpoints(tmp_path: Path) -> None:
+    cluster = the_cluster()
+    directory = ChannelDirectory.of(cluster, FileLedger(tmp_path / "ledger"))
+    assert "lab" in directory.providers and not {"openai", "tinker"} & set(directory.providers)
+    assert directory.providers["lab"].servers == cluster.inference["lab"].endpoints

@@ -4304,12 +4304,14 @@ Serve `gateway` over HTTP (behind a proxy that terminates TLS, or with uvicorn's
 *function* · `libraries/rollout-train/src/rollout_train/gateway/__init__.py`
 
 ```python
-async def deployed(profile: 'Profile', stack: contextlib.AsyncExitStack) -> Gateway
+async def deployed(profile: 'Profile', stack: contextlib.AsyncExitStack, cluster: 'Cluster | None' = None) -> Gateway
 ```
 
 A replica of the gateway a profile describes: its ledger and blob store, its `[gateway]` table's keys, and its
 channels, sampled as a runner samples them: those whose engines serve elsewhere routed to their servers (each run's
-from what it says its channel serves), and any other with its engines started here (each closed by `stack`).
+from what it says its channel serves), and any other with its engines started here (each closed by `stack`). With
+a cluster config, also every channel a run's start names, over the servers of the config's providers
+(`ChannelDirectory.of`).
 
 ### `Gateway`
 

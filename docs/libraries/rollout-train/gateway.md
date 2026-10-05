@@ -282,6 +282,9 @@ ROLLOUT_GATEWAY_KEYS_FILE=~/.config/rollout/gateway.keys \
 engines, its ledger and blob store, and its `[gateway]` table ([deploying](../../guide/deploying.md#the-gateway)).
 Replicas share nothing but the ledger and the blob store.
 
+- **Every channel a run's start names.** With `--cluster [PATH or NAME]`, a replica also samples every channel a run's
+  start names over the servers of the cluster config's providers (a `ChannelDirectory`): a judge's channel, or one
+  that follows the trained channel, needs no profile channel of its own.
 - **Behind a proxy.** A proxy in front of the replicas terminates TLS, checks its own credentials, and may serve them
   under a path of its own (`https://models.example/gw/v1`). The gateway builds no URL from a request. It trusts
   `X-Forwarded-*` headers only from `--proxied` addresses (127.0.0.1 unless given).
