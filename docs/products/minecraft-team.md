@@ -54,7 +54,7 @@ Paths are under `environments/minecraft/`.
 | Tasks | `minecraft_team/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and unguided variants (`tXXXu`) of the 41 whose way starts from a kit: 100 rows |
 | Episode | `minecraft_team/episode.py` | The program: one to four agents act, the world runs until they are done, repeat, until the task's budget of game time or of turns is spent; the team's score is every agent's reward. Each agent has a model slot (`agent-1` to `agent-4`) and a [`Memory`](../libraries/rollout/memory.md). It declares its world, a sandbox named `world` |
 | Worlds | `minecraft_team/worlds.py` | Temporary worlds as sandboxes of the kind `minecraft` ([the worlds](#the-worlds)): actions, observations and ground-truth scores. In a pool in the run's driver (the cluster config's `[sandboxes.minecraft]` naming `minecraft_team.worlds:worlds`), or on a machine of its own (`rollout pool minecraft_team.worlds:worlds`) |
-| Environment | `minecraft_team/environment.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given; its eval data, one start of every task (`teams-every-task`), which training never draws; what its results say (rewards from 0 up, `solved`, `saturated`, `duration` in minutes of game time) |
+| Environment | `minecraft_team/environment.py` | The tasks as rows, and a start of one: a world seed, a layout seed and the team's names, which every episode of a group is given; its eval data, one start of every task (`teams-every-task`), which training never draws; what its results say (rewards from 0 to 1, `solved`, `saturated`, `duration` in turns) |
 | Command | `minecraft_team/cli.py` | `minecraft-team server`: a temporary server to look at |
 | Tests | `tests/` | The episode on a made-up world, tasks and scoring, the map, the harness and servers live, and the agreement tests below |
 
@@ -97,7 +97,7 @@ Every agent's operations reach the episode's world through `run.sandbox("world")
 | `observe` | `agent` | `PURE` | What an agent perceives. Observing uses nothing up: asked again before the game next runs, the harness answers the same |
 | `act` | `agent`, `action` | `SIDE_EFFECTING` | Starts an agent's action |
 | `window` | | `SIDE_EFFECTING` | Runs game time while actions happen, then freezes; says whether anything is left to earn |
-| `score` | | `PURE` | The reward, and the ground truth it is scored from |
+| `score` | | `PURE` | The reward and what it is made of, and the ground truth it is scored from |
 
 The worlds do not deduplicate by effect identity; what each class means is in
 [tools](../guide/tools.md#retry-classes).
@@ -242,10 +242,10 @@ turns.
 
 | Tier | Tasks | What is given | Objective |
 |---|---|---|---|
-| Skills (staged) | 21, 3 to 16 minutes | The plugin builds the situation: diamonds on the floor of a lit room (out of reach of where anyone starts, since a diamond dropped where an agent stands is picked up before the first turn), chests around corners, natural ore exposed in a pocket's wall or hidden 5 to 24 blocks away. Rooms are sealed: water, lava, gravel and sand around them are replaced. Kits remove steps of the tech tree (iron pickaxe → ingots → raw iron → stone tools, which come with iron ore in the pocket's wall); kits are given to everyone, to one agent, or dealt in parts. | Diamonds the team holds at the end |
-| Skills (crafting) | 10, 6 to 70 minutes | Nothing at all, on a peaceful surface with a tree trunk within reach. The task names an item several recipes deep, and everything for it must be gathered: a crafting table, a wooden pickaxe, a stone pickaxe, a furnace, torches, an iron pickaxe, a bucket, a shield, a diamond, a diamond pickaxe (wood to diamonds, the way down included). | The steps of the item's chain the team got done |
-| Survival (natural) | 25, 15 to 66 minutes | Nothing is staged: a natural cave, the surface, the nether, beside a fortress, near or inside a stronghold, or the end; a real day and night, mobs, and inventory lost on death. Kits run from iron tools down to nothing, or prepare one stage of the game (obsidian and flint for a portal, a bow for blazes, eyes of ender, armor for the dragon). | Diamonds held, or progress |
-| Game | 3, 240 minutes | A bare spawn on the surface, nothing given; easy, normal and hard. | Progress |
+| Skills (staged) | 21, 3 to 16 minutes | The plugin builds the situation: diamonds on the floor of a lit room (out of reach of where anyone starts, since a diamond dropped where an agent stands is picked up before the first turn), chests around corners, natural ore exposed in a pocket's wall or hidden 5 to 24 blocks away. Rooms are sealed: water, lava, gravel and sand around them are replaced. Kits remove steps of the tech tree (iron pickaxe → ingots → raw iron → stone tools, which come with iron ore in the pocket's wall); kits are given to everyone, to one agent, or dealt in parts. | Diamonds the team holds at the end: most of those laid out, or one each from ore |
+| Skills (crafting) | 10, 6 to 70 minutes | Nothing at all, on a peaceful surface with a tree trunk within reach. The task names an item several recipes deep, and everything for it must be gathered: a crafting table, a wooden pickaxe, a stone pickaxe, a furnace, torches, an iron pickaxe, a bucket, a shield, a diamond, a diamond pickaxe (wood to diamonds, the way down included). | The item |
+| Survival (natural) | 25, 15 to 66 minutes | Nothing is staged: a natural cave, the surface, the nether, beside a fortress, near or inside a stronghold, or the end; a real day and night, mobs, and inventory lost on death. Kits run from iron tools down to nothing, or prepare one stage of the game (obsidian and flint for a portal, a bow for blazes, eyes of ender, armor for the dragon). | Diamonds held, or a milestone toward the dragon |
+| Game | 3, 240 minutes | A bare spawn on the surface, nothing given; easy, normal and hard. | The dragon |
 
 The system prompt states the objective, how the game runs and what an agent can know, and what to do when stuck:
 when an action fails or the goal gets no closer, work out what the goal needs that is still missing, plan the steps
@@ -277,8 +277,38 @@ A world is generated once per seed. A template server holds the overworld around
 every server of that seed copies the same chunks, so the episodes of a group start in the same world. Servers that
 each generate their own chunks from one seed differ in details: a tree here, two diamond ores there.
 
-**Progress** is scored from Minecraft's own advancements, earned by any team member after the episode began (ones the
-start or the kit granted do not count), each once:
+### Rewards
+
+Every episode scores from 0 to 1, and every agent of the team gets the same reward (`tasks.scored`). Solving the task
+is worth half. Progress along the task's **path** (`tasks.path_of`) is worth the other half: the steps toward the
+objective that the start and the kit leave to the team, each counted once with a weight that grows along it. So
+any episode that solved its task scores more than any that did not, and of those that did not, the one that got
+further scores more. How long an episode took does not count. The reasons, and the measurements of curriculum-9
+behind them, are in [Minecraft rewards](../research/minecraft-rewards.md).
+
+A task is **solved** when the team holds more than half of the diamonds that were laid out (in the staged rooms,
+where they are counted) or one diamond each (from ore), makes the task's item, or, for a progress task, earns the
+milestone the task is about (a task that starts beside a fortress is about the blaze rod; the game is about the
+dragon, and a dragon that dies with no player credited counts as killed).
+
+| Objective | The path | A step counts when |
+|---|---|---|
+| Diamonds laid out | the diamonds | as the share of those laid out that the team holds |
+| Diamonds from ore | the steps of the chain to a diamond after the last one whose item the kit holds, then the diamonds: an iron pickaxe and diamonds for the kit of ingots; raw iron, an iron ingot, an iron pickaxe and diamonds for stone tools; the diamonds alone for an iron pickaxe | the step's item was got hold of; the diamonds as the share of one each that the team holds |
+| An item | every step of its chain | the step's item was got hold of |
+| A milestone | the milestones from the first that the kit and the start leave to the task's own; for a team that starts with nothing, the first steps of the game before them | the advancement was earned |
+
+What the team got hold of is every item a member picked up, crafted or took from a furnace after the episode began.
+Any kind of log or planks counts, and forty logs count as one step. A step whose item the kit holds is not on the path:
+a kit's crafting table placed and picked up again counts for nothing. Solving the task completes its path, however it
+was done (a furnace needs no stone pickaxe), except where diamonds are laid out: there the path ends with holding
+every one. An episode scores 1 exactly when nothing is left to earn, and then it ends: every diamond laid out is held,
+every player holds a diamond from ore, the item is made or the milestone earned.
+
+The steps of a chain, with their weights (the chain to a stone pickaxe, for one): logs 1, planks 1, a crafting table
+2, sticks 1, a wooden pickaxe 3, cobblestone 2, the stone pickaxe 3; then a furnace 3, raw iron 4, an iron ingot 5,
+an iron pickaxe 6, a diamond 8. Milestones are Minecraft's own advancements, earned by any team member after the
+episode began (ones the start or the kit granted do not count):
 
 | Milestone | Weight | Milestone | Weight |
 |---|---|---|---|
@@ -289,29 +319,20 @@ start or the kit granted do not count), each once:
 | Mine a diamond | 4 | Enter the end | 12 |
 | Form obsidian | 3 | Kill the dragon | 40 |
 
-A dragon left alive still counts for 20 times the most it was hurt, as a share of its health. For a team that starts
-with nothing, the first steps of the game, which have no advancement, count too: logs 0.5, planks 0.5, a crafting
-table 1, a wooden pickaxe 1.
+A dragon left alive counts for 20 times the most it was hurt, as a share of its health, of the weight of killing it.
+The first steps of the game, for a team that starts with nothing: logs 0.5, planks 0.5, a crafting table 1, a wooden
+pickaxe 1. The goal in the system prompt says what counts: as many diamonds as the team can hold where they are laid
+out, one each and the steps toward them from ore, the steps of an item's chain, the milestones of the path.
 
-**Crafting** is scored from what the team got hold of after the episode began: every item a member picked up, crafted
-or took from a furnace. Each step of the chain to the task's item counts once, with a weight that grows along the
-chain. For a stone pickaxe: logs 1, planks 1, a crafting table 2, sticks 1, a wooden pickaxe 3, cobblestone 2, the
-stone pickaxe 3. Any kind of log or planks counts; forty logs count as one step. The episode ends when the item is
-made, and the item made counts as the whole chain, however it was made (a furnace needs no stone pickaxe).
-
-A task is **solved** when the team holds more than half of the diamonds that were laid out (in the staged rooms,
-where they are counted) or one diamond each (from ore), makes the task's item, or, for a progress task, earns the
-milestone the task is about (a task that starts beside a fortress is about the blaze rod; the game is about the
-dragon, and a dragon that dies with no player credited counts as killed).
-
-The episode's result says so in the terms training reads: `solved`, `saturated` (the team holds everything the task
-has to give) and `duration` (game minutes). The curriculum unlocks tasks by `solved` and weighs them by how often
-their groups' rewards differ; of a group's saturated episodes, the one that took the least game time scores a point
-more in the advantages ([training](../libraries/rollout-train/training.md)). The result also names the team (the
-names, slot by slot) and the guidance its prompt carried, word for word and by kind (`guidance`: `way`,
-`teamwork`), so that a learner can take it back out of the prompts
-([imitation](../libraries/rollout-train/training.md#imitation)). A dataset of the team's play can keep only the turns
-whose action worked: the turn filter `minecraft_team.datasets:worked` reads each agent's next observation
+The episode's result says how it went in the terms training reads: `solved`, `saturated` (nothing was left to earn)
+and `duration` (the turns the team took). It records what the reward is made of, which the monitor shows with the
+rest of the result: `reward_parts` (`solved`, then each step of the path by name, what it adds; they sum to the
+reward) and `progress` (the share of the path done). Game time is `game_minutes`. The curriculum unlocks tasks by
+`solved` and weighs them by how often their groups' rewards differ. The result also names the team (the names, slot
+by slot) and the guidance its prompt carried, word for word and by kind (`guidance`: `way`, `teamwork`), so that a
+learner can take it back out of the prompts ([imitation](../libraries/rollout-train/training.md#imitation)). A
+dataset of the team's play can keep only the turns whose action worked: the turn filter
+`minecraft_team.datasets:worked` reads each agent's next observation
 ([datasets](../libraries/rollout-train/datasets.md#choosing-examples)).
 
 ## Model and training

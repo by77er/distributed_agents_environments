@@ -2,15 +2,19 @@
 gets."""
 
 import random
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
+from minecraft_team.environment import Teams
 from minecraft_team.prompts import goal
 from minecraft_team.tasks import (
     CHAINS,
+    DRAGON_DAMAGE,
     KITS,
     MILESTONES,
+    SOLVED_SHARE,
     TEAM,
     UNGUIDED,
     Coordination,
@@ -24,10 +28,14 @@ from minecraft_team.tasks import (
     done,
     kits,
     laddered,
+    path_of,
     saturated,
     score,
+    scored,
     solved,
 )
+from rollout.curriculum import Curriculum
+from rollout.environment import Row
 
 
 def find(start: Start, kit: Kit, coordination: Coordination = Coordination.KITTED, tier: Tier | None = None) -> Task:
@@ -87,24 +95,77 @@ def test_the_catalog_runs_from_staged_skills_to_the_whole_game() -> None:
     assert all(task.goal == "end/kill_dragon" for task in tasks if task.tier is Tier.GAME)
 
 
-def test_diamond_tasks_reward_the_diamonds_the_team_holds() -> None:
-    task = find(Start.ORE_IN_SIGHT, Kit.IRON)
-    state: dict[str, Any] = {"team_diamonds": 5, "team_advancements": ["story/mine_stone", "story/mine_diamond"]}
-    assert score(task, state) == 5.0 and solved(task, state)
-    assert score(task, {"team_diamonds": 0}) == 0.0 and not solved(task, {"team_diamonds": 0})
+def test_a_reward_runs_from_0_to_1_and_solving_the_task_outweighs_any_progress() -> None:
+    for task in catalog():
+        steps = path_of(task)
+        unsolved: dict[str, Any] = {"team_diamonds": 0, "team_obtained": {}, "team_advancements": []}
+        assert steps and score(task, unsolved, available=12) == 0.0
+        # Every step done but the task itself: still less than any episode that solved it.
+        almost = scored(task, nearly(task, steps), available=12)
+        assert not almost.solved and almost.reward < SOLVED_SHARE <= score(task, solving(task), available=12)
+        best = scored(task, solving(task, everything=True), available=12)
+        assert best.reward == 1.0 and best.saturated and best.progress == 1.0
 
 
-def test_a_diamond_task_is_solved_by_most_of_what_was_laid_out_or_by_one_diamond_each() -> None:
-    staged, ore = find(Start.CHESTS, Kit.NONE), find(Start.ORE_IN_SIGHT, Kit.IRON)
+def nearly(task: Task, steps: list[tuple[str, tuple[str, ...], float]]) -> dict[str, Any]:
+    """Every step of the path done, short of solving the task."""
+    items = {item.replace("*", "oak"): 1 for _, shown, _ in steps for item in shown if item != str(task.goal)}
+    advancements = [name for name, _, _ in steps if name in MILESTONES and name != task.goal]
+    held = 6 if task.laid_out else 3  # of the 12 laid out, or one short of one each
+    return {"team_diamonds": held, "team_obtained": items, "team_advancements": advancements, "dragon_damage": 0.9}
+
+
+def solving(task: Task, everything: bool = False) -> dict[str, Any]:
+    held = 12 if everything else 7
+    goal = str(task.goal)
+    return {
+        "team_diamonds": held if task.objective is Objective.DIAMONDS else 0,
+        "team_obtained": {goal: 1} if task.objective is Objective.CRAFT else {},
+        "team_advancements": [goal] if task.objective is Objective.PROGRESS else [],
+        "dragon_killed": goal == "end/kill_dragon",
+    }
+
+
+def test_diamonds_laid_out_count_as_a_share_of_those_laid_out() -> None:
+    staged = find(Start.CHESTS, Kit.NONE)
+    assert [name for name, _, _ in path_of(staged)] == ["diamonds"]
+    assert score(staged, {"team_diamonds": 3}, available=12) == 0.125  # a quarter of them: half of the progress half
+    assert score(staged, {"team_diamonds": 7}, available=12) == round(0.5 + 0.5 * 7 / 12, 6)  # more than half: solved
+    assert score(staged, {"team_diamonds": 12}, available=12) == 1.0
     assert not solved(staged, {"team_diamonds": 6}, available=12) and solved(staged, {"team_diamonds": 7}, available=12)
-    assert not solved(ore, {"team_diamonds": 3}, available=274) and solved(ore, {"team_diamonds": 4}, available=274)
+
+
+def test_diamonds_from_ore_count_the_steps_the_kit_leaves_then_one_diamond_each() -> None:
+    iron, ingots = find(Start.ORE_IN_SIGHT, Kit.IRON), find(Start.ORE_IN_SIGHT, Kit.INGOTS)
+    assert [name for name, _, _ in path_of(iron)] == ["diamonds"]
+    assert [(name, weight) for name, _, weight in path_of(ingots)] == [("an iron pickaxe", 6), ("diamonds", 8)]
+    stone = find(Start.ORE_IN_SIGHT, Kit.STONE)
+    assert [name for name, _, _ in path_of(stone)] == ["raw iron", "an iron ingot", "an iron pickaxe", "diamonds"]
+    assert score(iron, {"team_diamonds": 2}, available=274, players=4) == 0.25  # half of one each
+    assert score(iron, {"team_diamonds": 2}, available=274, players=2) == 1.0
+    assert score(iron, {"team_diamonds": 20}, available=274) == score(iron, {"team_diamonds": 4}, available=274) == 1
+    # From curriculum-9 (t013u, group 15): one team made the pickaxe and found no diamond, its teammates' teams four.
+    pickaxe: dict[str, Any] = {
+        "team_diamonds": 0,
+        "team_obtained": {"cobbled_deepslate": 1, "crafting_table": 2, "iron_ingot": 6, "iron_pickaxe": 1, "stick": 4},
+        "team_advancements": ["story/iron_tools", "story/mine_stone", "story/root", "story/smelt_iron"],
+    }
+    found = scored(ingots, pickaxe, available=313, players=4)
+    assert not found.solved and found.progress == round(6 / 14, 6) and found.reward == round(0.5 * 6 / 14, 6)
+    assert found.parts == {"solved": 0.0, "an iron pickaxe": round(0.5 * 6 / 14, 4), "diamonds": 0.0}
+    # What the kit gave counts for nothing, picked up again or not (group 50: a table placed and taken back).
+    assert score(ingots, {"team_diamonds": 0, "team_obtained": {"crafting_table": 1, "iron_ingot": 3}}) == 0.0
+    four = {**pickaxe, "team_diamonds": 4, "team_obtained": {**pickaxe["team_obtained"], "diamond": 4}}
+    assert scored(ingots, four, available=313, players=4).parts == {"solved": 0.5, "an iron pickaxe": 0.2143,
+                                                                     "diamonds": 0.2857}  # fmt: skip
 
 
 def test_an_episode_may_end_when_nothing_is_left_to_earn() -> None:
     staged, ore = find(Start.CHESTS, Kit.NONE), find(Start.ORE_IN_SIGHT, Kit.IRON)
     assert staged.laid_out and not ore.laid_out
     assert not saturated(staged, {"team_diamonds": 11}, 12) and saturated(staged, {"team_diamonds": 12}, 12)
-    assert not saturated(ore, {"team_diamonds": 300}, 274)  # ore is counted only near the start: there is more
+    assert not saturated(ore, {"team_diamonds": 3}, 274) and saturated(ore, {"team_diamonds": 4}, 274)  # one each
+    assert saturated(ore, {"team_diamonds": 1}, 274, players=1)
     furnace = next(t for t in catalog() if t.goal == "furnace")
     assert not saturated(furnace, {"team_diamonds": 0, "team_obtained": {"cobblestone": 8}}, 0)
     assert saturated(furnace, {"team_diamonds": 0, "team_obtained": {"furnace": 1}}, 0)
@@ -113,33 +174,34 @@ def test_an_episode_may_end_when_nothing_is_left_to_earn() -> None:
     assert saturated(dragon, {"team_diamonds": 0, "dragon_killed": True}, 0)
 
 
-def test_progress_tasks_reward_milestones_once_and_are_solved_by_their_own() -> None:
+def test_progress_tasks_count_the_milestones_on_their_path_once_and_are_solved_by_their_own() -> None:
     task = find(Start.FORTRESS, Kit.FORTRESS_READY)
     assert task.goal == "nether/obtain_blaze_rod"
+    assert [name for name, _, _ in path_of(task)] == ["nether/find_fortress", "nether/obtain_blaze_rod"]
     found: dict[str, Any] = {"team_diamonds": 3, "team_advancements": ["nether/find_fortress", "adventure/kill_a_mob"]}
-    assert score(task, found) == MILESTONES["nether/find_fortress"] and not solved(task, found)
-    rods: dict[str, Any] = {
-        "team_diamonds": 0,
-        "team_advancements": ["nether/find_fortress", "nether/obtain_blaze_rod"],
-    }
-    assert score(task, rods) == MILESTONES["nether/find_fortress"] + MILESTONES["nether/obtain_blaze_rod"]
-    assert solved(task, rods)
+    assert score(task, found) == round(0.5 * 6 / 14, 6) and not solved(task, found)
+    rods: dict[str, Any] = {"team_diamonds": 0, "team_advancements": ["nether/obtain_blaze_rod"]}
+    assert score(task, rods) == 1.0 and solved(task, rods)  # however it got there
+    portal = find(Start.PORTAL_ROOM, Kit.EYES_READY)  # inside the stronghold: the eyes have been followed
+    assert [name for name, _, _ in path_of(portal)] == ["story/enter_the_end"]
 
 
 def test_hurting_the_dragon_counts_and_killing_it_counts_most() -> None:
     task = find(Start.END, Kit.END_READY)
     hurt: dict[str, Any] = {"team_diamonds": 0, "team_advancements": [], "dragon_damage": 0.5}
     killed: dict[str, Any] = {"team_diamonds": 0, "team_advancements": ["end/kill_dragon"], "dragon_damage": 1.0}
-    assert 0 < score(task, hurt) < score(task, killed) == MILESTONES["end/kill_dragon"]
-    assert not solved(task, hurt) and solved(task, killed)
+    assert score(task, hurt) == 0.5 * DRAGON_DAMAGE * 0.5 / MILESTONES["end/kill_dragon"] == 0.125
+    assert score(task, killed) == 1.0 and not solved(task, hurt) and solved(task, killed)
     # A dragon that died with no player credited for it (the advancement goes to a player) is as dead.
     uncredited: dict[str, Any] = {"team_advancements": [], "dragon_damage": 1.0, "dragon_killed": True}
-    assert score(task, uncredited) == score(task, killed) and solved(task, uncredited)
+    assert score(task, uncredited) == 1.0 and solved(task, uncredited)
     whole_game = catalog()[-1]
-    assert score(whole_game, {"team_advancements": list(MILESTONES)}) == sum(MILESTONES.values())
+    assert score(whole_game, {"team_advancements": list(MILESTONES)}) == 1.0
+    almost = scored(whole_game, {"team_advancements": list(MILESTONES)[:-1], "dragon_damage": 0.5})
+    assert almost.reward < 0.5 and almost.parts["end/kill_dragon"] == round(0.5 * 10 / 98, 4)
 
 
-def test_crafting_tasks_reward_each_step_of_the_chain_once_and_are_solved_by_the_item() -> None:
+def test_crafting_tasks_count_each_step_of_the_chain_once_and_are_solved_by_the_item() -> None:
     task = next(t for t in catalog() if t.goal == "stone_pickaxe")
     assert [name for name, _, _ in CHAINS["stone_pickaxe"]][-2:] == ["cobblestone", "a stone pickaxe"]
     nothing: dict[str, Any] = {"team_diamonds": 0, "team_obtained": {}}
@@ -147,29 +209,20 @@ def test_crafting_tasks_reward_each_step_of_the_chain_once_and_are_solved_by_the
     # Any log and any planks count; forty logs count as one step; things off the chain count for nothing.
     halfway: dict[str, Any] = {"team_obtained": {"birch_log": 40, "birch_planks": 8, "stick": 4, "dirt": 9}}
     assert done(CHAINS["stone_pickaxe"], halfway["team_obtained"]) == ["logs", "planks", "sticks"]
-    assert score(task, halfway) == 3 and not solved(task, halfway)
-    whole = {
-        "team_obtained": dict.fromkeys(
-            (
-                "oak_log",
-                "oak_planks",
-                "crafting_table",
-                "stick",
-                "wooden_pickaxe",
-                "cobbled_deepslate",
-                "stone_pickaxe",
-            ),
-            1,
-        )
-    }
-    assert score(task, whole) == sum(weight for _, _, weight in CHAINS["stone_pickaxe"]) == 13 and solved(task, whole)
+    assert score(task, halfway) == round(0.5 * 3 / 13, 6) and not solved(task, halfway)
+    # From curriculum-9 (t019, group 46): two teams got as far as a wooden pickaxe, two as cobblestone.
+    wooden = {"birch_log": 16, "birch_planks": 48, "crafting_table": 7, "stick": 48, "wooden_pickaxe": 1}
+    assert score(task, {"team_obtained": wooden}) == round(0.5 * 8 / 13, 6)
+    assert score(task, {"team_obtained": {**wooden, "cobblestone": 1}}) == round(0.5 * 10 / 13, 6)
+    whole = {"team_obtained": {"stone_pickaxe": 1}}
+    assert score(task, whole) == 1.0 and solved(task, whole)
     # The item made is the whole chain, however it was made: a furnace takes cobblestone, not a stone pickaxe.
     furnace = next(t for t in catalog() if t.goal == "furnace")
     obtained: dict[str, int] = dict.fromkeys(("oak_log", "oak_planks", "stick", "wooden_pickaxe", "cobblestone"), 1)
     direct = {"team_obtained": obtained}
-    assert score(furnace, direct) == 8 and not solved(furnace, direct)  # no table, no stone pickaxe, no furnace
+    assert score(furnace, direct) == 0.25 and not solved(furnace, direct)  # 8 of 16: no table, stone pickaxe, furnace
     obtained["furnace"] = 1
-    assert score(furnace, direct) == sum(weight for _, _, weight in CHAINS["furnace"]) and solved(furnace, direct)
+    assert score(furnace, direct) == 1.0 and solved(furnace, direct)
     text = goal(task)
     assert text.startswith("Goal: together, make a stone pickaxe. You start with nothing")
     assert text.endswith(
@@ -200,10 +253,19 @@ def test_from_nothing_the_first_steps_count_toward_progress() -> None:
         "team_advancements": ["story/mine_stone"],
         "team_obtained": {"oak_log": 3, "oak_planks": 12, "crafting_table": 1, "wooden_pickaxe": 1},
     }
-    assert score(game, state) == MILESTONES["story/mine_stone"] + 3  # logs, planks, a table, a wooden pickaxe
-    assert score(kitted, state) == MILESTONES["story/mine_stone"]  # a team given a kit earns nothing for wood
+    assert score(game, state) == round(0.5 * (MILESTONES["story/mine_stone"] + 3) / 98, 6)  # wood, a table, a pickaxe
+    assert score(kitted, state) == 0.0  # mining stone is not on the path from a fortress
     assert "in order: logs, planks, a crafting table, a wooden pickaxe, mining stone" in goal(game)
-    assert "in order: mining stone" in goal(kitted)
+    assert "in order: finding a fortress, getting a blaze rod." in goal(kitted)
+
+
+def test_the_goal_says_what_counts() -> None:
+    ingots, iron = find(Start.ORE_IN_SIGHT, Kit.INGOTS), find(Start.ORE_IN_SIGHT, Kit.IRON)
+    assert goal(ingots).startswith("Goal: together, hold one diamond each, four in all.")
+    assert "whoever does it: an iron pickaxe, diamonds. The game is over when you hold them." in goal(ingots)
+    assert goal(iron, 1).startswith("Goal: hold one diamond.") and "step by step" not in goal(iron, 1)
+    assert goal(find(Start.CHESTS, Kit.NONE)).startswith("Goal: together, hold as many diamonds as you can.")
+    assert "What counts: killing the ender dragon. Hurting the dragon" in goal(find(Start.END, Kit.END_READY))
 
 
 def test_a_task_has_a_budget_of_turns_as_well_as_of_game_time() -> None:
@@ -307,3 +369,28 @@ async def test_a_woodland_start_is_at_the_foot_of_the_nearest_tree_or_nowhere() 
     assert len(site.starts) == len(TEAM) and all(
         abs(x - 40) <= 4 and abs(z + 30) <= 4 and y == 71 for x, y, z in site.starts
     )
+
+
+@dataclass(frozen=True)
+class Group:
+    task: str
+    title: str
+    rewards: list[float]
+    solved: list[bool]
+
+
+def test_the_curriculum_unlocks_by_solved_and_weighs_rows_by_differing_rewards_on_this_scale() -> None:
+    rows = list(Teams().rows())
+    curriculum = Curriculum(rows, start=3, reach=4)
+    assert len(curriculum.unlocked()) == 3
+    first, second, third = rows[:3]
+
+    def played(row: Row, rewards: list[float], solved: list[bool]) -> None:
+        curriculum.recorded(Group(row.key, row.title, rewards, solved))
+
+    played(first, [1.0, 1.0, 1.0, 1.0], [True] * 4)  # all saturated: solved, and nothing to compare
+    assert len(curriculum.unlocked()) == 1 + 4 and curriculum.weight(first) == curriculum.floor
+    played(second, [0.5 * 6 / 14, 0.0, 0.0, 0.0], [False] * 4)  # progress only: something to compare, nothing solved
+    assert curriculum.weight(second) == 1.0 + curriculum.floor and curriculum.record(second).success == 0.0
+    played(third, [0.75, 0.25, 0.75, 0.125], [True, False, True, False])  # a mixed group: half solved
+    assert len(curriculum.unlocked()) == 3 + 4 and curriculum.weight(third) == 1.0 + curriculum.floor

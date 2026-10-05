@@ -199,9 +199,11 @@ async def test_an_agent_sees_the_map_once_and_remembers_its_turns_in_brief_and_o
     assert isinstance(result, dict) and result["turns"] == TURNS and result["compactions"] != 0
     assert len(world.deleted) == 1  # one world for the episode, released when it ended
     assert world.made == {} and world.observed == dict.fromkeys(CREW, TURNS)
-    # How it went, in the game's terms: nothing here ended the game early, and its time is game minutes.
+    # How it went, in the game's terms: nothing here ended the game early; it took its turns, and so much game time.
     assert result["solved"] is True and result["saturated"] is False and result["ended"] == "turns"
-    assert result["duration"] == pytest.approx(TURNS * SHORT_WINDOW / TICKS_PER_MINUTE)
+    assert result["duration"] == TURNS and result["game_minutes"] == pytest.approx(
+        TURNS * SHORT_WINDOW / TICKS_PER_MINUTE
+    )
 
     acting, compactions = of(model, "agent-1")  # (ada's slot)
     assert len(acting) == TURNS and len(compactions) == result["compactions"]
@@ -251,7 +253,7 @@ async def test_an_episode_ends_when_its_turns_are_spent_however_little_game_time
     game_ticks = first.minutes * TICKS_PER_MINUTE
     quick = await play(ticks=20)  # actions that end at once: a second of game time a turn
     assert quick["turns"] == first.turns == 36 and quick["ended"] == "turns"
-    assert quick["duration"] == pytest.approx(first.turns * 20 / TICKS_PER_MINUTE)
+    assert quick["duration"] == 36 and quick["game_minutes"] == pytest.approx(first.turns * 20 / TICKS_PER_MINUTE)
     slow = await play(ticks=FULL_WINDOW)  # full windows: the game time runs out first
     assert slow["turns"] == math.ceil(game_ticks / FULL_WINDOW) < first.turns and slow["ended"] == "game time"
 

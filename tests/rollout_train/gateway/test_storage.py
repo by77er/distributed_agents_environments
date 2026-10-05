@@ -29,6 +29,7 @@ from tests.rollout_qwen.support import qwen_tokenizer
 from tests.rollout_train.gateway.support import stores
 
 prompts = pytest.importorskip("minecraft_team.prompts")
+tasks = pytest.importorskip("minecraft_team.tasks")
 SAID = (
     "the ore is east of the corridor so I should walk there first then mine it with the stone pickaxe and pick up "
     "what drops before the creeper gets close ben said he is going north to the chest which leaves the furnace to me"
@@ -40,7 +41,7 @@ SYMBOLS = list("..........####,,,,wwvv?????~*") + ["#"] * 6
 def system() -> str:
     return prompts.SYSTEM.format(
         opening=prompts.TEAM_OPENING.format(count="three", team="ada, ben, cy"),
-        goal=prompts.PROGRESS_GOAL.format(early=""),
+        goal=prompts.goal(tasks.catalog()[-1]),  # the whole game's
         way="\n\n" + " ".join(prompts.MAKING.values()),
         turns=prompts.TEAM_TURNS.format(count="three"),
         window="five",

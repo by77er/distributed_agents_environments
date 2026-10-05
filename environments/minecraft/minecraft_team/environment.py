@@ -25,10 +25,8 @@ class Teams:
     only: tuple[str, ...] = ()
     """Restrict the rows to these task ids (all tasks when empty)."""
     program: ProgramReference = field(default_factory=lambda: ProgramReference(program=register(TeamEpisode)))
-    version = "1"
-    description = Description(
-        rewards=(0.0, None), saturated=True, duration="minutes of game time", observations="minecraft"
-    )  # (a team can hold any number of diamonds)
+    version = "2"
+    description = Description(rewards=(0.0, 1.0), saturated=True, duration="turns", observations="minecraft")
 
     def rows(self) -> Sequence[Row]:
         return [

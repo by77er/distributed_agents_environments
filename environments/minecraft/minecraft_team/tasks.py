@@ -5,16 +5,19 @@ reward. Three tiers:
 
 - **Skills** (staged or safe): the plugin builds the situation from ground truth: diamonds lying in a lit room, chests
   around corners, natural ore exposed in a pocket's wall or hidden nearby. Kits remove steps of the tech tree.
-  Objective: the diamonds the team holds at the end. Also here, the **crafting** tasks: among trees on a peaceful
-  surface with nothing at all, make an item whose recipe is several steps deep, gathering every material (from a
-  crafting table to a diamond pickaxe: `CHAINS`). Objective: the steps of the chain the team got done.
+  Objective: diamonds held, most of those laid out or one each from ore. Also here, the **crafting** tasks: among
+  trees on a peaceful surface with nothing at all, make an item whose recipe is several steps deep, gathering every
+  material (from a crafting table to a diamond pickaxe: `CHAINS`). Objective: the item.
 - **Survival** (natural): a natural world, a real day and night, mobs and no kept inventory. Nothing is staged; only
   the start (a cave, the surface, the nether, beside a fortress or a stronghold, the end) and the kit decide where
-  along the game the task begins. Objectives: diamonds held, or progress toward the dragon.
-- **Game**: a bare spawn on the surface, nothing given. Objective: progress, ending with the dragon.
+  along the game the task begins. Objectives: diamonds held, or a milestone toward the dragon.
+- **Game**: a bare spawn on the surface, nothing given. Objective: the dragon.
 
-Progress is scored from Minecraft's own advancements, earned by any team member after the episode's start
-(advancements a kit grants are not counted): each milestone along the path to the dragon has a weight.
+A reward runs from 0 to 1 (`scored`): half for solving the task, and half for progress along its path (`path_of`), the
+steps toward the objective that the start and the kit leave to the team, each with a weight that grows along it.
+Steps are scored from what the team got hold of and from Minecraft's own advancements, earned by any team member
+after the episode's start (advancements a kit grants are not counted): each milestone along the path to the dragon
+has a weight.
 
 `catalog()` generates the tasks (`TASKS` holds them by id); `build()` turns one into a starting state in a live world.
 """
@@ -66,9 +69,10 @@ MILESTONES: dict[str, float] = {
     "story/enter_the_end": 12,
     "end/kill_dragon": 40,
 }
-"""Advancements along the path to the dragon and what each is worth."""
+"""Advancements along the path to the dragon, each with its weight on a task's path (`path_of`)."""
 DRAGON_DAMAGE = 20.0
-"""For a dragon left alive: this times the most it was hurt, as a share of its health."""
+"""For a dragon left alive: this times the most it was hurt, as a share of its health, counts of the weight of
+killing it (at most all of it)."""
 
 
 class Tier(StrEnum):
@@ -79,12 +83,12 @@ class Tier(StrEnum):
 
 class Objective(StrEnum):
     DIAMONDS = "diamonds"
-    """The diamonds the team holds at the end (a diamond block counts 9)."""
+    """The diamonds the team holds at the end (a diamond block counts 9): all of those laid out, or one each from
+    ore; on the path, the steps of the chain to a diamond that the kit leaves to the team."""
     PROGRESS = "progress"
-    """The weights of the milestones the team earned."""
+    """The task's milestone toward the dragon; on the path, the milestones before it that the start leaves."""
     CRAFT = "craft"
-    """The weights of the steps toward the task's item that the team got done: each thing gathered, crafted or
-    smelted along the way, once."""
+    """The task's item; on the path, each thing gathered, crafted or smelted along its chain, once."""
 
 
 class Start(StrEnum):
@@ -508,32 +512,110 @@ def kits(task: Task, team: Sequence[str], rng: random.Random) -> dict[str, list[
     return dealt
 
 
-def score(task: Task, state: Mapping[str, Any]) -> float:
-    """The episode's reward from the plugin's ground truth (`Control.state()`)."""
-    if task.objective is Objective.DIAMONDS:
-        return float(state["team_diamonds"])
-    if task.objective is Objective.CRAFT:
-        steps = CHAINS[str(task.goal)]
-        if str(task.goal) in state.get(
-            "team_obtained", {}
-        ):  # however it was made (a furnace needs no stone pickaxe), nothing is left to earn
-            return float(sum(weight for _, _, weight in steps))
-        made = set(done(steps, state.get("team_obtained", {})))
-        return float(sum(weight for name, _, weight in steps if name in made))
-    earned = set(state.get("team_advancements", []))
-    if state.get("dragon_killed"):  # (the advancement goes to a player; the dragon may die with no one credited)
-        earned.add("end/kill_dragon")
-    reward = float(sum(weight for key, weight in MILESTONES.items() if key in earned))
-    if task.counts_early_steps:
-        made = set(done(EARLY, state.get("team_obtained", {})))
-        reward += sum(weight for name, _, weight in EARLY if name in made)
-    if "end/kill_dragon" not in earned:  # hurting the dragon counts for something
-        reward += DRAGON_DAMAGE * float(state.get("dragon_damage", 0.0))
-    return reward
-
-
+SOLVED_SHARE = 0.5
+"""Of an episode's reward, which runs from 0 to 1, what solving the task is worth; progress along the task's path
+(`path_of`) is worth the rest. So any episode that solved its task scores more than any that did not, and of those
+that did not, the one that got further along the path scores more."""
 SOLVED_DIAMONDS = 1
 """Diamonds each player must hold, as a team, for a task with natural ore to count as solved."""
+DIAMONDS = "diamonds"
+"""The last step of the path to diamonds: the diamonds the team holds, against what solves the task."""
+KILL = "end/kill_dragon"
+KIT_MILESTONE: dict[Kit, str] = {
+    Kit.NETHER_READY: "story/enter_the_nether",
+    Kit.OBSIDIAN_MAKER: "story/form_obsidian",
+    Kit.FORTRESS_READY: "nether/find_fortress",
+    Kit.EYES_READY: "story/follow_ender_eye",
+    Kit.END_READY: KILL,
+    Kit.END_IRON: KILL,
+}
+"""For a progress task: the first milestone that a kit leaves to the team (any other kit leaves them all)."""
+START_MILESTONE: dict[Start, str] = {Start.PORTAL_ROOM: "story/enter_the_end", Start.END: KILL}
+"""For a progress task: the first milestone that a start leaves to the team (inside a stronghold, the eyes have
+been followed there)."""
+
+
+def path_of(task: Task) -> list[Step]:
+    """The steps toward a task's objective that it leaves to the team, each with its weight: what progress is scored
+    on. Diamonds laid out: the diamonds. Diamonds from ore: the steps of the chain to a diamond after the last one the
+    kit holds an item of, then the diamonds (`DIAMONDS`). An item: every step of its chain. Progress: the milestones
+    from the first that the kit and the start leave to the team to the task's own, after `EARLY` for a team that
+    starts with nothing; a milestone's step is named by its advancement, and no item shows it."""
+    if task.objective is Objective.DIAMONDS:
+        if task.laid_out:
+            return [(DIAMONDS, ("diamond",), 1)]
+        chain = [*CHAINS["diamond"][:-1], (DIAMONDS, ("diamond",), CHAINS["diamond"][-1][2])]
+        kit = {str(stack["item"]): 1 for stack in KITS[task.kit]}
+        given = [index for index, (_, items, _) in enumerate(chain) if done([("", items, 0)], kit)]
+        return chain[given[-1] + 1 :] if given else chain
+    if task.objective is Objective.CRAFT:
+        return list(CHAINS[str(task.goal)])
+    keys = list(MILESTONES)
+    first = max(keys.index(KIT_MILESTONE.get(task.kit, keys[0])), keys.index(START_MILESTONE.get(task.start, keys[0])))
+    milestones: list[Step] = [(key, (), MILESTONES[key]) for key in keys[first : keys.index(str(task.goal)) + 1]]
+    return [*(EARLY if task.counts_early_steps else []), *milestones]
+
+
+@dataclass(frozen=True)
+class Scored:
+    """An episode's reward from the plugin's ground truth, and what it is made of."""
+
+    reward: float
+    """From 0 to 1: `SOLVED_SHARE` if the task was solved, and the rest of 1 times `progress`."""
+    solved: bool
+    progress: float
+    """The share of the weight of the task's path (`path_of`) that the team got done, from 0 to 1. Solving the task
+    completes its path, except where diamonds are laid out: there the path ends with holding every one."""
+    parts: dict[str, float]
+    """What `reward` is made of: `solved`, then each step of the path by name, what it adds (to four places; they sum
+    to `reward`)."""
+
+    @property
+    def saturated(self) -> bool:
+        """Whether nothing is left to earn (the reward is 1), so that the episode may end."""
+        return self.solved and self.progress >= 1.0
+
+
+def scored(task: Task, state: Mapping[str, Any], available: int | None = None, players: int = len(TEAM)) -> Scored:
+    """The reward of an episode of `task` played by `players`, from the plugin's ground truth (`Control.state()`) and
+    the diamonds laid out (`available`, for the starts that count them). Each step of the path counts once, if what
+    the team got hold of (`team_obtained`) or the advancements it earned show it done, with three exceptions: the
+    diamonds count as the share held of those laid out or of one each; a dragon left alive counts `DRAGON_DAMAGE`
+    times the most it was hurt, as a share of its health, of the weight of killing it; and once the task is solved
+    (however it was done: a furnace needs no stone pickaxe) every step counts as done, except where diamonds are laid
+    out."""
+    won = solved(task, state, available, players)
+    held = int(state.get("team_diamonds", 0))
+    obtained: Mapping[str, Any] = state.get("team_obtained") or {}
+    earned = set(state.get("team_advancements", []))
+    if state.get("dragon_killed"):  # (the advancement goes to a player; the dragon may die with no one credited)
+        earned.add(KILL)
+    steps = path_of(task)
+    made = set(done(steps, obtained))
+
+    def share(name: str) -> float:
+        if task.objective is Objective.DIAMONDS and name == DIAMONDS:
+            target = available if task.laid_out and available else SOLVED_DIAMONDS * players
+            return 1.0 if won and not task.laid_out else min(held / target, 1.0)
+        if won:
+            return 1.0
+        if name == KILL and KILL not in earned:  # hurting the dragon counts for something
+            return min(DRAGON_DAMAGE * float(state.get("dragon_damage", 0.0)) / MILESTONES[KILL], 1.0)
+        return 1.0 if name in made or name in earned else 0.0
+
+    total = sum(weight for _, _, weight in steps)
+    worth = {name: weight * share(name) / total for name, _, weight in steps}
+    progress = sum(worth.values())
+    parts = {"solved": SOLVED_SHARE if won else 0.0} | {
+        name: round((1 - SOLVED_SHARE) * value, 4) for name, value in worth.items()
+    }
+    reward = round((SOLVED_SHARE if won else 0.0) + (1 - SOLVED_SHARE) * progress, 6)
+    return Scored(reward, won, round(progress, 6), parts)
+
+
+def score(task: Task, state: Mapping[str, Any], available: int | None = None, players: int = len(TEAM)) -> float:
+    """The episode's reward, from 0 to 1 (`scored`)."""
+    return scored(task, state, available, players).reward
 
 
 def solved(task: Task, state: Mapping[str, Any], available: int | None = None, players: int = len(TEAM)) -> bool:
@@ -541,25 +623,22 @@ def solved(task: Task, state: Mapping[str, Any], available: int | None = None, p
     (`available`, for the staged starts that count them) or one each from ore, made the task's item, or earned its
     milestone."""
     if task.objective is Objective.DIAMONDS:
-        held = int(state["team_diamonds"])
+        held = int(state.get("team_diamonds", 0))
         if task.laid_out and available:
             return 2 * held > available
         return held >= SOLVED_DIAMONDS * players
     if task.objective is Objective.CRAFT:
         return str(task.goal) in state.get("team_obtained", {})
-    if task.goal == "end/kill_dragon" and state.get("dragon_killed"):
+    if task.goal == KILL and state.get("dragon_killed"):
         return True
     return task.goal in set(state.get("team_advancements", []))
 
 
-def saturated(task: Task, state: Mapping[str, Any], available: int) -> bool:
-    """Whether nothing is left to earn, so that the episode may end: every diamond laid out (`available`) is held, the
-    task's item is made, or the dragon is dead."""
-    return (
-        bool(state.get("dragon_killed"))
-        or (task.laid_out and int(state["team_diamonds"]) >= available)
-        or (task.objective is Objective.CRAFT and solved(task, state))
-    )
+def saturated(task: Task, state: Mapping[str, Any], available: int | None = None, players: int = len(TEAM)) -> bool:
+    """Whether nothing is left to earn, so that the episode may end: the reward is 1 (`Scored.saturated`). Every
+    diamond laid out is held, every player holds a diamond from ore, the task's item is made, or its milestone
+    earned."""
+    return scored(task, state, available, players).saturated
 
 
 # Building a task in a live world

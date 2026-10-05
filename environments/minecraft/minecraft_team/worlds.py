@@ -27,7 +27,7 @@ from minecraft_team.control import Control
 from minecraft_team.harness import Harness
 from minecraft_team.limits import LIMITS, TICKS_PER_SECOND
 from minecraft_team.paper import Installation, PaperServer, sweep
-from minecraft_team.tasks import TASKS, TEAM, Built, Task, build, saturated, score, solved
+from minecraft_team.tasks import TASKS, TEAM, Built, Task, build, saturated, scored
 from rollout.contracts import RetryClass, Text, ToolResult, ToolSpecification
 from rollout.harness import Reach, SandboxSpec
 
@@ -163,14 +163,14 @@ class MinecraftWorlds:
         state = await world.control.state()
         return {
             "ticks": ran,
-            "done": saturated(world.task, state, world.built.available_diamonds),
+            "done": saturated(world.task, state, world.built.available_diamonds, len(world.team)),
             "team_diamonds": int(state["team_diamonds"]),  # for whoever watches; the reward is scored at the end
             "team_advancements": list(state.get("team_advancements", [])),
         }
 
     async def score(self, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
-        """Ground truth: the reward of the task's objective, the team's diamonds and advancements, and what
-        happened."""
+        """Ground truth: the reward of the task's objective (`tasks.scored`) and what it is made of, the team's
+        diamonds, advancements and what it got hold of, and what happened."""
         state = await world.control.state()
         team = {name.lower() for name in world.team}  # (someone watching is a player too, and not the episode's)
         events = [
@@ -180,9 +180,13 @@ class MinecraftWorlds:
         ]
         kinds = Counter(str(event["kind"]) for event in events)
         mined = Counter(str(event["block"]) for event in events if event["kind"] == "mined")
+        found = scored(world.task, state, world.built.available_diamonds, len(world.team))
         return {
-            "reward": score(world.task, state),
-            "solved": solved(world.task, state, world.built.available_diamonds, len(world.team)),
+            "reward": found.reward,
+            "solved": found.solved,
+            "saturated": found.saturated,
+            "progress": found.progress,
+            "reward_parts": dict(found.parts),
             "objective": world.task.objective.value,
             "team_diamonds": int(state["team_diamonds"]),
             "team_advancements": list(state.get("team_advancements", [])),

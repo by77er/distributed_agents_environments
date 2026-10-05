@@ -4,6 +4,7 @@ a sandbox, and the shared reward. Needs Java and Node."""
 import re
 import shutil
 from collections.abc import Mapping
+from typing import cast
 
 import httpx
 import pytest
@@ -102,12 +103,16 @@ async def test_a_scripted_team_picks_up_diamonds_and_shares_the_reward(through: 
     (result,) = [payload(e)["payload"] for e in events if e.type is RunEventType.OUTPUT_EMITTED]
     assert isinstance(result, dict)
     diamonds = result["team_diamonds"]
-    assert isinstance(diamonds, int) and diamonds > 0 and rewards[TEAM[0]] == diamonds, result
+    assert isinstance(diamonds, int) and diamonds > 0 and rewards[TEAM[0]] == result["reward"], result
+    reward, parts = result["reward"], result["reward_parts"]
+    assert isinstance(reward, float) and 0 < reward <= 1 and isinstance(parts, dict)
+    assert sum(float(cast(float, each)) for each in parts.values()) == pytest.approx(reward)
     assert result["objective"] == "diamonds" and result["solved"] is True
     turns = result["turns"]
     assert isinstance(turns, int) and 1 <= turns <= 4  # it ends early once every diamond is held
     assert (turns < 4) == (diamonds == result["available_diamonds"])
-    assert isinstance(result["duration"], float) and 0 < result["duration"] <= 3
+    minutes = result["game_minutes"]
+    assert result["duration"] == turns and isinstance(minutes, float) and 0 < minutes <= 3
     assert result["saturated"] == (diamonds == result["available_diamonds"])
     world_operations = [
         e for e in events if e.type is RunEventType.EFFECT_REQUESTED and payload(e).get("kind") == "tool.call"

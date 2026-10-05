@@ -21,7 +21,6 @@ from minecraft_team.limits import LIMITS
 from minecraft_team.paper import Installation, PaperServer
 from minecraft_team.prompts import describe
 from minecraft_team.tasks import (
-    CHAINS,
     Coordination,
     Kit,
     Objective,
@@ -279,7 +278,7 @@ async def test_a_portal_is_built_lit_and_entered_and_the_milestone_is_scored(wor
     assert observation["self"]["dimension"] == "the_nether"
     state = await world.control.state()
     assert "story/enter_the_nether" in state["team_advancements"]
-    assert solved(chosen, state) and score(chosen, state) >= 6
+    assert solved(chosen, state) and score(chosen, state) == 1.0
 
 
 @pytest.mark.live
@@ -390,7 +389,7 @@ async def test_a_crafting_table_is_made_from_a_tree_and_every_step_is_scored(wor
     assert table["ok"], table
     state = await world.control.state()
     assert {f"{kind}_log", f"{kind}_planks", "crafting_table"} <= set(state["team_obtained"]), state["team_obtained"]
-    assert score(chosen, state) == sum(weight for _, _, weight in CHAINS["crafting_table"]) == 4
+    assert score(chosen, state) == 1.0
     assert solved(chosen, state)
     crafted = [event["item"] for event in await world.control.events() if event["kind"] == "crafted"]
     assert crafted == [f"{kind}_planks", "crafting_table"]

@@ -6,7 +6,7 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from minecraft_team.limits import LIMITS
-from minecraft_team.tasks import CHAINS, EARLY, KITS, TEAM, Coordination, Kit, Objective, Start, Task
+from minecraft_team.tasks import CHAINS, DIAMONDS, KILL, KITS, TEAM, Coordination, Kit, Objective, Start, Task, path_of
 from rollout.contracts import ToolSpecification
 
 NUMBERS = [
@@ -30,14 +30,36 @@ DIAMONDS_GOAL = (
     "counts as 9). Diamonds may be lying on the ground, stored in chests, or still in ore; ore counts only once "
     "it is mined and picked up. What is around you differs from game to game."
 )
-PROGRESS_GOAL = (
-    "Goal: get as far toward beating the game as you can, together. What counts, in order: {early}mining stone, a "
-    "stone pickaxe, smelting iron, an iron pickaxe, mining diamonds, getting obsidian, entering the nether, finding a "
-    "fortress, getting a blaze rod, following eyes of ender into a stronghold, entering the end, and killing the "
-    "ender dragon, which counts most; hurting the dragon without killing it counts for a little. A step counts "
-    "once, whoever does it, and only if it is done in this game: what you start with does not count."
+"""Where the diamonds are laid out: every one of them counts."""
+ORE_GOAL = (
+    "Goal: together, hold {target}. Only diamonds in your inventories count (a diamond block counts as 9). Diamonds "
+    "may be lying on the ground, stored in chests, or still in ore; ore counts only once it is mined and picked up. "
+    "What is around you differs from game to game.{steps} The game is over when you hold {them}."
 )
-"""`early` names the steps that count before mining stone, each followed by a comma: none, or those of `EARLY`."""
+"""Where the diamonds are in ore: one each solves the task, and the steps toward them count (`path_of`)."""
+PROGRESS_GOAL = (
+    "Goal: get as far as you can toward {goal}, together. What counts{order}: {steps}.{dragon} A step counts once, "
+    "whoever does it, and only if it is done in this game: what you start with does not count."
+)
+"""`steps` names the steps of the task's path (`path_of`); `dragon` says what the dragon counts for, where killing
+it is on the path."""
+DRAGON = " Killing the dragon counts most; hurting it without killing it counts for a little."
+DRAGON_ONLY = " Hurting the dragon without killing it counts for a little."
+MILESTONE_WORDS = {
+    "story/mine_stone": "mining stone",
+    "story/upgrade_tools": "a stone pickaxe",
+    "story/smelt_iron": "smelting iron",
+    "story/iron_tools": "an iron pickaxe",
+    "story/mine_diamond": "mining diamonds",
+    "story/form_obsidian": "getting obsidian",
+    "story/enter_the_nether": "entering the nether",
+    "nether/find_fortress": "finding a fortress",
+    "nether/obtain_blaze_rod": "getting a blaze rod",
+    "story/follow_ender_eye": "following eyes of ender into a stronghold",
+    "story/enter_the_end": "entering the end",
+    KILL: "killing the ender dragon",
+}
+"""Each milestone (`tasks.MILESTONES`) as agents read it."""
 CRAFT_GOAL = (
     "Goal: together, make {item}. You start with nothing: everything it takes must be gathered and crafted. Getting "
     "there counts step by step, each step once, whoever does it: {steps}. The game is over when it is made."
@@ -208,11 +230,19 @@ def guidance(task: Task, players: int = len(TEAM)) -> dict[str, str]:
 
 def goal(task: Task, players: int = len(TEAM)) -> str:
     """What the task asks, as agents read it (for one player, as one player reads it)."""
-    if task.objective is Objective.DIAMONDS:
+    names = [MILESTONE_WORDS.get(name, name) for name, _, _ in path_of(task)]
+    if task.objective is Objective.DIAMONDS and task.laid_out:
         text = DIAMONDS_GOAL
+    elif task.objective is Objective.DIAMONDS:
+        target = f"one diamond each, {spelled(players)} in all" if players > 1 else "one diamond"
+        counted = f" Getting there counts step by step, each step once, whoever does it: {', '.join(names)}."
+        steps = counted if names != [DIAMONDS] else ""
+        text = ORE_GOAL.format(target=target, steps=steps, them="them" if players > 1 else "it")
     elif task.objective is Objective.PROGRESS:
-        early = [name for name, _, _ in EARLY] if task.counts_early_steps else []
-        text = PROGRESS_GOAL.format(early="".join(f"{name}, " for name in early))
+        dragon = "" if task.goal != KILL else DRAGON if len(names) > 1 else DRAGON_ONLY
+        order = ", in order" if len(names) > 1 else ""
+        words = MILESTONE_WORDS[str(task.goal)]
+        text = PROGRESS_GOAL.format(goal=words, order=order, steps=", ".join(names), dragon=dragon)
     else:
         steps = [name for name, _, _ in CHAINS[str(task.goal)]]
         text = CRAFT_GOAL.format(item=steps[-1], steps=", ".join(steps))

@@ -22,8 +22,11 @@ of everything older, a summary it wrote itself when its memory was full. The tea
 waits for its slowest agent, so agents that write their summaries together hold the team up once, and agents that
 write them in different turns once each.
 
-The episode's result says how it went, in the game's terms: `solved`, `saturated` (nothing was left to earn),
-`duration` (game minutes), `turns`, and the ground truth the reward was scored from.
+Its reward runs from 0 to 1 (`tasks.scored`): half for solving the task, half for progress along its path. The
+episode's result says how it went, in the game's terms: `solved`, `saturated` (nothing was left to earn), `duration`
+(the turns the team took: each is a round of thinking, and unlike game time it does not depend on how long the bots'
+paths and the server's ticks took), `game_minutes`, the reward's parts (`reward_parts`, `progress`) and the ground
+truth it was scored from.
 """
 
 import random
@@ -134,11 +137,13 @@ class TeamEpisode(Program):
         reward = float(cast(float, score["reward"]))
         for name in self.team:  # the team is rewarded equally
             run.reward(reward, slot=name)
+        saturated = saturated or score.get("saturated") is True  # (the last window may have run out of budget)
         result: dict[str, JsonValue] = {
             **score,
             "task": self.task.id,
             "turns": turn,
-            "duration": spent / TICKS_PER_MINUTE,
+            "duration": turn,
+            "game_minutes": spent / TICKS_PER_MINUTE,
             "saturated": saturated,
             "ended": "nothing left to earn" if saturated else "game time" if spent >= budget else "turns",
             "compactions": max(memory.compactions for memory in memories.values()),
