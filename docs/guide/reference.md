@@ -7020,7 +7020,7 @@ What a RunPod kind's table says of its pods (`pod_table`).
 | `volume_gb` | `int` | `50` |  |
 | `container_disk_gb` | `int` | `50` |  |
 | `secrets` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Variables whose values are RunPod console secrets, by the secret's name (`HF_TOKEN = "hf_token"`). |
-| `step_ca` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | step-ca, for the pods' certificates: `url`, `provisioner`, `key_file` (the provisioner's key), `root`. |
+| `step_ca` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | step-ca, for the pods' certificates: `url`, `provisioner`, `key_file` (the provisioner's key), `root` (the cluster's root, which pods are given), and `trust` (`root`, by default: pods reach step-ca directly and check its TLS by the root; `system`: behind a proxy that ends TLS with a public certificate, they check it by the system's roots, and renew with a token rather than over mutual TLS). |
 | `store` | `str \| None` | `None` | The blob store its pods read and write (`[stores.NAME]`; none: `[blobs]`). |
 | `memory_fraction` | `float \| None` | `None` | The share of the GPU's memory vLLM takes (`--gpu-memory-utilization`); on a `runpod-host` pod the trainer has the rest (0.42 unless said). |
 | `sleep` | `bool` | `False` | On a `runpod-host` pod: whether vLLM sleeps while a step is taken (`rollout_train.colocated`), for a GPU too small to hold both. |

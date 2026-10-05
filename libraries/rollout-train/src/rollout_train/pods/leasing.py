@@ -378,8 +378,11 @@ class Pods:
         sensitive = {"ROLLOUT_LEDGER_TOKEN": lease.token or "", **keys}
         ca = self._ca(table)
         if ca is not None:
+            root = Path(table.step_ca["root"]).expanduser().read_bytes()
             env["STEP_CA_URL"] = table.step_ca["url"]
-            env["STEP_FINGERPRINT"] = fingerprint(Path(table.step_ca["root"]).expanduser().read_bytes())
+            env["STEP_FINGERPRINT"] = fingerprint(root)
+            env["STEP_ROOT"] = root.decode()  # (pinned: the root the pod's certificates chain to, which it checks by)
+            env["STEP_CA_TRUST"] = table.step_ca.get("trust", "root")
             sensitive["STEP_TOKEN"] = ca.pod_token(pod_identity(lease.pod))
         return PodSpec(
             name=lease.pod, image=table.image, gpu_types=list(table.gpu_types), gpu_count=table.gpu_count, env=env,

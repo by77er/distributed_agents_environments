@@ -231,6 +231,7 @@ async def test_a_pod_says_what_its_trainer_is(tmp_path: Path) -> None:
     assert said == {
         "kind": f"{Fake.__module__}:Fake", "model": "Qwen/Qwen3-0.6B", "weights": "lora",
         "budget": {"segment_tokens": 4096, "segments": 8}, "changeable": {"learning_rate": 1e-4}, "running": None,
+        "run": None,
     }  # fmt: skip
 
 

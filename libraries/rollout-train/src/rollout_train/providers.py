@@ -699,7 +699,10 @@ class PodTable:
     secrets: Mapping[str, str] = field(default_factory=dict[str, str])
     """Variables whose values are RunPod console secrets, by the secret's name (`HF_TOKEN = "hf_token"`)."""
     step_ca: Mapping[str, str] = field(default_factory=dict[str, str])
-    """step-ca, for the pods' certificates: `url`, `provisioner`, `key_file` (the provisioner's key), `root`."""
+    """step-ca, for the pods' certificates: `url`, `provisioner`, `key_file` (the provisioner's key), `root` (the
+    cluster's root, which pods are given), and `trust` (`root`, by default: pods reach step-ca directly and check its
+    TLS by the root; `system`: behind a proxy that ends TLS with a public certificate, they check it by the system's
+    roots, and renew with a token rather than over mutual TLS)."""
     store: str | None = None
     """The blob store its pods read and write (`[stores.NAME]`; none: `[blobs]`)."""
     memory_fraction: float | None = None
@@ -712,6 +715,9 @@ class PodTable:
 
 CLOUDS = ("SECURE", "COMMUNITY")
 STEP_CA = ("url", "provisioner", "key_file", "root")
+TRUSTS = ("root", "system")
+"""How pods trust step-ca's own TLS: by the cluster's root (reached directly), or by the system's roots (behind a proxy
+that ends TLS with a public certificate, such as a Cloudflare Tunnel)."""
 
 
 def pod_table(kind: str, settings: Mapping[str, JsonValue]) -> PodTable:
@@ -753,8 +759,10 @@ def pod_table(kind: str, settings: Mapping[str, JsonValue]) -> PodTable:
     if cloud not in CLOUDS:
         raise ValueError(f"cloud is secure or community (not {settings.get('cloud')!r})")
     step_ca = table("step_ca")
-    if step_ca and set(step_ca) != set(STEP_CA):
-        raise ValueError(f"step_ca says {', '.join(STEP_CA)}")
+    if step_ca and not set(STEP_CA) <= set(step_ca) <= {*STEP_CA, "trust"}:
+        raise ValueError(f"step_ca says {', '.join(STEP_CA)}, and may say trust")
+    if step_ca.get("trust", "root") not in TRUSTS:
+        raise ValueError(f"step_ca trust is root or system (not {step_ca.get('trust')!r})")
     store = settings.get("store")
     if store is not None and not isinstance(store, str):
         raise ValueError("store names a blob store of the cluster's ([stores.NAME])")

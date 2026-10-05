@@ -16,7 +16,7 @@ from rollout_train.pods.environment import PORT
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 IMAGES = ROOT / "deploy" / "images"
-ROLES = ["inference", "trainer"]
+ROLES = ["inference", "trainer", "host"]
 ALLOWED = {
     "inference": {("POST", "/v1/completions"): "vllm", ("GET", "/v1/models"): "vllm"},
     "trainer": {
@@ -25,6 +25,7 @@ ALLOWED = {
         ("GET", "/v1/trainer"): "trainer",
     },
 }
+ALLOWED["host"] = {**ALLOWED["inference"], **ALLOWED["trainer"]}
 REFUSED = [
     ("GET", "/v1/completions"),
     ("POST", "/v1/models"),
@@ -164,6 +165,9 @@ def test_the_inference_image_is_the_workspace_s_vllm() -> None:
     dockerfile = (IMAGES / "inference" / "Dockerfile").read_text()
     assert f"ARG VLLM_VERSION={version}" in dockerfile and "FROM vllm/vllm-openai:v${VLLM_VERSION}" in dockerfile
     assert "--host 127.0.0.1" in (IMAGES / "inference" / "entrypoint.sh").read_text()
+    host = (IMAGES / "host" / "Dockerfile").read_text()
+    assert f"ARG VLLM_VERSION={version}" in host and "rollout-lora" in host  # (vLLM and the trainer, one image)
+    assert "--host 127.0.0.1" in (IMAGES / "host" / "entrypoint.sh").read_text()
     workflow = (ROOT / ".github" / "workflows" / "images.yml").read_text()
     for role in ROLES:
         dockerfile = (IMAGES / role / "Dockerfile").read_text()
@@ -188,10 +192,14 @@ def _read(path: Path) -> set[str]:
 @pytest.mark.parametrize("role", ROLES)
 def test_every_variable_a_pod_reads_is_documented(role: str) -> None:
     pods = ROOT / "libraries" / "rollout-train" / "src" / "rollout_train" / "pods"
-    module = "inference.py" if role == "inference" else "training.py"
+    modules = {"inference": ["inference.py"], "trainer": ["training.py"], "host": ["inference.py", "training.py"]}[role]
     read: set[str] = set[str]().union(*(_read(each) for each in (
-        pods / module, pods / "environment.py", IMAGES / role / "entrypoint.sh", IMAGES / "common" / "pki.sh",
+        *(pods / module for module in modules), pods / "environment.py", IMAGES / role / "entrypoint.sh",
+        IMAGES / "common" / "pki.sh",
     )))  # fmt: skip
-    documented = (IMAGES / role / "README.md").read_text() + (IMAGES / "README.md").read_text()
+    readmes = {"host": ["host", "inference", "trainer"]}.get(role, [role])
+    documented = (
+        "".join((IMAGES / each / "README.md").read_text() for each in readmes) + (IMAGES / "README.md").read_text()
+    )
     missing = sorted(name for name in read if f"`{name}`" not in documented and not name.startswith("RUNPOD_TCP_PORT"))
     assert missing == []

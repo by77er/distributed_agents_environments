@@ -10,6 +10,9 @@ serve on the pod's loopback interface.
   `RUNPOD_TCP_PORT_8443`.
 - `ROLLOUT_CERT_SERIAL_FILE`: a file holding the serial of the pod's certificate now (default
   `/certs/current/serial`), said in its beats.
+- `ROLLOUT_BLOB_CACHE`: a directory on the pod's disk that keeps a copy of every blob the pod's processes put or read
+  (`CachedBlobs`): on a host pod, the checkpoints the training service makes are loaded by the follower from it, with
+  no round trip through the bucket (each is in the bucket too).
 
 The ledger is opened with `rollout_train.ledger.opened`, so any implementation of `Ledger` can be named, by
 `module:name` and its settings.
@@ -21,7 +24,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
-from rollout.harness.blobs import Blobs
+from rollout.contracts import BlobReference
+from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout_train.ledger import Ledger, opened
 from rollout_train.stores import opened as blobs_at
 
@@ -37,8 +41,40 @@ def required(environ: Mapping[str, str], name: str) -> str:
 
 
 def stores(environ: Mapping[str, str]) -> tuple[Ledger, Blobs]:
-    """The ledger and the blob store the environment names."""
-    return opened(_location(environ, "ROLLOUT_LEDGER")), blobs_at(_location(environ, "ROLLOUT_BLOBS"))
+    """The ledger and the blob store the environment names (with a copy on the pod's disk, `ROLLOUT_BLOB_CACHE`)."""
+    blobs = blobs_at(_location(environ, "ROLLOUT_BLOBS"))
+    if cache := environ.get("ROLLOUT_BLOB_CACHE"):
+        blobs = CachedBlobs(blobs, FileBlobStore(Path(cache)))
+    return opened(_location(environ, "ROLLOUT_LEDGER")), blobs
+
+
+class CachedBlobs:
+    """A blob store with a copy of every blob that passes through it in a store of files on this machine: a put goes to
+    both, a read is answered from the copy where it has the blob, else from the store (and kept)."""
+
+    def __init__(self, store: Blobs, cache: FileBlobStore) -> None:
+        self.store = store
+        self.cache = cache
+
+    def holds(self, reference: BlobReference) -> bool:
+        holds = getattr(self.store, "holds", None)
+        return bool(holds(reference)) if callable(holds) else False
+
+    async def put(self, data: bytes, media_type: str) -> BlobReference:
+        reference = await self.store.put(data, media_type)
+        await self.cache.put(data, media_type)
+        return reference
+
+    async def read(self, reference: BlobReference) -> bytes:
+        try:
+            return await self.cache.read(reference)
+        except (OSError, ValueError):  # (not here, or not whole: read from the store)
+            data = await self.store.read(reference)
+            await self.cache.put(data, reference.media_type)
+            return data
+
+    async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None:
+        await self.store.delete(reference, unused_for=unused_for)
 
 
 def public_address(environ: Mapping[str, str]) -> str | None:

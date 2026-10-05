@@ -1,4 +1,4 @@
-# The pods' images (deploy/images): the Envoy configurations validated, then both images built and pushed to GHCR,
+# The pods' images (deploy/images): the Envoy configurations validated, then the images built and pushed to GHCR,
 # on a version tag or when asked for. Each image is tagged with the repository's version (the tag, or the commit for
 # a run asked for by hand) and pushed by digest; the digests are in the run's summary.
 name: images
@@ -31,7 +31,7 @@ jobs:
           chmod -R a+rX certs
       - name: envoy --mode validate
         run: |
-          for role in inference trainer; do
+          for role in inference trainer host; do
             docker run --rm \
               -v "$PWD/deploy/images/$role/envoy.yaml:/etc/envoy/envoy.yaml:ro" \
               -v "$PWD/deploy/images/common/sds:/etc/envoy/sds:ro" \
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        role: [inference, trainer]
+        role: [inference, trainer, host]
     steps:
       - uses: actions/checkout@v4
       - name: Free disk space (the vLLM and CUDA layers are large)

@@ -26,6 +26,8 @@ checks; the proxy in front of the pod passes neither on.
 - `ROLLOUT_VLLM`: the server's address (default `http://127.0.0.1:8000`).
 - `ROLLOUT_CHECKPOINTS`: where checkpoints' files are kept while they are served (default `/workspace/checkpoints`).
 - `ROLLOUT_HEALTH`: where `/healthz` and `/readyz` are served (default `127.0.0.1:8081`);
+- `ROLLOUT_TRAINER_URL`: on a host pod, the training service beside vLLM (`http://127.0.0.1:8001`): the pod is ready
+  only once it holds the trainer of the run that holds the pod too;
 
 and those every pod reads (`rollout_train.pods.environment`).
 """
@@ -82,8 +84,13 @@ class InferencePod(Follower):
         serial_file: Path | None = None,
         every: float = 2.0,
         beating: float = 15.0,
+        trainer: str | None = None,
+        role: str = INFERENCE,
     ) -> None:
         self.engine = RemoteEngine(model, address=vllm)
+        self.trainer = trainer
+        """On a host pod, the training service beside the server, which must hold the run's trainer too."""
+        self.role = role
         self.leases = pod_leases_of(checkpoints.ledger) if run is None else None
         if run is not None:
             served = self._opened(run, channel or "policy")
@@ -149,7 +156,21 @@ class InferencePod(Follower):
             self.ready = serves in has and (serves == self.model or serves == channel.serving)
             error = self.errors.get(qualified(run, name))
             self.why = "" if self.ready else error or f"{serves} is not served yet"
+            if self.ready and self.trainer is not None and (held := await self._trained()) != run:
+                self.ready, self.why = False, f"the training service holds the trainer of {held or 'no run'} yet"
         self.looked = time.monotonic()
+
+    async def _trained(self) -> str | None:
+        """The run whose trainer the training service beside the server holds (none: none, or it does not answer)."""
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                said: Any = (await client.get(f"{self.trainer}/v1/trainer")).json()
+        except (httpx.HTTPError, ValueError):
+            return None
+        run: Any = cast(dict[str, Any], said).get("run") if isinstance(said, dict) else None
+        return str(run) if run else None
 
     def healthy(self, stale: float = STALE) -> bool:
         """Whether it looked within `stale` seconds (or started within them)."""
@@ -159,7 +180,7 @@ class InferencePod(Follower):
         """What its beats say of the pod, beside what every follower says."""
         run, channel = self.held if self.held is not None else (None, None)
         pod: dict[str, JsonValue] = {
-            "name": self.name, "identity": self.identity, "address": self.address, "role": INFERENCE,
+            "name": self.name, "identity": self.identity, "address": self.address, "role": self.role,
             "ready": self.ready, "why": self.why, "model": self.model, "serial": serial(self.serial_file),
             "run": run, "channel": channel,
         }  # fmt: skip
@@ -193,6 +214,7 @@ async def main(environ: Mapping[str, str]) -> None:
         environ.get("ROLLOUT_CHANNEL") or None, required(environ, "ROLLOUT_MODEL"),
         Path(environ.get("ROLLOUT_CHECKPOINTS", "/workspace/checkpoints")), vllm=environ.get("ROLLOUT_VLLM", VLLM),
         address=public_address(environ), presence=presence_of(ledger), serial_file=serial_file(environ),
+        trainer=environ.get("ROLLOUT_TRAINER_URL") or None, role=environ.get("ROLLOUT_ROLE") or INFERENCE,
     )  # fmt: skip
     host, port = listening(environ, "ROLLOUT_HEALTH", "127.0.0.1:8081")
     await asyncio.gather(pod.serve(), served(health(pod), host, port))

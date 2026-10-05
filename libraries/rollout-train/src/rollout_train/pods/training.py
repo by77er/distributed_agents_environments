@@ -204,6 +204,7 @@ class TrainerService:
             "budget": dataclasses.asdict(self.trainer.budget),
             "changeable": changeable,
             "running": self.running,
+            "run": self.run,
         }
 
     async def _step(self, asked: StepAsked) -> None:

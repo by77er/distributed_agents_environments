@@ -8,9 +8,10 @@ at a public TCP port over mutual TLS:
 |---|---|---|
 | `ghcr.io/by77er/rollout-inference` | [inference](inference/README.md) | A stock vLLM server (the workspace's version), the follower that keeps it serving what one run's channel should (`rollout_train.pods.inference`), Envoy in front |
 | `ghcr.io/by77er/rollout-trainer` | [trainer](trainer/README.md) | The training service over rollout-lora's trainers (`rollout_train.pods.training`), Envoy in front |
+| `ghcr.io/by77er/rollout-host` | [host](host/README.md) | Both on one GPU: vLLM with its share of the GPU's memory and the follower, the training service beside it, one Envoy in front |
 
-Both are built by `.github/workflows/images.yml` on a version tag (`v*`) or when it is run by hand, after
-`envoy --mode validate` has checked both Envoy configurations. Each image is tagged with the repository's version
+They are built by `.github/workflows/images.yml` on a version tag (`v*`) or when it is run by hand, after
+`envoy --mode validate` has checked each Envoy configuration. Each image is tagged with the repository's version
 (the tag without its `v`, or `sha-COMMIT` for a run by hand); the run's summary has each pushed image's digest, which is
 what a cluster's configuration should name.
 
@@ -56,10 +57,14 @@ and a `step ca renew --daemon` beside the gateway.
 | `ROLLOUT_BLOBS` | Where the blob store is, as JSON: `{"kind": "rollout_s3:S3BlobStore", "bucket": "…", "endpoint_url": "…", "access_key_id_env": "…", "secret_access_key_env": "…"}`, the store's key in the two variables it names: a read-only key for an inference pod, a key that writes for a trainer or host pod |
 | `STEP_CA_URL` | The cluster's step-ca (`https://ca.example.com`) |
 | `STEP_FINGERPRINT` | The SHA-256 fingerprint of step-ca's root certificate (`rollout_runpod.fingerprint`, or `step certificate fingerprint root_ca.crt`) |
+| `STEP_ROOT` | The cluster's root certificate itself (PEM), pinned when the pod is leased and checked against `STEP_FINGERPRINT`; without it the pod fetches it from step-ca |
+| `STEP_CA_TRUST` | `root` (default): step-ca is reached directly, its TLS checked by the cluster's root; `system`: behind a proxy that ends TLS with a public certificate (a Cloudflare Tunnel), checked by the system's roots, and renewals use a token signed by the certificate's key (`--mtls=false`) |
 | `STEP_TOKEN` | The one-time token for the pod's first certificate; unset before any other process starts |
 | `ROLLOUT_CERTS` | Where the certificates are kept (default `/workspace/certs`, on the volume) |
 | `ROLLOUT_ADDRESS` | The pod's public address, `https://IP:PORT`; by default from RunPod's `RUNPOD_PUBLIC_IP` and `RUNPOD_TCP_PORT_8443` |
 | `ROLLOUT_CERT_SERIAL_FILE` | The file the certificate's serial is read from for the pod's beats (default `/certs/current/serial`) |
+| `ROLLOUT_BLOB_CACHE` | A directory on the pod's disk that keeps a copy of every blob the pod's processes put or read (a host pod's, `/workspace/blobs`): none by default |
+| `SYSTEM_ROOTS` | The system's root certificates, which step-ca's TLS is checked by with `STEP_CA_TRUST=system` (default `/etc/ssl/certs/ca-certificates.crt`) |
 | `ENVOY_CONFIG` | Another Envoy configuration (default `/etc/envoy/envoy.yaml`) |
 | `ENVOY_LOG_LEVEL` | Envoy's log level (default `warn`); its access log is always on |
 | `HF_HOME` | Where models are downloaded (default `/workspace/huggingface`); `HF_TOKEN` for a gated model |

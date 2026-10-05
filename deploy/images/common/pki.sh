@@ -7,6 +7,12 @@
 #                      publish each new one (runs until killed)
 #   pki.sh publish     make what step wrote the certificate Envoy serves (what `renew` runs after each renewal)
 #
+# The cluster's root is the one the pod is given (STEP_ROOT, checked against STEP_FINGERPRINT), else the one step-ca
+# serves, checked by the fingerprint. With STEP_CA_TRUST=system, step-ca is behind a proxy that ends TLS with a public
+# certificate (a Cloudflare Tunnel): its TLS is checked by the system's roots (and the cluster's), and the certificate
+# is renewed with a token signed by its key rather than over mutual TLS, which such a proxy does not pass on. Either way
+# the pod's certificate chains to the cluster's root, which Envoy checks clients by.
+#
 # step writes the certificate, its key and the root under $ROLLOUT_CERTS/live. Publishing copies them into a directory
 # of their own and swaps the symbolic link $ROLLOUT_CERTS/current to it in one rename, which Envoy watches for: it
 # reads the new pair whole, with no restart and no connection dropped. /certs is the directory Envoy's configuration
@@ -16,7 +22,17 @@ set -euo pipefail
 CERTS=${ROLLOUT_CERTS:-/workspace/certs}
 LIVE=$CERTS/live
 PYTHON=/opt/rollout/venv/bin/python
+SYSTEM_ROOTS=${SYSTEM_ROOTS:-/etc/ssl/certs/ca-certificates.crt}
 export STEPPATH=$CERTS/.step
+
+trusted() { # the roots step-ca's own TLS is checked by: the cluster's, and with STEP_CA_TRUST=system the system's too
+    if [ "${STEP_CA_TRUST:-root}" = system ]; then
+        cat "$LIVE/ca.crt" "$SYSTEM_ROOTS" >"$LIVE/trust.pem"
+        echo "$LIVE/trust.pem"
+    else
+        echo "$LIVE/ca.crt"
+    fi
+}
 
 need() {
     for name in "$@"; do
@@ -35,7 +51,13 @@ bootstrap() {
     if [ "$CERTS" != /certs ]; then
         ln -sfn "$CERTS" /certs
     fi
-    if [ ! -s "$LIVE/ca.crt" ]; then
+    if [ -n "${STEP_ROOT:-}" ]; then
+        printf '%s\n' "$STEP_ROOT" >"$LIVE/ca.crt"
+        if [ "$(step certificate fingerprint "$LIVE/ca.crt")" != "$STEP_FINGERPRINT" ]; then
+            echo "pki.sh: STEP_ROOT is not the root STEP_FINGERPRINT names" >&2
+            exit 1
+        fi
+    elif [ ! -s "$LIVE/ca.crt" ]; then
         step ca root "$LIVE/ca.crt" --ca-url "$STEP_CA_URL" --fingerprint "$STEP_FINGERPRINT" --force
     fi
     if [ -s "$LIVE/tls.crt" ] && step certificate verify "$LIVE/tls.crt" --roots "$LIVE/ca.crt" >/dev/null 2>&1; then
@@ -44,7 +66,7 @@ bootstrap() {
         need STEP_TOKEN
         # The key is made here and never leaves the pod; the token names this identity, and step-ca takes it once.
         step ca certificate "$identity" "$LIVE/tls.crt" "$LIVE/tls.key" --token "$STEP_TOKEN" \
-            --ca-url "$STEP_CA_URL" --root "$LIVE/ca.crt" --kty EC --curve P-256 --force
+            --ca-url "$STEP_CA_URL" --root "$(trusted)" --kty EC --curve P-256 --force
     fi
     chmod 600 "$LIVE/tls.key"
     publish
@@ -54,7 +76,11 @@ renew() {
     need STEP_CA_URL
     # --daemon renews at about two thirds of the certificate's life (with jitter), for as long as step-ca renews it:
     # a certificate its starter had revoked is not renewed, and lapses.
-    exec step ca renew --daemon --ca-url "$STEP_CA_URL" --root "$LIVE/ca.crt" \
+    local by=()
+    if [ "${STEP_CA_TRUST:-root}" = system ]; then
+        by=(--mtls=false) # (a token signed by the certificate's key: the proxy in front of step-ca drops client certificates)
+    fi
+    exec step ca renew --daemon --ca-url "$STEP_CA_URL" --root "$(trusted)" "${by[@]}" \
         --exec "$0 publish" "$LIVE/tls.crt" "$LIVE/tls.key"
 }
 
