@@ -39,7 +39,7 @@ def evaluated(made: Objective, advantage: float = 1.0, **given: torch.Tensor) ->
     )
     found.loss.backward()
     assert logprobs.grad is not None
-    return float(found.loss), logprobs.grad.tolist(), found
+    return float(found.loss.detach()), logprobs.grad.tolist(), found
 
 
 def test_the_default_is_the_step_as_it_always_was() -> None:
@@ -251,10 +251,10 @@ def test_a_dpo_step_prefers_the_chosen_and_kto_its_desirable() -> None:
         ("kto", [Labelled((chosen,), True), Labelled((rejected,), False)]),
     ):
         policy = ToyPolicy()
-        before = [float(policy.logprobs(each.tokens, positions(each)).sum()) for each in (chosen, rejected)]
+        before = [float(policy.logprobs(each.tokens, positions(each)).detach().sum()) for each in (chosen, rejected)]
         stepping = PolicyStep(policy, StepSettings(objective=preset, learning_rate=0.05, max_kl=None))  # type: ignore[arg-type]
         metrics = [stepping.step(items, seed=seed) for seed in range(3)]
-        after = [float(policy.logprobs(each.tokens, positions(each)).sum()) for each in (chosen, rejected)]
+        after = [float(policy.logprobs(each.tokens, positions(each)).detach().sum()) for each in (chosen, rejected)]
         assert after[0] - after[1] > before[0] - before[1], preset
         assert metrics[0]["items"] == len(items) and metrics[0]["segments"] == 2.0
         assert metrics[-1]["preference_accuracy"] == 1.0 and metrics[-1]["loss"] < metrics[0]["loss"]

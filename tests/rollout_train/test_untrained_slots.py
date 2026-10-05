@@ -82,7 +82,7 @@ def test_the_algorithm_never_trains_on_a_judges_turns_and_the_reward_is_the_trai
     assert [episode.reward for episode in group] == [0.0, 1.0]  # (not halved by the judge's empty reward)
     batch = Grpo().batch(group, Budget(), random.Random(0))
     assert batch.skipped is None
-    assert [weighted.segment.channel for weighted in batch.segments] == ["policy", "policy"]
+    assert [weighted.segment.channel for weighted in batch.items] == ["policy", "policy"]
 
 
 async def test_an_episode_keeps_which_of_its_slots_are_trained_once_stored(tmp_path: Path) -> None:
