@@ -68,6 +68,7 @@ the test suite and a block tagged `py` does not. The API reference is generated 
 ## Implementations
 
 - [vLLM engine](docs/implementations/rollout-vllm.md), [LoRA trainer](docs/implementations/rollout-lora.md),
+  [objectives in torch](docs/implementations/rollout-objectives.md),
   [Tinker trainer and engine](docs/implementations/rollout-tinker.md),
   [Qwen renderers](docs/implementations/rollout-qwen.md), [Gemma renderers](docs/implementations/rollout-gemma.md):
   what a profile names

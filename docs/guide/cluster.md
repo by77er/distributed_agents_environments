@@ -220,14 +220,17 @@ model's `max_lora_rank`. Turns are shared among a pool's runs by each run's `sha
 |---|---|---|---|---|
 | produces | `lora` | `full` | `lora` | as the trainer it runs (`trainer = "lora"` or `"full"`) |
 | format | `peft` | `full` | `tinker` | `peft` or `full` |
-| objectives | `policy_gradient/token`, `policy_gradient/segment`, `likelihood` | the same | the same | the same |
+| objective families | `policy_gradient`, `preference`, `likelihood` | the same | the same | the same |
+| reference | yes (the adapter switched off) | when asked (`trainer.frozen_reference`: a frozen copy) | no | as the trainer it runs |
+| entropy | yes | yes | no | as the trainer it runs |
 | scores given tokens | yes | yes | yes | yes |
 | starts from | `peft`, `full` | `full` | `tinker` | as the trainer it runs |
 | auth | `none` | `none` | `vendor` | `mtls` |
-| settings | `rollout_lora.settings:LoraSettings` | the same, less `rank` | `rollout_tinker.settings:TinkerSettings`, less `project` and `weights` | `LoraSettings` |
+| settings | `rollout_lora.settings:LoraSettings`, less `frozen_reference` | the same, less `rank` | `rollout_tinker.settings:TinkerSettings`, less `project` and `weights` | `LoraSettings` |
 
 `settings_of(kind)` reads a trainer's settings from its dataclass, without importing the trainer or torch: each field
-is `trainer.FIELD`, with its type and default, changeable when its module's `CHANGEABLE` names it.
+is `trainer.FIELD`, with its type and default, changeable when its module's `CHANGEABLE` names it. A trainer's
+`objective` is not one of them: the run's `objective.*` settings say it.
 
 ## Bridges
 
@@ -260,7 +263,9 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `groups`, `seed`, `episodes_at_once` | 100, 0, 6 | |
 | `start`, `bookmark` | | The checkpoint it starts from; a bookmark it carries |
 | `trainer.provider`, `trainer.channel`, `trainer.model` | , `policy`, the trained channel's model | The trainer, the trained channel, what it trains over |
-| `trainer.FIELD` | the trainer's | Its own settings: `rank`, `segment_tokens`, `learning_rate`, `objective`, `ratio`, … |
+| `trainer.FIELD` | the trainer's | Its own settings: `rank`, `segment_tokens`, `learning_rate`, `max_kl`, … |
+| `objective.preset` | `default` | The objective's preset: `default`, `reinforce`, `rloo`, `ppo_clip`, `grpo`, `dr_grpo`, `dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto`, `orpo` |
+| `objective.COMPONENT` | the preset's | Each component ([objectives](../libraries/rollout-train/training.md#objectives)): `objective.clip.kind`, `objective.kl.target`, `objective.preference.loss`, …; its numbers (`objective.clip.low`, `objective.kl.coefficient`, `objective.preference.beta`, …) changeable |
 | `channels.NAME.provider` or `.providers` | | What samples the channel |
 | `channels.NAME.routing`, `.weights` | `spill` | How several providers share its turns |
 | `channels.NAME.model`, `.renderer` | | |
@@ -285,9 +290,14 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 Settings are given in layers, each over the last (`layered`): the schema's defaults, a preset, a file
 (`from_file`: TOML or JSON, dotted keys or tables; JSON's `null` unsets a key), then the flags (`from_flags`:
 `--set KEY=VALUE`, the value read as JSON, then TOML, then as text; `shortcuts` for `--model`, `--provider`,
-`--renderer`, `--trainer`). `RunSettings` answers each key with its default where it was not given.
-`recorded(settings, trainer_settings, preset)` is what a run's start records: a full copy, fixed and changeable,
-and the preset version they came from. `diff(before, after)` says what changed, key by key.
+`--renderer`, `--trainer`). `RunSettings` answers each key with its default where it was not given, and holds the
+trainer settings that name the objective (`trainer.objective`, `trainer.ratio`, `trainer.clip_low`,
+`trainer.clip_high`, `trainer.segment_clip_low`, `trainer.segment_clip_high`, `trainer.truncate`) as the `objective.*`
+keys they say, where those are not given: `trainer.objective = "policy_gradient"` is the `default` preset and
+`"likelihood"` is `sft`. `objective_in(settings)` is the objective they resolve to. `recorded(settings,
+trainer_settings, preset)` is what a run's start records: a full copy, fixed and changeable, the resolved objective of a
+run that trains (`objective`), and the preset version they came from. `diff(before, after)` says what changed, key by
+key.
 
 ### Over a profile
 
@@ -307,6 +317,9 @@ gives (its trainer's settings and `start`, its channels' models, renderers and b
   its checkpoint, resolved to an id when the run starts).
 - A run setting it has no place for (`trainer.provider`, `channels.NAME.provider`, `limits.spend`, `share`,
   routing) is refused: it needs the cluster config.
+- The objective's keys (`objective.preset`, `objective.COMPONENT`) reach the trainer as its `objective`, a table of the
+  preset and the components given; the profile's `[trainer]` can name it the same way (`objective = "dapo"`, or a
+  table).
 - A key that is no run setting is the profile's own (`memory.runs_gib`), as `--set` takes it.
 
 The run's start records the profile's settings (`settings`), and beside them its run settings as they ran
@@ -342,14 +355,14 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | `settings` | a key the kind does not take; a wrong type or a value out of range; a required key missing; a channel that contradicts itself (`provider` and `providers`, `weights` without `weighted`, a mode on the trained channel, following nothing); a slot naming no channel; a slot the program declares and the run does not bind (one that is not trained has no default); a channel a slot samples without a provider or a model; a judge bound to the trained channel, or one following it, without `self_judging` (`rollout_train.slots`) |
 | `providers` | the trainer or a channel's provider is not offered |
 | `auth` | a provider is reached with no auth away from this machine |
-| `capabilities` | a provider of the trained channel is not token-exact, returns no sampled-token logprobs, or does not honour sampling |
+| `capabilities` | a provider of the trained channel is not token-exact, for a policy gradient; or returns no sampled-token logprobs or does not honour sampling, for one with an importance correction. A preference loss and a likelihood read neither |
 | `bridge` | no bridge from the trainer's format (or a checkpoint's) to what a provider of the channel loads |
 | `weights` | adapters for a provider without adapters; full weights for one without full-weight reload |
 | `models` | `trainer.model` not among the trainer's; a channel's model not among its provider's; a channel serving the run's checkpoints with a model that is neither `trainer.model` nor quantized from it; a start trained over another model |
 | `rank` | `trainer.rank` times the bridge's rank factor above the provider model's `max_lora_rank` |
 | `segment` | `trainer.segment_tokens` above the trainer's here, or above the trained channel's context |
 | `start` | the start does not exist or was released; a full-weight trainer from an adapter (merge it first); Tinker from a checkpoint Tinker did not make; a local trainer from a Tinker checkpoint (bridge it first) |
-| `objective` | `trainer.objective` with `trainer.ratio` not among the trainer's objectives |
+| `objective` | a component the objective's family does not accept, or a combination that means nothing (a clip with no ratio, a KL to the reference with none, a reference for a loss that compares likelihoods alone); a family the trainer does not take; a policy gradient for an imitate run; a reference the trainer cannot give (Tinker: none; the full-weight trainer: only with `trainer.frozen_reference`); an entropy bonus on a trainer without entropies |
 | `evals` | a suite that does not exist (a name never becomes a suite by itself), a version it lacks, a suite's environment not offered |
 | `distillation` | the teacher's provider lacks prompt logprobs (or top-k with k at least `distill.k`), or has them only unchecked; the trainer does not score; the teacher's renderer family differs |
 | `environment` | not offered, does not load, needs a sandbox kind with no pool or a tool set not served |

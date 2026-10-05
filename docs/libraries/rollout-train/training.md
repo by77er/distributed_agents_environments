@@ -26,15 +26,19 @@ the last, without editing its file: `--preset NAME[@N]` (a [preset](../../guide/
 profile's ledger), `--settings FILE` (TOML or JSON, dotted keys or tables), `--set KEY=VALUE` (repeatable), then
 `--model`, `--renderer` (of `--channel`, by default the trained one), `--groups`, `--groups-per-step` and `--seed`.
 A value is read as JSON, then TOML, then as the text it is: `--set trainer.learning_rate=3e-5`,
-`--set episodes_at_once=4`, `--set start=curriculum-9:20`, `--set bookmark=diamonds`, `--set max_lag=2`. The run
+`--set episodes_at_once=4`, `--set start=curriculum-9:20`, `--set bookmark=diamonds`, `--set max_lag=2`,
+`--set objective.preset=dapo`, `--set objective.kl.coefficient=0.01`. The run
 settings the profile keeps are applied to it (`start` and `bookmark` as `[trainer] start` and `bookmark`, `max_lag` as
 the trained channel's); one it has no place for (`trainer.provider`, a channel's `provider`, `limits.spend`) is
-refused, as it needs the cluster config. A key that is no run setting is the profile's own (`memory.runs_gib`), and a
+refused, as it needs the cluster config. The objective's (`objective.preset` and its components,
+[objectives](#objectives)) reach the trainer as its `objective`. A key that is no run setting is the profile's own
+(`memory.runs_gib`), and a
 key the profile cannot have is an error, as in the file: when the profile is loaded, for its top level and its
 tables; for a `trainer.` key, when the trainer is made with its settings
 ([`Profile.load(path, settings=...)`](../../guide/reference.md#profile)). The run's start records the profile's
-settings (`settings`) and, beside them, its run settings as they ran, with the preset they came from
-(`run_settings`: `rollout_train.run_settings.recorded`).
+settings (`settings`) and, beside them, its run settings as they ran, with the objective they resolve to and the preset
+they came from (`run_settings`: `rollout_train.run_settings.recorded`). A run started again trains with the objective
+its newest training start recorded, so what a preset means later does not change it.
 
 ## The loop
 
@@ -122,24 +126,86 @@ nothing, or the step that covers it has made its checkpoint or failed.
 What is redone: a step that was in progress, and the episodes that were in flight in a runner that stopped with it
 (a runner plays them again from the same start).
 
-## The algorithm (`Grpo`)
+## Objectives
+
+An objective is chosen by its **family**, the primary selector, and composed from **components**, orthogonal
+settings (`rollout_train.objectives`, free of torch; [`rollout_objectives`](../../implementations/rollout-objectives.md)
+computes it). A family fixes what a batch item is and the core term of the loss:
+
+| Family | Batch item | Core term |
+|---|---|---|
+| `policy_gradient` | a segment with an advantage ([`Weighted`](../../guide/reference.md#weighted)) | the advantage times each sampled token's logprob, under the ratio, clipping and importance components |
+| `preference` | a pair, chosen and rejected over a shared context ([`Pair`](../../guide/reference.md#pair)), or an example labelled desirable or undesirable ([`Labelled`](../../guide/reference.md#labelled)) | a function of each side's log-likelihood ratio to the reference (or its likelihood alone, for a loss with no reference) |
+| `likelihood` | a segment with a weight | the weighted log-likelihood of its sampled tokens (supervised fine-tuning, imitation) |
+
+Each component has a dotted key under `objective.` in a run's settings, the values it takes and the families that
+accept it; validation refuses the rest. The numbers can change between steps; what shapes the loss cannot.
+
+| Component | Values | Families |
+|---|---|---|
+| `advantage.baseline` | `group_mean`, `leave_one_out`, `none` | policy_gradient, likelihood |
+| `advantage.scale` | `none`, `group_std` | policy_gradient, likelihood |
+| `advantage.filter` | `none`, `equal_scores` (DAPO's dynamic sampling) | policy_gradient, likelihood |
+| `ratio` | `token`, `segment` (the geometric mean of its tokens' ratios, GSPO), `none` (the logprob itself, REINFORCE) | policy_gradient |
+| `clip.kind` | `none`, `ratio` (PPO), `weight` (the clipped ratio as a weight with no gradient, CISPO), `dual` (and no less than `clip.dual` times a negative advantage) | policy_gradient |
+| `clip.low`, `clip.high`, `clip.dual` | numbers: the ratio within 1 - low .. 1 + high | policy_gradient |
+| `importance.correction` | `none`, `untruncated`, `truncate` (TIS), `mask` (tokens outside `floor` .. `cap` dropped) | policy_gradient |
+| `importance.level` | `token`, `segment` | policy_gradient |
+| `importance.cap`, `importance.floor` | numbers | policy_gradient |
+| `kl.target` | `none`, `reference`, `old` (the step's start) | policy_gradient |
+| `kl.estimator` | `k1`, `k2`, `k3` | policy_gradient |
+| `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient) | policy_gradient |
+| `kl.coefficient`, `entropy.coefficient` | numbers | policy_gradient |
+| `aggregate` | `token_mean`, `segment_mean`, `segment_sum`, `constant` (divided by `constant_tokens`, Dr. GRPO) | policy_gradient, likelihood |
+| `constant_tokens` | a whole number | policy_gradient, likelihood |
+| `reference` | `base` (the model trained over), `none` | policy_gradient (with a KL to it), preference |
+| `preference.loss` | `sigmoid` (DPO), `hinge`, `square` (IPO), `margin` (SimPO), `odds_ratio` (ORPO), `kto` | preference |
+| `preference.beta`, `preference.margin`, `preference.desirable`, `preference.undesirable` | numbers | preference |
+| `preference.length_normalized` | true or false | preference |
+| `likelihood.coefficient` | a number: the chosen side's mean negative logprob beside the preference loss (ORPO) | preference |
+
+A component that follows from another follows where it is not given: a KL to the reference reads `reference = base`, a
+preference loss with a reference reads it and one without (`margin`, `odds_ratio`) reads none, and an odds ratio is
+length-normalized.
+
+**Presets** are the literature's objectives, each a family and component values pinned to its paper (its test compares
+the composed loss with a transcription of the paper's formula): `default` (Dr. GRPO's advantages, DAPO's clip-higher
+(0.2, 0.28) and token mean, truncated importance sampling at 2), `reinforce`, `rloo`, `ppo_clip`, `grpo`, `dr_grpo`,
+`dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto` and `orpo` ([the design](../../research/objectives-design.md#presets)
+lists their values and sources). A run names one (`objective.preset`) and overrides any component
+(`objective.kl.target = "reference"`, `objective.kl.coefficient = 0.01`); `resolved(preset, overrides)` is the
+objective, refused (`ValueError`) for a component the family does not accept or a combination that means nothing.
+
+A trainer's own settings can name an objective too: `objective = "policy_gradient"` is `default`, `"likelihood"` is
+`sft`, and `ratio`, `clip_low`, `clip_high`, `segment_clip_low`, `segment_clip_high` and `truncate` are its components
+(`from_trainer_settings`); a run's settings hold them as the `objective.*` keys they say.
+
+## The algorithm
 
 The loop asks two things of an [`Algorithm`](../../guide/reference.md#algorithm): how many episodes of one start it
 compares (`group_size`), and what to train on from a group's episodes (`batch`). `batch` is given the episodes of
 every outcome, the trainer's budget and a random number generator seeded by the group's number, and returns a
-[`Batch`](../../guide/reference.md#batch): the weighted segments, or why there are none, and notes to log with the
-group. Another algorithm is passed as `train(..., algorithm=...)`.
+[`Batch`](../../guide/reference.md#batch): the items to train on, or why there are none, and notes to log with the
+group. By default the loop takes the algorithm of the trainer's objective's family (`algorithm_for`: `Grpo` for a
+policy gradient or a likelihood, `Preferences` for a preference loss); another is passed as `train(..., algorithm=...)`.
 
-[`Grpo`](../../guide/reference.md#grpo), the default, is group-relative policy optimisation:
+[`Grpo`](../../guide/reference.md#grpo) is group-relative optimisation, by the objective's advantage components:
 
 | | |
 |---|---|
-| Advantages | An episode's score minus its group's mean, with no division by the group's spread (Dr. GRPO). Every token the policy sampled in the episode gets it; with several model slots, every slot's, so a team is rewarded together. |
-| Dynamic sampling | A group whose scores are all equal has nothing to teach and is skipped (DAPO). So is a group with fewer than two episodes fit to train on. |
-| Behaviour logprobs | A group with a segment to train on whose turns were sampled without their exact tokens or behaviour logprobs is skipped, and `skipped` says which channel's turns lacked what. |
+| Advantages | An episode's score less a baseline: the group's mean (`group_mean`, Dr. GRPO), the mean of the others' (`leave_one_out`, RLOO), or none; then divided by the standard deviation of the group's scores (`group_std`, the sample's, as GRPO's implementations take it) or not. Every token the policy sampled in the episode gets it; with several model slots, every slot's, so a team is rewarded together. |
+| Dynamic sampling | A group whose scores are all equal has nothing to teach and is skipped (`equal_scores`, DAPO; the default). So is a group with fewer than two episodes fit to train on, and one whose every advantage is zero. |
+| Behaviour logprobs | A policy gradient does not train on a group with a segment whose turns were sampled without their exact tokens, nor, with an importance correction, without their behaviour logprobs; `skipped` says which channel's turns lacked what. A likelihood reads neither. |
 | The fastest of the saturated | Episodes that reached everything their task has to give earned the same; the one that took the least scores a point more, and episodes that tie for fastest all do. The task says what saturated means and how long it took ([result conventions](episodes.md#result-conventions)); comparing across the group is done here. An episode that does not say its duration is not compared. `tie_break` turns this off. |
 | Untrained slots | A segment of a slot that is not trained (a judge's, a fixed opponent's: `Segment.trained` is false) is never trained on. |
 | What is trained on | Every segment of the episodes whose advantage is not zero, up to what the trainer can afford in a step (`Budget.segments`). Beyond that, segments are taken at even steps through the group, so that each episode and slot keeps its share, spread over its whole game. |
+
+[`Preferences`](../../guide/reference.md#preferences) makes a group's pairs: its best episode (the first of the best,
+by score with the bonus) preferred to its worst. Both sides start from the group's start, so their shared context is
+the start's first observation; a side is every turn of its episode, and only the tokens the policy sampled count. With
+`labelled` (KTO) each episode above the group's mean is desirable and each below it undesirable. A group whose scores
+are all equal gives none. A preference loss reads no behaviour logprobs, so turns sampled without them (a provider
+that returns none) are trained on.
 
 ## The curriculum
 
@@ -194,17 +260,20 @@ nothing between steps that it cannot be given again, so any trainer can take any
   how many segments a step can afford. It comes from the trainer's hardware, and nothing above the trainer chooses
   it. The algorithm selects within it, and a deployment makes the longest segment its channel's longest turn
   ([limits](channels.md#limits)).
-- **`step(batch, seed=..., parent=..., into=...)`** trains on [`Weighted`](../../guide/reference.md#weighted)
-  segments, starting from [`Files`](../../guide/reference.md#files) (a checkpoint's weights and state on this
+- **`objective`** is what it trains with ([objectives](#objectives)); a trainer that says none trains the `default`
+  preset.
+- **`step(batch, seed=..., parent=..., into=...)`** trains on the items of its objective's family (weighted
+  segments, pairs or labelled examples), starting from [`Files`](../../guide/reference.md#files) (a checkpoint's weights and state on this
   machine; none means the base model). It leaves the new weights in `into/weights`, as engines load them, and what
   a later step starts from (an optimizer's state, say) in `into/state`. It returns its metrics.
 - **`StepFailed`** means the step produced no weights: the weights are as they were, and a later step may succeed.
 - **`changeable`** and **`change(settings)`**, where a trainer has them ([`Changeable`](../../guide/reference.md#changeable)):
   the settings it takes between steps, by its name for each, with their values now, and a call that has it take some
   of them from its next step on (raising `ValueError` for one it does not take). They change neither what its weights
-  are nor its `budget`. `LoraTrainer` and `FullTrainer` take `learning_rate`, `clip_low`, `clip_high`,
-  `segment_clip_low`, `segment_clip_high`, `truncate`, `tokens_per_step`, `max_kl` and `max_gradient_norm`: each step
-  runs in a process of its own, which reads them afresh (the optimizer's saved state is given the learning rate then).
+  are nor its `budget`. `LoraTrainer` and `FullTrainer` take `learning_rate`, `tokens_per_step`, `max_kl`,
+  `max_gradient_norm` and the numbers of their objective (`objective.clip.low`, `objective.kl.coefficient`, ...,
+  named by the run settings' keys): each step runs in a process of its own, which reads them afresh (the optimizer's
+  saved state is given the learning rate then).
 
 [`Colocated`](../../guide/reference.md#colocated) wraps a trainer that shares an accelerator with the engines of
 some channels. For each step it holds new requests back, waits for those in flight, puts the engines to sleep,
@@ -220,7 +289,7 @@ A run's settings are named by dotted key, as a profile's are, and are of two kin
 checkpoint it serves, so runners elsewhere take it with that checkpoint), the evals it makes
 (`evals.suite`: a suite by name, which follows its newest version, a version by id, or none for no evals;
 `evals.every`; `evals.episodes`, none for the suite's own), and its trainer's (`trainer.NAME` for each of its
-`changeable`). **Fixed** ones make what the run is: the model, the trainer's kind and what its weights are, the
+`changeable`, and the numbers of its objective by their own keys, `objective.kl.coefficient`). **Fixed** ones make what the run is: the model, the trainer's kind and what its weights are, the
 adapter's rank and the trainer's other settings, the channels and their engines, how many episodes it plays at once,
 and the groups and seed the loop was started with (`fixed(profile, trainer, …)`). `rollout train` writes both into the
 run's start record (`settings`: `fixed`, and `changeable` with their values as it starts).
@@ -342,9 +411,9 @@ word and by kind (`info["guidance"]`, for example `way` and `teamwork`).
 - **`examples(ledger, run, blobs, renderer, kinds=...)`** reads a run's episodes for those that carried guidance
   of those kinds and solved their task, and gives their segments, cut, each weighted 1.
 - **`imitate(checkpoints, trainer, examples, fence=..., run=..., start=..., base=..., directory=...)`** takes one
-  step of a trainer whose objective is likelihood ([LoRA trainer](../../implementations/rollout-lora.md), or the
-  trainer of every weight) from the newest checkpoint the run made (else from `start`), and appends the checkpoint it
-  makes as the run's (with no step). Its parents are the checkpoint it trained from, then the checkpoints that sampled
+  step of a trainer whose objective is a likelihood, or a preference loss for a dataset's pairs or labelled examples
+  ([LoRA trainer](../../implementations/rollout-lora.md), or the trainer of every weight), from the newest checkpoint
+  the run made (else from `start`), and appends the checkpoint it makes as the run's (with no step). Its parents are the checkpoint it trained from, then the checkpoints that sampled
   its examples, where those are known. The checkpoint says whether its examples were `importance` data (every turn
   sampled with its exact tokens and behaviour logprobs) or `supervised` (`supervision`).
 
@@ -358,7 +427,8 @@ rollout imitate PROFILE … --learning-rate R --warmup N --passes N   # the step
 It takes the run's fence, so the run must be stopped, and writes a start of `kind: imitation` that says its
 examples' `supervision`. It reads the episodes
 of the run in the directory for guidance of the kinds given (`way` by default), or, with `--dataset`, a
-[dataset's](datasets.md) examples; steps the profile's trainer with `objective = "likelihood"`; and adds
+[dataset's](datasets.md) examples; steps the profile's trainer with the run's objective if it is a likelihood or a
+preference preset (a preference preset for a dataset of pairs or labelled examples), else `sft`; and adds
 `imitated_episodes`, `imitated_segments` and `optimizer_resumed` to the checkpoint's metrics. The step starts from
 the parent's weights with its optimizer afresh, unless `--resume-optimizer`, on a schedule of its own: 1e-6 for
 every weight or 1e-4 for an adapter, warmed up over 4 updates, with passes enough for 8 updates

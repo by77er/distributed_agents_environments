@@ -40,6 +40,7 @@ PUBLIC_MODULES = [
     ("rollout_train.cluster", "The cluster config: infrastructure, found, read strictly, with secrets only by name."),
     ("rollout_train.providers", "Inference providers and trainers: kinds, capabilities, auth, shared pools, routing."),
     ("rollout_train.bridges", "Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks."),
+    ("rollout_train.objectives", "Objectives declared: families, components, presets, and resolving them."),
     ("rollout_train.run_settings", "A run's settings: the schema, layers, flags and files, a full copy, diffs."),
     ("rollout_train.stores", "The ledger and the blob store a cluster config names, opened on this node."),
     ("rollout_train.presets", "Named, versioned run settings beside the ledger."),
@@ -51,6 +52,9 @@ PUBLIC_MODULES = [
     # implementations
     ("rollout_vllm", "An engine on vLLM."),
     ("rollout_lora", "A trainer for 4-bit checkpoints with LoRA."),
+    ("rollout_objectives.settings", "A policy step's settings, which the LoRA, full-weight and Tinker trainers take."),
+    ("rollout_objectives.terms", "An objective's loss composed from its components, in torch."),
+    ("rollout_objectives.step", "A step over a batch on a local policy, its plan of minibatches, and its statistics."),
     ("rollout_qwen", "Renderers for the Qwen model families."),
     ("rollout_gemma", "Renderers for the Gemma model families."),
     ("rollout_openai", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),

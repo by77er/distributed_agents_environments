@@ -240,13 +240,14 @@ The other parts behave as follows.
   - It adds the version from `into/weights` and `into/state`.
   - It serves the version: `publish(channel, version.name, str(local weights directory), version.number)`.
   - It thins the policy.
-- **The objective** (`rollout_lora/objectives.py`) is a pure torch function of one segment. It takes logprobs now
-  (`logprobs`), at the step's start (`old`), and when sampled (`behavior`):
-  - The importance weight is `old / behavior`, truncated at `truncate`.
-  - The PPO ratio is `logprobs / old`, clipped to `1 - clip_low .. 1 + clip_high`.
+- **The objective** (`rollout_objectives/terms.py`, composed from the components `rollout_train.objectives` declares)
+  is a pure torch function of one segment. It takes logprobs now (`logprobs`), at the step's start (`old`), when
+  sampled (`behavior`) and under the reference:
+  - The importance weight is `old / behavior`, truncated at the cap (the `default` preset's).
+  - The PPO ratio is `logprobs / old`, clipped to `1 - clip.low .. 1 + clip.high`.
   - A segment ratio is the geometric mean (GSPO).
-  - `likelihood` is for imitation.
-- **The step** (`rollout_lora/step.py`):
+  - `likelihood` is for imitation; a preference loss is of pairs or labelled examples.
+- **The step** (`rollout_objectives/step.py`):
   - It computes `old` for every segment first.
   - It takes shuffled minibatches of about `tokens_per_step` sampled tokens, one optimizer step each.
   - The loss is divided by the minibatch's units (tokens, or segments for GSPO).
@@ -268,7 +269,7 @@ The other parts behave as follows.
 | `Weighted(segment, advantage)` | One `Datum`: `model_input = tokens[:-1]`, `target_tokens = tokens[1:]`, and for each sampled position *t* the row *t*−1 carries its behaviour (or old) logprob and its advantage. Other rows are 0 | Exact. Multi-turn segments with several spans are one datum. Forced tokens get advantage 0, which masks them |
 | Advantages and importance weights | Per-token `advantages` and `logprobs` | The built-in losses take *one* reference logprob. Our factored objective is expressed by passing `old` as the reference and folding the truncated weight and 1/units into the advantages ([the objective](#the-objective-on-tinker)) |
 | `old` (π at the step's start) | `forward_async(data, "cross_entropy")` on the parent, reading `loss_fn_outputs[i]["logprobs"]` | Billed at the training price, the same as a training pass. Not needed when a step is a single optimizer step |
-| GSPO segment ratio | `forward_backward_custom_async(data, fn)`, with `fn` calling `rollout_lora.objectives.terms` on the returned logprobs | 1.5x the FLOPs, and up to 3x the wall time |
+| GSPO segment ratio | `forward_backward_custom_async(data, fn)`, with `fn` calling `rollout_objectives.terms.terms` on the returned logprobs | 1.5x the FLOPs, and up to 3x the wall time |
 | `likelihood` (imitation) | `cross_entropy` with `weights = advantage / units` on sampled rows | Exact |
 | `tokens_per_step`, `max_gradient_norm`, `learning_rate` | Minibatches are ours; `AdamParams(learning_rate, beta1=0.9, beta2=0.999, eps=1e-8, weight_decay=0.0, grad_clip_norm=...)` | Tinker's LoRA scaling (`lora_alpha`) is its own, not our `2 × rank`, so learning rates need re-tuning |
 | `max_kl` stop | KL from each `forward_backward` output (the logprobs before that minibatch's update) against `old` | Exact if we await the forward-backward before submitting `optim_step` (two clock cycles per minibatch), or one minibatch late if pipelined. No call clears accumulated gradients (SDK 0.32.0), so after a stop the live client is not used again |
@@ -309,7 +310,7 @@ exactly.
 - With one minibatch, `importance_sampling` with `q = old` and `A′ = w_seg·A/(n_seg·U)` gives our gradient. It needs
   the `old` pass.
 - With several minibatches, the clip acts on the segment's ratio, which no built-in loss expresses. Use
-  `forward_backward_custom`, whose function calls `rollout_lora.objectives.terms` unchanged (pure torch, on CPU).
+  `forward_backward_custom`, whose function calls `rollout_objectives.terms.terms` unchanged (pure torch, on CPU).
 - Inside that function the KL check can return a zero loss and skip `optim_step`. A zero gradient would still move
   Adam through its momentum, so skipping is necessary.
 

@@ -12,9 +12,9 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.curriculum`](#rolloutcurriculum)** — Which row to train on next, and gates on evals. [`Curriculum`](#curriculum), [`curriculum_of`](#curriculum_of), [`GroupResult`](#groupresult), [`solved_share`](#solved_share)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
-- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
+- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#rollout_trainrolloutsplan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Labelled`](#labelled), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#scores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
@@ -23,18 +23,22 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
 - **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`LauncherSection`](#launchersection), [`LedgerSection`](#ledgersection), [`load`](#load), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
-- **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, shared pools, routing. [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`OBJECTIVES`](#objectives), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`SharedPool`](#sharedpool), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
+- **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, shared pools, routing. [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`SharedPool`](#sharedpool), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
-- **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
+- **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
+- **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`objective_in`](#objective_in), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
 - **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`FILES`](#files), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
-- **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#preset), [`Presets`](#presets), [`presets_of`](#presets_of)
+- **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`offered_json`](#offered_json), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#runtime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
-- **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#problems), [`serving`](#serving), [`subject`](#subject)
+- **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`SECRETS`](#secrets)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
-- **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer), [`StepSettings`](#stepsettings)
+- **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
+- **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
+- **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
+- **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`positions`](#positions), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`TrainablePolicy`](#trainablepolicy)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls)
 - **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
@@ -2552,7 +2556,7 @@ class Outcome(StrEnum)
 | `FAILED` | `'failed'` | The program raised: its `detail` says what. |
 | `CANCELLED` | `'cancelled'` |  |
 
-### `Plan`
+### `Plan` {#rollout_trainrolloutsplan}
 
 *class* · `libraries/rollout-train/src/rollout_train/rollouts/scheduler.py`
 
@@ -2778,21 +2782,31 @@ What the training loop asks of an algorithm.
 **Methods**
 
 - `@property def group_size(self) -> int` — How many episodes of one start it compares.
-- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch` — What to train on from a group's episodes (of every outcome), within what the trainer can afford.
+- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Item]` — What to train on from a group's episodes (of every outcome), within what the trainer can afford.
+
+### `algorithm_for`
+
+*function* · `libraries/rollout-train/src/rollout_train/algorithm.py`
+
+```python
+def algorithm_for(objective: Objective, group_size: int = 4) -> Grpo | Preferences
+```
+
+The algorithm that makes the batch items an objective's family takes.
 
 ### `Batch`
 
 *class* · `libraries/rollout-train/src/rollout_train/algorithm.py`
 
 ```python
-class Batch
+class Batch(Generic[Each])
 ```
 
-What an algorithm makes of a group of episodes.
+What an algorithm makes of a group of episodes: items of one kind (`Each`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `segments` | `Sequence[Weighted]` | `()` | What to train on. |
+| `items` | `Sequence[Each]` | `()` | What to train on. |
 | `skipped` | `str \| None` | `None` | Why there is nothing to train on, if there is not. |
 | `notes` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the algorithm wants logged with the group. |
 
@@ -2807,7 +2821,7 @@ class Budget
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `segment_tokens` | `int \| None` | `None` | The longest segment the trainer can train on (None: any). |
-| `segments` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
+| `segments` | `int \| None` | `None` | How many segments a step can afford (None: any number), counting each of a pair's or an example's. |
 
 ### `Changeable`
 
@@ -2822,7 +2836,8 @@ what its weights are nor what it can take (`Budget`).
 
 **Methods**
 
-- `@property def changeable(self) -> Mapping[str, JsonValue]` — The settings it takes between steps, by its name for each, with their values now.
+- `@property def changeable(self) -> Mapping[str, JsonValue]` — The settings it takes between steps, by its name for each, with their values now: a component of its
+  objective by its run setting's key (`objective.kl.coefficient`).
 - `def change(self, settings: Mapping[str, JsonValue]) -> None` — Take these settings (some of `changeable`) from its next step on. Raises `ValueError` for one it does not
   take, or a value it cannot.
 
@@ -2910,7 +2925,7 @@ start (too little memory, say).
 - `def __init__(self, trainer: Trainer, channels: Sequence[Pausable], *, guard: Callable[[], None] | None = None) -> None`
 - `@property def changeable(self) -> Mapping[str, JsonValue]` — The settings the trainer it wraps takes between steps (`rollout_train.trainer.Changeable`), if any.
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
-- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
+- `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
 
 ### `Dataset`
 
@@ -2936,6 +2951,7 @@ A dataset's record (`DATASETS`): how its examples were chosen, what came of it, 
 | `left_out` | `Mapping[str, int]` | `field(default_factory=dict[str, int])` | Turns of its episodes that are no examples, by why. |
 | `checkpoints` | `list[str]` | `field(default_factory=list[str])` | The checkpoints that sampled its examples, by id, by depth (examples sampled by the base model name none). |
 | `supervision` | `str` | `IMPORTANCE` | `importance` if every example's turns were sampled with their exact tokens and behaviour logprobs, else `supervised`. |
+| `kind` | `str` | `EXAMPLES` | What its lines are: `examples`, `pairs` or `labelled` examples. |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
 | `by` | `str` | `''` | Who made it: `user@host`. |
 
@@ -3092,7 +3108,7 @@ and at once when a channel serves something new: what `about` says of the machin
 def group_advantages(scores: Sequence[float]) -> list[float] | None
 ```
 
-Each score minus the group's mean; None when all are equal (no signal).
+Each score minus the group's mean; None when all are equal (no signal): the `default` preset's advantages.
 
 ### `Grpo`
 
@@ -3102,15 +3118,39 @@ Each score minus the group's mean; None when all are equal (no signal).
 class Grpo
 ```
 
+Weighted segments, each with its episode's advantage (for the policy-gradient and likelihood families).
+
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `group_size` | `int` | `4` |  |
 | `tie_break` | `bool` | `True` | Whether the fastest of a group's saturated episodes scores a point more. |
+| `advantage` | `Advantage` | `DEFAULT_ADVANTAGE` |  |
+| `needs` | `tuple[str, ...]` | `tuple(_LACKING)` | What every segment's turns must have been sampled with (`needs_of`). |
 
 **Methods**
 
-- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch` — The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
+- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Weighted]` — The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
   its episode's advantage; none, if one of them cannot be weighed (`unweighable`).
+
+### `Labelled`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Labelled
+```
+
+The segments of one episode, labelled desirable or not (KTO's unpaired examples).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `side` | `tuple[Segment, ...]` | required |  |
+| `desirable` | `bool` | required |  |
+| `source` | `str` | `''` | `RUN/GROUP/EPISODE`. |
+
+**Methods**
+
+- `@property def segments(self) -> tuple[Segment, ...]`
 
 ### `Ledger`
 
@@ -3142,10 +3182,10 @@ class Ledger(Protocol)
 async def make_dataset(ledger: Ledger, rule: str, runs: Sequence[str], *, into: Blobs, at: Mapping[str, JsonValue], turns: Sequence[str] = (ALL,), cut: Sequence[str] = ('way',), per_task: int | None = None, by: str | None = None) -> Dataset
 ```
 
-Make a dataset of the episodes `runs` (by id) completed: those `rule` picks, and of them the turns every filter
-of `turns` keeps. Its manifest is kept in `into`, which is at `at` (as `rollout_train.stores.opened` reads it).
-Episodes are read one at a time, from where each run's blobs are. Raises `ValueError` for a rule or filter that
-does not exist, or a dataset of no examples.
+Make a dataset of the episodes `runs` (by id) completed: those `rule` picks (an episode rule, or a preference
+rule's pairs or labelled examples), and of them the turns every filter of `turns` keeps. Its manifest is kept in
+`into`, which is at `at` (as `rollout_train.stores.opened` reads it). Episodes are read one at a time, from where
+each run's blobs are. Raises `ValueError` for a rule or filter that does not exist, or a dataset of no examples.
 
 ### `make_suite`
 
@@ -3172,6 +3212,49 @@ The files of a checkpoint, by their paths within it, each kept as a blob.
 |---|---|---|---|
 | `files` | `Mapping[str, BlobReference]` | required |  |
 | `layout` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | How the weights are divided among the files, where they are divided: whoever wrote them says, so that a reader with the same division reads its own files and no others. |
+
+### `Pair`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Pair
+```
+
+Two sides over a shared context (one start), the chosen preferred to the rejected: each the segments of one
+episode (every turn the policy sampled in it), of which only the tokens the policy sampled count.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `chosen` | `tuple[Segment, ...]` | required |  |
+| `rejected` | `tuple[Segment, ...]` | required |  |
+| `source` | `str` | `''` | Where the sides are from, for the record of what a step trained on: `RUN/GROUP/CHOSEN>REJECTED` (the episodes' numbers). |
+
+**Methods**
+
+- `@property def segments(self) -> tuple[Segment, ...]`
+
+### `Preferences`
+
+*class* · `libraries/rollout-train/src/rollout_train/algorithm.py`
+
+```python
+class Preferences
+```
+
+Pairs, a group's best episode preferred to its worst; or, `labelled`, examples, each episode above the group's
+mean desirable and each below it undesirable (for the preference family).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `group_size` | `int` | `4` |  |
+| `tie_break` | `bool` | `True` |  |
+| `labelled` | `bool` | `False` |  |
+
+**Methods**
+
+- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Pair | Labelled]` — A pair of the group's best and worst completed episodes (the first of each where several tie), or every
+  completed episode not at the group's mean, labelled; none where every score is the same.
 
 ### `record_serving`
 
@@ -3441,7 +3524,8 @@ serving each checkpoint made on `channel`; a run started again goes on from the 
 taken over the groups queued once at least `groups_per_step` have something to train on (and, at the end, over what
 is left). `directory` is where checkpoints' files are kept on this machine while they are in use: the one being
 served and the one before it (a turn in progress finishes under the weights it began with); every checkpoint's files
-are in the blob store; `publish` serves a checkpoint on `channel`. `algorithm` is `Grpo()` unless given.
+are in the blob store; `publish` serves a checkpoint on `channel`. `algorithm` is the one the family of the
+trainer's objective takes, unless given (`rollout_train.algorithm.algorithm_for`).
 `episodes_at_once` is how many episodes the run keeps work waiting for, whatever groups they are of (runners play
 them, as many at once as each has places). `binding` says how the program's model slots and imports are served (by
 default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is one that has
@@ -3505,7 +3589,7 @@ where its files go, so any trainer can take any step of any policy.
 
 **Methods**
 
-- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step` — Train on the batch, starting from `parent` (None: from the base model). The new weights are left in
+- `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step` — Train on the batch, starting from `parent` (None: from the base model). The new weights are left in
   `into/weights`, and what a later step starts from in `into/state`. Raises `StepFailed` if the step
   produced no weights.
 
@@ -5095,18 +5179,19 @@ class RemoteTrainer
 
 Takes steps on the training service at `address`, its files through `checkpoints`' blob store. `weights` and
 `budget` are what the pod's trainer makes and can take (as the cluster says of it; `describe` asks the pod);
-`changeable` the settings it takes between steps, with their values now. The pod is reached as `connection` says
+`objective` what it trains with (the `default` preset unless given); `changeable` the settings it takes between
+steps, with their values now. The pod is reached as `connection` says
 (a client certificate, the CA, and the identity the pod's certificate must carry). It is asked after a step every
 `every` seconds; a step fails as `TrainerUnreachable` after `patience` seconds without an answer.
 
 **Methods**
 
-- `def __init__(self, address: str, checkpoints: Checkpoints, *, weights: str = 'lora', budget: Budget | None = None, changeable: Mapping[str, JsonValue] | None = None, connection: Connection | None = None, client: httpx.AsyncClient | None = None, every: float = 2.0, patience: float = 300.0) -> None`
+- `def __init__(self, address: str, checkpoints: Checkpoints, *, weights: str = 'lora', budget: Budget | None = None, objective: Objective = DEFAULT, changeable: Mapping[str, JsonValue] | None = None, connection: Connection | None = None, client: httpx.AsyncClient | None = None, every: float = 2.0, patience: float = 300.0) -> None`
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def describe(self) -> dict[str, Any]` — What the pod says its trainer is: its kind, model, `weights`, `budget`, and the settings it takes between
   steps.
-- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
+- `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
 - `async def aclose(self) -> None` — Close the client it made (one it was given is its giver's).
 
 ### `TrainerBusy`
@@ -5584,17 +5669,6 @@ A model a provider serves here.
 | `cost` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Dollars per million tokens by token class (`input`, `cached_input`, `output`, `thinking`), or per hour (`hour`). |
 | `options` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What its engines are started with (`gpu_memory_utilization`, `max_num_seqs`, …). |
 
-### `OBJECTIVES`
-
-*constant* · `libraries/rollout-train/src/rollout_train/providers.py`
-
-```python
-OBJECTIVES = ('policy_gradient/token', 'policy_gradient/segment', 'likelihood')
-```
-
-The objectives a trainer may take: the clipped policy gradient with a ratio per token (PPO) or per segment (GSPO),
-and likelihood (imitation).
-
 ### `ROUTING`
 
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
@@ -5716,7 +5790,7 @@ The cluster's own certificate authority and the client certificate its gateway a
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none')), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_OBJECTIVE, True, frozenset({'tinker'})), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), not_settings={'project': 'the cluster config says it ([trainers.NAME] project)'}), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', 'image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca'), secrets=('api_key',)))}
+TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={**_OBJECTIVE, 'frozen_reference': "an adapter's reference is the model with the adapter switched off"}), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={**_OBJECTIVE, 'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_FAMILY, True, frozenset({'tinker'}), reference='no', entropy=False), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), not_settings={**_OBJECTIVE, 'project': 'the cluster config says it ([trainers.NAME] project)'}), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', 'image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca'), secrets=('api_key',), not_settings=_OBJECTIVE))}
 ```
 
 Every kind of trainer, by name.
@@ -5735,9 +5809,11 @@ What a kind of trainer makes and takes.
 |---|---|---|---|
 | `produces` | `Literal['lora', 'full']` | required |  |
 | `format` | `str` | required | The checkpoint format its files are in: `peft`, `full` or `tinker`. |
-| `objectives` | `frozenset[str]` | required | Among `OBJECTIVES`. |
+| `families` | `frozenset[str]` | required | The objective families it takes (`rollout_train.objectives.FAMILIES`). |
 | `scores` | `bool` | required | Can compute logprobs of given tokens (for distillation, and supervised data without behaviour logprobs). |
 | `starts_from` | `frozenset[str]` | required | Checkpoint formats a run may start from (besides the base model). |
+| `reference` | `Literal['yes', 'asked', 'no']` | `'yes'` | Whether it gives the reference model's logprobs, which a KL to the reference and most preference losses read: `yes` (an adapter switched off), `asked` (only when its settings ask, `trainer.frozen_reference`: a frozen copy of the model beside the policy), `no`. |
+| `entropy` | `bool` | `True` | Whether it gives each position's entropy (an entropy bonus reads it). |
 
 ### `TrainerKind`
 
@@ -6022,6 +6098,317 @@ def verbatim(weights: Path, into: Path, context: Context) -> dict[str, JsonValue
 
 The provider loads the trainer's files as they are: each is linked (or copied) into `into`.
 
+## `rollout_train.objectives`
+
+Objectives declared: families, components, presets, and resolving them.
+
+### `Advantage`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Advantage
+```
+
+How a policy-gradient segment's advantage is made from its group's scores (`rollout_train.algorithm`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `baseline` | `str` | `'group_mean'` | `group_mean`: each score less the group's mean. `leave_one_out`: less the mean of the others' (RLOO). `none`: the score itself. |
+| `scale` | `str` | `'none'` | `none`, or `group_std`: divided by the standard deviation of the group's scores (GRPO). |
+| `filter` | `str` | `'equal_scores'` | `equal_scores`: a group whose scores are all equal is skipped (DAPO's dynamic sampling). `none`: kept. |
+
+### `Clip`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Clip
+```
+
+How the update's movement is bounded, through the ratio of each token's logprob now to the step's start.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `kind` | `str` | `'ratio'` | `none`; `ratio`: PPO's, the smaller of the ratio and the clipped ratio, each times the advantage; `weight`: the clipped ratio as a weight with no gradient, times the logprob (CISPO); `dual`: PPO's, and for a negative advantage no less than `dual` times it (dual-clip PPO). |
+| `low` | `float` | `0.2` |  |
+| `high` | `float` | `0.28` | The ratio is clipped to 1 - `low` .. 1 + `high` (asymmetric: DAPO's clip-higher). |
+| `dual` | `float` | `3.0` | For `dual`: the bound for a negative advantage, in times it (above 1). |
+
+### `Component`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Component
+```
+
+One component: its dotted key under `objective.`, the JSON types and strings it takes, the families that accept
+it, and whether a running run takes it from its next step on.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `key` | `str` | required |  |
+| `types` | `tuple[str, ...]` | required |  |
+| `families` | `frozenset[str]` | required |  |
+| `changeable` | `bool` | required |  |
+| `says` | `str` | required |  |
+| `choices` | `tuple[str, ...]` | `()` |  |
+| `least` | `float \| None` | `None` |  |
+| `above` | `bool` | `False` | `least` itself is not taken. |
+
+### `component`
+
+*function* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+def component(key: str) -> Component | None
+```
+
+The component a dotted key names (`clip.low`, without `objective.`).
+
+### `COMPONENTS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+COMPONENTS: tuple[Component, ...] = (Component('advantage.baseline', _S, _ADVANTAGED, False, 'What a score is measured against', ('group_mean', 'leave_one_out', 'none')), Component('advantage.scale', _S, _ADVANTAGED, False, 'What an advantage is divided by', ('none', 'group_std')), Component('advantage.filter', _S, _ADVANTAGED, False, 'Which groups are skipped', ('none', 'equal_scores')), Component('ratio', _S, _PG, False, "The ratio to the step's start", ('token', 'segment', 'none')), Component('clip.kind', _S, _PG, False, 'How the ratio is clipped', ('none', 'ratio', 'weight', 'dual')), Component('clip.low', _F, _PG, True, "The ratio's lower bound, below 1", least=0), Component('clip.high', _F, _PG, True, "The ratio's upper bound, above 1", least=0), Component('clip.dual', _F, _PG, True, "Dual clipping's bound, in times a negative advantage", least=1, above=True), Component('importance.correction', _S, _PG, False, 'The correction for where tokens were sampled', ('none', 'untruncated', 'truncate', 'mask')), Component('importance.level', _S, _PG, False, 'A weight per token or per segment', ('token', 'segment')), Component('importance.cap', _F, _PG, True, 'The largest weight', least=0, above=True), Component('importance.floor', _F, _PG, True, 'The smallest weight a mask keeps', least=0), Component('kl.target', _S, _PG, False, 'What the KL penalty measures against', ('none', 'reference', 'old')), Component('kl.estimator', _S, _PG, False, 'How the KL is estimated', ('k1', 'k2', 'k3')), Component('kl.placement', _S, _PG, False, 'Where the KL penalty goes', ('loss', 'reward')), Component('kl.coefficient', _F, _PG, True, "The KL penalty's weight", least=0), Component('entropy.coefficient', _F, _PG, True, "The entropy bonus's weight"), Component('aggregate', _S, _ADVANTAGED, False, 'How per-token losses become one', ('token_mean', 'segment_mean', 'segment_sum', 'constant')), Component('constant_tokens', _I, _ADVANTAGED, False, 'The token count `constant` divides by', least=1), Component('reference', _S, frozenset({POLICY_GRADIENT, PREFERENCE}), False, 'The reference model', ('none', 'base')), Component('preference.loss', _S, _PREFERENCE, False, 'The preference loss', ('sigmoid', 'hinge', 'square', 'margin', 'odds_ratio', 'kto')), Component('preference.beta', _F, _PREFERENCE, True, "The preference loss's scale", least=0, above=True), Component('preference.margin', _F, _PREFERENCE, True, "SimPO's target margin"), Component('preference.length_normalized', _B, _PREFERENCE, False, "Each side's mean logprob, not its sum"), Component('preference.desirable', _F, _PREFERENCE, True, "KTO's weight of desirable examples", least=0), Component('preference.undesirable', _F, _PREFERENCE, True, "KTO's weight of undesirable examples", least=0), Component('likelihood.coefficient', _F, _PREFERENCE, True, 'A likelihood term beside the preference loss', least=0))
+```
+
+Every component, by dotted key under `objective.`.
+
+### `composed`
+
+*function* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+def composed(preset: str, overrides: Mapping[str, JsonValue] | None = None) -> tuple[Objective, list[tuple[str, str]]]
+```
+
+A preset with `overrides` in place, and what is wrong with it (`problems`), by dotted key. Raises `ValueError`
+for a preset that does not exist, or an override that is no component or a value it does not take.
+
+### `DEFAULT`
+
+*constant* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+DEFAULT = PRESETS['default'].objective
+```
+
+### `Entropy`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Entropy
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `coefficient` | `float` | `0.0` | Each sampled position's entropy, times this, is taken from its loss (a bonus for keeping the policy spread). |
+
+### `FAMILIES`
+
+*constant* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+FAMILIES = (POLICY_GRADIENT, PREFERENCE, LIKELIHOOD)
+```
+
+Every family, the primary selector of an objective.
+
+### `from_trainer_settings`
+
+*function* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+def from_trainer_settings(said: Mapping[str, Any]) -> tuple[str | None, dict[str, JsonValue]]
+```
+
+The preset and overrides that a trainer's settings named the objective by (`LEGACY`), where they name it:
+`objective = "policy_gradient"` is the `default` preset and `"likelihood"` is `sft`; `ratio = "segment"` is a
+segment ratio and weight clipped to `segment_clip_low` and `segment_clip_high` (3e-4, 4e-4 by default), a mean over
+segments; `clip_low` and `clip_high` bound a token ratio; `truncate` is the importance weight's cap (none: the
+weight untruncated). A name other than those two is a preset's.
+
+### `Importance`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Importance
+```
+
+The correction for where each token was sampled: the weight of its logprob at the step's start against the one
+the engine recorded (`old / behavior`), a constant with no gradient.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `correction` | `str` | `'truncate'` | `none`; `untruncated`: the weight (importance sampling); `truncate`: the weight, at most `cap` (truncated importance sampling); `mask`: the weight, and a token whose weight is outside `floor` .. `cap` is dropped (masked importance sampling). |
+| `level` | `str` | `'token'` | `token`: a weight for each token. `segment`: one for the segment, the geometric mean of its tokens'. |
+| `cap` | `float` | `2.0` |  |
+| `floor` | `float` | `0.0` | For `mask`: the lowest weight kept. |
+
+### `Kl`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Kl
+```
+
+A penalty for the policy's divergence from a target, estimated on the sampled tokens.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `target` | `str` | `'none'` | `none`; `reference`: the reference model (`Objective.reference`); `old`: the policy at the step's start. |
+| `estimator` | `str` | `'k3'` | With `log_r` the target's logprob less the policy's: `k1` is `-log_r`, `k2` is `log_r² / 2`, `k3` is `exp(log_r) - 1 - log_r` (Schulman's estimators). |
+| `placement` | `str` | `'loss'` | `loss`: added to each token's loss, with its gradient. `reward`: taken from each token's advantage, with none. |
+| `coefficient` | `float` | `0.0` |  |
+
+### `LEGACY`
+
+*constant* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+LEGACY = ('objective', 'ratio', 'clip_low', 'clip_high', 'segment_clip_low', 'segment_clip_high', 'truncate')
+```
+
+The trainer settings that once said the objective, which still say it (`from_trainer_settings`).
+
+### `Likelihood`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Likelihood
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `coefficient` | `float` | `0.0` | A likelihood term beside a preference loss: the chosen side's mean negative logprob, times this (ORPO). |
+
+### `Objective`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Objective
+```
+
+An objective, every component of it (those its family does not accept keep their defaults and mean nothing).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `family` | `str` | `POLICY_GRADIENT` |  |
+| `advantage` | `Advantage` | `field(default_factory=Advantage)` |  |
+| `ratio` | `str` | `'token'` | `token`: each token's logprob now against the step's start. `segment`: one for the segment, the geometric mean of its tokens' (GSPO), its gradient spread over them. `none`: no ratio, the logprob itself (REINFORCE). |
+| `clip` | `Clip` | `field(default_factory=Clip)` |  |
+| `importance` | `Importance` | `field(default_factory=Importance)` |  |
+| `kl` | `Kl` | `field(default_factory=Kl)` |  |
+| `entropy` | `Entropy` | `field(default_factory=Entropy)` |  |
+| `aggregate` | `str` | `'token_mean'` | How a minibatch's per-token losses become one: `token_mean`, over its sampled tokens; `segment_mean`, over each segment's tokens, then its segments; `segment_sum`, summed over each segment's tokens, then a mean over its segments (a sequence's logprob, as REINFORCE and RLOO take it); `constant`, summed over each segment's tokens and divided by `constant_tokens`, then a mean over its segments (Dr. GRPO). A preference loss is a mean over pairs or examples. |
+| `constant_tokens` | `int` | `1024` | For `constant`: the fixed token count (the turn's token budget). |
+| `reference` | `str` | `'none'` | The model the KL to the reference and a preference loss compare with: `base`, the model trained over (an adapter switched off; a frozen copy for a full-weight trainer); `none`. |
+| `preference` | `Preference` | `field(default_factory=Preference)` |  |
+| `likelihood` | `Likelihood` | `field(default_factory=Likelihood)` |  |
+| `preset` | `str` | `'default'` | The preset it was resolved from (what it says, not what it is: the components are). |
+
+**Methods**
+
+- `def components(self) -> dict[str, JsonValue]` — The components its family accepts, by dotted key, with their values.
+- `def get(self, key: str) -> JsonValue` — A component's value, by dotted key (`clip.low`).
+- `def to_json(self) -> dict[str, JsonValue]` — What a run's start records: the preset, the family and the family's components.
+- `@classmethod def from_json(cls, said: Mapping[str, JsonValue]) -> 'Objective'` — An objective as `to_json` recorded it.
+- `def changed(self, changes: Mapping[str, JsonValue]) -> 'Objective'` — With `changes` (dotted keys, each a component that may change between steps), checked as any objective is
+  (else `ValueError`).
+- `@property def needs_reference(self) -> bool` — Whether its loss reads the reference's logprobs.
+- `@property def needs_behaviour(self) -> bool` — Whether its loss reads the logprobs the engine recorded (an importance correction).
+- `@property def needs_entropy(self) -> bool`
+- `@property def labelled(self) -> bool` — Whether its batch items are labelled examples (KTO), rather than pairs.
+
+### `objective_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+def objective_of(given: Any = None, legacy: Mapping[str, Any] | None = None) -> Objective
+```
+
+The objective a trainer is given: an `Objective`; a preset's name (or `policy_gradient`, `likelihood`); a table
+of `preset` and overrides (dotted keys, or tables of them), or one recorded by `Objective.to_json` (it has
+`family`); none for `default`. `legacy` are the trainer's other settings that once named the objective (`LEGACY`),
+taken as overrides before the table's. Raises `ValueError` for one that is wrong.
+
+### `Preference`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Preference
+```
+
+The preference loss, of each side's log-likelihood ratio to the reference (`rho`: the sum over its sampled
+tokens of the policy's logprob less the reference's, or their mean with `length_normalized`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `loss` | `str` | `'sigmoid'` | For a pair, of `h = rho_chosen - rho_rejected` (`sigmoid(x)` the logistic function): `sigmoid`, `-log sigmoid(beta·h)` (DPO); `hinge`, `max(0, 1 - beta·h)`; `square`, `(h - 1/(2·beta))²` (IPO, beta as its tau); `margin`, `-log sigmoid(beta·h - margin)` of the likelihoods alone (SimPO); `odds_ratio`, `-beta·log sigmoid(log odds_chosen - log odds_rejected)` of the length-normalized likelihoods, beta weighing the term (ORPO). For a labelled example: `kto`, `desirable·(1 - sigmoid(beta·(rho - z)))` or `undesirable·(1 - sigmoid(beta·(z - rho)))`, `z` the mean of the minibatch's `rho` (no less than 0, no gradient). |
+| `beta` | `float` | `0.1` |  |
+| `margin` | `float` | `0.0` |  |
+| `length_normalized` | `bool` | `False` |  |
+| `desirable` | `float` | `1.0` |  |
+| `undesirable` | `float` | `1.0` | KTO's weights of desirable and undesirable examples. |
+
+### `Preset` {#rollout_trainobjectivespreset}
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Preset
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `objective` | `Objective` | required |  |
+| `source` | `str` | required | The paper it comes from. |
+| `says` | `str` | required |  |
+
+### `PRESETS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+PRESETS: Mapping[str, Preset] = {each.name: each for each in (_preset('default', 'this platform: Liu et al., 2025 (Dr. GRPO) for the advantage, Yu et al., 2025 (DAPO) for clip-higher and the token mean, Yao et al., 2025 for truncated importance sampling', "Dr. GRPO's advantages, DAPO's clip-higher and token mean, truncated importance sampling at 2"), _preset('reinforce', 'Williams, 1992', "the score times each segment's logprob: no baseline, ratio, clipping or correction", advantage=Advantage(baseline='none', filter='none'), ratio='none', clip=_NO_CLIP, importance=_NO_IMPORTANCE, aggregate='segment_sum'), _preset('rloo', 'Ahmadian et al., 2024 (Back to Basics)', 'REINFORCE with a leave-one-out baseline', advantage=Advantage(baseline='leave_one_out', filter='none'), ratio='none', clip=_NO_CLIP, importance=_NO_IMPORTANCE, aggregate='segment_sum'), _preset('ppo_clip', 'Schulman et al., 2017', 'the token ratio clipped at 0.2 either side; advantages normalized within the group (no critic)', advantage=_GROUP_NORMALIZED, clip=Clip(low=0.2, high=0.2), importance=_NO_IMPORTANCE), _preset('grpo', 'Shao et al., 2024 (DeepSeekMath)', "group mean and standard deviation; the token ratio clipped at 0.2; KL to the reference by k3 in the loss, at 0.04; a mean over each segment's tokens, then segments", advantage=_GROUP_NORMALIZED, clip=Clip(low=0.2, high=0.2), importance=_NO_IMPORTANCE, kl=Kl(target='reference', estimator='k3', placement='loss', coefficient=0.04), aggregate='segment_mean', reference='base'), _preset('dr_grpo', 'Liu et al., 2025 (Understanding R1-Zero-Like Training)', 'the group mean without the standard deviation; summed over tokens and divided by a constant; no KL', advantage=Advantage(filter='none'), clip=Clip(low=0.2, high=0.2), importance=_NO_IMPORTANCE, aggregate='constant', constant_tokens=3000), _preset('dapo', 'Yu et al., 2025 (DAPO)', 'clip-higher (0.2, 0.28); the token mean; groups of equal scores skipped; no KL', advantage=Advantage(scale='group_std', filter='equal_scores'), clip=Clip(low=0.2, high=0.28), importance=_NO_IMPORTANCE), _preset('gspo', 'Zheng et al., 2025 (GSPO)', "the segment ratio, the geometric mean of its tokens', clipped to (3e-4, 4e-4); a mean over segments", advantage=_GROUP_NORMALIZED, ratio='segment', clip=Clip(low=0.0003, high=0.0004), importance=Importance(correction='none', level='segment'), aggregate='segment_mean'), _preset('cispo', 'MiniMax, 2025 (MiniMax-M1)', 'the importance weight clipped above, with its gradient stopped, times the logprob: no update clipping', advantage=_GROUP_NORMALIZED, clip=Clip(kind='weight', low=1.0, high=3.0), importance=_NO_IMPORTANCE), _preset('sft', 'supervised fine-tuning', "the sampled tokens' log-likelihood, each segment weighted by its advantage (1 for a dataset's)", family=LIKELIHOOD), _preset('dpo', 'Rafailov et al., 2023', 'the sigmoid loss over pairs, against the reference, at beta 0.1', family=PREFERENCE, reference='base', preference=Preference(loss='sigmoid', beta=0.1)), _preset('ipo', 'Azar et al., 2023', 'the square loss over pairs, against the reference', family=PREFERENCE, reference='base', preference=Preference(loss='square', beta=0.1, length_normalized=True)), _preset('simpo', 'Meng et al., 2024', 'the length-normalized margin loss, with no reference', family=PREFERENCE, preference=Preference(loss='margin', beta=2.0, margin=1.0, length_normalized=True)), _preset('kto', 'Ethayarajh et al., 2024', 'desirable and undesirable examples, unpaired, against the reference', family=PREFERENCE, reference='base', preference=Preference(loss='kto', beta=0.1)), _preset('orpo', 'Hong et al., 2024', "an odds-ratio term at 0.1 beside the chosen side's likelihood, with no reference", family=PREFERENCE, preference=Preference(loss='odds_ratio', beta=0.1, length_normalized=True), likelihood=Likelihood(coefficient=1.0)))}
+```
+
+Every preset, by name.
+
+### `problems` {#rollout_trainobjectivesproblems}
+
+*function* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+def problems(objective: Objective, overrides: Mapping[str, JsonValue] | None = None) -> list[tuple[str, str]]
+```
+
+What is wrong with an objective, as (dotted key, reason): an override of a component its family does not accept,
+and combinations that mean nothing.
+
+### `resolved`
+
+*function* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+def resolved(preset: str, overrides: Mapping[str, JsonValue] | None = None) -> Objective
+```
+
+A preset with `overrides` (dotted keys under `objective.`) in place. Raises `ValueError` for a preset that does
+not exist, an override that is no component or not of the family, a value it does not take, or a combination that
+means nothing (`problems`).
+
 ## `rollout_train.run_settings`
 
 A run's settings: the schema, layers, flags and files, a full copy, diffs.
@@ -6138,7 +6525,7 @@ it (a trainer's own setting among them).
 *constant* · `libraries/rollout-train/src/rollout_train/run_settings.py`
 
 ```python
-KEYS: tuple[Key, ...] = (Key('kind', _S, 'train', False, EVERY, 'The kind of run', choices=KINDS), Key('name', _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"), Key('environment', _S + _N, None, False, SAMPLING, 'The environment, `module:name`'), Key('groups', _I, 100, False, TRAINED | {'check'}, 'Groups it plays', least=1), Key('seed', _I, 0, False, EVERY, 'The seed its draws start from', least=0), Key('start', _S + _N, None, False, EVERY, 'The checkpoint it trains from or evaluates; none: the base model'), Key('bookmark', _S + _N, None, False, TRAINING, 'A bookmark it moves to each checkpoint it makes'), Key('episodes_at_once', _I, 6, False, SAMPLING, 'Episodes it keeps work waiting for', least=1), Key('trainer.provider', _S + _N, None, False, TRAINING, 'The trainer, a `[trainers.NAME]` of the cluster'), Key('trainer.channel', _S, 'policy', False, TRAINED, 'The trained channel'), Key('trainer.model', _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"), Key('channels.*.provider', _S + _N, None, False, SAMPLING, 'What samples the channel, an `[inference.NAME]`'), Key('channels.*.providers', ('list', 'null'), None, False, SAMPLING, 'Several providers serving it, in order'), Key('channels.*.routing', _S, 'spill', False, SAMPLING, 'How turns are shared among them', choices=ROUTING), Key('channels.*.weights', ('table', 'null'), None, False, SAMPLING, "Each provider's weight, for `weighted`"), Key('channels.*.model', _S + _N, None, False, SAMPLING, "The model it serves, among its providers'"), Key('channels.*.renderer', _S + _N, None, False, SAMPLING, 'The renderer, `module:name`'), Key('channels.*.thinking_tokens', _I + _N, None, False, SAMPLING, 'Thinking budget per turn', least=1), Key('channels.*.answer_tokens', _I + _N, None, False, SAMPLING, 'Room for the answer after it', least=1), Key('channels.*.replicas', _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1), Key('channels.*.bridge', _S, 'auto', False, SAMPLING, 'The bridge', choices=('auto', 'merge-quantize')), Key('channels.*.mode', _S + _N, None, False, SAMPLING, '`fixed` or `follows`; none: the trained channel serves what the run trains, another serves `fixed`', choices=('fixed', 'follows')), Key('channels.*.checkpoint', _S + _N, None, False, SAMPLING, 'What a `fixed` channel serves; none: the base model'), Key('channels.*.follows', _S + _N, None, False, SAMPLING, 'The channel a `follows` channel follows'), Key('channels.*.lag', _I, 0, False, SAMPLING, 'How many checkpoints behind it follows', least=0), Key('slots.*', _S, None, False, SAMPLING, "The channel a program's slot samples"), Key('self_judging', _B, False, False, SAMPLING, "Whether a judge may be bound to a channel serving the run's own"), Key('distill.channel', _S + _N, None, False, TRAINED, "The teacher's channel, for distillation"), Key('distill.k', _I + _N, None, False, TRAINED, 'Top-k logprobs matched; none: the teacher scores', least=1), Key('eval.suite', _S + _N, None, False, frozenset({'eval'}), 'The suite an eval plays, by name or `NAME@N`'), Key('eval.episodes', _I + _N, None, False, frozenset({'eval'}), 'Episodes of each start', least=1), Key('check.episodes', _I, 1, False, frozenset({'check'}), 'Scripted episodes a check plays', least=1), Key('imitation.dataset', _S + _N, None, False, frozenset({'imitate'}), 'The dataset, by name or id'), Key('imitation.limit', _I + _N, None, False, frozenset({'imitate'}), 'At most this many segments', least=1), Key('imitation.passes', _I, 1, False, frozenset({'imitate'}), 'Passes over the dataset', least=1), Key('imitation.warmup', _I, 0, False, frozenset({'imitate'}), 'Warm-up updates', least=0), Key('imitation.resume_optimizer', _B, False, False, frozenset({'imitate'}), "Go on from the start's optimizer"), Key('imitation.without', ('list',), [], False, frozenset({'imitate'}), 'Datasets whose segments are left out'), Key('groups_per_step', _I, 4, True, TRAINED, 'Groups a step waits for', least=1), Key('max_lag', _I, 1, True, TRAINED, 'Checkpoints behind the newest a turn may begin', least=0), Key('evals.suite', _S + _N, None, True, TRAINED, 'The suite its checkpoints play, by name or `NAME@N`'), Key('evals.every', _I, 1, True, TRAINED, 'Every this many steps', least=1), Key('evals.episodes', _I + _N, None, True, TRAINED, "Episodes of each start; none: the suite's", least=1), Key('limits.spend', ('float', 'null'), None, True, TRAINING, 'Dollars: the run ends once its estimate reaches this', least=0), Key('share', ('float',), 1.0, True, SAMPLING, "Its weight in a shared pool's fair shares", least=0, above=True))
+KEYS: tuple[Key, ...] = (Key('kind', _S, 'train', False, EVERY, 'The kind of run', choices=KINDS), Key('name', _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"), Key('environment', _S + _N, None, False, SAMPLING, 'The environment, `module:name`'), Key('groups', _I, 100, False, TRAINED | {'check'}, 'Groups it plays', least=1), Key('seed', _I, 0, False, EVERY, 'The seed its draws start from', least=0), Key('start', _S + _N, None, False, EVERY, 'The checkpoint it trains from or evaluates; none: the base model'), Key('bookmark', _S + _N, None, False, TRAINING, 'A bookmark it moves to each checkpoint it makes'), Key('episodes_at_once', _I, 6, False, SAMPLING, 'Episodes it keeps work waiting for', least=1), Key('trainer.provider', _S + _N, None, False, TRAINING, 'The trainer, a `[trainers.NAME]` of the cluster'), Key('trainer.channel', _S, 'policy', False, TRAINED, 'The trained channel'), Key('trainer.model', _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"), Key('channels.*.provider', _S + _N, None, False, SAMPLING, 'What samples the channel, an `[inference.NAME]`'), Key('channels.*.providers', ('list', 'null'), None, False, SAMPLING, 'Several providers serving it, in order'), Key('channels.*.routing', _S, 'spill', False, SAMPLING, 'How turns are shared among them', choices=ROUTING), Key('channels.*.weights', ('table', 'null'), None, False, SAMPLING, "Each provider's weight, for `weighted`"), Key('channels.*.model', _S + _N, None, False, SAMPLING, "The model it serves, among its providers'"), Key('channels.*.renderer', _S + _N, None, False, SAMPLING, 'The renderer, `module:name`'), Key('channels.*.thinking_tokens', _I + _N, None, False, SAMPLING, 'Thinking budget per turn', least=1), Key('channels.*.answer_tokens', _I + _N, None, False, SAMPLING, 'Room for the answer after it', least=1), Key('channels.*.replicas', _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1), Key('channels.*.bridge', _S, 'auto', False, SAMPLING, 'The bridge', choices=('auto', 'merge-quantize')), Key('channels.*.mode', _S + _N, None, False, SAMPLING, '`fixed` or `follows`; none: the trained channel serves what the run trains, another serves `fixed`', choices=('fixed', 'follows')), Key('channels.*.checkpoint', _S + _N, None, False, SAMPLING, 'What a `fixed` channel serves; none: the base model'), Key('channels.*.follows', _S + _N, None, False, SAMPLING, 'The channel a `follows` channel follows'), Key('channels.*.lag', _I, 0, False, SAMPLING, 'How many checkpoints behind it follows', least=0), Key('slots.*', _S, None, False, SAMPLING, "The channel a program's slot samples"), Key('self_judging', _B, False, False, SAMPLING, "Whether a judge may be bound to a channel serving the run's own"), Key('distill.channel', _S + _N, None, False, TRAINED, "The teacher's channel, for distillation"), Key('distill.k', _I + _N, None, False, TRAINED, 'Top-k logprobs matched; none: the teacher scores', least=1), Key('eval.suite', _S + _N, None, False, frozenset({'eval'}), 'The suite an eval plays, by name or `NAME@N`'), Key('eval.episodes', _I + _N, None, False, frozenset({'eval'}), 'Episodes of each start', least=1), Key('check.episodes', _I, 1, False, frozenset({'check'}), 'Scripted episodes a check plays', least=1), Key('imitation.dataset', _S + _N, None, False, frozenset({'imitate'}), 'The dataset, by name or id'), Key('imitation.limit', _I + _N, None, False, frozenset({'imitate'}), 'At most this many segments', least=1), Key('imitation.passes', _I, 1, False, frozenset({'imitate'}), 'Passes over the dataset', least=1), Key('imitation.warmup', _I, 0, False, frozenset({'imitate'}), 'Warm-up updates', least=0), Key('imitation.resume_optimizer', _B, False, False, frozenset({'imitate'}), "Go on from the start's optimizer"), Key('imitation.without', ('list',), [], False, frozenset({'imitate'}), 'Datasets whose segments are left out'), Key('groups_per_step', _I, 4, True, TRAINED, 'Groups a step waits for', least=1), Key('max_lag', _I, 1, True, TRAINED, 'Checkpoints behind the newest a turn may begin', least=0), Key('evals.suite', _S + _N, None, True, TRAINED, 'The suite its checkpoints play, by name or `NAME@N`'), Key('evals.every', _I, 1, True, TRAINED, 'Every this many steps', least=1), Key('evals.episodes', _I + _N, None, True, TRAINED, "Episodes of each start; none: the suite's", least=1), Key('limits.spend', ('float', 'null'), None, True, TRAINING, 'Dollars: the run ends once its estimate reaches this', least=0), Key('share', ('float',), 1.0, True, SAMPLING, "Its weight in a shared pool's fair shares", least=0, above=True), Key('objective.preset', _S, 'default', False, TRAINING, "The objective's preset", choices=tuple(PRESETS)), *(Key(f'objective.{each.key}', (*each.types, 'null'), None, each.changeable, TRAINING, f"{each.says}; none: the preset's", least=each.least, choices=each.choices, above=each.above) for each in COMPONENTS))
 ```
 
 Every key a run takes, beside the trainer's own (`trainer.FIELD`).
@@ -6164,6 +6551,17 @@ def layered(*layers: Mapping[str, JsonValue] | None) -> RunSettings
 Settings given in layers, each over the ones before (a preset's, a file's, the flags'): a key of a later layer
 replaces the same key of an earlier one.
 
+### `objective_in`
+
+*function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
+
+```python
+def objective_in(settings: RunSettings) -> Objective
+```
+
+The objective a run's settings ask for: their preset with each component they give. Raises `ValueError` for one
+that is wrong (`rollout_train.objectives.resolved`).
+
 ### `recorded`
 
 *function* · `libraries/rollout-train/src/rollout_train/run_settings.py`
@@ -6173,7 +6571,9 @@ def recorded(settings: RunSettings, trainer: Sequence[SettingSpec] = (), preset:
 ```
 
 What a run's start records of its settings: a full copy, fixed and changeable (every key with its value,
-defaults included), and, as provenance only, the preset version they came from (`NAME@N`).
+defaults included); for a run that trains, the objective they resolve to (`objective_in`), so that what it trains
+with never depends on what a preset means later; and, as provenance only, the preset version they came from
+(`NAME@N`).
 
 ### `RunSettings`
 
@@ -6183,7 +6583,8 @@ defaults included), and, as provenance only, the preset version they came from (
 class RunSettings
 ```
 
-A run's settings, as given (`values`), answering with the schema's defaults for what was not.
+A run's settings, as given (`values`), answering with the schema's defaults for what was not. Trainer settings
+that name the objective are held as the `objective.*` keys they say (`current`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -6348,7 +6749,7 @@ def parsed(reference: str) -> tuple[str, int | None]
 
 `NAME` or `NAME@N`, as the name and the version (none: the newest).
 
-### `Preset`
+### `Preset` {#rollout_trainpresetspreset}
 
 *class* · `libraries/rollout-train/src/rollout_train/presets.py`
 
@@ -6951,7 +7352,7 @@ class Rule
 *constant* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact with sampled logprobs and honoured sampling"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'adapters for a provider without adapters, full weights for one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'an objective the trainer does not take'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'a teacher without the logprobs distillation needs, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', 'more GPUs than the cluster has'), Rule('pools', 'more adapter slots than a shared pool has'), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
+RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'adapters for a provider without adapters, full weights for one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference or an entropy the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'a teacher without the logprobs distillation needs, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', 'more GPUs than the cluster has'), Rule('pools', 'more adapter slots than a shared pool has'), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
 ```
 
 Every rule `check` applies, in the order it reports them.
@@ -7005,7 +7406,7 @@ The slots a program declares: their names, those that are not trained, and those
 
 - `@classmethod def of(cls, slots: Mapping[str, ModelSlot]) -> 'Declared'`
 
-### `problems`
+### `problems` {#rollout_trainslotsproblems}
 
 *function* · `libraries/rollout-train/src/rollout_train/slots.py`
 
@@ -7269,8 +7670,8 @@ class FullTrainer(LoraTrainer)
 
 Trains every weight of a text model (`rollout_lora.full`), one step at a time in a fresh process: a step
 starts from its parent's full weights (the model's own for the first) and the optimizer's state, and leaves the
-new ones where it is told. `settings` are `LoraSettings`' fields; `rank` is not
-used.
+new ones where it is told. `settings` are `LoraSettings`' fields; `rank` is not used. It holds a reference (a frozen
+copy of the model) only when asked (`frozen_reference`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -7287,6 +7688,10 @@ class LoraSettings(StepSettings)
 The settings of `LoraTrainer` and `FullTrainer`: a step's, and the adapter's scaling, which is twice its rank
 (`alpha`).
 
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `frozen_reference` | `bool` | `False` | For the full-weight trainer: hold a frozen copy of the model trained over (in bfloat16, beside the policy), the reference an objective may read. An adapter's reference is the model with the adapter switched off. |
+
 **Methods**
 
 - `@property def alpha(self) -> float`
@@ -7301,8 +7706,9 @@ class LoraTrainer
 
 Trains a LoRA adapter over `model`'s checkpoint, one step at a time, each in a fresh process on the GPU
 (`rollout_lora.worker`). It keeps nothing between steps: a step starts from the adapter and the optimizer's
-state it is given and leaves the new ones where it is told. `settings` are `LoraSettings`' fields; those in
-`CHANGEABLE` it takes between steps (`rollout_train.trainer.Changeable`).
+state it is given and leaves the new ones where it is told. `settings` are `LoraSettings`' fields (its
+`objective` among them); those in `CHANGEABLE`, and the changeable components of its objective, it takes between
+steps (`rollout_train.trainer.Changeable`). Its reference is the model with the adapter switched off.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -7311,46 +7717,377 @@ state it is given and leaves the new ones where it is told. `settings` are `Lora
 **Methods**
 
 - `def __init__(self, model: str, **settings: Any) -> None`
+- `@property def objective(self) -> Objective`
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
-- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
+- `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
+
+## `rollout_objectives.settings`
+
+A policy step's settings, which the LoRA, full-weight and Tinker trainers take.
+
+### `CHANGEABLE`
+
+*constant* · `implementations/rollout-objectives/src/rollout_objectives/settings.py`
+
+```python
+CHANGEABLE = ('learning_rate', 'tokens_per_step', 'max_kl', 'max_gradient_norm')
+```
+
+The settings a trainer takes between steps: each step reads them afresh, and none changes what its weights are or
+what a step can hold. Beside them, the components of its objective that may change (`objective.kl.coefficient`).
+
+### `OBJECTIVE`
+
+*constant* · `implementations/rollout-objectives/src/rollout_objectives/settings.py`
+
+```python
+OBJECTIVE = 'objective.'
+```
+
+The start of a changeable setting that is a component of the objective, as the run's settings name it.
 
 ### `StepSettings`
 
-*class* · `implementations/rollout-lora/src/rollout_lora/settings.py`
+*class* · `implementations/rollout-objectives/src/rollout_objectives/settings.py`
 
 ```python
 class StepSettings
 ```
 
-A policy step's settings (`rollout_lora.step`), whichever trainer takes it.
+A policy step's settings (`rollout_objectives.step`), whichever trainer takes it.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `rank` | `int` | `32` | Of the adapter. |
 | `learning_rate` | `float` | `5e-05` |  |
-| `clip_low` | `float` | `0.2` |  |
-| `clip_high` | `float` | `0.28` | A token's ratio to its logprob at the step's start is clipped to 1 - `clip_low` .. 1 + `clip_high` (DAPO's clip-higher). |
-| `segment_clip_low` | `float` | `0.0003` |  |
-| `segment_clip_high` | `float` | `0.0004` | With `ratio = "segment"`, the segment's ratio is clipped to 1 - `segment_clip_low` .. 1 + `segment_clip_high` (GSPO's). |
-| `truncate` | `float \| None` | `2.0` | The most a token's importance weight (its logprob at the step's start against the one it was sampled at) may be (None: not truncated). |
 | `tokens_per_step` | `int` | `4096` | Sampled tokens per optimizer step (gradients accumulate over segments until then). Adam moves a weight by at most the learning rate a step, so how far an update goes is set by how many steps its tokens make. |
-| `max_kl` | `float \| None` | `0.02` | Stop the pass when a minibatch, before its step, finds the policy this far from where the step began (in nats per token, estimated on the sampled tokens). |
+| `max_kl` | `float \| None` | `0.02` | Stop the pass when a minibatch, before its step, finds the policy this far from where the step began (in nats per token, estimated on the sampled tokens). A likelihood step does not stop. |
 | `max_gradient_norm` | `float` | `1.0` |  |
 | `segment_tokens` | `int \| None` | `None` | The longest segment a step can hold (None: any). Longer ones are left out and counted (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training, so whoever serves the policy takes this as the longest turn to sample; the count says whether that held. |
 | `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
 | `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch makes more optimizer updates (a supervised step on a small dataset, say). |
 | `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every weight by about the full rate. A step that goes on from an optimizer's state is not warmed up. |
-| `objective` | `str` | `'policy_gradient'` | `policy_gradient`: the clipped policy gradient over the sampled tokens, each weighted by its segment's advantage, with an importance weight for where they were sampled. `likelihood`: raise the log-likelihood of the sampled tokens, each weighted by its segment's advantage (imitation: what was sampled is what to do), with no ratio, weight or stop at `max_kl` (`rollout_lora.objectives`). |
-| `ratio` | `str` | `'token'` | `token`: a ratio for each token (PPO). `segment`: one for each segment, the geometric mean of its tokens' (GSPO). |
+| `objective` | `Objective \| str \| Mapping[str, Any]` | `DEFAULT` | The objective (`rollout_train.objectives`): an `Objective`, a preset's name, or a table of `preset` and component overrides (`rollout_train.objectives.objective_of`). The run's `objective.*` settings say it; `loss` is it, resolved. |
+| `ratio` | `InitVar[str]` | `_UNSAID` |  |
+| `clip_low` | `InitVar[float]` | `_UNSAID` |  |
+| `clip_high` | `InitVar[float]` | `_UNSAID` |  |
+| `segment_clip_low` | `InitVar[float]` | `_UNSAID` |  |
+| `segment_clip_high` | `InitVar[float]` | `_UNSAID` |  |
+| `truncate` | `InitVar[float \| None]` | `_UNSAID` | The objective's components by a trainer's own names (`rollout_train.objectives.from_trainer_settings`): `ratio` (`token`, `segment`), the clip of a token ratio (`clip_low`, `clip_high`) or a segment ratio (`segment_clip_low`, `segment_clip_high`), the importance weight's cap (`truncate`; none: the weight untruncated). |
 
 **Methods**
 
-- `@property def loss(self) -> Objective` — The objective a step takes, by these settings.
+- `@property def loss(self) -> Objective` — The objective a step takes, resolved.
 - `def rate(self, update: int, *, fresh: bool) -> float` — The learning rate of a step's `update`-th optimizer update (from 0): warmed up if its optimizer is
   `fresh`.
-- `def changeable(self) -> dict[str, JsonValue]` — The settings of `CHANGEABLE`, with their values (what `rollout_train.trainer.Changeable` says).
-- `def changed(self, changes: Mapping[str, JsonValue]) -> Self` — These settings with `changes`, each one of `CHANGEABLE` (else `ValueError`), checked as any settings are.
+- `def changeable(self) -> dict[str, JsonValue]` — The settings of `CHANGEABLE` and the changeable components of its objective's family (by their run
+  settings' keys, `objective.kl.coefficient`), with their values (what `rollout_train.trainer.Changeable`
+  says).
+- `def changed(self, changes: Mapping[str, JsonValue]) -> Self` — These settings with `changes`, each one of `changeable` (else `ValueError`), checked as any settings are.
+
+## `rollout_objectives.terms`
+
+An objective's loss composed from its components, in torch.
+
+### `kl_estimate`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def kl_estimate(estimator: str, logprobs: torch.Tensor, target: torch.Tensor) -> torch.Tensor
+```
+
+Each sampled token's estimate of KL(policy || target), from `log_r = target - logprobs` (Schulman's k1, k2,
+k3).
+
+### `labelled`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def labelled(objective: Objective, examples: Sequence[tuple[Scored, bool]]) -> list[Terms]
+```
+
+KTO's loss of each labelled example (desirable or not), against the reference point `z`: the mean of the
+examples' log ratios, no less than 0, with no gradient (an estimate of the policy's KL to the reference).
+
+### `likelihood`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def likelihood(objective: Objective, logprobs: torch.Tensor, advantage: float) -> Terms
+```
+
+One segment's likelihood loss: its sampled tokens' log-likelihood, weighted by its advantage (imitation: what
+was sampled is what to do), reading neither `old` nor `behavior`.
+
+### `pair`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def pair(objective: Objective, chosen: Scored, rejected: Scored) -> Terms
+```
+
+A pair's preference loss (`preference.loss`), and a likelihood term on its chosen side
+(`likelihood.coefficient`, ORPO's).
+
+### `policy_gradient`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def policy_gradient(objective: Objective, logprobs: torch.Tensor, advantage: float, old: torch.Tensor, behavior: torch.Tensor | None = None, reference: torch.Tensor | None = None, entropy: torch.Tensor | None = None) -> Terms
+```
+
+One segment's policy-gradient loss, from its sampled tokens' logprobs now (with gradient), at the step's start
+(`old`), when they were sampled (`behavior`, for an importance correction), under the reference (for a KL to it)
+and each position's entropy (for an entropy bonus).
+
+### `reduced`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def reduced(objective: Objective, per_token: torch.Tensor) -> torch.Tensor
+```
+
+A segment's per-token losses as its part of the minibatch's (`aggregate`).
+
+### `Scored`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+class Scored
+```
+
+One side of a preference item: each of its segments' sampled tokens' logprobs now, and the reference's.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `logprobs` | `Sequence[torch.Tensor]` | required |  |
+| `reference` | `Sequence[torch.Tensor] \| None` | `None` |  |
+
+**Methods**
+
+- `def tokens(self) -> int`
+- `def likelihood(self, objective: Objective) -> torch.Tensor` — Its log-likelihood: the sum of its tokens' logprobs, or their mean (`length_normalized`).
+- `def rho(self, objective: Objective) -> torch.Tensor` — Its log-likelihood ratio to the reference, or its log-likelihood where the loss has none.
+
+### `SUMS`
+
+*constant* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+SUMS: tuple[str, ...] = ('loss', 'units', 'clipped', 'truncated', 'tokens', 'ratio', 'weight', 'moved', 'segments', 'kl', 'entropy', 'items', 'pairs', 'accurate', 'margin', 'chosen', 'rejected')
+```
+
+What a minibatch's `Terms` add up to, for its statistics and the step's.
+
+### `tally`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def tally(sums: dict[str, float], found: Terms, objective: Objective, *, segments: float = 1.0) -> None
+```
+
+Add one segment's `found` terms (or one preference item's, of `segments` segments) to `sums` (keyed by
+`SUMS`).
+
+### `Terms`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+class Terms
+```
+
+One segment's part of a minibatch's loss (`loss`, which the trainer divides by the minibatch's units), or one
+preference item's; the rest are counts and sums, for the step's statistics.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `loss` | `torch.Tensor` | required |  |
+| `tokens` | `float` | required |  |
+| `clipped` | `float` | `0.0` | Tokens whose ratio was clipped. |
+| `truncated` | `float` | `0.0` | Tokens whose importance weight was truncated, or that a mask dropped. |
+| `ratio` | `float` | `0.0` |  |
+| `weight` | `float` | `0.0` |  |
+| `moved` | `float` | `0.0` | The sum of `old - logprobs`: an estimate of KL(old \|\| now) on the sampled tokens, times their number. |
+| `kl` | `float` | `0.0` | The sum of the KL penalty's estimate over the tokens. |
+| `entropy` | `float` | `0.0` |  |
+| `items` | `float` | `0.0` | Preference items: pairs or examples. |
+| `pairs` | `float` | `0.0` |  |
+| `accurate` | `float` | `0.0` | Of the items, those whose chosen side's log ratio is above the rejected's (an example's above the reference point if desirable, below it if not). |
+| `margin` | `float` | `0.0` | The sum of each pair's `rho_chosen - rho_rejected`, and of each example's distance from the reference point on its label's side (`rho - z` if desirable, `z - rho` if not). |
+| `chosen` | `float` | `0.0` |  |
+| `rejected` | `float` | `0.0` | Sums of each pair's `rho_chosen` and `rho_rejected`. |
+
+### `terms`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def terms(objective: Objective, logprobs: torch.Tensor, advantage: float, old: torch.Tensor | None = None, behavior: torch.Tensor | None = None, reference: torch.Tensor | None = None, entropy: torch.Tensor | None = None) -> Terms
+```
+
+One weighted segment's loss under `objective`: a policy gradient's or a likelihood's.
+
+### `units`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def units(objective: Objective, tokens: int) -> float
+```
+
+What a segment of `tokens` sampled tokens counts for in its minibatch's mean (a preference item counts 1).
+
+## `rollout_objectives.step`
+
+A step over a batch on a local policy, its plan of minibatches, and its statistics.
+
+### `line`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+def line(sums: Mapping[str, float], units: float, rate: float) -> dict[str, float]
+```
+
+What a minibatch that was stepped on did (its `SUMS`, over `units`, stepped at `rate`), as `MINIBATCHES` keeps
+it.
+
+### `metrics`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+def metrics(totals: Mapping[str, float], starts: Sequence[tuple[torch.Tensor, torch.Tensor]], *, plan: Plan, given: int, moved: float, updates: int, settings: StepSettings, fresh: bool, stopped: bool, start_seconds: float) -> dict[str, float]
+```
+
+A step's metrics: from the `SUMS` of the minibatches it stepped on (`totals`), each segment's behaviour and
+start logprobs (`starts`; a behaviour logprob that is not finite, from a provider without them, is left out of
+theirs), the plan of `given` items, how far the last minibatch stepped on found the policy from the step's start
+(`moved`), and how many `updates` it made.
+
+### `MINIBATCHES`
+
+*constant* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+MINIBATCHES = 'minibatches.jsonl'
+```
+
+In a step's state: what each of its minibatches did, one line each (`line`).
+
+### `minibatches`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+def minibatches[Each: Item](items: Sequence[Each], tokens_per_step: int) -> list[list[Each]]
+```
+
+The items in order, cut where a minibatch has reached `tokens_per_step` sampled tokens. A last minibatch of less
+than half that joins the one before: Adam's step is as large for a handful of tokens as for a full minibatch.
+
+### `Plan` {#rollout_objectivesstepplan}
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+class Plan
+```
+
+The items a step trains on, in the order it takes them (those whose segments are all no longer than
+`segment_tokens`, with tokens sampled, shuffled by the step's seed), and how many it left out for their length.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `items` | `list[Item]` | required |  |
+| `too_long` | `int` | required |  |
+| `shuffled` | `random.Random` | required | What shuffles each pass after the first. |
+
+**Methods**
+
+- `@classmethod def of(cls, items: Sequence[Item], settings: StepSettings, seed: int) -> 'Plan'`
+- `@property def segments(self) -> list[Segment]` — Every segment of its items, in order (a segment two items share, once).
+- `def minibatches(self, settings: StepSettings) -> list[list[Item]]` — Every pass's minibatches, in order: the first pass takes the items in the plan's order, and each further
+  one shuffles them anew.
+
+### `PolicyStep`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+class PolicyStep
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `policy` | `TrainablePolicy` | required |  |
+| `settings` | `StepSettings` | `field(default_factory=StepSettings)` |  |
+| `fresh` | `bool` | `True` | Whether the optimizer starts afresh (warmed up), or goes on from a state loaded into it. |
+
+**Methods**
+
+- `def step(self, items: Sequence[Item], *, seed: int = 0) -> dict[str, float]` — The logprobs the step starts from, then `passes` passes over the items in shuffled minibatches.
+
+### `positions`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+def positions(segment: Segment) -> list[int]
+```
+
+The positions of the tokens the policy sampled in a segment.
+
+### `preference_terms`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+def preference_terms(objective: Objective, batch: Sequence[Item], now: Mapping[int, torch.Tensor], reference: Mapping[int, torch.Tensor]) -> list[tuple[Item, Terms]]
+```
+
+The preference loss of each item of a minibatch, from each segment's logprobs (`now`, by the segment's `id`)
+and the reference's.
+
+### `sampled`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+def sampled(weighted: Weighted) -> list[int]
+```
+
+The positions of the tokens the policy sampled in a weighted segment.
+
+### `TrainablePolicy`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+class TrainablePolicy(Protocol)
+```
+
+What the step needs of a policy (`rollout_lora.policy.Policy` is one). An objective with a KL to the reference
+or a preference loss against it needs `reference` too, and one with an entropy bonus `logprobs_and_entropy`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `model` | `nn.Module` | required |  |
+
+**Methods**
+
+- `def parameters(self) -> list[nn.Parameter]`
+- `def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor`
 
 ## `rollout_qwen`
 
@@ -7739,8 +8476,9 @@ state its parent names (its optimizer too, if it is given the parent's state) an
 checkpoints (which Tinker's bridge, `rollout_tinker.bridges`, turns into an adapter engines here load). A client
 from the step before is used again when the parent is the state it saved. `service` is what calls Tinker: by
 default a session the SDK opens with the key it finds; `module:name` of what makes another (a profile names a fake
-one so). `settings` are `TinkerSettings`'; those in `CHANGEABLE` it takes between steps
-(`rollout_train.trainer.Changeable`).
+one so). `settings` are `TinkerSettings`' (its `objective` among them); those in `CHANGEABLE`, and the changeable
+components of its objective, it takes between steps (`rollout_train.trainer.Changeable`). Raises `ValueError` for
+an objective that reads the reference or the entropy, which Tinker does not give here.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -7749,6 +8487,7 @@ one so). `settings` are `TinkerSettings`'; those in `CHANGEABLE` it takes betwee
 **Methods**
 
 - `def __init__(self, model: str, *, service: 'Service | str | None' = None, **settings: Any) -> None`
+- `@property def objective(self) -> Objective`
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
-- `async def step(self, batch: Sequence[Weighted], *, seed: int, parent: Files | None, into: Path) -> Step`
+- `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`

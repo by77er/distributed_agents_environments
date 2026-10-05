@@ -93,7 +93,8 @@ segments ([`Segment`](../../guide/reference.md#segment)), each the tokens of a c
 - **Logprobs** are those of the tokens inside the spans, in order: the behaviour logprobs.
 - **What it was sampled with** (`sampled_with`) is what every one of its turns was sampled with, of `token_exact`,
   `sampled_logprobs` and `honours_sampling` (`TOKEN_LEVEL`). A segment without `token_exact` and `sampled_logprobs`
-  (`BEHAVIOUR`) has no importance weight: the [algorithm](training.md#the-algorithm-grpo) does not train on its group, and
+  (`BEHAVIOUR`) has no importance weight: the [algorithm](training.md#the-algorithm) does not train on its group with a
+  policy gradient that corrects for where tokens were sampled (a preference loss and a likelihood do), and
   a [dataset](datasets.md) of such turns is `supervised`.
 - **Whether it is trained on** (`trained`): false for a segment of a slot that is not trained (a judge's, a fixed
   opponent's). Such a segment is kept in its episode, for the monitor and for what it sampled, and the

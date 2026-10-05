@@ -7,7 +7,8 @@ Code: `rollout_train.datasets`, `rollout_train.imitation` · See [training](trai
 A **dataset** is a set of examples to imitate, chosen from runs' episodes by a rule: rejection sampling over what the
 policy played. It is made once and never changed. A **supervised step** on one (`rollout imitate --dataset`) raises the
 likelihood of what its examples sampled, and makes a checkpoint that says which dataset it learned from and which
-checkpoints sampled that dataset.
+checkpoints sampled that dataset. A dataset of **pairs** or **labelled examples**, made by a preference rule, is
+trained on by a preference loss the same way.
 
 ```bash
 rollout dataset make best-of-group --run curriculum-9 --turns all --turns minecraft_team.datasets:worked \
@@ -31,11 +32,12 @@ rollout imitate profile.toml --dataset diamonds-worked --start curriculum-9 --na
 
 | Record field | Holds |
 |---|---|
-| `rule`, `per_task` | the episode rule, by name, and (for `capped-per-task`) the most episodes of a task |
+| `rule`, `per_task` | the episode rule (or preference rule), by name, and (for `capped-per-task`) the most episodes of a task |
+| `kind` | what its lines are: `examples` to imitate, `pairs` or `labelled` examples (for a preference loss) |
 | `runs` | the runs its episodes are from, by id |
 | `turns` | the turn filters, by name |
 | `cut` | the kinds of guidance cut from its examples' prompts (`way` by default) |
-| `counts` | `episodes` the rule picked and the `groups` they are of; `turns_seen`, every turn of those episodes; of its examples, `tasks`, `turns`, `sampled_tokens` and `context_tokens` |
+| `counts` | `episodes` the rule picked and the `groups` they are of; `turns_seen`, every turn of those episodes; of its examples, `tasks`, `turns`, `sampled_tokens` and `context_tokens`; `pairs` or `labelled`, its lines, for a dataset of preferences |
 | `left_out` | the turns of its episodes that are no examples, by why (`action failed`: 2,969) |
 | `checkpoints` | the checkpoints that sampled its examples, by id, by depth |
 | `supervision` | `importance` where every example's turns were sampled with their exact tokens and behaviour logprobs; `supervised` where some were not (the trainer computes what it needs of their logprobs, and nothing is importance-corrected). A step on its examples records the same on the checkpoint it makes, and in its start |
@@ -51,6 +53,10 @@ rollout imitate profile.toml --dataset diamonds-worked --start curriculum-9 --na
 | `guidance` | the kinds of guidance to cut from its prompt (those of the dataset's `cut` that its episode carried) |
 | anything else | what the turn filters saw of it (`action`, for `minecraft_team.datasets:worked`) |
 
+A dataset of pairs has a line per pair: its `source` (`RUN/GROUP/CHOSEN>REJECTED`), `task`, both `rewards`, and its
+sides, `chosen` and `rejected`, each a list of turns as above. A dataset of labelled examples has a line per example:
+its `source` (`RUN/GROUP/EPISODE`), `task`, `reward`, `desirable`, and its `side`.
+
 The checkpoint served at a depth is found along the line of first parents back from each checkpoint the run made and
 each it started from (`served_at`). The manifest is kept beside the first run's episodes (the blob store its newest
 start names, or the directory of files that holds its episodes), or in the directory `--blobs` names.
@@ -64,6 +70,16 @@ Episodes first: an **episode rule** picks among the episodes the runs completed 
 | `solved-all` | every solved episode |
 | `best-of-group` | of each group's solved episodes, the one with the highest reward, then the shortest (`duration`), then the first |
 | `capped-per-task` | solved episodes by that same order, at most `--per-task` (3) of each task |
+
+For a preference loss, a **preference rule** picks among the groups whose rewards differ instead:
+
+| Rule | Makes |
+|---|---|
+| `best-and-worst` | `pairs`: of each group, its best episode (the highest reward, then the shortest, then the first) preferred to its worst (the lowest, then the first) |
+| `above-and-below` | `labelled` examples: every episode of each group, desirable above the group's mean reward and undesirable below it (none at the mean) |
+
+A side is its episode's turns that every filter keeps; a pair with a side of none is left out (`a side has no turn`).
+Its turns may lack behaviour logprobs: a preference loss reads none.
 
 Then turns: **turn filters** pick among the turns (segments) of those episodes. A turn is an example if every filter
 keeps it. `all` keeps every turn that sampled something. An environment supplies others, named `module:name`. A turn
@@ -94,9 +110,11 @@ rollout imitate PROFILE --dataset REF [--start REF] [--name NAME] [--directory R
     [--learning-rate R] [--warmup N] [--passes N] [--resume-optimizer]
 ```
 
-The profile's trainer takes the step with `objective = "likelihood"`: the LoRA trainer, or the trainer of every
-weight (`rollout_lora:FullTrainer`), each through the same [weighted segments](training.md#the-trainer), each
-example weighted 1. The step is a run of its own (the profile's directory, or `--directory`), registered under
+The profile's trainer takes the step: the LoRA trainer, or the trainer of every weight (`rollout_lora:FullTrainer`).
+A dataset of examples is trained on by a likelihood (`sft`, unless the run names another likelihood preset), each
+example weighted 1; a dataset of pairs or labelled examples by the preference preset the run names
+(`--set objective.preset=dpo`), its items the [pairs or labelled examples](training.md#objectives) the manifest
+holds. A dataset's kind and the objective's family must agree. The step is a run of its own (the profile's directory, or `--directory`), registered under
 `--name`; its start record says `kind: imitation`, the dataset, and the checkpoint it trains from. It trains from
 the newest checkpoint the run made, else `--start` (any [reference](checkpoints.md#references)), else the profile's
 `[trainer] start`, else the base model.

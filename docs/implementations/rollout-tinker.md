@@ -2,18 +2,19 @@
 
 Code: `rollout_tinker` · See [Thinking Machines' API](../research/thinking-machines.md), [training](../libraries/rollout-train/training.md),
 [channels and engines](../libraries/rollout-train/channels.md), [checkpoints](../libraries/rollout-train/checkpoints.md),
-[LoRA trainer](rollout-lora.md)
+[LoRA trainer](rollout-lora.md), [objectives in torch](rollout-objectives.md)
 
 `TinkerTrainer` implements the [`Trainer`](../guide/reference.md#trainer) protocol and `TinkerEngine` the
 [`Engine`](../guide/reference.md#engine) protocol on Thinking Machines' hosted API, Tinker. The trainer takes LoRA steps
-there with the [LoRA trainer](rollout-lora.md)'s objective, expressed as Tinker's losses; the engine samples there,
-token ids in, ids and logprobs out. Neither uses this machine's GPU. The loop, the gateway, the ledger, the renderer and
+there with the objective [`rollout_objectives`](rollout-objectives.md) composes, sent as one of Tinker's built-in
+losses where it is one and as a custom loss otherwise; the engine samples there, token ids in, ids and logprobs out. Neither uses this machine's GPU. The loop, the gateway, the ledger, the renderer and
 the objective are the platform's own: Tinker holds the weights and does the arithmetic.
 
 ## Installing
 
-`implementations/rollout-tinker` is a member of the workspace, installed by its `tinker` extra. Its one dependency
-beyond the workspace's is Tinker's SDK, pinned at `tinker==0.32.0`.
+`implementations/rollout-tinker` is a member of the workspace, installed by its `tinker` extra. Beyond the workspace's
+libraries and `rollout-objectives` (torch, for the objective, with no GPU code) its dependency is Tinker's SDK, pinned at
+`tinker==0.32.0`.
 
 ```bash
 uv sync --extra tinker                  # or --all-extras, with vLLM to serve Tinker's adapters here (its bridge)
@@ -107,14 +108,14 @@ step's files are pointers. A channel served on engines here names Tinker's bridg
 ### Settings
 
 `TinkerSettings` (`rollout_tinker/settings.py`) are a policy step's settings, the ones `LoraSettings` hold too
-([`StepSettings`](../guide/reference.md#stepsettings)), with Tinker's defaults, and a project: a profile switches
-trainers by changing `kind`.
+([`StepSettings`](rollout-objectives.md#settings)), with Tinker's defaults, and a project: a profile switches trainers by
+changing `kind`.
 
 | Setting | What it sets |
 |---|---|
 | `rank` | The adapter's rank |
 | `learning_rate` | AdamW's rate (1e-4). Tinker scales its adapters by its own `lora_alpha / rank`, and its archives say an alpha of 32 (the live test's), half our scale at rank 32, so twice `LoraTrainer`'s rate moves the weights as far |
-| `clip_low`, `clip_high`, `segment_clip_low`, `segment_clip_high`, `truncate`, `ratio`, `objective` | As `LoraSettings` |
+| `objective` | The objective, as [`StepSettings`](rollout-objectives.md#settings) takes it (a run's `objective.*` settings give it). One that reads the reference or the entropy is refused: Tinker gives neither here |
 | `tokens_per_step` | Sampled tokens per optimizer step (65,536). A step that is one optimizer step needs no pass for where it starts (below) |
 | `max_kl`, `max_gradient_norm`, `passes`, `warmup_updates`, `segment_tokens`, `segments_per_step` | As `LoraSettings` |
 | `project` | A Tinker project's id |
@@ -123,32 +124,54 @@ Adam's numbers are torch's AdamW's, as in the LoRA step (0.9, 0.999, 1e-8; Tinke
 and the adapter leaves the output layer out. `service` (trainer and engine) is what calls Tinker: by default a session
 the SDK opens; `module:name` of what makes another, as the tests name `rollout_tinker.testing:fake_service`.
 
-The trainer takes the LoRA trainer's settings between steps (`Changeable`): `learning_rate`, the clips, `truncate`,
-`tokens_per_step`, `max_kl` and `max_gradient_norm`. The next step reads them, on the same client.
+The trainer takes the LoRA trainer's settings between steps (`Changeable`): `learning_rate`, `tokens_per_step`,
+`max_kl`, `max_gradient_norm` and its objective's numbers (`objective.clip.low`, `objective.importance.cap`, ...). The
+next step reads them, on the same client.
+
+**The reference.** Tinker's SDK offers prompt logprobs from a sampler of the base model
+(`sample_async(..., include_prompt_logprobs=True)`), which could give the reference's logprobs of a segment's tokens;
+the provider declares them unchecked until a live test confirms them, so an objective that reads the reference (a KL
+to it, DPO, IPO, KTO) is refused on Tinker, by validation before a run starts and by the trainer if it is made with
+one. SimPO and ORPO, which read none, train on Tinker through the custom loss.
 
 ## A step
 
-A step takes the same minibatches as the [LoRA step](rollout-lora.md#the-step): segments longer than `segment_tokens`
-or with nothing sampled left out and counted, the rest shuffled by the step's seed and cut where a minibatch reaches
-`tokens_per_step` sampled tokens, `passes` times. Each segment is one of Tinker's `Datum`s, its input the tokens but the
-last and its targets the tokens but the first, so a sampled token at position *t* is row *t* - 1; every other row
-(a prompt, a tool's result, a token the gateway forced) carries zeros and adds nothing to the loss.
+A step takes the same minibatches as the [LoRA step](rollout-objectives.md#the-step): items with a segment longer
+than `segment_tokens` or with nothing sampled left out and counted, the rest shuffled by the step's seed and cut where
+a minibatch reaches `tokens_per_step` sampled tokens, `passes` times. Each segment is one of Tinker's `Datum`s, its
+input the tokens but the last and its targets the tokens but the first, so a sampled token at position *t* is row
+*t* - 1; every other row (a prompt, a tool's result, a token the gateway forced) carries zeros and adds nothing to the
+loss.
 
-Tinker's losses take one reference logprob per token, where ours has two: the logprob at the step's start (`old`) and
-the one it was sampled at (`behavior`). Folding the importance weight `w = min(exp(old - behavior), truncate)` and the
-minibatch's units `U` into the advantages makes each loss ours, in value and in gradient:
+Tinker's built-in losses take one logprob per token to compare with, where the objective may read two: the logprob at
+the step's start (`old`) and the one it was sampled at (`behavior`). Folding the importance weight `w`, the
+aggregation's scale `s` of each token and the minibatch's units `U` into the advantages makes a built-in loss the
+objective, in value and in gradient, where it is one (`rollout_tinker.trainer.route`):
 
-| Objective, ratio | Optimizer steps | Tinker | Reference; advantage |
+| Objective | Updates | Tinker | Compared with; advantage |
 |---|---|---|---|
-| `policy_gradient`, `token` | one | `cispo`, its ratio clipped to 0 .. `truncate` | behaviour; A/U |
-| `policy_gradient`, `token` | several | a forward pass for `old`, then `ppo`, clipped to 1 - `clip_low` .. 1 + `clip_high` | old; A·w/U |
-| `policy_gradient`, `segment` | any | a forward pass for `old` if several, then a custom loss that calls `rollout_lora.objectives.terms` | |
-| `likelihood` | any | `cross_entropy`, weights A/U | |
+| likelihood | any | `cross_entropy` | weights A·s/U |
+| no ratio (REINFORCE), no correction | any | `cross_entropy` | weights A·s/U |
+| no ratio, a weight | several | a forward pass for `old`, then `cross_entropy` | weights A·w·s/U |
+| token ratio, no correction | one | `cross_entropy` | weights A·s/U |
+| token ratio or none, a weight (truncated or not) | one | `cispo`, clipped to 0 .. the cap | behaviour; A·s/U |
+| token ratio, clipped (PPO) | several | a forward pass for `old`, then `ppo` | old; A·w·s/U |
+| token ratio, weight clipped (CISPO) | several | a forward pass for `old`, then `cispo` | old; A·w·s/U |
+| token ratio, unclipped | several | a forward pass for `old`, then `importance_sampling` | old; A·w·s/U |
+| anything else | any | (a forward pass for `old` if several) then a custom loss | |
 
-With one optimizer step `old` is the logprob now, so no forward pass is needed. A custom loss is computed here from the
-logprobs Tinker returns, and Tinker then takes a pass on a linear stand-in with that loss's gradient: a forward pass
-more than a built-in loss. Each minibatch's statistics are `terms` of the logprobs its forward-backward returns (the
-policy before that update), so the metrics are the LoRA step's.
+Anything else is a segment ratio, dual clipping, a mask, a KL penalty or a preference loss. `ppo` and `cispo` are
+clipped to 1 - `clip.low` .. 1 + `clip.high`; `s` is 1 for a token mean or a sum, one over the segment's tokens for a
+segment mean, one over `constant_tokens` for `constant`. With one update `old` is the logprob now, so a ratio is 1 and
+unclipped, every clipped surrogate's gradient is the weighted advantage's, and no forward pass is needed. A custom loss
+is the objective itself (`rollout_objectives.terms`, or the preference loss of the minibatch's pairs or examples),
+computed here from the logprobs Tinker returns; Tinker then takes a pass on a linear stand-in with that loss's
+gradient: a forward pass more than a built-in loss. Each minibatch's statistics are the objective's terms of the
+logprobs its forward-backward returns (the policy before that update), so the metrics are the LoRA step's.
+
+What crosses to Tinker is float32 (its `TensorData` takes no other float): the logprobs a built-in loss compares with,
+the advantages, and a custom loss's gradient. A built-in loss and the custom loss of the same objective agree to that
+precision: on the tests' fixed batch, after several Adam updates at a rate of 0.05, their weights differ by under 1e-8.
 
 **Where a step starts.**
 
@@ -274,10 +297,13 @@ and how often (a new sampler checkpoint each step starts its cache afresh), is t
 plus a learnable table) with training runs, checkpoints, sampling and archives, its losses computed as Tinker's
 documentation writes them. The tests (`tests/rollout_tinker`) show, with no network:
 
-- the substitutions are exact: a step through the fake moves the model as `rollout_lora.step.PolicyStep` moves the same
-  model, and its metrics are the same, for each row of the table above, with two passes and warm-up, and at a stop at
-  `max_kl`; going on from a parent's state (the live client, or a new one) equals the LoRA step going on with its
-  optimizer; a parent's weights alone start a fresh optimizer;
+- the substitutions are exact: a step through the fake moves the model as `rollout_objectives.step.PolicyStep` moves
+  the same model, and its metrics are the same, for each row of the table above (the `default`, `ppo_clip`, `cispo`,
+  `dr_grpo`, `reinforce` and `sft` presets among them), with two passes and warm-up, and at a stop at `max_kl`; each
+  built-in loss moves the model as the custom loss of the same objective does; SimPO and ORPO pairs train as the LoRA
+  step trains them; an objective that reads the reference or the entropy is refused; going on from a parent's state
+  (the live client, or a new one) equals the LoRA step going on with its optimizer; a parent's weights alone start a
+  fresh optimizer;
 - a datum's rows: the shift by one, spans across turns, forced tokens left out;
 - the engine's contract, and a published version sampled at once through the channel and the gateway;
 - Tinker's bridge: the renaming and the joining of q, k and v, on a tiny model laid out as Qwen3.5, in this process
