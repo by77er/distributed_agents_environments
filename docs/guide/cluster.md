@@ -220,9 +220,10 @@ model's `max_lora_rank`. Turns are shared among a pool's runs by each run's `sha
 |---|---|---|---|---|
 | produces | `lora` | `full` | `lora` | as the trainer it runs (`trainer = "lora"` or `"full"`) |
 | format | `peft` | `full` | `tinker` | `peft` or `full` |
-| objective families | `policy_gradient`, `preference`, `likelihood` | the same | the same | the same |
+| objective families | `policy_gradient`, `preference`, `likelihood`, `distillation` | the same | the same | the same |
 | reference | yes (the adapter switched off) | when asked (`trainer.frozen_reference`: a frozen copy) | no | as the trainer it runs |
 | entropy | yes | yes | no | as the trainer it runs |
+| logprobs of tokens not sampled (distillation's top-k form) | yes | yes | no | as the trainer it runs |
 | scores given tokens | yes | yes | yes | yes |
 | starts from | `peft`, `full` | `full` | `tinker` | as the trainer it runs |
 | auth | `none` | `none` | `vendor` | `mtls` |
@@ -264,8 +265,8 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `start`, `bookmark` | | The checkpoint it starts from; a bookmark it carries |
 | `trainer.provider`, `trainer.channel`, `trainer.model` | , `policy`, the trained channel's model | The trainer, the trained channel, what it trains over |
 | `trainer.FIELD` | the trainer's | Its own settings: `rank`, `segment_tokens`, `learning_rate`, `max_kl`, … |
-| `objective.preset` | `default` | The objective's preset: `default`, `reinforce`, `rloo`, `ppo_clip`, `grpo`, `dr_grpo`, `dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto`, `orpo` |
-| `objective.COMPONENT` | the preset's | Each component ([objectives](../libraries/rollout-train/training.md#objectives)): `objective.clip.kind`, `objective.kl.target`, `objective.preference.loss`, …; its numbers (`objective.clip.low`, `objective.kl.coefficient`, `objective.preference.beta`, …) changeable |
+| `objective.preset` | `default` | The objective's preset: `default`, `reinforce`, `rloo`, `ppo_clip`, `grpo`, `dr_grpo`, `dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto`, `orpo`, `on_policy_distillation`, `distillation`, `mopd`, `mopd_top_k` |
+| `objective.COMPONENT` | the preset's | Each component ([objectives](../libraries/rollout-train/training.md#objectives)): `objective.clip.kind`, `objective.kl.target`, `objective.preference.loss`, …; its numbers (`objective.clip.low`, `objective.kl.coefficient`, `objective.preference.beta`, …) changeable. A distillation's teachers are `objective.distillation.teachers`, a table of channels by route (`{"*" = "teacher"}`), and the top-k it reads `objective.distillation.top_k` |
 | `channels.NAME.provider` or `.providers` | | What samples the channel |
 | `channels.NAME.routing`, `.weights` | `spill` | How several providers share its turns |
 | `channels.NAME.model`, `.renderer` | | |
@@ -277,7 +278,6 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `channels.NAME.follows`, `.lag` | , 0 | The channel a following channel follows, and how many of its serving records behind |
 | `slots.SLOT` | the trained channel, for a trained slot | The channel a program's slot samples; a slot that is not trained (a judge, a fixed opponent) has no default |
 | `self_judging` | false | Whether a judge may be bound to a channel serving the run's own checkpoints |
-| `distill.channel`, `distill.k` | | A teacher's channel; top-k matched (none: the teacher scores) |
 | `eval.suite`, `eval.episodes` | | An eval's suite and episodes |
 | `check.episodes` | 1 | |
 | `imitation.dataset`, `.limit`, `.passes`, `.warmup`, `.resume_optimizer`, `.without` | | Supervised steps |
@@ -362,9 +362,9 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | `rank` | `trainer.rank` times the bridge's rank factor above the provider model's `max_lora_rank` |
 | `segment` | `trainer.segment_tokens` above the trainer's here, or above the trained channel's context |
 | `start` | the start does not exist or was released; a full-weight trainer from an adapter (merge it first); Tinker from a checkpoint Tinker did not make; a local trainer from a Tinker checkpoint (bridge it first) |
-| `objective` | a component the objective's family does not accept, or a combination that means nothing (a clip with no ratio, a KL to the reference with none, a reference for a loss that compares likelihoods alone); a family the trainer does not take; a policy gradient for an imitate run; a reference the trainer cannot give (Tinker: none; the full-weight trainer: only with `trainer.frozen_reference`); an entropy bonus on a trainer without entropies |
+| `objective` | a component the objective's family does not accept, or a combination that means nothing (a clip with no ratio, a KL to the reference with none, a reference for a loss that compares likelihoods alone); a family the trainer does not take; a policy gradient for an imitate run; a reference the trainer cannot give (Tinker: none; the full-weight trainer: only with `trainer.frozen_reference`); an entropy bonus on a trainer without entropies; the top-k form of distillation on a trainer that gives the sampled tokens' logprobs only (Tinker) |
 | `evals` | a suite that does not exist (a name never becomes a suite by itself), a version it lacks, a suite's environment not offered |
-| `distillation` | the teacher's provider lacks prompt logprobs (or top-k with k at least `distill.k`), or has them only unchecked; the trainer does not score; the teacher's renderer family differs |
+| `distillation` | a distillation (or a policy gradient's distillation term) with no teachers, a teacher channel without a provider, or no route for the environment the run plays (routes for some of its rows only: a note); a teacher's provider without prompt logprobs, with fewer top logprobs than `objective.distillation.top_k`, or with them only unchecked (Tinker); the trainer does not score; the teacher's renderer family differs |
 | `environment` | not offered, does not load, needs a sandbox kind with no pool or a tool set not served |
 | `capacity` | more GPUs than the cluster has (more than are free: a note, it waits) |
 | `pools` | more adapter slots than a shared pool has (more than are free, or the pool full of runs: a note, it waits) |

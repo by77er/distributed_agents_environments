@@ -13,7 +13,8 @@ libraries; it is installed with either the `gpu` or the `tinker` extra.
 | Module | What it holds |
 |---|---|
 | `settings` | `StepSettings`: a step's settings, which the LoRA, full-weight and Tinker trainers take alike. Importing it does not load torch |
-| `terms` | The loss of one weighted segment (`policy_gradient`, `likelihood`) or of preference items (`pair`, `labelled`), the KL estimators, aggregation, and what a minibatch's terms add up to (`SUMS`, `tally`) |
+| `terms` | The loss of one weighted segment (`policy_gradient`, `likelihood`) or of preference items (`pair`, `labelled`), the importance weight, the KL estimators, aggregation, and what a minibatch's terms add up to (`SUMS`, `tally`) |
+| `distillation` | The loss of one distilled segment (`distillation`, and `distilled` for either family): the policy-gradient form, the top-k divergences (`top_k_divergence`), and a policy gradient's distillation term |
 | `step` | `PolicyStep`, a step over a batch on a local policy; `Plan`, which items a step takes and in which minibatches; `metrics` and `line`, a step's and a minibatch's statistics |
 
 ## Settings
@@ -102,22 +103,51 @@ loss without a reference). For a pair, with `h = rho_chosen - rho_rejected`:
 mismatched pairs of the microbatch (one example's prompt with another's answer), which a multi-turn episode does not
 have. A minibatch's loss is the mean over its items.
 
+### A distillation
+
+A distilled segment carries the teacher's logprob `T(y_t)` of each sampled token `y_t` and, for the top-k form, the
+teacher's top-k tokens `V_t` at each with their logprobs. With `w` the importance weight (as a policy gradient's, from
+old and behavior; NeMo-RL's `icepop` is `mask`), each sampled token's loss is, by `distillation.form`:
+
+| Form | Divergence | Each token's loss |
+|---|---|---|
+| `policy_gradient` | `reverse_kl` | `-w · A · now`, with `A = clip(T(y) - old(y), -A_max, A_max)` (no gradient; `A_max = advantage_clip`, unclipped at 0): the reverse KL's gradient, estimated from the sampled tokens alone (MOPD's Eq. 3 and 4) |
+| `top_k` | `reverse_kl` | `w · sum over v in V of [p(v) log(p(v)/q(v)) - p(v) + q(v)]`, `p` the policy's probabilities now and `q` the teacher's, as they are (MOPD's Eq. 5): each term at least 0, and 0 where the two agree |
+| `top_k` | `forward_kl` | `w · tau² · sum over v in V of q'(v) log(q'(v)/p'(v))`, both renormalized over `V` at temperature `tau` (`p'(v) ∝ p(v)^(1/tau)`) |
+| `top_k` | `jsd` | `w · tau² · [beta KL(q' ‖ m) + (1 - beta) KL(p' ‖ m)]`, `m = beta q' + (1 - beta) p'` (GKD) |
+
+The student's logprob in the policy-gradient form's advantage is old, the step's start, as NeMo-RL's MOPD takes
+`prev_logprobs`; at the first minibatch it is the logprob now. The forward KL and the JSD renormalize over the teacher's
+top k: the teacher's mass outside them is dropped rather than spread, so the student is fitted to the teacher's top-k
+distribution, which is the teacher's own where its top k hold nearly all its mass; at k = the vocabulary each is the full
+divergence. The reverse KL of the top-k form needs no renormalization (its terms are those of the full reverse KL's sum
+over `V`, with `q - p` keeping each at least 0). A token the teacher did not score (beyond its context) adds nothing,
+and counts in the mean. A KL penalty is added to each token's loss, or, in the policy-gradient form, taken from its
+advantage (`kl.placement = reward`). `aggregate` reduces a segment's tokens as a policy gradient's.
+
+A policy gradient with a distillation term (`distillation.coefficient`) is the policy gradient's loss of a distilled
+segment (its episode's advantage) plus the coefficient times the distillation term, reduced the same way, weighed by the
+same importance weight and with no KL penalty of its own.
+
 ## The step
 
 `PolicyStep(policy, settings).step(items, seed=...)` takes a step on a policy that gives `logprobs(tokens, positions)`
-(with a gradient), `reference(tokens, positions)` when the objective reads the reference, and
-`logprobs_and_entropy(tokens, positions)` when it has an entropy bonus. Which items, and with what advantages, is the
+(with a gradient), `reference(tokens, positions)` when the objective reads the reference,
+`logprobs_and_entropy(tokens, positions)` when it has an entropy bonus, and `logprobs_among(tokens, positions,
+candidates)` (the sampled tokens' logprobs and those of a row of candidate tokens at each position, with a gradient) for
+the top-k form of distillation. Which items, and with what advantages, is the
 [algorithm's](../libraries/rollout-train/training.md) business.
 
 1. **The plan** (`Plan.of`). Items with a segment longer than `segment_tokens`, or with nothing sampled (a pair with a
    side that sampled nothing), are left out and counted. The rest are shuffled with the step's `seed` and cut into
    minibatches of about `tokens_per_step` sampled tokens; a last minibatch of less than half that joins the one
    before. With `passes` above 1, each further pass shuffles them anew.
-2. **Where the step starts.** For a policy gradient or a preference loss, every sampled token's logprob on the weights
-   the step starts from (old), without a gradient, and the reference's where it is read. A behaviour logprob that is
-   not finite fails the step only where an importance correction reads it. A segment that does not fit the GPU here is
-   left out and counted.
-3. **Each minibatch.** A weighted segment's loss is computed and its gradient accumulated one segment at a time. A
+2. **Where the step starts.** For a policy gradient, a distillation or a preference loss, every sampled token's
+   logprob on the weights the step starts from (old), without a gradient, and the reference's where it is read. A
+   behaviour logprob that is not finite fails the step only where an importance correction reads it. A segment that
+   does not fit the GPU here is left out and counted.
+3. **Each minibatch.** A weighted or distilled segment's loss is computed and its gradient accumulated one segment at a
+   time (for the top-k form, with the policy's logprobs of the teacher's top-k tokens at each position). A
    preference loss is a function of each side's whole likelihood, so its gradient is taken in two parts that also
    hold one segment's activations at a time: the loss of the logprobs computed without a gradient (on the weights the
    minibatch steps from; before any update, old) gives each logprob's gradient, and each segment's logprobs, computed
@@ -142,6 +172,9 @@ A step returns these; a trainer adds its own (`peak_gpu_gib`, `billed_tokens`).
 | `stopped_at_max_kl` | 1 if the pass stopped at `max_kl` |
 | `items`, `preference_accuracy`, `preference_margin` | For a preference loss: items trained on, the share whose chosen side's log ratio is above the rejected's (a desirable example's above `z`, an undesirable one's below), and the mean `h` (an example's distance from `z` on its label's side) |
 | `chosen_log_ratio`, `rejected_log_ratio` | For pairs: the mean `rho` of each side |
+| `teacher_gap` | For distilled segments: the mean, over the tokens the teacher scored, of the policy's logprob less the teacher's, as each minibatch found it before its update. On the policy's own samples, an estimate of KL(policy ‖ teacher) per token; it is also in each minibatch's line |
+| `teacher_divergence` | The mean top-k divergence per scored token (the top-k form) |
+| `advantage_clip_fraction`, `unscored_fraction` | The share of scored tokens whose advantage was clipped (the policy-gradient form), and the share of sampled tokens the teacher did not score |
 | `gradient_norm` | Before clipping, the mean over optimizer steps |
 | `optimizer_steps`, `passes`, `learning_rate`, `warmup_updates` | Minibatches stepped on, and the settings the step took |
 | `tokens`, `segments` | Sampled tokens and segments trained on |
@@ -162,4 +195,8 @@ components (to the last bit), and the step over pairs and labelled examples (its
 gradient of the whole loss, the direction of DPO's, SimPO's and KTO's updates, the stop at `max_kl`). `test_step.py`
 covers the step on a toy policy: the direction of an update, minibatches, warmup, forced tokens, segments left out, the
 KL stop, a missing logprob, the likelihood objective, the importance weight and its truncation, the token clip and the
-segment ratio.
+segment ratio. `test_distillation.py` covers distillation's terms against their definitions (each top-k divergence over
+the whole vocabulary equal to the full one: GKD's JSD as TRL writes it, Hinton's softened KL, the reverse KL), tokens
+the teacher did not score, a teacher that gave fewer than k tokens, the importance mask, a KL in the reward and in the
+loss, a policy gradient's distillation term, and the step on a toy policy, whose every distillation preset moves it
+toward its teacher on its own samples.

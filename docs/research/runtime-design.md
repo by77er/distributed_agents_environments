@@ -384,7 +384,7 @@ model with Qwen3.5's linear-attention layers when each of q, k and v has an A of
 | Another channel (a fixed opponent, a judge) | any | Its turns are recorded and never trained on |
 | An eval's subject | any; a checkpoint needs a bridge to the provider's `loads` | |
 | An SFT data source (a dataset's turns) | any | Without sampled logprobs the data is supervised: the trainer computes logprobs itself and nothing is importance-corrected. The dataset records `supervision: "supervised"` (else `"importance"`), and the imitation step records it |
-| A distillation teacher | prompt logprobs (to score the student's tokens), or top-k logprobs with k at least the run's `distill.k` for distribution matching; the same renderer family as the student | Validated when distillation runs exist; the rule is in `rollout_train.validation` from the start |
+| A distillation teacher | prompt logprobs (to score the student's tokens), and top-k logprobs with k at least the objective's `distillation.top_k` where it reads them; logprobs confirmed by a live test (not Tinker's yet); the same renderer family as the student | A teacher for every route, and a route for the environment the run plays (`rollout_train.validation`) |
 | A trainer that scores (distillation on the student's side, recomputed logprobs for supervised data) | the trainer's `scores` | |
 
 ### What a turn records
@@ -960,7 +960,7 @@ channel, the placement group, the runner count, the estimated cost per step.
 | Objective | `trainer.objective` or `trainer.ratio` not among the trainer's objectives |
 | Evals | `evals.suite` names no suite (an unknown name is an error, never a new suite); a suite's environment is not offered |
 | Eval subject | a checkpoint with no bridge to the eval's provider |
-| Distillation | a teacher's provider has neither prompt logprobs nor top-k with k at least `distill.k`; the teacher's renderer family differs from the student's |
+| Distillation | no teacher for a route, or no route for the environment played; a teacher's provider without prompt logprobs, or with fewer top logprobs than `distillation.top_k`, or with them unchecked; the teacher's renderer family differs from the student's |
 | Environment | not offered; a sandbox kind it declares has no pool; a tool set URL it imports by name is not in `[tools]` |
 | Capacity | the placement group's demand exceeds the cluster's total resources (it would never start). Demand above what is free is not refused: the job waits in Ray's queue |
 | Spend | `limits.spend` set and the plan's estimated cost per step above it (it would stop before its first step) |

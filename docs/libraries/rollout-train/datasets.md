@@ -8,7 +8,7 @@ A **dataset** is a set of examples to imitate, chosen from runs' episodes by a r
 policy played. It is made once and never changed. A **supervised step** on one (`rollout imitate --dataset`) raises the
 likelihood of what its examples sampled, and makes a checkpoint that says which dataset it learned from and which
 checkpoints sampled that dataset. A dataset of **pairs** or **labelled examples**, made by a preference rule, is
-trained on by a preference loss the same way.
+trained on by a preference loss the same way, and a dataset of **teacher samples** by a distillation.
 
 ```bash
 rollout dataset make best-of-group --run curriculum-9 --turns all --turns minecraft_team.datasets:worked \
@@ -40,7 +40,7 @@ rollout imitate profile.toml --dataset diamonds-worked --start curriculum-9 --na
 | `counts` | `episodes` the rule picked and the `groups` they are of; `turns_seen`, every turn of those episodes; of its examples, `tasks`, `turns`, `sampled_tokens` and `context_tokens`; `pairs` or `labelled`, its lines, for a dataset of preferences |
 | `left_out` | the turns of its episodes that are no examples, by why (`action failed`: 2,969) |
 | `checkpoints` | the checkpoints that sampled its examples, by id, by depth |
-| `supervision` | `importance` where every example's turns were sampled with their exact tokens and behaviour logprobs; `supervised` where some were not (the trainer computes what it needs of their logprobs, and nothing is importance-corrected). A step on its examples records the same on the checkpoint it makes, and in its start |
+| `supervision` | `teacher` where a teacher scored every example with its top-k ([teacher samples](#teacher-samples)); else `importance` where every example's turns were sampled with their exact tokens and behaviour logprobs; `supervised` where some were not (the trainer computes what it needs of their logprobs, and nothing is importance-corrected). A step on its examples records the same on the checkpoint it makes, and in its start |
 | `manifest`, `blobs` | the manifest's blob, and the store it is in, as any process opens it ([`rollout_train.stores`](rollouts.md#what-runners-write)) |
 | `made`, `by` | when, and who (`user@host`) |
 
@@ -51,6 +51,7 @@ rollout imitate profile.toml --dataset diamonds-worked --start curriculum-9 --na
 | `depth`, `checkpoint` | the depth it was sampled at (its spans' newest), and the checkpoint the run served at that depth (none for the base model) |
 | `tokens`, `sampled` | its tokens, and the tokens the policy sampled |
 | `guidance` | the kinds of guidance to cut from its prompt (those of the dataset's `cut` that its episode carried) |
+| `teacher` | the teacher channel that scored it, where one did |
 | anything else | what the turn filters saw of it (`action`, for `minecraft_team.datasets:worked`) |
 
 A dataset of pairs has a line per pair: its `source` (`RUN/GROUP/CHOSEN>REJECTED`), `task`, both `rewards`, and its
@@ -60,6 +61,18 @@ its `source` (`RUN/GROUP/EPISODE`), `task`, `reward`, `desirable`, and its `side
 The checkpoint served at a depth is found along the line of first parents back from each checkpoint the run made and
 each it started from (`served_at`). The manifest is kept beside the first run's episodes (the blob store its newest
 start names, or the directory of files that holds its episodes), or in the directory `--blobs` names.
+
+### Teacher samples
+
+A dataset of examples every one of which a teacher scored, with its top-k logprobs at each sampled token
+(`Segment.teacher`, [distillation](training.md#distillation)), is of `teacher` supervision: off-policy distillation's
+data. Its episodes are a teacher's own (a run or an eval whose sampled channel served the teacher), its segments scored
+by the teacher with its top-k as an on-policy run's are, so each example carries the teacher's distribution over its
+most likely tokens at every position it sampled. Its examples are distilled segments
+([`Distilled`](../../guide/reference.md#distilled), `Examples.distilled`), which a step trains on with a distillation
+objective: the `distillation` preset is the forward KL to the teacher's top-k, renormalized over it. Guidance is cut
+from their prompts as from any example's; the teacher's scores, which go with the sampled tokens, are kept. A dataset
+with a turn no teacher scored, or scored without a top-k, is not of `teacher` supervision.
 
 ## Choosing examples
 

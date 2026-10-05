@@ -1,9 +1,10 @@
 # Objectives design: families, components, presets, distillation and judges
 
-Status: the composable objective and the preference family are built (steps 1 and 2 of the [order of
-work](#order-of-work)): the declaration is `rollout_train.objectives`, the torch implementation `rollout_objectives`
-([objectives in torch](../implementations/rollout-objectives.md), [objectives](../libraries/rollout-train/training.md#objectives)).
-Judges and distillation are proposed, but for teacher scoring, which is built. Each section says which of its parts are built.
+Status: the composable objective, the preference family and the distillation family are built (steps 1, 2 and 4 of
+the [order of work](#order-of-work)): the declaration is `rollout_train.objectives`, the torch implementation
+`rollout_objectives` ([objectives in torch](../implementations/rollout-objectives.md),
+[objectives](../libraries/rollout-train/training.md#objectives)). Distillation is library code: the loop does not yet
+ask teachers to score its episodes. Judges are proposed. Each section says which of its parts are built.
 
 ## Goals
 
@@ -13,7 +14,8 @@ Judges and distillation are proposed, but for teacher scoring, which is built. E
 - The objectives of the literature ship as **presets**: each one a family plus component values, cited, and tested
   against a direct transcription of the paper's formula. A run names a preset and overrides any component. *Built.*
 - Two more sources of supervision: **distillation** from a teacher's logprobs, on-policy and off-policy (not black-box
-  distillation from text alone), and **LLM judges** as a source of rewards and preferences. *Proposed.*
+  distillation from text alone), *built* as library code; and **LLM judges** as a source of rewards and preferences,
+  *proposed*.
 - One definition serves every training provider. Local LoRA and full-weight trainers compute it in torch. Tinker runs
   it through its custom-loss path, or through its built-in loss when the composition is one Tinker has built in.
   *Built.*
@@ -26,11 +28,12 @@ A family fixes what a batch item is and what the core term of the loss is. Every
 |---|---|---|---|---|
 | `policy_gradient` | a segment with an advantage | the advantage times the policy's logprob of each sampled token, under the ratio and clipping components | behaviour logprobs when importance correction is on | built |
 | `preference` | a pair (chosen, rejected) over a shared context, or a single example labelled desirable or undesirable | a function of the policy-to-reference log-likelihood ratio of each side | a reference, unless the loss is reference-free | built |
-| `distillation` | a segment with the teacher's logprobs for its tokens | a divergence between the teacher's and the policy's next-token distributions | a teacher channel that returns logprobs | proposed |
+| `distillation` | a segment with the teacher's logprob of each sampled token, and for the top-k form its top-k tokens and logprobs there (`Distilled`) | a divergence between the teacher's and the policy's next-token distributions | a teacher channel that returns logprobs; for the top-k form, a trainer that gives the policy's logprobs of tokens it did not sample | built |
 | `likelihood` | a segment with a weight | the weighted log-likelihood of its tokens (supervised fine-tuning, imitation) | nothing more | built |
 
-A preference loss can add a likelihood term with a coefficient (`likelihood.coefficient`, as ORPO does): built. A
-policy gradient plus a distillation term is proposed, with distillation.
+A preference loss can add a likelihood term with a coefficient (`likelihood.coefficient`, as ORPO does), and a policy
+gradient a distillation term (`distillation.coefficient`, its batch items then distilled segments with their episode's
+advantage): both built.
 
 ## Components
 
@@ -45,24 +48,29 @@ validation refuses the rest. Every component below is built but those marked pro
 | `ratio` | `token`, `segment` (the geometric mean of its tokens' ratios, as GSPO), `none` (the logprob itself, as REINFORCE) | policy_gradient |
 | `clip.kind` | `none`, `ratio` (PPO), `weight` (clip the importance weight and stop its gradient, as CISPO), `dual` (with a lower bound for negative advantages) | policy_gradient |
 | `clip.low`, `clip.high`, `clip.dual` | numbers; asymmetric for clip-higher; `dual` in times a negative advantage | policy_gradient |
-| `importance.correction` | `none`, `untruncated`, `truncate` (TIS), `mask` (drop tokens outside the bounds, keeping the weight of those within) | policy_gradient; distillation proposed |
-| `importance.level` | `token`, `segment` | policy_gradient; distillation proposed |
-| `importance.cap`, `importance.floor` | numbers: the cap, and the lowest weight a mask keeps | policy_gradient; distillation proposed |
-| `kl.target` | `none`, `reference`, `old` | policy_gradient; distillation proposed |
-| `kl.estimator` | `k1`, `k2`, `k3` | policy_gradient; distillation proposed |
-| `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient, after the group's baseline) | policy_gradient |
-| `kl.coefficient` | a number | policy_gradient; distillation proposed |
+| `importance.correction` | `none`, `untruncated`, `truncate` (TIS), `mask` (drop tokens outside the bounds, keeping the weight of those within; NeMo-RL's `icepop`) | policy_gradient, distillation |
+| `importance.level` | `token`, `segment` | policy_gradient, distillation |
+| `importance.cap`, `importance.floor` | numbers: the cap, and the lowest weight a mask keeps | policy_gradient, distillation |
+| `kl.target` | `none`, `reference`, `old` | policy_gradient, distillation |
+| `kl.estimator` | `k1`, `k2`, `k3` | policy_gradient, distillation |
+| `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient, after the group's baseline) | policy_gradient; distillation (`reward` in the policy-gradient form) |
+| `kl.coefficient` | a number | policy_gradient, distillation |
 | `entropy.coefficient` | a number | policy_gradient |
-| `aggregate` | `token_mean` (over the minibatch's tokens), `segment_mean` (over each segment's tokens, then segments), `segment_sum` (summed over each segment's tokens, then a mean over segments, as REINFORCE and RLOO), `constant` (summed and divided by a fixed token count, `constant_tokens`, as Dr. GRPO) | policy_gradient, likelihood; a preference loss is a mean over its items |
-| `reference` | `base` (the adapter switched off, or a frozen copy for a full-weight trainer), `none`; `checkpoint` (a named one) proposed | preference, and policy_gradient with a KL to the reference; distillation proposed |
+| `aggregate` | `token_mean` (over the minibatch's tokens), `segment_mean` (over each segment's tokens, then segments), `segment_sum` (summed over each segment's tokens, then a mean over segments, as REINFORCE and RLOO), `constant` (summed and divided by a fixed token count, `constant_tokens`, as Dr. GRPO) | policy_gradient, likelihood, distillation; a preference loss is a mean over its items |
+| `reference` | `base` (the adapter switched off, or a frozen copy for a full-weight trainer), `none`; `checkpoint` (a named one) proposed | preference, and policy_gradient or distillation with a KL to the reference |
 | `preference.loss` | `sigmoid` (DPO), `hinge`, `square` (IPO), `margin` (SimPO), `odds_ratio` (ORPO), `kto` | preference |
 | `preference.beta`, `preference.margin` | numbers (for `odds_ratio`, beta weighs the term, as TRL's ORPO) | preference |
 | `preference.length_normalized` | true or false | preference |
 | `preference.desirable`, `preference.undesirable` | KTO's weights | preference with `kto` |
 | `likelihood.coefficient` | the chosen side's mean negative logprob beside the preference loss | preference |
-| `distillation.divergence` | `reverse_kl`, `forward_kl`, `jsd` (with its mixing weight) | distillation, proposed |
-| `distillation.top_k` | how many of the teacher's logprobs each position carries | distillation, proposed |
-| `distillation.temperature` | a number | distillation, proposed |
+| `distillation.divergence` | `reverse_kl`, `forward_kl`, `jsd` (GKD's, with its mixing weight `distillation.beta`) | distillation; policy_gradient's distillation term |
+| `distillation.form` | `policy_gradient` (a per-token advantage from the teacher-student gap; reverse KL only), `top_k` (a divergence over the teacher's top-k tokens) | distillation; policy_gradient's term |
+| `distillation.top_k` | how many of the teacher's most likely tokens each position carries (0: none) | distillation; policy_gradient's term |
+| `distillation.temperature` | a number: for the renormalized `forward_kl` and `jsd` of the top-k form | distillation; policy_gradient's term |
+| `distillation.advantage_clip` | a number: the policy-gradient form's advantage within ± it (0: unclipped) | distillation; policy_gradient's term |
+| `distillation.beta` | the teacher's weight in the JSD's mixture, between 0 and 1 | distillation; policy_gradient's term |
+| `distillation.teachers` | a table: the teacher channel of each route (an environment, one of its rows, or `*`); one teacher a sample, never an ensemble | distillation; policy_gradient's term |
+| `distillation.coefficient` | a number: the distillation term beside a policy gradient (0: none); it changes between steps, but not to or from 0 | policy_gradient |
 
 Where a component that follows from another is not given, it follows: a KL to the reference reads `reference = base`,
 a preference loss with a reference reads it and one without reads none, and an odds ratio is length-normalized.
@@ -76,8 +84,9 @@ unbounded steps.
 
 A preset is a family and component values, with the paper it comes from. Its test transcribes the paper's loss
 directly on a fixed batch and compares the composed objective with it, in value and gradient
-(`tests/rollout_objectives/test_presets.py`, which also pins each value to its source). *Built*, but the distillation
-presets.
+(`tests/rollout_objectives/test_presets.py`, which also pins each value to its source). *Built.* A distillation
+preset's transcription reads the full distributions (the student's logits and the teacher's logprobs over the
+vocabulary), and its composed loss only what a distilled segment carries and the step computes.
 
 | Preset | Family | What sets it apart | Source |
 |---|---|---|---|
@@ -96,8 +105,10 @@ presets.
 | `simpo` | preference | length-normalized margin loss at beta 2.0, margin 1.0, no reference | Meng et al., 2024 (Eq. 6, Table 8) |
 | `kto` | preference | unpaired desirable and undesirable examples at beta 0.1, both weights 1 | Ethayarajh et al., 2024 (Eq. 8, Sec. 4.2) |
 | `orpo` | preference plus likelihood | an odds-ratio term at 0.1 beside the chosen side's likelihood, odds of the mean token logprob, no reference | Hong et al., 2024 (Eq. 3, 6, 7; Sec. 6.1) |
-| `on_policy_distillation` | distillation | reverse KL on the student's own samples, scored by the teacher | Agarwal et al., 2024 (GKD); Thinking Machines, 2025. *Proposed* |
-| `distillation` | distillation | forward KL to the teacher's top-k logprobs on the teacher's samples | Hinton et al., 2015; Kim and Rush, 2016. *Proposed* |
+| `on_policy_distillation` | distillation | reverse KL on the student's own samples, from the teacher's logprob of each sampled token: the advantage `log T(y) - log pi_old(y)`, unclipped, its loss the advantage times the logprob; token mean; no importance correction | Agarwal et al., 2024, GKD (Sec. 3, on-policy with the reverse KL); Thinking Machines, 2025 (On-Policy Distillation) |
+| `distillation` | distillation | forward KL to the teacher's top-20 logprobs, renormalized over them, on the teacher's samples; temperature 1; token mean | Hinton et al., 2015; Kim and Rush, 2016 (word-level KD) |
+| `mopd` | distillation | the policy-gradient form: `A = clip(sg[log T(y) - log pi_old(y)], -5, 5)`, loss `-1/|y| sum_t A log pi(y)` (a mean over each segment's tokens, then segments); one rollout a prompt (the algorithm's group of 1); each domain routed to its teacher (`distillation.teachers`); no importance correction, no KL | Ma et al., 2026, MOPD: Multi-Teacher On-Policy Distillation (MiMo, ICML 2026; Eq. 3, 4; Sec. 4) |
+| `mopd_top_k` | distillation | MOPD's top-k form: `1/|y| sum_t sum over the teacher's top-64 v of [p log(p/q) - p + q]`, the probabilities as they are | Ma et al., 2026 (Eq. 5; k = 64) |
 
 Values the papers do not state, and where they come from instead:
 
@@ -118,11 +129,27 @@ Values the papers do not state, and where they come from instead:
 - **RLOO's KL.** The paper puts a KL penalty in the reward before the baseline (beta 0.03 to 0.10). `kl.placement =
   reward` takes it from each token's advantage after the baseline, which is not the same estimator, so `rloo` carries
   no KL; a verifiable reward needs none.
+- **The student's logprob in a distillation advantage** is the step's start (`old`), as NeMo-RL's MOPD takes
+  `prev_logprobs`; MOPD's paper writes `log pi_theta` under a stop-gradient, the same at the first update. Thinking
+  Machines' cookbook takes the sampler's logprob and Tinker's `importance_sampling` loss (the ratio to the sampler);
+  on-policy, sampler and start agree up to the engine's numerical gap, which `importance.correction` can weigh.
+- **`distillation`'s top 20** is vLLM's default most logprobs a position; Hinton et al. and Kim and Rush match the whole
+  vocabulary. The tail outside the top k is dropped and the rest renormalized; at k = the vocabulary the loss is theirs.
+  Hinton's temperature (they report 20 for MNIST, and scale by its square) is a component (`distillation.temperature`);
+  Kim and Rush use 1, the preset's.
+- **MOPD's values** are the paper's for Qwen3-30B-A3B: A_max 5, k 64 for the top-k form, one rollout a prompt (against 8
+  for its per-domain RL), temperature 1 for sampling, no dynamic sampling, domain ratios 0.35 : 0.35 : 0.3 (Math, IF,
+  SWE) and a batch of 2,048 prompts. Its learning rate is not stated. The paper reports the two forms equal (Sec. 4.4.1).
+  The ratios and the batch belong to a run's mixture of environments, not to the objective.
+- **GKD's JSD** (`distillation.divergence = jsd`) is `beta·KL(T ‖ m) + (1 - beta)·KL(pi ‖ m)` with `m = beta·T + (1 -
+  beta)·pi`, as TRL writes it; `beta` 0.5 by default, TRL's. It is a component of the top-k form, over the
+  renormalized top k; no preset takes it.
 
 Importance correction is a modifier any policy-gradient preset can take. `truncate` follows truncated importance
 sampling (Yao et al., 2025; the cap of 2 is their code's) and `mask` follows masked importance sampling, which keeps
 a weight within the bounds and drops the token outside them (Liu, Li et al., 2025), for the gap between the sampler and
-the trainer. The papers' presets carry none, as the papers do; `default` truncates at 2.
+the trainer. The papers' presets carry none, as the papers do; `default` truncates at 2. A distillation takes it too:
+NeMo-RL's MOPD runs with `icepop`, which is `mask`.
 
 The platform's present default is a preset of its own, `default`, with the `max_kl` stop. A trainer's own settings
 that named the objective before (`objective = "policy_gradient"`, `ratio`, the clips, `truncate`) say `default` and its
@@ -146,9 +173,13 @@ structural components cannot. *Built.*
   When a resolved objective is one of them, the Tinker provider uses it, and tests check that both paths agree, to the
   float32 precision Tinker takes its inputs in. *Built.*
 - **The algorithm** (`rollout_train.algorithm`) reads the advantage components and builds each family's batch items:
-  weighted segments (`Grpo`), pairs or labelled examples (`Preferences`); segments with teacher logprobs are proposed.
-  Datasets of pairs and labelled examples come from `rollout_train.datasets` (`best-and-worst`, `above-and-below`).
-  *Built.*
+  weighted segments (`Grpo`), pairs or labelled examples (`Preferences`), segments with their teacher's scores
+  (`Distillations`, and `Grpo` for a policy gradient's distillation term). Datasets of pairs and labelled examples come
+  from `rollout_train.datasets` (`best-and-worst`, `above-and-below`), and datasets of teacher samples from the same
+  rules, of `teacher` supervision. *Built.*
+- **Teacher routing and scoring** (`rollout_train.distillation`): which teacher an episode goes to, the positions a
+  segment is scored at, the teacher's `Scores` aligned with its sampled tokens, and `taught`, which asks a scorer and
+  returns the segment carrying its scores. *Built*; the loop's call to it after each episode is not wired yet.
 - **The reference** is the base with the adapter switched off for LoRA (a no-gradient pass), a frozen copy for the
   full-weight trainer only when asked (`trainer.frozen_reference`), and none on Tinker: its SDK offers prompt
   logprobs from a sampler of the base model, unconfirmed by a live test, so validation refuses an objective that
@@ -156,21 +187,40 @@ structural components cannot. *Built.*
 
 ## Distillation
 
-*Proposed*, but teacher scoring, which is built.
+*Built* as library code, and checked on Qwen3 ([below](#checked-on-qwen3)); the loop does not yet ask teachers.
 
-- **On-policy.** The student samples as it does for reinforcement learning. The teacher channel scores each sampled
-  token with its own logprobs (prompt logprobs over the student's tokens, with the top k at each position), and the
-  loss is the reverse KL per token. It needs a teacher provider that returns prompt logprobs, with the same tokenizer
-  as the student, which the validation's renderer-family rule already checks. Scoring is built: `Engine.score` gives
-  the logprobs of given tokens with the top k at each position, on `VllmEngine` (vLLM's prompt logprobs),
-  `RemoteEngine` and engine hosts, and the gateway's `POST /v1/scores` asks a run's channel for them, recording each
-  request as a turn that is never trained on ([scoring tokens](../libraries/rollout-train/gateway.md#scoring-tokens)).
-- **Off-policy, with logprobs.** The teacher samples, with its top-k logprobs at each position (built:
-  `generate(…, top=K)`), and the student fits them by forward KL. A dataset of teacher samples (the dataset module, with a `teacher` supervision) serves as
-  well as live sampling. Sampling stays exact as far as it goes: the teacher's turns are recorded through the gateway
-  like any other.
-- Either kind can be mixed with a policy gradient by a coefficient. Black-box distillation (from a teacher's text
-  alone) is left out.
+- **On-policy.** The student samples as it does for reinforcement learning. A teacher channel scores each sampled
+  token with its own logprobs (prompt logprobs over the student's tokens, with the top k at each position where the
+  objective reads them), and the loss is the reverse KL: from the sampled tokens alone (the policy-gradient form,
+  `on_policy_distillation`, `mopd`), or over the teacher's top k (`mopd_top_k`). Scoring: `Engine.score` gives the
+  logprobs of given tokens with the top k at each position, on `VllmEngine` (vLLM's prompt logprobs), `RemoteEngine`
+  and engine hosts, and the gateway's `POST /v1/scores` asks a run's channel for them, recording each request as a
+  turn that is never trained on ([scoring tokens](../libraries/rollout-train/gateway.md#scoring-tokens)).
+  `rollout_train.distillation.taught` scores a segment (from its first sampled token to its last, within the teacher's
+  context) and keeps the scores on it (`Segment.teacher`); `Distillations` makes the batch of distilled items.
+- **Several teachers** (MOPD). `distillation.teachers` routes each episode, by its environment and row, to one teacher
+  channel; each segment is scored by that one teacher, never an ensemble. A run over several environments with mixing
+  ratios is the run's business; validation checks that the routes cover the environment a run plays.
+- **Off-policy, with logprobs.** The teacher's own samples, each segment scored by the teacher with its top-k logprobs
+  at each sampled position, are a dataset of `teacher` supervision (`rollout_train.datasets`), and the student fits
+  them by forward KL over the top k (`distillation`). Sampling stays exact as far as it goes: the teacher's turns are
+  recorded through the gateway like any other.
+- **Mixing.** A policy gradient adds a distillation term with `distillation.coefficient`. Black-box distillation (from
+  a teacher's text alone) is left out.
+- **Validation** refuses a distillation with no teacher for a route, or no route for the environment played (routes
+  for some of its rows only are a note); a teacher whose provider gives no prompt logprobs, fewer top logprobs than
+  `distillation.top_k`, or logprobs not yet confirmed by a live test (Tinker's); a teacher of another renderer family
+  than the student; and the top-k form on a trainer that gives the sampled tokens' logprobs only (Tinker).
+- **Tinker** trains the policy-gradient form (alone, or as a policy gradient's term) through its custom loss: the
+  teacher's scores are in the items, and the student's logprobs are the sampled tokens', which Tinker returns. The
+  top-k form needs the student's logprobs of the teacher's top tokens, which Tinker's loss functions do not give, so it
+  is refused there.
+
+**The wiring left for runs.** After each episode, each trained segment is routed (`teacher_for`, by the run's
+environment and the episode's row), scored by `taught` with a scorer that calls `Gateway.score` for its teacher's
+channel, with `top = distillation.top_k` and the teacher's context (its `max_model_len` less the one token vLLM
+generates), and kept in the episode's trajectories before the algorithm reads them. The teacher channels are fixed
+channels of the run (`channels.NAME`), each bound for scoring like a judge.
 
 ## LLM judges
 
@@ -205,8 +255,9 @@ reached through the gateway, so every judge call is recorded, counted in spend, 
    episodes and from datasets. Use the adapter-off reference for LoRA. *Built.*
 3. **Judges**: judge channels, rubric scores and comparisons, and comparisons feeding preferences and group
    rankings.
-4. **Distillation**: prompt logprobs in `VllmEngine` (built: scoring through the engines and the gateway), then
-   on-policy distillation, then off-policy distillation with teacher datasets.
+4. **Distillation**: prompt logprobs in `VllmEngine` (scoring through the engines and the gateway), on-policy
+   distillation, MOPD with routing by teacher, and off-policy distillation with teacher datasets. *Built* as library
+   code; asking teachers after each episode is wired where runs are built.
 
 ## Checked on Qwen3-0.6B
 
@@ -266,3 +317,67 @@ What looks wrong, and is reported rather than tuned away:
   fresh pairs a step says little.
 - **`kl_moved` can be negative** (`ipo`, -0.0024): it is the k1 estimate on the sampled tokens, which is unbiased but
   not bounded below.
+
+## Checked on Qwen3
+
+On 2026-10-04, at commit `3d8f100`, the distillation presets took a few steps each on one RTX 5080 (16 GB), without
+the run wiring: a script drove `PolicyStep` directly. The student, Qwen/Qwen3-0.6B with a fresh LoRA adapter (rank 16,
+alpha 32), sampled answers to GSM8K training questions (chat template without thinking, temperature 1, at most 192
+tokens, one sample a prompt, by transformers' `generate` on the trainer's own model); each sample was scored through
+`rollout_train.distillation.taught` by a teacher served by `VllmEngine.score`; `PolicyStep` stepped on the distilled
+items (learning rate 2e-4 unless said, `tokens_per_step` 512, two or three updates a step, `max_kl` none, gradients
+clipped to 1). *Gap* is the mean, over sampled tokens, of the student's logprob less the teacher's: on the student's
+own samples, an estimate of KL(student ‖ teacher) per token, in nats. Each step's gap is on that step's fresh samples
+before its update (`teacher_gap`); the held-out gap is on fixed prompts the student never trained on, one sample each,
+before the first step and after the last.
+
+**One teacher**, Qwen/Qwen3-1.7B (`max_logprobs` 64). 8 prompts a step, 8 steps; held-out: 16 prompts.
+
+| Preset | Held-out gap, before → after | Step gaps, `/` between steps | Advantage clipped | Top-k divergence, first → last step |
+|---|---|---|---|---|
+| `on_policy_distillation` | 0.730 → 0.529 | 0.585 / 0.362 / 0.515 / 0.395 / 0.456 / 0.468 / 0.464 / 0.351 | — | — |
+| `mopd` | 0.730 → 0.503 | 0.586 / 0.383 / 0.510 / 0.544 / 0.560 / 0.467 / 0.540 / 0.653 | 3.0 to 4.7% | — |
+| `mopd_top_k`, k = 20 | 0.730 → 0.408 | 0.586 / 0.259 / 0.388 / 0.318 / 0.432 / 0.479 / 0.307 / 0.397 | — | 0.511 → 0.350 |
+| `mopd_top_k`, k = 64 | 0.730 → 0.444 | 0.586 / 0.354 / 0.350 / 0.326 / 0.432 / 0.365 / 0.567 / 0.342 | — | 0.560 → 0.305 |
+
+Every preset lowered the held-out gap, by 0.20 to 0.32 nats a token; the top-k forms the most. A step took 17 to 19
+seconds (sampling most of it), about 1,450 sampled tokens; no token went unscored. The trainer process's allocated peak
+was 1.6 GiB in the first run and 2.8 GiB over the script; the card's peak was 12.0 GiB, the desktop's 3.4 GiB and the
+teacher engine's 30% share among it.
+
+**Two teachers**, LoRA adapters over Qwen/Qwen3-0.6B, each made by 8 supervised steps (`sft`, rate 3e-4, three passes
+over 32 examples a step): *math* on GSM8K's reference solutions (calculator annotations and a final `#### N`), *caps*
+on Dolly's answers written in capitals. One engine served both side by side (`max_loras` 2). Sampled by the engine,
+the math teacher ended 7 of 8 held-out math answers with `####` (the base: none) and the caps teacher wrote 85% of the
+letters of its caps answers in capitals (99% on math questions; the base: 6%). The student trained by `mopd` with
+`distillation.teachers = {"check:gsm8k" = "math", "check:caps" = "caps"}`, each item routed by `teacher_for`: 4 GSM8K
+and 4 Dolly prompts a step, rate 1e-4, 40 steps; held-out: 8 prompts of each task.
+
+| Held-out gap | Before | After 10 steps | After 40 steps |
+|---|---|---|---|
+| math prompts, to the math teacher (its own task) | 0.589 | 0.386 | 0.312 |
+| math prompts, to the caps teacher | 0.318 | 0.262 | 0.301 |
+| caps prompts, to the caps teacher (its own task) | 0.569 | 0.518 | 0.252 |
+| caps prompts, to the math teacher | 0.340 | 0.310 | 0.168 |
+
+On each task the gap to that task's teacher fell the most: on math 0.28 nats against 0.02 to the other teacher, on caps
+0.32 against 0.17. (The 10- and 40-step columns are separate runs from the same start.)
+
+What looks wrong, and is reported rather than tuned away:
+
+- **Routing moved the gaps, not the teachers' visible behaviour.** After 40 steps the student wrote 4.7% of its
+  caps answers' letters in capitals (the base 4.4%, the caps teacher 85%) and ended no math answer with `####`. Reverse
+  KL from the student's own samples fits the teacher where the student already writes; the teachers' distinct modes
+  (capitals from the first token, GSM8K's annotations) are sequences the student almost never samples, so a few hundred
+  samples do not reach them. The gap falls by matching word choice and length within the student's own modes.
+- **A first two-teacher run diverged.** With teachers of 4 supervised steps each and a student rate of 2e-4, every gap
+  rose from the fifth step (the step gap from 0.28 at the fourth to 1.24 and 2.11; held out, after 10 steps 0.71 to
+  0.99 against 0.24 to 0.62 before) and the student's capitals fell to 1.8%. The runs above use teachers of 8 steps and a rate of 1e-4.
+- **Answers got shorter.** In the 10-step run the mean sampled length fell from 153 to 40 to 105 tokens from the fourth
+  step, its steps then one update each (`kl_moved` reads 0 by construction); in the 40-step run it moved between 66 and
+  141. Both teachers' training answers are short, and `segment_mean` weighs each token of a short segment more.
+- **Step gaps are noisy.** Each step's gap is on 8 new prompts, so it moves by ±0.1 from step to step: `mopd`'s last
+  step read 0.653, above its first, while its held-out gap fell from 0.730 to 0.503. The held-out gaps are one sample
+  of 16 (or 8) prompts each.
+- **The policy-gradient form's loss is negative** (-0.94 to -0.16): it is the surrogate `-A log pi`, with `A` mostly
+  negative where the student is more confident than the teacher; only its gradient means anything.

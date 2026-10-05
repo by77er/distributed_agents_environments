@@ -14,10 +14,10 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#rollout_trainrolloutsplan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Labelled`](#labelled), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Labelled`](#labelled), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#scores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
-- **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
+- **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
@@ -25,7 +25,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`LauncherSection`](#launchersection), [`LedgerSection`](#ledgersection), [`load`](#load), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, shared pools, routing. [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`SharedPool`](#sharedpool), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
-- **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
+- **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Distillation`](#distillation), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`objective_in`](#objective_in), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
 - **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`FILES`](#files), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
@@ -37,7 +37,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
 - **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
-- **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
+- **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`importance_weight`](#importance_weight), [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`TALLIED`](#tallied), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
 - **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`positions`](#positions), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`TrainablePolicy`](#trainablepolicy)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls)
@@ -2789,10 +2789,11 @@ What the training loop asks of an algorithm.
 *function* · `libraries/rollout-train/src/rollout_train/algorithm.py`
 
 ```python
-def algorithm_for(objective: Objective, group_size: int = 4) -> Grpo | Preferences
+def algorithm_for(objective: Objective, group_size: int | None = None) -> Grpo | Preferences | Distillations
 ```
 
-The algorithm that makes the batch items an objective's family takes.
+The algorithm that makes the batch items an objective's family takes, comparing `group_size` episodes of one
+start (none: 4, and 1 for a distillation, which compares nothing).
 
 ### `Batch`
 
@@ -2863,7 +2864,7 @@ class Checkpoint
 | `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage. |
 | `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
 | `dataset` | `str \| None` | `None` | The dataset it was trained on, by id (`rollout_train.datasets`), if a supervised step on one made it: its parents after the first are then the checkpoints that sampled the dataset's examples. |
-| `supervision` | `str \| None` | `None` | For a checkpoint a supervised step made: `importance` if every segment it trained on was sampled with its exact tokens and behaviour logprobs, else `supervised` (`rollout_train.imitation.supervision_of`). |
+| `supervision` | `str \| None` | `None` | For a checkpoint a supervised step made: `teacher` if a teacher scored every segment it trained on with its top-k, else `importance` if every one was sampled with its exact tokens and behaviour logprobs, else `supervised` (`rollout_train.imitation.supervision_of`). |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
 | `released` | `float \| None` | `None` | When its files were deleted (`Checkpoints.thin`), if they were: its weights and its trainer state are then None. Its record stays: where it came from, what it was trained on, and its metrics. |
 
@@ -2950,7 +2951,7 @@ A dataset's record (`DATASETS`): how its examples were chosen, what came of it, 
 | `counts` | `Mapping[str, int]` | `field(default_factory=dict[str, int])` | `episodes` the rule picked and the `groups` they are of; `turns_seen`, every turn of those episodes; and of its examples, `tasks`, `turns`, `sampled_tokens` and `context_tokens`. |
 | `left_out` | `Mapping[str, int]` | `field(default_factory=dict[str, int])` | Turns of its episodes that are no examples, by why. |
 | `checkpoints` | `list[str]` | `field(default_factory=list[str])` | The checkpoints that sampled its examples, by id, by depth (examples sampled by the base model name none). |
-| `supervision` | `str` | `IMPORTANCE` | `importance` if every example's turns were sampled with their exact tokens and behaviour logprobs, else `supervised`. |
+| `supervision` | `str` | `IMPORTANCE` | `teacher` if a teacher scored every example with its top-k (a dataset of examples), else `importance` if every example's turns were sampled with their exact tokens and behaviour logprobs, else `supervised`. |
 | `kind` | `str` | `EXAMPLES` | What its lines are: `examples`, `pairs` or `labelled` examples. |
 | `made` | `float` | `0.0` | When, in seconds since the epoch. |
 | `by` | `str` | `''` | Who made it: `user@host`. |
@@ -2964,6 +2965,47 @@ async def dataset_of(ledger: Ledger, id: str) -> Dataset
 ```
 
 The dataset an id says.
+
+### `Distillations`
+
+*class* · `libraries/rollout-train/src/rollout_train/algorithm.py`
+
+```python
+class Distillations
+```
+
+Distilled segments: every trained segment of a group's completed episodes, with the teacher's scores it carries
+(for the distillation family). Nothing is compared, so a group is one episode by default (MOPD's one rollout per
+prompt), and its reward is not read.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `group_size` | `int` | `1` |  |
+| `top_k` | `int` | `0` | The teacher's top tokens the objective reads at each sampled position. |
+| `needs` | `tuple[str, ...]` | `('token_exact',)` | What every segment's turns must have been sampled with (`needs_of`). |
+
+**Methods**
+
+- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Distilled]` — The trained segments of the group's completed episodes, each with its teacher's scores; none, if one of
+  them cannot be trained on (`unweighable`) or has no teacher's scores (`unscored`).
+
+### `Distilled`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Distilled
+```
+
+A segment and a teacher's scores of its sampled tokens (for the distillation family), and its episode's
+advantage (for a policy gradient with a distillation term; 0 for a distillation alone).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `segment` | `Segment` | required |  |
+| `scores` | `TeacherScores` | required | One for each sampled token, in the order of the segment's spans, and which teacher gave them. |
+| `advantage` | `float` | `0.0` |  |
+| `source` | `str` | `''` | `RUN/GROUP/EPISODE/SLOT/INDEX`. |
 
 ### `edit_suite`
 
@@ -3118,7 +3160,9 @@ Each score minus the group's mean; None when all are equal (no signal): the `def
 class Grpo
 ```
 
-Weighted segments, each with its episode's advantage (for the policy-gradient and likelihood families).
+Weighted segments, each with its episode's advantage (for the policy-gradient and likelihood families); with
+`distills`, distilled segments, each with its teacher's scores and its episode's advantage (a policy gradient with
+a distillation term).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -3126,11 +3170,14 @@ Weighted segments, each with its episode's advantage (for the policy-gradient an
 | `tie_break` | `bool` | `True` | Whether the fastest of a group's saturated episodes scores a point more. |
 | `advantage` | `Advantage` | `DEFAULT_ADVANTAGE` |  |
 | `needs` | `tuple[str, ...]` | `tuple(_LACKING)` | What every segment's turns must have been sampled with (`needs_of`). |
+| `distills` | `bool` | `False` | Whether the objective has a distillation term: every segment is kept, a group whose advantages are all zero (or that the filter skips) too, since the teacher's scores train on it all the same. |
+| `top_k` | `int` | `0` | For `distills`: the teacher's top tokens the objective reads at each sampled position. |
 
 **Methods**
 
-- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Weighted]` — The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
-  its episode's advantage; none, if one of them cannot be weighed (`unweighable`).
+- `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Weighted | Distilled]` — The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
+  its episode's advantage; none, if one of them cannot be weighed (`unweighable`) or, with `distills`, has no
+  teacher's scores (`unscored`).
 
 ### `Labelled`
 
@@ -4251,6 +4298,7 @@ A piece of a session's trajectory: tokens that only grew, as the policy saw and 
 | `channel` | `str` | `''` | The channel that sampled them. The spans' `version`s are the depths of the checkpoints it served. |
 | `sampled_with` | `tuple[str, ...]` | `TOKEN_LEVEL` | What every one of its turns was sampled with, of `TOKEN_LEVEL`. |
 | `trained` | `bool` | `True` | Whether it may be trained on: false for a segment of a slot that is not trained (a judge's, a fixed opponent's), which is kept for what it shows and what it cost, and never trained on. |
+| `teacher` | `TeacherScores \| None` | `None` | A teacher's scores of its sampled tokens, where a teacher scored them (for distillation); none otherwise. |
 
 **Methods**
 
@@ -4286,6 +4334,29 @@ of the checkpoint served then).
 | `end` | `int` | required |  |
 | `version` | `int` | required |  |
 | `effect_id` | `str` | `''` | The sample that produced them: the `effect_id` its run's events know it by. |
+
+### `TeacherScores`
+
+*class* · `libraries/rollout-train/src/rollout_train/recorder/segments.py`
+
+```python
+class TeacherScores
+```
+
+A teacher's scores of a segment's sampled tokens, one for each, in the order of its spans (as
+`Segment.logprobs`): its logprob of the token, and the teacher's most likely tokens there with their logprobs,
+most likely first (`rollout_train.distillation.teacher_scores` makes them from a teacher's `Scores`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `teacher` | `str` | required | The channel that scored them. |
+| `logprobs` | `list[float \| None]` | required | Of each sampled token, given the tokens before it: none for one the teacher did not score (beyond its context). |
+| `top_tokens` | `list[list[int]]` | `field(default_factory=list[list[int]])` | At each sampled token, the teacher's most likely tokens (at most the top-k asked for; fewer where it gave fewer, none where it did not score the token), or empty where no top-k was asked for. |
+| `top_logprobs` | `list[list[float]]` | `field(default_factory=list[list[float]])` | Their logprobs, beside `top_tokens`. |
+
+**Methods**
+
+- `@property def top(self) -> int` — The most tokens any position carries (0: no top-k).
 
 ### `ThinkingFormat`
 
@@ -5790,7 +5861,7 @@ The cluster's own certificate authority and the client certificate its gateway a
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={**_OBJECTIVE, 'frozen_reference': "an adapter's reference is the model with the adapter switched off"}), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={**_OBJECTIVE, 'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_FAMILY, True, frozenset({'tinker'}), reference='no', entropy=False), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), not_settings={**_OBJECTIVE, 'project': 'the cluster config says it ([trainers.NAME] project)'}), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', 'image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca'), secrets=('api_key',), not_settings=_OBJECTIVE))}
+TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={**_OBJECTIVE, 'frozen_reference': "an adapter's reference is the model with the adapter switched off"}), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={**_OBJECTIVE, 'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_FAMILY, True, frozenset({'tinker'}), reference='no', entropy=False, distribution=False), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), not_settings={**_OBJECTIVE, 'project': 'the cluster config says it ([trainers.NAME] project)'}), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', 'image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca'), secrets=('api_key',), not_settings=_OBJECTIVE))}
 ```
 
 Every kind of trainer, by name.
@@ -5814,6 +5885,7 @@ What a kind of trainer makes and takes.
 | `starts_from` | `frozenset[str]` | required | Checkpoint formats a run may start from (besides the base model). |
 | `reference` | `Literal['yes', 'asked', 'no']` | `'yes'` | Whether it gives the reference model's logprobs, which a KL to the reference and most preference losses read: `yes` (an adapter switched off), `asked` (only when its settings ask, `trainer.frozen_reference`: a frozen copy of the model beside the policy), `no`. |
 | `entropy` | `bool` | `True` | Whether it gives each position's entropy (an entropy bonus reads it). |
+| `distribution` | `bool` | `True` | Whether it gives the policy's logprobs of tokens other than the sampled ones (the top-k form of distillation reads them at the teacher's top-k tokens). |
 
 ### `TrainerKind`
 
@@ -6172,7 +6244,7 @@ The component a dotted key names (`clip.low`, without `objective.`).
 *constant* · `libraries/rollout-train/src/rollout_train/objectives.py`
 
 ```python
-COMPONENTS: tuple[Component, ...] = (Component('advantage.baseline', _S, _ADVANTAGED, False, 'What a score is measured against', ('group_mean', 'leave_one_out', 'none')), Component('advantage.scale', _S, _ADVANTAGED, False, 'What an advantage is divided by', ('none', 'group_std')), Component('advantage.filter', _S, _ADVANTAGED, False, 'Which groups are skipped', ('none', 'equal_scores')), Component('ratio', _S, _PG, False, "The ratio to the step's start", ('token', 'segment', 'none')), Component('clip.kind', _S, _PG, False, 'How the ratio is clipped', ('none', 'ratio', 'weight', 'dual')), Component('clip.low', _F, _PG, True, "The ratio's lower bound, below 1", least=0), Component('clip.high', _F, _PG, True, "The ratio's upper bound, above 1", least=0), Component('clip.dual', _F, _PG, True, "Dual clipping's bound, in times a negative advantage", least=1, above=True), Component('importance.correction', _S, _PG, False, 'The correction for where tokens were sampled', ('none', 'untruncated', 'truncate', 'mask')), Component('importance.level', _S, _PG, False, 'A weight per token or per segment', ('token', 'segment')), Component('importance.cap', _F, _PG, True, 'The largest weight', least=0, above=True), Component('importance.floor', _F, _PG, True, 'The smallest weight a mask keeps', least=0), Component('kl.target', _S, _PG, False, 'What the KL penalty measures against', ('none', 'reference', 'old')), Component('kl.estimator', _S, _PG, False, 'How the KL is estimated', ('k1', 'k2', 'k3')), Component('kl.placement', _S, _PG, False, 'Where the KL penalty goes', ('loss', 'reward')), Component('kl.coefficient', _F, _PG, True, "The KL penalty's weight", least=0), Component('entropy.coefficient', _F, _PG, True, "The entropy bonus's weight"), Component('aggregate', _S, _ADVANTAGED, False, 'How per-token losses become one', ('token_mean', 'segment_mean', 'segment_sum', 'constant')), Component('constant_tokens', _I, _ADVANTAGED, False, 'The token count `constant` divides by', least=1), Component('reference', _S, frozenset({POLICY_GRADIENT, PREFERENCE}), False, 'The reference model', ('none', 'base')), Component('preference.loss', _S, _PREFERENCE, False, 'The preference loss', ('sigmoid', 'hinge', 'square', 'margin', 'odds_ratio', 'kto')), Component('preference.beta', _F, _PREFERENCE, True, "The preference loss's scale", least=0, above=True), Component('preference.margin', _F, _PREFERENCE, True, "SimPO's target margin"), Component('preference.length_normalized', _B, _PREFERENCE, False, "Each side's mean logprob, not its sum"), Component('preference.desirable', _F, _PREFERENCE, True, "KTO's weight of desirable examples", least=0), Component('preference.undesirable', _F, _PREFERENCE, True, "KTO's weight of undesirable examples", least=0), Component('likelihood.coefficient', _F, _PREFERENCE, True, 'A likelihood term beside the preference loss', least=0))
+COMPONENTS: tuple[Component, ...] = (Component('advantage.baseline', _S, _ADVANTAGED, False, 'What a score is measured against', ('group_mean', 'leave_one_out', 'none')), Component('advantage.scale', _S, _ADVANTAGED, False, 'What an advantage is divided by', ('none', 'group_std')), Component('advantage.filter', _S, _ADVANTAGED, False, 'Which groups are skipped', ('none', 'equal_scores')), Component('ratio', _S, _PG, False, "The ratio to the step's start", ('token', 'segment', 'none')), Component('clip.kind', _S, _PG, False, 'How the ratio is clipped', ('none', 'ratio', 'weight', 'dual')), Component('clip.low', _F, _PG, True, "The ratio's lower bound, below 1", least=0), Component('clip.high', _F, _PG, True, "The ratio's upper bound, above 1", least=0), Component('clip.dual', _F, _PG, True, "Dual clipping's bound, in times a negative advantage", least=1, above=True), Component('importance.correction', _S, _DISTILLED, False, 'The correction for where tokens were sampled', ('none', 'untruncated', 'truncate', 'mask')), Component('importance.level', _S, _DISTILLED, False, 'A weight per token or per segment', ('token', 'segment')), Component('importance.cap', _F, _DISTILLED, True, 'The largest weight', least=0, above=True), Component('importance.floor', _F, _DISTILLED, True, 'The smallest weight a mask keeps', least=0), Component('kl.target', _S, _DISTILLED, False, 'What the KL penalty measures against', ('none', 'reference', 'old')), Component('kl.estimator', _S, _DISTILLED, False, 'How the KL is estimated', ('k1', 'k2', 'k3')), Component('kl.placement', _S, _DISTILLED, False, 'Where the KL penalty goes', ('loss', 'reward')), Component('kl.coefficient', _F, _DISTILLED, True, "The KL penalty's weight", least=0), Component('entropy.coefficient', _F, _PG, True, "The entropy bonus's weight"), Component('aggregate', _S, _AGGREGATED, False, 'How per-token losses become one', ('token_mean', 'segment_mean', 'segment_sum', 'constant')), Component('constant_tokens', _I, _AGGREGATED, False, 'The token count `constant` divides by', least=1), Component('reference', _S, frozenset({POLICY_GRADIENT, PREFERENCE, DISTILLATION}), False, 'The reference model', ('none', 'base')), Component('preference.loss', _S, _PREFERENCE, False, 'The preference loss', ('sigmoid', 'hinge', 'square', 'margin', 'odds_ratio', 'kto')), Component('preference.beta', _F, _PREFERENCE, True, "The preference loss's scale", least=0, above=True), Component('preference.margin', _F, _PREFERENCE, True, "SimPO's target margin"), Component('preference.length_normalized', _B, _PREFERENCE, False, "Each side's mean logprob, not its sum"), Component('preference.desirable', _F, _PREFERENCE, True, "KTO's weight of desirable examples", least=0), Component('preference.undesirable', _F, _PREFERENCE, True, "KTO's weight of undesirable examples", least=0), Component('likelihood.coefficient', _F, _PREFERENCE, True, 'A likelihood term beside the preference loss', least=0), Component('distillation.divergence', _S, _DISTILLED, False, 'The divergence from the teacher', ('reverse_kl', 'forward_kl', 'jsd')), Component('distillation.form', _S, _DISTILLED, False, "From the sampled tokens, or over the teacher's top-k", ('policy_gradient', 'top_k')), Component('distillation.top_k', _I, _DISTILLED, False, "The teacher's most likely tokens at each position", least=0), Component('distillation.temperature', _F, _DISTILLED, True, "A renormalized top-k divergence's temperature", least=0, above=True), Component('distillation.advantage_clip', _F, _DISTILLED, True, "The advantage's bound either side; 0: none", least=0), Component('distillation.beta', _F, _DISTILLED, True, "The teacher's weight in the JSD's mixture", least=0, above=True), Component('distillation.teachers', _T, _DISTILLED, False, 'The teacher channel of each route'), Component('distillation.coefficient', _F, _PG, True, 'A distillation term beside the policy gradient', least=0))
 ```
 
 Every component, by dotted key under `objective.`.
@@ -6196,6 +6268,28 @@ for a preset that does not exist, or an override that is no component or a value
 DEFAULT = PRESETS['default'].objective
 ```
 
+### `Distillation`
+
+*class* · `libraries/rollout-train/src/rollout_train/objectives.py`
+
+```python
+class Distillation
+```
+
+A divergence between a teacher's next-token distribution and the policy's at each sampled token
+(`rollout_objectives.distillation`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `divergence` | `str` | `'reverse_kl'` | `reverse_kl`, KL(policy \|\| teacher); `forward_kl`, KL(teacher \|\| policy); `jsd`, GKD's generalized Jensen-Shannon divergence, `beta·KL(teacher \|\| m) + (1 - beta)·KL(policy \|\| m)` with `m = beta·teacher + (1 - beta)·policy`. |
+| `form` | `str` | `'policy_gradient'` | `policy_gradient`: each sampled token's advantage is the teacher's logprob less the policy's at the step's start (no gradient), clipped to `advantage_clip`, and its loss the advantage times the policy's logprob (the reverse KL's gradient, estimated from the sampled tokens alone). `top_k`: the divergence over the teacher's top-k tokens at each sampled position: for `reverse_kl`, of the probabilities as they are there (MOPD's top-k form); for `forward_kl` and `jsd`, of both distributions renormalized over those tokens, at `temperature` (the rest of the vocabulary is dropped). |
+| `top_k` | `int` | `0` | How many of the teacher's most likely tokens each sampled position carries (0: its logprob of the sampled token alone). |
+| `temperature` | `float` | `1.0` | For a renormalized top-k divergence: both sides' logprobs are divided by it before renormalizing, and the divergence is multiplied by its square (Hinton et al., 2015). |
+| `advantage_clip` | `float` | `0.0` | For the `policy_gradient` form: the advantage is clipped to -this .. this (0: not clipped). |
+| `beta` | `float` | `0.5` | For `jsd`: the teacher's weight in the mixture, between 0 and 1. |
+| `teachers` | `Mapping[str, str]` | `field(default_factory=dict[str, str], hash=False)` | The teacher channel that scores each episode, by route: an environment (`module:name`), one of its rows (`module:name/ROW`), or `*` for any other (`rollout_train.distillation.teacher_for`). One teacher scores each segment; teachers are never combined. |
+| `coefficient` | `float` | `0.0` | For a policy gradient: a distillation term beside it, times this (0: none). |
+
 ### `Entropy`
 
 *class* · `libraries/rollout-train/src/rollout_train/objectives.py`
@@ -6213,7 +6307,7 @@ class Entropy
 *constant* · `libraries/rollout-train/src/rollout_train/objectives.py`
 
 ```python
-FAMILIES = (POLICY_GRADIENT, PREFERENCE, LIKELIHOOD)
+FAMILIES = (POLICY_GRADIENT, PREFERENCE, LIKELIHOOD, DISTILLATION)
 ```
 
 Every family, the primary selector of an objective.
@@ -6313,6 +6407,7 @@ An objective, every component of it (those its family does not accept keep their
 | `reference` | `str` | `'none'` | The model the KL to the reference and a preference loss compare with: `base`, the model trained over (an adapter switched off; a frozen copy for a full-weight trainer); `none`. |
 | `preference` | `Preference` | `field(default_factory=Preference)` |  |
 | `likelihood` | `Likelihood` | `field(default_factory=Likelihood)` |  |
+| `distillation` | `Distillation` | `field(default_factory=Distillation)` |  |
 | `preset` | `str` | `'default'` | The preset it was resolved from (what it says, not what it is: the components are). |
 
 **Methods**
@@ -6325,6 +6420,11 @@ An objective, every component of it (those its family does not accept keep their
   (else `ValueError`).
 - `@property def needs_reference(self) -> bool` — Whether its loss reads the reference's logprobs.
 - `@property def needs_behaviour(self) -> bool` — Whether its loss reads the logprobs the engine recorded (an importance correction).
+- `@property def distills(self) -> bool` — Whether its loss reads a teacher's logprobs: a distillation, or a policy gradient with a distillation term
+  (its batch items are `rollout_train.trainer.Distilled`).
+- `@property def needs_top(self) -> int` — How many of the teacher's most likely tokens each sampled position must carry (0: none).
+- `@property def needs_distribution(self) -> bool` — Whether its loss reads the policy's logprobs of tokens other than the sampled ones: those of the teacher's
+  top-k (the `top_k` form of distillation).
 - `@property def needs_entropy(self) -> bool`
 - `@property def labelled(self) -> bool` — Whether its batch items are labelled examples (KTO), rather than pairs.
 
@@ -6381,7 +6481,7 @@ class Preset
 *constant* · `libraries/rollout-train/src/rollout_train/objectives.py`
 
 ```python
-PRESETS: Mapping[str, Preset] = {each.name: each for each in (_preset('default', 'this platform: Liu et al., 2025 (Dr. GRPO) for the advantage, Yu et al., 2025 (DAPO) for clip-higher and the token mean, Yao et al., 2025 for truncated importance sampling', "Dr. GRPO's advantages, DAPO's clip-higher and token mean, truncated importance sampling at 2"), _preset('reinforce', 'Williams, 1992', "the score times each segment's logprob: no baseline, ratio, clipping or correction", advantage=Advantage(baseline='none', filter='none'), ratio='none', clip=_NO_CLIP, importance=_NO_IMPORTANCE, aggregate='segment_sum'), _preset('rloo', 'Ahmadian et al., 2024 (Back to Basics)', 'REINFORCE with a leave-one-out baseline', advantage=Advantage(baseline='leave_one_out', filter='none'), ratio='none', clip=_NO_CLIP, importance=_NO_IMPORTANCE, aggregate='segment_sum'), _preset('ppo_clip', 'Schulman et al., 2017', 'the token ratio clipped at 0.2 either side; advantages normalized within the group (no critic)', advantage=_GROUP_NORMALIZED, clip=Clip(low=0.2, high=0.2), importance=_NO_IMPORTANCE), _preset('grpo', 'Shao et al., 2024 (DeepSeekMath)', "group mean and standard deviation; the token ratio clipped at 0.2; KL to the reference by k3 in the loss, at 0.04; a mean over each segment's tokens, then segments", advantage=_GROUP_NORMALIZED, clip=Clip(low=0.2, high=0.2), importance=_NO_IMPORTANCE, kl=Kl(target='reference', estimator='k3', placement='loss', coefficient=0.04), aggregate='segment_mean', reference='base'), _preset('dr_grpo', 'Liu et al., 2025 (Understanding R1-Zero-Like Training)', 'the group mean without the standard deviation; summed over tokens and divided by a constant; no KL', advantage=Advantage(filter='none'), clip=Clip(low=0.2, high=0.2), importance=_NO_IMPORTANCE, aggregate='constant', constant_tokens=3000), _preset('dapo', 'Yu et al., 2025 (DAPO)', 'clip-higher (0.2, 0.28); the token mean; groups of equal scores skipped; no KL', advantage=Advantage(scale='group_std', filter='equal_scores'), clip=Clip(low=0.2, high=0.28), importance=_NO_IMPORTANCE), _preset('gspo', 'Zheng et al., 2025 (GSPO)', "the segment ratio, the geometric mean of its tokens', clipped to (3e-4, 4e-4); a mean over segments", advantage=_GROUP_NORMALIZED, ratio='segment', clip=Clip(low=0.0003, high=0.0004), importance=Importance(correction='none', level='segment'), aggregate='segment_mean'), _preset('cispo', 'MiniMax, 2025 (MiniMax-M1)', 'the importance weight clipped above, with its gradient stopped, times the logprob: no update clipping', advantage=_GROUP_NORMALIZED, clip=Clip(kind='weight', low=1.0, high=3.0), importance=_NO_IMPORTANCE), _preset('sft', 'supervised fine-tuning', "the sampled tokens' log-likelihood, each segment weighted by its advantage (1 for a dataset's)", family=LIKELIHOOD), _preset('dpo', 'Rafailov et al., 2023', 'the sigmoid loss over pairs, against the reference, at beta 0.1', family=PREFERENCE, reference='base', preference=Preference(loss='sigmoid', beta=0.1)), _preset('ipo', 'Azar et al., 2023', 'the square loss over pairs, against the reference', family=PREFERENCE, reference='base', preference=Preference(loss='square', beta=0.1, length_normalized=True)), _preset('simpo', 'Meng et al., 2024', 'the length-normalized margin loss, with no reference', family=PREFERENCE, preference=Preference(loss='margin', beta=2.0, margin=1.0, length_normalized=True)), _preset('kto', 'Ethayarajh et al., 2024', 'desirable and undesirable examples, unpaired, against the reference', family=PREFERENCE, reference='base', preference=Preference(loss='kto', beta=0.1)), _preset('orpo', 'Hong et al., 2024', "an odds-ratio term at 0.1 beside the chosen side's likelihood, with no reference", family=PREFERENCE, preference=Preference(loss='odds_ratio', beta=0.1, length_normalized=True), likelihood=Likelihood(coefficient=1.0)))}
+PRESETS: Mapping[str, Preset] = {each.name: each for each in (_preset('default', 'this platform: Liu et al., 2025 (Dr. GRPO) for the advantage, Yu et al., 2025 (DAPO) for clip-higher and the token mean, Yao et al., 2025 for truncated importance sampling', "Dr. GRPO's advantages, DAPO's clip-higher and token mean, truncated importance sampling at 2"), _preset('reinforce', 'Williams, 1992', "the score times each segment's logprob: no baseline, ratio, clipping or correction", advantage=Advantage(baseline='none', filter='none'), ratio='none', clip=_NO_CLIP, importance=_NO_IMPORTANCE, aggregate='segment_sum'), _preset('rloo', 'Ahmadian et al., 2024 (Back to Basics)', 'REINFORCE with a leave-one-out baseline', advantage=Advantage(baseline='leave_one_out', filter='none'), ratio='none', clip=_NO_CLIP, importance=_NO_IMPORTANCE, aggregate='segment_sum'), _preset('ppo_clip', 'Schulman et al., 2017', 'the token ratio clipped at 0.2 either side; advantages normalized within the group (no critic)', advantage=_GROUP_NORMALIZED, clip=Clip(low=0.2, high=0.2), importance=_NO_IMPORTANCE), _preset('grpo', 'Shao et al., 2024 (DeepSeekMath)', "group mean and standard deviation; the token ratio clipped at 0.2; KL to the reference by k3 in the loss, at 0.04; a mean over each segment's tokens, then segments", advantage=_GROUP_NORMALIZED, clip=Clip(low=0.2, high=0.2), importance=_NO_IMPORTANCE, kl=Kl(target='reference', estimator='k3', placement='loss', coefficient=0.04), aggregate='segment_mean', reference='base'), _preset('dr_grpo', 'Liu et al., 2025 (Understanding R1-Zero-Like Training)', 'the group mean without the standard deviation; summed over tokens and divided by a constant; no KL', advantage=Advantage(filter='none'), clip=Clip(low=0.2, high=0.2), importance=_NO_IMPORTANCE, aggregate='constant', constant_tokens=3000), _preset('dapo', 'Yu et al., 2025 (DAPO)', 'clip-higher (0.2, 0.28); the token mean; groups of equal scores skipped; no KL', advantage=Advantage(scale='group_std', filter='equal_scores'), clip=Clip(low=0.2, high=0.28), importance=_NO_IMPORTANCE), _preset('gspo', 'Zheng et al., 2025 (GSPO)', "the segment ratio, the geometric mean of its tokens', clipped to (3e-4, 4e-4); a mean over segments", advantage=_GROUP_NORMALIZED, ratio='segment', clip=Clip(low=0.0003, high=0.0004), importance=Importance(correction='none', level='segment'), aggregate='segment_mean'), _preset('cispo', 'MiniMax, 2025 (MiniMax-M1)', 'the importance weight clipped above, with its gradient stopped, times the logprob: no update clipping', advantage=_GROUP_NORMALIZED, clip=Clip(kind='weight', low=1.0, high=3.0), importance=_NO_IMPORTANCE), _preset('sft', 'supervised fine-tuning', "the sampled tokens' log-likelihood, each segment weighted by its advantage (1 for a dataset's)", family=LIKELIHOOD), _preset('dpo', 'Rafailov et al., 2023', 'the sigmoid loss over pairs, against the reference, at beta 0.1', family=PREFERENCE, reference='base', preference=Preference(loss='sigmoid', beta=0.1)), _preset('ipo', 'Azar et al., 2023', 'the square loss over pairs, against the reference', family=PREFERENCE, reference='base', preference=Preference(loss='square', beta=0.1, length_normalized=True)), _preset('simpo', 'Meng et al., 2024', 'the length-normalized margin loss, with no reference', family=PREFERENCE, preference=Preference(loss='margin', beta=2.0, margin=1.0, length_normalized=True)), _preset('kto', 'Ethayarajh et al., 2024', 'desirable and undesirable examples, unpaired, against the reference', family=PREFERENCE, reference='base', preference=Preference(loss='kto', beta=0.1)), _preset('orpo', 'Hong et al., 2024', "an odds-ratio term at 0.1 beside the chosen side's likelihood, with no reference", family=PREFERENCE, preference=Preference(loss='odds_ratio', beta=0.1, length_normalized=True), likelihood=Likelihood(coefficient=1.0)), _preset('on_policy_distillation', 'Agarwal et al., 2024 (GKD); Thinking Machines, 2025 (On-Policy Distillation)', "the reverse KL on the student's own samples, from the teacher's logprob of each sampled token: its advantage the teacher's logprob less the student's", family=DISTILLATION, importance=_NO_IMPORTANCE, distillation=Distillation(divergence='reverse_kl', form='policy_gradient')), _preset('distillation', 'Hinton et al., 2015; Kim and Rush, 2016', "the forward KL to the teacher's top-20 logprobs, renormalized over them, on the teacher's samples", family=DISTILLATION, importance=_NO_IMPORTANCE, distillation=Distillation(divergence='forward_kl', form='top_k', top_k=20)), _preset('mopd', 'Ma et al., 2026, MOPD: Multi-Teacher On-Policy Distillation (MiMo)', "each sampled token's advantage the teacher's logprob less the student's, clipped at 5; a mean over each segment's tokens; one teacher for each domain", family=DISTILLATION, importance=_NO_IMPORTANCE, distillation=Distillation(divergence='reverse_kl', form='policy_gradient', advantage_clip=5.0), aggregate='segment_mean'), _preset('mopd_top_k', 'Ma et al., 2026, MOPD: Multi-Teacher On-Policy Distillation (MiMo)', "MOPD's top-k form: the reverse KL over the teacher's top-64 tokens; a mean over each segment's tokens", family=DISTILLATION, importance=_NO_IMPORTANCE, distillation=Distillation(divergence='reverse_kl', form='top_k', top_k=64), aggregate='segment_mean'))}
 ```
 
 Every preset, by name.
@@ -6525,7 +6625,7 @@ it (a trainer's own setting among them).
 *constant* · `libraries/rollout-train/src/rollout_train/run_settings.py`
 
 ```python
-KEYS: tuple[Key, ...] = (Key('kind', _S, 'train', False, EVERY, 'The kind of run', choices=KINDS), Key('name', _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"), Key('environment', _S + _N, None, False, SAMPLING, 'The environment, `module:name`'), Key('groups', _I, 100, False, TRAINED | {'check'}, 'Groups it plays', least=1), Key('seed', _I, 0, False, EVERY, 'The seed its draws start from', least=0), Key('start', _S + _N, None, False, EVERY, 'The checkpoint it trains from or evaluates; none: the base model'), Key('bookmark', _S + _N, None, False, TRAINING, 'A bookmark it moves to each checkpoint it makes'), Key('episodes_at_once', _I, 6, False, SAMPLING, 'Episodes it keeps work waiting for', least=1), Key('trainer.provider', _S + _N, None, False, TRAINING, 'The trainer, a `[trainers.NAME]` of the cluster'), Key('trainer.channel', _S, 'policy', False, TRAINED, 'The trained channel'), Key('trainer.model', _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"), Key('channels.*.provider', _S + _N, None, False, SAMPLING, 'What samples the channel, an `[inference.NAME]`'), Key('channels.*.providers', ('list', 'null'), None, False, SAMPLING, 'Several providers serving it, in order'), Key('channels.*.routing', _S, 'spill', False, SAMPLING, 'How turns are shared among them', choices=ROUTING), Key('channels.*.weights', ('table', 'null'), None, False, SAMPLING, "Each provider's weight, for `weighted`"), Key('channels.*.model', _S + _N, None, False, SAMPLING, "The model it serves, among its providers'"), Key('channels.*.renderer', _S + _N, None, False, SAMPLING, 'The renderer, `module:name`'), Key('channels.*.thinking_tokens', _I + _N, None, False, SAMPLING, 'Thinking budget per turn', least=1), Key('channels.*.answer_tokens', _I + _N, None, False, SAMPLING, 'Room for the answer after it', least=1), Key('channels.*.replicas', _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1), Key('channels.*.bridge', _S, 'auto', False, SAMPLING, 'The bridge', choices=('auto', 'merge-quantize')), Key('channels.*.mode', _S + _N, None, False, SAMPLING, '`fixed` or `follows`; none: the trained channel serves what the run trains, another serves `fixed`', choices=('fixed', 'follows')), Key('channels.*.checkpoint', _S + _N, None, False, SAMPLING, 'What a `fixed` channel serves; none: the base model'), Key('channels.*.follows', _S + _N, None, False, SAMPLING, 'The channel a `follows` channel follows'), Key('channels.*.lag', _I, 0, False, SAMPLING, 'How many checkpoints behind it follows', least=0), Key('slots.*', _S, None, False, SAMPLING, "The channel a program's slot samples"), Key('self_judging', _B, False, False, SAMPLING, "Whether a judge may be bound to a channel serving the run's own"), Key('distill.channel', _S + _N, None, False, TRAINED, "The teacher's channel, for distillation"), Key('distill.k', _I + _N, None, False, TRAINED, 'Top-k logprobs matched; none: the teacher scores', least=1), Key('eval.suite', _S + _N, None, False, frozenset({'eval'}), 'The suite an eval plays, by name or `NAME@N`'), Key('eval.episodes', _I + _N, None, False, frozenset({'eval'}), 'Episodes of each start', least=1), Key('check.episodes', _I, 1, False, frozenset({'check'}), 'Scripted episodes a check plays', least=1), Key('imitation.dataset', _S + _N, None, False, frozenset({'imitate'}), 'The dataset, by name or id'), Key('imitation.limit', _I + _N, None, False, frozenset({'imitate'}), 'At most this many segments', least=1), Key('imitation.passes', _I, 1, False, frozenset({'imitate'}), 'Passes over the dataset', least=1), Key('imitation.warmup', _I, 0, False, frozenset({'imitate'}), 'Warm-up updates', least=0), Key('imitation.resume_optimizer', _B, False, False, frozenset({'imitate'}), "Go on from the start's optimizer"), Key('imitation.without', ('list',), [], False, frozenset({'imitate'}), 'Datasets whose segments are left out'), Key('groups_per_step', _I, 4, True, TRAINED, 'Groups a step waits for', least=1), Key('max_lag', _I, 1, True, TRAINED, 'Checkpoints behind the newest a turn may begin', least=0), Key('evals.suite', _S + _N, None, True, TRAINED, 'The suite its checkpoints play, by name or `NAME@N`'), Key('evals.every', _I, 1, True, TRAINED, 'Every this many steps', least=1), Key('evals.episodes', _I + _N, None, True, TRAINED, "Episodes of each start; none: the suite's", least=1), Key('limits.spend', ('float', 'null'), None, True, TRAINING, 'Dollars: the run ends once its estimate reaches this', least=0), Key('share', ('float',), 1.0, True, SAMPLING, "Its weight in a shared pool's fair shares", least=0, above=True), Key('objective.preset', _S, 'default', False, TRAINING, "The objective's preset", choices=tuple(PRESETS)), *(Key(f'objective.{each.key}', (*each.types, 'null'), None, each.changeable, TRAINING, f"{each.says}; none: the preset's", least=each.least, choices=each.choices, above=each.above) for each in COMPONENTS))
+KEYS: tuple[Key, ...] = (Key('kind', _S, 'train', False, EVERY, 'The kind of run', choices=KINDS), Key('name', _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"), Key('environment', _S + _N, None, False, SAMPLING, 'The environment, `module:name`'), Key('groups', _I, 100, False, TRAINED | {'check'}, 'Groups it plays', least=1), Key('seed', _I, 0, False, EVERY, 'The seed its draws start from', least=0), Key('start', _S + _N, None, False, EVERY, 'The checkpoint it trains from or evaluates; none: the base model'), Key('bookmark', _S + _N, None, False, TRAINING, 'A bookmark it moves to each checkpoint it makes'), Key('episodes_at_once', _I, 6, False, SAMPLING, 'Episodes it keeps work waiting for', least=1), Key('trainer.provider', _S + _N, None, False, TRAINING, 'The trainer, a `[trainers.NAME]` of the cluster'), Key('trainer.channel', _S, 'policy', False, TRAINED, 'The trained channel'), Key('trainer.model', _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"), Key('channels.*.provider', _S + _N, None, False, SAMPLING, 'What samples the channel, an `[inference.NAME]`'), Key('channels.*.providers', ('list', 'null'), None, False, SAMPLING, 'Several providers serving it, in order'), Key('channels.*.routing', _S, 'spill', False, SAMPLING, 'How turns are shared among them', choices=ROUTING), Key('channels.*.weights', ('table', 'null'), None, False, SAMPLING, "Each provider's weight, for `weighted`"), Key('channels.*.model', _S + _N, None, False, SAMPLING, "The model it serves, among its providers'"), Key('channels.*.renderer', _S + _N, None, False, SAMPLING, 'The renderer, `module:name`'), Key('channels.*.thinking_tokens', _I + _N, None, False, SAMPLING, 'Thinking budget per turn', least=1), Key('channels.*.answer_tokens', _I + _N, None, False, SAMPLING, 'Room for the answer after it', least=1), Key('channels.*.replicas', _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1), Key('channels.*.bridge', _S, 'auto', False, SAMPLING, 'The bridge', choices=('auto', 'merge-quantize')), Key('channels.*.mode', _S + _N, None, False, SAMPLING, '`fixed` or `follows`; none: the trained channel serves what the run trains, another serves `fixed`', choices=('fixed', 'follows')), Key('channels.*.checkpoint', _S + _N, None, False, SAMPLING, 'What a `fixed` channel serves; none: the base model'), Key('channels.*.follows', _S + _N, None, False, SAMPLING, 'The channel a `follows` channel follows'), Key('channels.*.lag', _I, 0, False, SAMPLING, 'How many checkpoints behind it follows', least=0), Key('slots.*', _S, None, False, SAMPLING, "The channel a program's slot samples"), Key('self_judging', _B, False, False, SAMPLING, "Whether a judge may be bound to a channel serving the run's own"), Key('eval.suite', _S + _N, None, False, frozenset({'eval'}), 'The suite an eval plays, by name or `NAME@N`'), Key('eval.episodes', _I + _N, None, False, frozenset({'eval'}), 'Episodes of each start', least=1), Key('check.episodes', _I, 1, False, frozenset({'check'}), 'Scripted episodes a check plays', least=1), Key('imitation.dataset', _S + _N, None, False, frozenset({'imitate'}), 'The dataset, by name or id'), Key('imitation.limit', _I + _N, None, False, frozenset({'imitate'}), 'At most this many segments', least=1), Key('imitation.passes', _I, 1, False, frozenset({'imitate'}), 'Passes over the dataset', least=1), Key('imitation.warmup', _I, 0, False, frozenset({'imitate'}), 'Warm-up updates', least=0), Key('imitation.resume_optimizer', _B, False, False, frozenset({'imitate'}), "Go on from the start's optimizer"), Key('imitation.without', ('list',), [], False, frozenset({'imitate'}), 'Datasets whose segments are left out'), Key('groups_per_step', _I, 4, True, TRAINED, 'Groups a step waits for', least=1), Key('max_lag', _I, 1, True, TRAINED, 'Checkpoints behind the newest a turn may begin', least=0), Key('evals.suite', _S + _N, None, True, TRAINED, 'The suite its checkpoints play, by name or `NAME@N`'), Key('evals.every', _I, 1, True, TRAINED, 'Every this many steps', least=1), Key('evals.episodes', _I + _N, None, True, TRAINED, "Episodes of each start; none: the suite's", least=1), Key('limits.spend', ('float', 'null'), None, True, TRAINING, 'Dollars: the run ends once its estimate reaches this', least=0), Key('share', ('float',), 1.0, True, SAMPLING, "Its weight in a shared pool's fair shares", least=0, above=True), Key('objective.preset', _S, 'default', False, TRAINING, "The objective's preset", choices=tuple(PRESETS)), *(Key(f'objective.{each.key}', (*each.types, 'null'), None, each.changeable, TRAINING, f"{each.says}; none: the preset's", least=each.least, choices=each.choices, above=each.above) for each in COMPONENTS))
 ```
 
 Every key a run takes, beside the trainer's own (`trainer.FIELD`).
@@ -7352,7 +7452,7 @@ class Rule
 *constant* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'adapters for a provider without adapters, full weights for one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference or an entropy the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'a teacher without the logprobs distillation needs, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', 'more GPUs than the cluster has'), Rule('pools', 'more adapter slots than a shared pool has'), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
+RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'adapters for a provider without adapters, full weights for one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', 'more GPUs than the cluster has'), Rule('pools', 'more adapter slots than a shared pool has'), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
 ```
 
 Every rule `check` applies, in the order it reports them.
@@ -7790,6 +7890,18 @@ A policy step's settings (`rollout_objectives.step`), whichever trainer takes it
 
 An objective's loss composed from its components, in torch.
 
+### `importance_weight`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def importance_weight(objective: Objective, old: torch.Tensor, behavior: torch.Tensor | None) -> tuple[torch.Tensor | None, torch.Tensor | None]
+```
+
+Each sampled token's importance weight as `importance.correction` makes it (a constant), and the weight before
+truncation or masking; none for no correction. A mask (masked importance sampling; NeMo's `icepop`) zeroes a token
+whose weight is outside `floor` .. `cap`, keeping the weight of those within.
+
 ### `kl_estimate`
 
 *function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
@@ -7882,10 +7994,20 @@ One side of a preference item: each of its segments' sampled tokens' logprobs no
 *constant* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
 
 ```python
-SUMS: tuple[str, ...] = ('loss', 'units', 'clipped', 'truncated', 'tokens', 'ratio', 'weight', 'moved', 'segments', 'kl', 'entropy', 'items', 'pairs', 'accurate', 'margin', 'chosen', 'rejected')
+SUMS: tuple[str, ...] = ('loss', 'units', 'segments', *TALLIED)
 ```
 
 What a minibatch's `Terms` add up to, for its statistics and the step's.
+
+### `TALLIED`
+
+*constant* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+TALLIED = ('clipped', 'truncated', 'tokens', 'ratio', 'weight', 'moved', 'kl', 'entropy', 'items', 'pairs', 'accurate', 'margin', 'chosen', 'rejected', 'distilled', 'scored', 'gap', 'divergence', 'advantage_clipped')
+```
+
+The counts and sums of `Terms` a minibatch adds up.
 
 ### `tally`
 
@@ -7926,6 +8048,11 @@ preference item's; the rest are counts and sums, for the step's statistics.
 | `margin` | `float` | `0.0` | The sum of each pair's `rho_chosen - rho_rejected`, and of each example's distance from the reference point on its label's side (`rho - z` if desirable, `z - rho` if not). |
 | `chosen` | `float` | `0.0` |  |
 | `rejected` | `float` | `0.0` | Sums of each pair's `rho_chosen` and `rho_rejected`. |
+| `distilled` | `float` | `0.0` | Sampled tokens of distilled segments. |
+| `scored` | `float` | `0.0` | Of those, the tokens a teacher scored. |
+| `gap` | `float` | `0.0` | The sum, over the scored tokens, of the policy's logprob now less the teacher's: an estimate of KL(policy \|\| teacher) on the sampled tokens, times their number, where the policy sampled them. |
+| `divergence` | `float` | `0.0` | The sum of the top-k divergence over the scored tokens. |
+| `advantage_clipped` | `float` | `0.0` | Scored tokens whose distillation advantage was clipped. |
 
 ### `terms`
 
@@ -8078,7 +8205,9 @@ class TrainablePolicy(Protocol)
 ```
 
 What the step needs of a policy (`rollout_lora.policy.Policy` is one). An objective with a KL to the reference
-or a preference loss against it needs `reference` too, and one with an entropy bonus `logprobs_and_entropy`.
+or a preference loss against it needs `reference` too, one with an entropy bonus `logprobs_and_entropy`, and a
+distillation over the teacher's top-k tokens `logprobs_among` (the logprobs of given tokens at each position,
+beside the sampled ones').
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -8478,7 +8607,7 @@ from the step before is used again when the parent is the state it saved. `servi
 default a session the SDK opens with the key it finds; `module:name` of what makes another (a profile names a fake
 one so). `settings` are `TinkerSettings`' (its `objective` among them); those in `CHANGEABLE`, and the changeable
 components of its objective, it takes between steps (`rollout_train.trainer.Changeable`). Raises `ValueError` for
-an objective that reads the reference or the entropy, which Tinker does not give here.
+an objective that reads the reference, the entropy or the top-k form's logprobs, which Tinker does not give here.
 
 | Field | Type | Default | Description |
 |---|---|---|---|

@@ -137,6 +137,7 @@ computes it). A family fixes what a batch item is and the core term of the loss:
 | `policy_gradient` | a segment with an advantage ([`Weighted`](../../guide/reference.md#weighted)) | the advantage times each sampled token's logprob, under the ratio, clipping and importance components |
 | `preference` | a pair, chosen and rejected over a shared context ([`Pair`](../../guide/reference.md#pair)), or an example labelled desirable or undesirable ([`Labelled`](../../guide/reference.md#labelled)) | a function of each side's log-likelihood ratio to the reference (or its likelihood alone, for a loss with no reference) |
 | `likelihood` | a segment with a weight | the weighted log-likelihood of its sampled tokens (supervised fine-tuning, imitation) |
+| `distillation` | a segment with a teacher's logprob of each sampled token and, for the top-k form, the teacher's top-k tokens and logprobs there ([`Distilled`](../../guide/reference.md#distilled)) | a divergence between the teacher's next-token distribution and the policy's |
 
 Each component has a dotted key under `objective.` in a run's settings, the values it takes and the families that
 accept it; validation refuses the rest. The numbers can change between steps; what shapes the loss cannot.
@@ -149,30 +150,40 @@ accept it; validation refuses the rest. The numbers can change between steps; wh
 | `ratio` | `token`, `segment` (the geometric mean of its tokens' ratios, GSPO), `none` (the logprob itself, REINFORCE) | policy_gradient |
 | `clip.kind` | `none`, `ratio` (PPO), `weight` (the clipped ratio as a weight with no gradient, CISPO), `dual` (and no less than `clip.dual` times a negative advantage) | policy_gradient |
 | `clip.low`, `clip.high`, `clip.dual` | numbers: the ratio within 1 - low .. 1 + high | policy_gradient |
-| `importance.correction` | `none`, `untruncated`, `truncate` (TIS), `mask` (tokens outside `floor` .. `cap` dropped) | policy_gradient |
-| `importance.level` | `token`, `segment` | policy_gradient |
-| `importance.cap`, `importance.floor` | numbers | policy_gradient |
-| `kl.target` | `none`, `reference`, `old` (the step's start) | policy_gradient |
-| `kl.estimator` | `k1`, `k2`, `k3` | policy_gradient |
-| `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient) | policy_gradient |
-| `kl.coefficient`, `entropy.coefficient` | numbers | policy_gradient |
-| `aggregate` | `token_mean`, `segment_mean`, `segment_sum`, `constant` (divided by `constant_tokens`, Dr. GRPO) | policy_gradient, likelihood |
-| `constant_tokens` | a whole number | policy_gradient, likelihood |
-| `reference` | `base` (the model trained over), `none` | policy_gradient (with a KL to it), preference |
+| `importance.correction` | `none`, `untruncated`, `truncate` (TIS), `mask` (tokens outside `floor` .. `cap` dropped; NeMo's `icepop`) | policy_gradient, distillation |
+| `importance.level` | `token`, `segment` | policy_gradient, distillation |
+| `importance.cap`, `importance.floor` | numbers | policy_gradient, distillation |
+| `kl.target` | `none`, `reference`, `old` (the step's start) | policy_gradient, distillation |
+| `kl.estimator` | `k1`, `k2`, `k3` | policy_gradient, distillation |
+| `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient) | policy_gradient, distillation (`reward` in the policy-gradient form only) |
+| `kl.coefficient` | a number | policy_gradient, distillation |
+| `entropy.coefficient` | a number | policy_gradient |
+| `aggregate` | `token_mean`, `segment_mean`, `segment_sum`, `constant` (divided by `constant_tokens`, Dr. GRPO) | policy_gradient, likelihood, distillation |
+| `constant_tokens` | a whole number | policy_gradient, likelihood, distillation |
+| `reference` | `base` (the model trained over), `none` | policy_gradient and distillation (with a KL to it), preference |
 | `preference.loss` | `sigmoid` (DPO), `hinge`, `square` (IPO), `margin` (SimPO), `odds_ratio` (ORPO), `kto` | preference |
 | `preference.beta`, `preference.margin`, `preference.desirable`, `preference.undesirable` | numbers | preference |
 | `preference.length_normalized` | true or false | preference |
 | `likelihood.coefficient` | a number: the chosen side's mean negative logprob beside the preference loss (ORPO) | preference |
+| `distillation.divergence` | `reverse_kl`, `forward_kl`, `jsd` (GKD's generalized Jensen-Shannon divergence) | distillation; policy_gradient (its term) |
+| `distillation.form` | `policy_gradient` (each sampled token's advantage the teacher's logprob less the student's at the step's start, its loss the advantage times the logprob), `top_k` (the divergence over the teacher's top-k tokens) | distillation; policy_gradient |
+| `distillation.top_k` | how many of the teacher's most likely tokens each position carries (0: none) | distillation; policy_gradient |
+| `distillation.temperature` | a number: both sides softened, for the renormalized `forward_kl` and `jsd` of the top-k form | distillation; policy_gradient |
+| `distillation.advantage_clip` | a number: the policy-gradient form's advantage clipped to ± it (0: not) | distillation; policy_gradient |
+| `distillation.beta` | a number between 0 and 1: the teacher's weight in the JSD's mixture | distillation; policy_gradient |
+| `distillation.teachers` | a table: the teacher channel of each route (an environment, `module:name`; one of its rows, `module:name/ROW`; or `*`) | distillation; policy_gradient |
+| `distillation.coefficient` | a number: a distillation term beside the policy gradient (0: none) | policy_gradient |
 
 A component that follows from another follows where it is not given: a KL to the reference reads `reference = base`, a
 preference loss with a reference reads it and one without (`margin`, `odds_ratio`) reads none, and an odds ratio is
-length-normalized.
+length-normalized. A policy gradient's `distillation.*` components shape its distillation term, so they are refused
+while `distillation.coefficient` is 0, and the coefficient changes between steps but not to or from 0.
 
 **Presets** are the literature's objectives, each a family and component values pinned to its paper (its test compares
 the composed loss with a transcription of the paper's formula): `default` (Dr. GRPO's advantages, DAPO's clip-higher
 (0.2, 0.28) and token mean, truncated importance sampling at 2), `reinforce`, `rloo`, `ppo_clip`, `grpo`, `dr_grpo`,
-`dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto` and `orpo` ([the design](../../research/objectives-design.md#presets)
-lists their values and sources). A run names one (`objective.preset`) and overrides any component
+`dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto`, `orpo`, `on_policy_distillation`, `distillation`,
+`mopd` and `mopd_top_k` ([the design](../../research/objectives-design.md#presets) lists their values and sources). A run names one (`objective.preset`) and overrides any component
 (`objective.kl.target = "reference"`, `objective.kl.coefficient = 0.01`); `resolved(preset, overrides)` is the
 objective, refused (`ValueError`) for a component the family does not accept or a combination that means nothing.
 
@@ -187,7 +198,8 @@ compares (`group_size`), and what to train on from a group's episodes (`batch`).
 every outcome, the trainer's budget and a random number generator seeded by the group's number, and returns a
 [`Batch`](../../guide/reference.md#batch): the items to train on, or why there are none, and notes to log with the
 group. By default the loop takes the algorithm of the trainer's objective's family (`algorithm_for`: `Grpo` for a
-policy gradient or a likelihood, `Preferences` for a preference loss); another is passed as `train(..., algorithm=...)`.
+policy gradient or a likelihood, `Preferences` for a preference loss, `Distillations` for a distillation); another is
+passed as `train(..., algorithm=...)`.
 
 [`Grpo`](../../guide/reference.md#grpo) is group-relative optimisation, by the objective's advantage components:
 
@@ -206,6 +218,31 @@ the start's first observation; a side is every turn of its episode, and only the
 `labelled` (KTO) each episode above the group's mean is desirable and each below it undesirable. A group whose scores
 are all equal gives none. A preference loss reads no behaviour logprobs, so turns sampled without them (a provider
 that returns none) are trained on.
+
+[`Distillations`](../../guide/reference.md#distillations) makes distilled items: every trained segment of a group's
+completed episodes, with the teacher's scores it carries (`Segment.teacher`), whatever the episodes scored. Nothing is
+compared, so a group is one episode by default (MOPD's one rollout per prompt). A group with a segment no teacher scored,
+or without the top-k tokens the objective reads, trains nothing, and `skipped` says which channel or teacher. A policy
+gradient with a distillation term takes `Grpo` with `distills`: `Distilled` items with their episode's advantage, every
+segment kept (a group whose advantages are all zero, or that dynamic sampling would skip, still has its teacher's
+scores to train on).
+
+### Distillation
+
+A teacher is a channel whose provider scores given tokens (`Engine.score`, through the gateway's `POST /v1/scores`). The
+objective's `distillation.teachers` routes each episode to one teacher by the environment it plays and its row
+(`teacher_for`: the row's route `module:name/ROW`, else the environment's, else `*`); teachers are never combined. A
+segment is scored from its first sampled token to its last, within the teacher's context, with the teacher's
+`distillation.top_k` most likely tokens at each where the objective reads them (`rollout_train.distillation`:
+`scoring_range`, `teacher_scores`, and `taught`, which asks a scorer and returns the segment carrying its
+[`TeacherScores`](../../guide/reference.md#teacherscores)). A token beyond the teacher's context has no score and adds
+nothing to the loss; a position where the teacher gave fewer tokens than asked keeps the fewer.
+
+The loop does not ask teachers yet. Where runs are built, after each episode ends, each trained segment is routed,
+scored by `taught` with a scorer that calls `Gateway.score` for its teacher's channel (recorded as a turn that is
+never trained on), and kept in the episode's trajectories (`Segment.teacher` is stored with the segment), where
+`Distillations` reads it. A dataset of teacher samples ([datasets](datasets.md#teacher-samples)) holds segments scored
+the same way.
 
 ## The curriculum
 
