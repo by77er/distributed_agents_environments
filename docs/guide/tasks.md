@@ -145,9 +145,12 @@ asyncio.run(main())
 
 ## Other model slots
 
-A task can sample models itself, for example a simulated user or an opponent. Declare the slot in `models` and
-sample it through `run.models[...]`. Only the `policy` slot's replies form the agent's turns. Which endpoint serves
-each slot, and whether its samples are recorded for training, is the run's binding's to say ([models](models.md)).
+A task can sample models itself, for example a simulated user, an opponent or a judge. Declare the slot in `models`
+and sample it through `run.models[...]`. Only the `policy` slot's replies form the agent's turns. Which endpoint serves
+each slot is the run's binding's to say ([models](models.md)). A slot declared `ModelSlot(trained=False)` (a fixed
+opponent) is recorded and never trained on, and a run binds it to a channel by name (`slots.SLOT`). A judge is
+declared `ModelSlot(trained=False, judge=True)`: a run binds it to a channel serving the run's own checkpoints only
+with `self_judging` ([Judging](../products/judging.md)).
 
 ```python
 from rollout.harness import ModelSlot

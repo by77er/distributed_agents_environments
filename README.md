@@ -97,7 +97,7 @@ uv run pytest            # the tests, including every example in the docs
 |---|---|
 | `libraries/` | `rollout`, the API environments are written against, and `rollout-train`: the ledger, gateway, training loop, evals and monitor |
 | `implementations/` | Backends: vLLM, LoRA and full-weight trainers, Tinker, Qwen and Gemma renderers, S3, RunPod pods, verifiers environments |
-| `environments/` | Environments to train on: a Minecraft team, and a gridworld where agents spread out to press plates |
+| `environments/` | Environments to train on: a Minecraft team, a gridworld where agents spread out to press plates, and open-ended answers a judge scores |
 | `deploy/` | The platform image, the Helm chart, a K3s setup for one GPU, and local services |
 | `docs/`, `tests/`, `scripts/` | Documentation, tests and the reference generator |
 

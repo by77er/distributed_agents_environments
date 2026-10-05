@@ -60,6 +60,7 @@ Each implements one interface a library defines.
 |---|---|
 | [Minecraft team](products/minecraft-team.md) | One to four agents in a Minecraft world: an environment to train on |
 | [Gridworld](products/gridworld.md) | Two to four agents share out the plates of a grid level over chat: a small environment to train on |
+| [Judging](products/judging.md) | Open-ended answers scored by a judge against a versioned rubric: a reward from a slot that is not trained |
 
 ## Development
 
@@ -84,6 +85,7 @@ Each implements one interface a library defines.
 | `implementations/rollout-verifiers` | `rollout_verifiers` | Prime Intellect's verifiers environments, played through the gateway | `Environment` |
 | `environments/minecraft` | `minecraft_team` | One to four agents in a Minecraft world; depends on `rollout` only | `Environment` |
 | `environments/gridworld` | `gridworld` | Two to four agents on a grid level, with plates, doors, a gate and a lever; depends on `rollout` only | `Environment` |
+| `environments/judging` | `judging` | Open-ended requests answered by the policy and scored by a judge against a rubric; depends on `rollout` only | `Environment` |
 
 `uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora`,
 `rollout-qwen` and `rollout-gemma` (`--extra gemma`: that one alone), and `rollout-tinker` (`--extra tinker`). `implementations/rollout-verifiers` is a project of

@@ -78,6 +78,8 @@ the test suite and a block tagged `py` does not. The API reference is generated 
 
 - [Minecraft team](docs/products/minecraft-team.md): one to four agents in a Minecraft world, trained on a curriculum
 - [Gridworld](docs/products/gridworld.md): two to four agents share out the plates of a grid level, talking it over
+- [Judging](docs/products/judging.md): open-ended answers scored by a judge, a slot that is not trained, against a
+  versioned rubric
 
 ## Everything else
 

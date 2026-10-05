@@ -100,6 +100,7 @@ nav:
   - Environments:
       - "Minecraft team": products/minecraft-team.md
       - "Gridworld": products/gridworld.md
+      - "Judging": products/judging.md
   - Development:
       - "Local services": development/local-services.md
   - Research:

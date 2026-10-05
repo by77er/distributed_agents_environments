@@ -15,6 +15,7 @@ dependencies = [
     "rollout-runpod",
     "minecraft-team",
     "gridworld",
+    "judging",
 ]
 
 [project.optional-dependencies]
@@ -23,7 +24,7 @@ gemma = ["rollout-gemma"]
 tinker = ["rollout-tinker", "rollout-qwen"]  # a trainer and an engine at Thinking Machines
 
 [tool.uv.workspace]
-members = ["libraries/*", "implementations/*", "environments/minecraft", "environments/gridworld"]
+members = ["libraries/*", "implementations/*", "environments/minecraft", "environments/gridworld", "environments/judging"]
 exclude = ["implementations/rollout-verifiers"]  # a project of its own, locked apart
 
 [tool.uv.sources]
@@ -39,6 +40,7 @@ rollout-runpod = { workspace = true }
 rollout-tinker = { workspace = true }
 minecraft-team = { workspace = true }
 gridworld = { workspace = true }
+judging = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -64,7 +66,10 @@ line-length = 120
 target-version = "py313"
 # Code in docs/ is illustrative and hand-aligned for reading; .claude/ holds agents' working copies.
 extend-exclude = ["docs", ".claude"]
-src = ["libraries/*/src", "implementations/*/src", "environments/minecraft", "environments/gridworld", "."]
+src = [
+    "libraries/*/src", "implementations/*/src", "environments/minecraft", "environments/gridworld", "environments/judging",
+    ".",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
@@ -88,6 +93,7 @@ extraPaths = [
     "implementations/rollout-verifiers/src",
     "environments/minecraft",
     "environments/gridworld",
+    "environments/judging",
 ]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
