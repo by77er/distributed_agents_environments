@@ -137,6 +137,10 @@ export function changedSettings(settings: Record<string, unknown>, preset?: Pres
       found.push({ key, text: `no ${settingLabel(key).replace(/ tokens$/, "")} budget` });
       continue;
     }
+    if (key === "weights") {
+      found.push({ key, text: value === "full" ? "full weights" : "LoRA" });
+      continue;
+    }
     if (key === "limits.spend" && typeof value === "number") {
       found.push({ key, text: `spend up to $${settingValue(value)}` });
       continue;

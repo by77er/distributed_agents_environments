@@ -9,7 +9,7 @@ import type { System } from "../api/types";
 import { useConnection, useStream } from "../api/stream";
 import { readable } from "../lib/environments";
 import { madeBy, nameOf, stepOf } from "../lib/model";
-import { episodePlace, groupPlace, PAGES, type Place, runPlace, stepPlace, suitePlace, usePlace } from "../lib/places";
+import { episodePlace, groupPlace, PAGES, type Place, presetsPlace, runPlace, stepPlace, suitePlace, usePlace } from "../lib/places";
 import { Tree } from "./Tree";
 
 /** The topics the place shown needs the monitor to say it changed. */
@@ -25,6 +25,8 @@ function watched(place: Place, system: System | undefined): Topic[] {
   }
   if (place.kind === "base") found.push(topics.checkpoints(), topics.history("model", place.model), topics.launches(), topics.offers(), topics.evals());
   if (place.kind === "launch") found.push(topics.evals());
+  if (place.kind === "presets") found.push(topics.presets());
+  if (place.kind === "preset") found.push(topics.preset(place.preset));
   if (place.kind === "group") found.push(topics.group(place.run, place.number));
   if (place.kind === "episode") found.push(topics.episode(place.id));
   if (place.kind === "statistics") found.push(topics.statistics());
@@ -140,6 +142,8 @@ function Crumbs({ place }: { place: Place }) {
     if (place.slot) crumbs.push([`Rollout ${place.slot}`, ""]);
   } else if (place.kind === "outside") crumbs.push(["Episodes outside a run", ""]);
   else if (place.kind === "launch") crumbs.push(["New run", ""]);
+  else if (place.kind === "presets") crumbs.push(["Presets", ""]);
+  else if (place.kind === "preset") crumbs.push(["Presets", presetsPlace], [`Preset ${place.preset}`, ""]);
   else if (place.kind === "checkpoint") crumbs.push([`Checkpoint ${known.short(place.id)}`, ""]);
   else if (place.kind === "base") crumbs.push([`Base model ${place.model}`, ""]);
   else if (place.kind === "suite") crumbs.push([`Suite ${place.suite}`, ""]);

@@ -467,6 +467,30 @@
   .launch-actions .danger:hover { background: var(--bad-soft); }
   .launch-actions .danger:disabled { opacity: .5; cursor: default; }
   .settings-changed span { color: var(--accent); }
+  .preset-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; }
+  .preset-bar > .field { flex: 0 1 280px; }
+  .preset-bar .action, .preset-save .action { height: 32px; padding: 0 12px; }
+  .preset-bar > .linkish { line-height: 32px; }
+  .preset-save { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+  .preset-save input { width: min(24ch, 60vw); }
+  .segmented { display: flex; flex-wrap: wrap; gap: 8px; }
+  .segmented label { position: relative; display: inline-grid; align-content: center; gap: 1px; min-height: 32px; padding: 4px 14px;
+                     border: 1px solid var(--line-strong); border-radius: 3px; background: var(--panel); cursor: pointer; font-size: 13px; }
+  .launch-form .segmented input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; padding: 0; }
+  .segmented label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+  .segmented label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .segmented label.disabled { cursor: default; color: var(--faint); background: var(--raised); }
+  .segmented small { font-size: 11px; color: var(--faint); }
+  .from-preset > span::before, .segmented.from-preset label:has(input:checked) > span::before {
+    content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: 1px; }
+  details.advanced > summary { display: flex; align-items: center; min-height: 32px; cursor: pointer; font: 600 10.5px var(--mono);
+                               letter-spacing: .08em; text-transform: uppercase; color: var(--quiet); }
+  details.advanced > summary .faint { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 4px; }
+  details.advanced[open] > summary { margin-bottom: 8px; }
+  .launch-form .tick input { width: auto; height: auto; }
+  .launch-form fieldset.entry legend { font-weight: 600; }
+  .refusals.notes { color: var(--quiet); }
+  td.changed { color: var(--accent); font-weight: 600; }
   .more { margin-top: -6px; justify-self: start; }
 
   /* A machine, as its heartbeats say */

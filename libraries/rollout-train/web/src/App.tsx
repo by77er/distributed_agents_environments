@@ -4,6 +4,7 @@ import { Shell } from "./layout/Shell";
 import { usePlace } from "./lib/places";
 import { Episode } from "./pages/Episode";
 import { NewRun } from "./pages/NewRun";
+import { PresetPage, Presets } from "./pages/Presets";
 import { GroupView, StepView } from "./pages/Group";
 import { Run } from "./pages/Run";
 import { Outside, Runs } from "./pages/Runs";
@@ -28,6 +29,8 @@ function View() {
     case "episode": return <Episode key={place.id} id={place.id} slot={place.slot} />;
     case "outside": return <Outside />;
     case "launch": return <NewRun />;
+    case "presets": return <Presets />;
+    case "preset": return <PresetPage key={place.preset} name={place.preset} />;
     case "checkpoints": return <Checkpoints />;
     case "checkpoint": return <Checkpoint id={place.id} />;
     case "base": return <Base key={place.model} model={place.model} />;

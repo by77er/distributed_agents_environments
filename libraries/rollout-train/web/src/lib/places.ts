@@ -14,6 +14,8 @@ export type Place =
   | { page: "runs"; kind: "episode"; id: string; slot: string | null }
   | { page: "runs"; kind: "outside" }
   | { page: "runs"; kind: "launch" }
+  | { page: "runs"; kind: "presets" }
+  | { page: "runs"; kind: "preset"; preset: string }
   | { page: "checkpoints"; kind: "checkpoints" }
   | { page: "checkpoints"; kind: "checkpoint"; id: string }
   | { page: "checkpoints"; kind: "base"; model: string }
@@ -37,6 +39,8 @@ export const launchPlace = "/runs/new";
 export const launchOn = (environment: string) => `${launchPlace}?environment=${encodeURIComponent(environment)}`;
 /** The New run form with a base model chosen. */
 export const launchFor = (model: string) => `${launchPlace}?model=${encodeURIComponent(model)}`;
+export const presetsPlace = "/presets";
+export const presetPlace = (preset: string) => `${presetsPlace}/${encodeURIComponent(preset)}`;
 export const checkpointPlace = (id: string) => `/checkpoint/${encodeURIComponent(id)}`;
 /** A base model, a root of the checkpoints' graph, by name. */
 export const basePlace = (model: string) => `/base/${encodeURIComponent(model)}`;
@@ -68,6 +72,7 @@ export function placeOf(pathname: string): Place {
   if (parts[0] === "episode" && parts[1]) return { page: "runs", kind: "episode", id: parts[1], slot: parts[2] || null };
   if (parts[0] === "episodes") return { page: "runs", kind: "outside" };
   if (parts[0] === "runs" && parts[1] === "new") return { page: "runs", kind: "launch" };
+  if (parts[0] === "presets") return parts[1] ? { page: "runs", kind: "preset", preset: parts[1] } : { page: "runs", kind: "presets" };
   if (parts[0] === "checkpoints") return { page: "checkpoints", kind: "checkpoints" };
   if (parts[0] === "checkpoint" && parts[1]) return { page: "checkpoints", kind: "checkpoint", id: parts[1] };
   if (parts[0] === "base" && parts[1]) return { page: "checkpoints", kind: "base", model: parts.slice(1).join("/") };

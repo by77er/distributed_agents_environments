@@ -2,9 +2,9 @@
 // when the stream says its topic changed (`stream.ts`). An answer that changed only in part keeps the parts that did
 // not (TanStack Query's structural sharing), so only the views over what changed draw again.
 
-import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, EnvironmentVersion, Episode, EvalSubjects, Evals, FeedRun, Group, ImportAsked, Imports, KnownEnvironment, Launch, LaunchAsking, Launches, Lineage, Machines, Offers, Path, RunSettings, SettingFinding, Statistics, SubjectHistory, SubjectKind, System } from "./types";
+import type { Bookmark, Checked, CheckpointEvals, Entry, EnvironmentInfo, EnvironmentVersion, Episode, EvalSubjects, Evals, FeedRun, Group, ImportAsked, Imports, KnownEnvironment, Launch, LaunchAsking, Launches, Lineage, Machines, Offers, Path, Preset, Presets, PresetVersions, RunSettings, SettingFinding, Statistics, SubjectHistory, SubjectKind, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -21,6 +21,8 @@ export const topics = {
   machines: (): Topic => ({ topic: "machines", key: ["machines"], path: "api/machines" }),
   launches: (): Topic => ({ topic: "launches", key: ["launches"], path: "api/launches" }),
   offers: (): Topic => ({ topic: "offers", key: ["offers"], path: "api/offers" }),
+  presets: (): Topic => ({ topic: "presets", key: ["presets"], path: "api/presets" }),
+  preset: (name: string): Topic => ({ topic: `preset/${name}`, key: ["preset", name], path: `api/presets/${encodeURIComponent(name)}` }),
   statistics: (): Topic => ({ topic: "statistics", key: ["statistics"], path: "api/statistics" }),
   evals: (): Topic => ({ topic: "evals", key: ["evals"], path: "api/evals" }),
   evalSubjects: (): Topic => ({ topic: "eval-subjects", key: ["eval-subjects"], path: "api/evals/subjects" }),
@@ -182,6 +184,37 @@ export const useSaveSuite = (name: string) =>
  * holds the findings that refuse it). */
 export const useLaunch = () =>
   useWrite(async (launch: LaunchAsking) => (await asked<{ launch: Launch }>("api/launches", "POST", launch)).launch, [topics.launches()]);
+
+/** What the monitor says of a run's settings as the New run form has them now (none: nothing to check yet): its
+ * refusals and notes, what it trains, one step's spend and its environment's slots. The answer before is kept while the
+ * next is read. */
+export const useCheck = (launch: LaunchAsking | null) =>
+  useQuery({
+    queryKey: ["check", launch],
+    enabled: launch != null,
+    staleTime: Infinity,
+    refetchInterval: false,
+    retry: false,
+    placeholderData: keepPreviousData,
+    queryFn: () => asked<Checked>("api/launches/check", "POST", launch),
+  });
+
+export const usePresets = () => useTopic<Presets>(topics.presets());
+
+/** A preset's versions, oldest first. */
+export const usePreset = (name: string) => useTopic<PresetVersions>(topics.preset(name), Boolean(name));
+
+/** Save settings as a preset's next version. */
+export const useSavePreset = () =>
+  useWrite(
+    async ({ name, settings, note }: { name: string; settings: Record<string, unknown>; note?: string }) =>
+      (await asked<{ preset: Preset }>(`api/presets/${encodeURIComponent(name)}`, "POST", { settings, note: note ?? "" })).preset,
+    [topics.presets(), topics.offers()],
+  );
+
+/** Delete a preset (its versions stay readable by number). */
+export const useDeletePreset = () =>
+  useWrite(async (name: string) => asked<{ deleted: string }>(`api/presets/${encodeURIComponent(name)}`, "DELETE"), [topics.presets(), topics.offers()]);
 
 /** Ask a launch to stop: one whose job was not made is stopped at once; a job going is asked to stop. */
 export const useStop = () =>

@@ -410,7 +410,12 @@ export interface OfferedEnvironment {
   commit?: string;
   imported?: number;
   sandboxes?: string[];
+  /** The renderer families runs and presets on it named for their trained channel. */
+  families?: string[];
 }
+
+export type Weights = "lora" | "full";
+export type Allocation = "metered" | "scheduled";
 
 export interface OfferedTrainer {
   name: string;
@@ -424,6 +429,10 @@ export interface OfferedTrainer {
   cost: Record<string, number>;
   families: string[];
   settings: OfferedSetting[];
+  allocation: Allocation;
+  concurrency: number | null;
+  /** What it trains: its kind's one of `lora` and `full`. */
+  weights: Weights[];
 }
 
 export interface OfferedModel {
@@ -443,6 +452,42 @@ export interface OfferedProvider {
   replicas: number;
   capabilities: Record<string, unknown>;
   models: OfferedModel[];
+  allocation: Allocation;
+  concurrency: number | null;
+  /** The weights it serves a run's checkpoints as: adapters (`lora`), full weights reloaded in place (`full`). */
+  weights: Weights[];
+}
+
+/** One component of an objective (`rollout_train.objectives.COMPONENTS`). */
+export interface ObjectiveComponent {
+  key: string;
+  types: string[];
+  families: string[];
+  changeable: boolean;
+  says: string;
+  choices: string[];
+  least: number | null;
+  above: boolean;
+}
+
+/** One of the objective's presets: its family and every component its family accepts. */
+export interface ObjectivePreset {
+  name: string;
+  family: string;
+  source: string;
+  says: string;
+  components: Record<string, unknown>;
+}
+
+/** A key of a training run's settings, as the schema has it. */
+export interface SchemaKey {
+  key: string;
+  types: string[];
+  default: unknown;
+  changeable: boolean;
+  says: string;
+  choices: string[];
+  least: number | null;
 }
 
 export interface Preset {
@@ -468,6 +513,33 @@ export interface Offers {
   sandboxes: Record<string, { size: number; provider: string }>;
   presets: Preset[];
   capacity: { gpus: number; gpus_free: number; machines: Record<string, number> } | null;
+  objectives?: { families: string[]; presets: ObjectivePreset[]; components: ObjectiveComponent[] };
+  schema?: SchemaKey[];
+}
+
+/** What `POST /api/launches/check` answers: the refusals and notes, the settings the run would have, what it trains,
+ * one step's spend on its metered parts (or why it cannot be estimated yet), and its environment's slots. */
+export interface Checked {
+  refusals: SettingFinding[];
+  notes: SettingFinding[];
+  settings: Record<string, unknown>;
+  preset: string | null;
+  weights: Weights | null;
+  spend: { dollars: number | null; parts: Record<string, number>; why: string };
+  environment: { slots: string[]; untrained: string[]; judges: string[] } | null;
+}
+
+/** Every preset's newest version (`/api/presets`). */
+export interface Presets {
+  presets: (Preset & { versions: number })[];
+  /** Whether the ledger keeps presets beside it. */
+  keeps: boolean;
+}
+
+/** One preset's versions, oldest first (`/api/presets/NAME`). */
+export interface PresetVersions {
+  name: string;
+  versions: Preset[];
 }
 
 /** An episode in a feed, summarised. */
