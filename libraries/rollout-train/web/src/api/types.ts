@@ -341,7 +341,46 @@ export interface Machines {
   gateways: GatewayRole[];
 }
 
-export type RunKind = "train" | "eval" | "imitate" | "check";
+/** A resource the queue counts: CPUs, memory (bytes) and GPUs. */
+export type QueueResource = "cpu" | "memory" | "gpu";
+
+export type Amounts = Partial<Record<QueueResource, number>>;
+
+/** A run the queue admitted, and what it holds. */
+export interface QueueAdmitted {
+  /** The run, by id (none for a Workload no launch of this ledger made). */
+  run: string | null;
+  name: string | null;
+  requests: Amounts;
+  since: number | null;
+  /** Its RayJob and Workload, with Kueue. */
+  job?: string | null;
+  workload?: string | null;
+}
+
+/** A run that waits in the queue: its place (1 first), why it waits as Kueue or its driver says, what of its requests the
+ * free capacity does not hold, and the admitted runs that hold it, most first. */
+export interface QueuePending extends QueueAdmitted {
+  position: number;
+  reason: string | null;
+  lacks: Amounts;
+  held_by: (string | null)[];
+}
+
+/** How the runs share what the cluster gives them (`/api/queue`): from Kueue, from the runs' beats to Ray, or from nothing. */
+export interface Queue {
+  source: "kueue" | "ray" | null;
+  capacity: Amounts;
+  used: Amounts;
+  admitted: QueueAdmitted[];
+  pending: QueuePending[];
+  /** Why Kueue could not be read. */
+  error?: string;
+  /** How the pending runs are ordered, with Kueue: as its visibility API says, or by when each was made. */
+  order?: "kueue" | "created";
+}
+
+export type RunKind ="train" | "eval" | "imitate" | "check";
 
 /** What a run is asked to be (`rollout_train.launches.Asked`): its kind, its name, its run settings as given, the preset
  * they came from (`NAME@N`), and the run it resumes. */

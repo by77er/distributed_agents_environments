@@ -12,6 +12,7 @@ import { changedSettings, GOING, type LaunchShown, launchState, loopChanged } fr
 import { evalPlace, runPlace, suitePlace } from "../lib/places";
 import { suiteName, versionTag } from "../lib/suites";
 import { CheckpointTag } from "./checkpoints";
+import { useQueued } from "./queue";
 import { SectionTitle, Tile } from "./ui";
 
 /** The runs asked for whose run has not appeared yet: asked, starting, waiting, or failed before it started. A run that
@@ -40,14 +41,15 @@ export function launchesByRun(launches: Launch[]): Map<string, Launch> {
   return by;
 }
 
-/** What was asked of a run that a run's tile shows: its preset and changed settings, why it waits or failed, and the
- * button that stops it while it goes. */
+/** What was asked of a run that a run's tile shows: its preset and changed settings, why it waits (and where it is in
+ * the queue) or failed, and the button that stops it while it goes. */
 export function Asked({ launch, run }: { launch: Launch; run: Run }) {
   const stop = useStop();
   const { data: offers } = useOffers();
   const preset = (offers?.presets ?? []).find(each => each.id === launch.asked.preset);
   const said = launchState(launch, run);
   const going = GOING.has(launch.state);
+  const queued = useQueued(going ? launch.run : null);
   const changed = changedSettings(launch.asked.settings ?? {}, preset);
   return (
     <>
@@ -62,7 +64,7 @@ export function Asked({ launch, run }: { launch: Launch; run: Run }) {
           <summary>why it failed</summary>
           <pre>{launch.detail}</pre>
         </details>
-      ) : said.reason ? <div className="small muted" title={launch.detail ?? undefined}>{said.reason}</div> : null}
+      ) : queued || said.reason ? <div className="small muted" title={launch.detail ?? undefined}>{queued ?? said.reason}</div> : null}
       {going && launch.state !== "stopping" ? (
         <div className="launch-actions">
           <button type="button" className="danger" disabled={stop.isPending}
@@ -95,7 +97,8 @@ const LaunchTile = memo(function LaunchTile({ launch, system, preset }: { launch
   const run = launch.run ? system.runs.find(each => each.run === launch.run) : undefined;
   const said = launchState(launch, run);
   const going = GOING.has(launch.state);
-  const environment = typeof settings.environment === "string" ? settings.environment : null;
+  const queued = useQueued(going ? launch.run : null);
+  const environment =typeof settings.environment === "string" ? settings.environment : null;
   const start = typeof settings.start === "string" ? settings.start : null;
   const suite = typeof settings["eval.suite"] === "string" ? settings["eval.suite"] : null;
   const episodes = settings["eval.episodes"];
@@ -137,7 +140,7 @@ const LaunchTile = memo(function LaunchTile({ launch, system, preset }: { launch
           <summary>why it failed</summary>
           <pre>{launch.detail}</pre>
         </details>
-      ) : said.reason ? <div className="small muted" title={launch.detail ?? undefined}>{said.reason}</div> : null}
+      ) : queued || said.reason ? <div className="small muted" title={launch.detail ?? undefined}>{queued ?? said.reason}</div> : null}
       {going && launch.state !== "stopping" ? (
         <div className="launch-actions">
           <button type="button" className="danger" disabled={stop.isPending} onClick={() => stop.mutate(launch.id)}>

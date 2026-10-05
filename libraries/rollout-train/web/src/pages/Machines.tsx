@@ -1,11 +1,12 @@
-// The machines that run things, as their heartbeats and the ledger say: every runner, sandbox pool, engine host and
-// gateway alive, a section of each kind, with what each holds and how full it is; and one machine with
-// everything on it.
+// The machines that run things, as their heartbeats and the ledger say: the queue (what the cluster gives runs, and
+// who holds and waits for it), then every runner, sandbox pool, engine host and gateway alive, a section of each kind,
+// with what each holds and how full it is; and one machine with everything on it.
 
 import { Fragment } from "react";
 import { useMachines } from "../api/queries";
 import type { Role } from "../api/types";
 import { MachineCard, RoleCards } from "../components/machines";
+import { QueueSection } from "../components/queue";
 import { Empty, Head, SectionTitle, Spec, Specs, Table } from "../components/ui";
 import { Ago } from "../layout/runs";
 import { bytes } from "../lib/format";
@@ -35,6 +36,7 @@ export function Machines() {
           </Specs>
         ) : null}
       </Head>
+      <QueueSection />
       {data.hosts.length ? null : <Empty>No heartbeat yet.</Empty>}
       {present(alive).map(kind => (
         <Fragment key={kind}>

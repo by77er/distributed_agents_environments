@@ -17,7 +17,7 @@ function watched(place: Place, system: System | undefined): Topic[] {
   const found = [topics.system(), topics.feeds()];
   if (place.kind === "run") {
     const newest = system ? madeBy(system.checkpoints, place.run).at(-1) : undefined;
-    found.push(topics.settings(place.run), ...(newest ? [topics.path(newest.id)] : []));
+    found.push(topics.settings(place.run), ...(newest ? [topics.path(newest.id)] : []), topics.launches(), topics.queue());
   }
   if (place.kind === "checkpoint") {
     const id = system?.checkpoints.find(each => each.id === place.id || each.id.startsWith(place.id))?.id ?? place.id;
@@ -31,6 +31,7 @@ function watched(place: Place, system: System | undefined): Topic[] {
   if (place.kind === "episode") found.push(topics.episode(place.id));
   if (place.kind === "statistics") found.push(topics.statistics());
   if (place.page === "machines") found.push(topics.machines());
+  if (place.kind === "machines" || place.kind === "runs") found.push(topics.queue());
   if (place.kind === "runs" || place.kind === "launch") found.push(topics.launches(), topics.offers());
   if (place.kind === "checkpoints") found.push(topics.checkpoints());
   if (place.page === "evals" || place.kind === "checkpoint") found.push(topics.evals());

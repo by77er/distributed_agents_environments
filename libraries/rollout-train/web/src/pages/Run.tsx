@@ -1,10 +1,12 @@
 // A training run: where it started from and where it is now, how its groups went, what is in flight, every group's
-// rewards, its steps, the tasks it played, each suite's score along its line, and its settings. An eval's run has a
-// page of its own (`EvalRun`).
+// rewards, its steps, the tasks it played, each suite's score along its line, and its settings; while it waits in the
+// queue, its place there and why. An eval's run has a page of its own (`EvalRun`).
 
 import { memo } from "react";
 import { Link } from "react-router-dom";
-import { useKnown, useSystem } from "../api/queries";
+import { useKnown, useLaunches, useSystem } from "../api/queries";
+import { useQueued } from "../components/queue";
+import { launchState } from "../lib/launches";
 import { RunControls } from "../components/control";
 import { Rename } from "../components/Rename";
 import type { OpenGroup, Run as RunData, Step, Checkpoint } from "../api/types";
@@ -23,7 +25,7 @@ export function Run({ name }: { name: string }) {
   const { data: system } = useSystem();
   if (!system) return <Empty>Reading the run…</Empty>;
   const run = system.runs.find(each => each.run === name);
-  if (!run) return <Empty>There is no run {name}.</Empty>;
+  if (!run) return <NotStarted id={name} />;
   if (run.kind === "eval") return <EvalRun run={run.run} />;
   const made = madeBy(system.checkpoints, run.run);  // (the checkpoints it made, oldest first)
   return (
@@ -55,13 +57,37 @@ export function Run({ name }: { name: string }) {
   );
 }
 
+/** A run asked for whose run has not started yet: its state (where it is in the queue, and why it waits), when it was
+ * asked for, and its id. */
+function NotStarted({ id }: { id: string }) {
+  const { data: launched } = useLaunches();
+  const queued = useQueued(id);
+  const launch = launched?.launches?.find(each => each.run === id);
+  if (!launch) return <Empty>There is no run {id}.</Empty>;
+  const said = launchState(launch);
+  return (
+    <Head title={`Run ${launch.asked.name}`}>
+      <Specs>
+        <Spec label="state" kind={queued ? "warm" : said.kind}>
+          {queued ? `waiting · ${queued}` : said.reason ? `${said.state}: ${said.reason}` : said.state}
+        </Spec>
+        <Spec label="asked"><Ago at={launch.at} /> ago</Spec>
+        <Spec label="id">{id}</Spec>
+      </Specs>
+    </Head>
+  );
+}
+
 const RunHead = memo(function RunHead({ run, made, host }: { run: RunData; made: Checkpoint[]; host: string }) {
   const known = useKnown();
+  const queued = useQueued(run.run);
   const from = run.from ?? run.steps[0]?.parent ?? null, newest = made.at(-1), many = run.channels.length > 1;
   return (
     <Head title={<span className="head-with-action"><span>Run <Rename id={run.run} name={nameOf(run)} /></span><RunControls run={run} /></span>}>
       <Specs>
-        <Spec label="state" kind={runKind(run.state)}>{running(run, host)}{run.ending?.detail ? `: ${run.ending.detail}` : ""} · <Wrote run={run} /></Spec>
+        {queued ? <Spec label="state" kind="warm">waiting · {queued}</Spec> : (
+          <Spec label="state" kind={runKind(run.state)}>{running(run, host)}{run.ending?.detail ? `: ${run.ending.detail}` : ""} · <Wrote run={run} /></Spec>
+        )}
         {newest?.base ? <Spec label={known.checkpoint(newest.base) ? "over" : "base model"}><BaseName base={newest.base} /></Spec> : null}
         <Spec label="from"><CheckpointTag id={from} /></Spec>
         {newest ? <Spec label="now" kind="violet"><CheckpointTag id={newest.id} bare /></Spec> : null}

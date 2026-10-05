@@ -4,7 +4,7 @@
 
 import { keepPreviousData, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, Checked, CheckpointEvals, Entry, EnvironmentInfo, EnvironmentVersion, Episode, EvalSubjects, Evals, FeedRun, Group, ImportAsked, Imports, KnownEnvironment, Launch, LaunchAsking, Launches, Lineage, Machines, Offers, Path, Preset, Presets, PresetVersions, RunSettings, SettingFinding, Statistics, SubjectHistory, SubjectKind, System } from "./types";
+import type { Bookmark, Checked, CheckpointEvals, Entry, EnvironmentInfo, EnvironmentVersion, Episode, EvalSubjects, Evals, FeedRun, Group, ImportAsked, Imports, KnownEnvironment, Launch, LaunchAsking, Launches, Lineage, Machines, Offers, Path, Preset, Presets, PresetVersions, Queue, RunSettings, SettingFinding, Statistics, SubjectHistory, SubjectKind, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -19,6 +19,7 @@ export const topics = {
   system: (): Topic => ({ topic: "system", key: ["system"], path: "api/system" }),
   feeds: (): Topic => ({ topic: "feeds", key: ["feeds"], path: "api/runs" }),
   machines: (): Topic => ({ topic: "machines", key: ["machines"], path: "api/machines" }),
+  queue: (): Topic => ({ topic: "queue", key: ["queue"], path: "api/queue" }),
   launches: (): Topic => ({ topic: "launches", key: ["launches"], path: "api/launches" }),
   offers: (): Topic => ({ topic: "offers", key: ["offers"], path: "api/offers" }),
   presets: (): Topic => ({ topic: "presets", key: ["presets"], path: "api/presets" }),
@@ -122,6 +123,9 @@ export const useUnbookmark = () =>
 export const useFeeds = () => useTopic<FeedRun[]>(topics.feeds());
 
 export const useMachines = () => useTopic<Machines>(topics.machines());
+
+/** How the runs share what the cluster gives them: its capacity, what each admitted run holds, and who waits. */
+export const useQueue = () => useTopic<Queue>(topics.queue());
 
 export const useLaunches = () => useTopic<Launches>(topics.launches());
 
