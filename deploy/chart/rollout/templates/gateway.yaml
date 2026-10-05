@@ -1,6 +1,6 @@
 # The gateway: stateless replicas that sample every channel a run's start names on the cluster config's providers
-# whose servers it reaches, and record every turn, behind a Service (what runs in the cluster reach) and an Ingress
-# (what reaches it through Traefik).
+# whose servers it reaches (and its hosted APIs, with their keys from the Secret `providers`), and record every turn,
+# behind a Service (what runs in the cluster reach) and an Ingress (what reaches it through Traefik).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,7 +24,9 @@ spec:
             - 0.0.0.0:{{ .Values.gateway.port }}
             - --proxied
             - "*"
-          env: {{- include "rollout.env" . | nindent 12 }}
+          env:
+            {{- include "rollout.env" . | nindent 12 }}
+            {{- include "rollout.providerEnv" . | nindent 12 }}
           ports: [{containerPort: {{ .Values.gateway.port }}, name: http}]
           readinessProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 10, timeoutSeconds: 5}
           livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 6}

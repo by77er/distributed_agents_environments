@@ -243,3 +243,35 @@ def test_with_kueue_the_monitors_may_read_the_queue_and_its_pending_order(render
     assert binding["subjects"] == [{"kind": "ServiceAccount", "name": "monitor", "namespace": "rollout"}]
     assert binding["roleRef"] == {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole",
                                   "name": roles["ClusterRole"]["metadata"]["name"]}  # fmt: skip
+
+
+def provider_keys(env: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The hosted APIs' keys among a container's environment, each by the Secret it is read from."""
+    return {each["name"]: each["valueFrom"]["secretKeyRef"] for each in env if each["name"].endswith("_API_KEY")
+            and each["name"] != "TINKER_API_KEY"}  # fmt: skip
+
+
+def test_the_hosted_apis_keys_come_from_a_secret_in_the_gateway_and_runs_and_never_the_config(
+    rendered: list[dict[str, Any]],
+) -> None:
+    config = config_of(rendered)
+    cluster = parsed(tomllib.loads(config["cluster.toml"]))
+    hosted = {name: each for name, each in cluster.inference.items() if each.kind == "api"}
+    assert {name: (each.allocation, str(each.secrets["api_key"])) for name, each in hosted.items()} == {
+        "openai": ("metered", "$OPENAI_API_KEY"), "anthropic": ("metered", "$ANTHROPIC_API_KEY"),
+    }  # fmt: skip
+    assert all(offer.cost.get("input") and offer.cost.get("output") for each in hosted.values()
+               for offer in each.models.values())  # fmt: skip
+    wanted = {
+        name: {"name": "providers", "key": name, "optional": True} for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+    }
+    (gateway,) = containers_of(rendered, "gateway")
+    assert provider_keys(gateway["env"]) == wanted
+    template = yaml.safe_load(config["rayjob.yaml"])
+    (head,) = template["spec"]["rayClusterSpec"]["headGroupSpec"]["template"]["spec"]["containers"]
+    assert provider_keys(head["env"]) == wanted  # (each run's job: its driver samples its channels on hosted APIs)
+    (monitor,) = containers_of(rendered, "monitor")
+    assert provider_keys(monitor["env"]) == {}  # (only what samples them has the keys)
+    renamed = render("--set", "secrets.providers=api-keys")
+    (gateway,) = containers_of(renamed, "gateway")
+    assert {each["name"] for each in provider_keys(gateway["env"]).values()} == {"api-keys"}

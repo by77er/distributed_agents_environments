@@ -79,10 +79,19 @@ What a deployment provides for pods:
 
 ## Hosted model APIs
 
-**Built** for model slots that are not trained, such as a judge or a fixed opponent: a slot can be bound to a model
-behind the OpenAI Responses API with `rollout-openai`, with an API key or a Codex login
-([use a hosted model](../guide/models.md)). Such turns are not token-exact, so they are never trained on.
+**Built.** OpenAI's models (the Responses API, `rollout-openai`) and Anthropic's (the Messages API,
+[`rollout-anthropic`](../implementations/rollout-anthropic.md)) are inference providers of the kind `api`: the gateway
+samples a channel on one through its endpoint, for an eval of a hosted model or a slot that is not trained (a judge, a
+fixed opponent). Such turns are not token-exact, so they are never trained on; each records what it cost, and an
+eval's `limits.spend` ends it once it spends that ([hosted APIs](../guide/cluster.md#hosted-apis)).
 
-**Designed:** the `api` provider kind is declared in the cluster config; the gateway's sampler for it, which would
-serve such a slot like any channel, is not built yet
-([runtime design](../research/runtime-design.md#samplers-by-provider-kind)).
+- **Install:** both packages are in the platform image (`rollout-openai`, `rollout-anthropic`).
+- **Keys:** `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`, named by each provider's `api_key_env`. On Kubernetes, put them
+  in the Secret `providers` ([provider keys](helm.md#provider-keys)): the chart passes them to the gateway and to each
+  run's job, never to the ConfigMap.
+- **Cluster config:** the chart's `files/cluster.toml` and `deploy/clusters/example.toml` declare `[inference.openai]`
+  and `[inference.anthropic]`, metered, with each vendor's current models, their contexts and their prices per million
+  tokens (input, cached input, output; thinking is billed as output), and the date the prices were checked. Update the
+  prices there when a vendor changes them: an eval's estimate and its spend are counted from them.
+- **Rate limits:** `concurrency` caps the requests each gateway (and each run's driver) sends a provider at once; a
+  429 or an overloaded API is asked again with backoff.

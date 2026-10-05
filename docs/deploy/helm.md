@@ -57,7 +57,7 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `storageClass` | `local-path` | The class of every volume the chart makes; cannot change once a claim exists ([volumes](#volumes)) |
 | `state.size` | `200Gi` | The state volume |
 | `state.path` | `/root/.cache/rollout` | Where pods mount the state volume: the code's `~/.cache/rollout` |
-| `secrets.stores`, `secrets.gatewayKeys`, `secrets.tinker` | `stores`, `gateway-keys`, `tinker` | The names of the Secrets the chart reads ([secrets](#make-the-secrets)) |
+| `secrets.stores`, `secrets.gatewayKeys`, `secrets.tinker`, `secrets.providers` | `stores`, `gateway-keys`, `tinker`, `providers` | The names of the Secrets the chart reads ([secrets](#make-the-secrets)) |
 | `stores.postgres.storage`, `stores.s3.storage` | `20Gi`, `200Gi` | The stores' volumes; cannot change once made |
 | `stores.bucket`, `stores.prefix` | `rollout-blobs`, `blobs/` | Where blobs are kept in the S3 store |
 | `ray.version` | `2.59.0` | Ray's version, which must be the image's |
@@ -141,7 +141,7 @@ kubectl get --raw /apis/visibility.kueue.x-k8s.io/v1beta2/clusterqueues/rollout/
 
 ## Make the Secrets
 
-The chart reads three Secrets and makes none of them, so that uninstalling the chart never deletes a credential.
+The chart reads four Secrets and makes none of them, so that uninstalling the chart never deletes a credential.
 Make them once, before the first install:
 
 1. The namespace:
@@ -176,9 +176,24 @@ Make them once, before the first install:
     kubectl -n rollout create secret generic tinker --from-literal=TINKER_API_KEY="$TINKER_API_KEY"
     ```
 
-Other providers' keys, such as an OpenAI key for a judge, are named in the cluster config by environment variable
-(`key_env`). Put each in a Secret, and add it to the environment every pod is given (`rollout.env` in
-`templates/_helpers.tpl`).
+5. <a id="provider-keys"></a>**`providers`**, only to sample hosted APIs (OpenAI's, Anthropic's): their API keys, under
+   the names the cluster config's `api_key_env` say. Either key may be left out; a provider whose key is missing
+   refuses each turn on it, saying which variable is not set.
+
+    ```bash
+    kubectl -n rollout create secret generic providers \
+      --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY" \
+      --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
+    ```
+
+    The chart gives these keys only to what samples hosted APIs: the gateway's pods and each run's job (its RayJob's
+    pods, through `files/rayjob.yaml`), as environment variables read from the Secret by reference
+    (`rollout.providerEnv` in `templates/_helpers.tpl`). They are never in the ConfigMap: the cluster config names
+    them (`api_key_env`), and the RayJob template holds only the reference. To change a key, update the Secret and
+    restart the gateway (`kubectl -n rollout rollout restart deploy/gateway`); runs started after read the new one.
+
+Another provider's key (a tool set's token, say) is named in the cluster config by environment variable (`token_env`,
+`key_env`). Put each in a Secret, and add it to the environment of the pods that use it (`templates/_helpers.tpl`).
 
 ## What every pod is given
 
@@ -201,7 +216,8 @@ And has these environment variables:
 | `TINKER_API_KEY` | the Secret `tinker`, where it has one |
 | `HF_HOME` | `huggingface` under the state volume |
 
-The monitors also get `RAY_AUTH_MODE=token` and the Ray cluster's token, to reach its job server.
+The monitors also get `RAY_AUTH_MODE=token` and the Ray cluster's token, to reach its job server. The gateway and each
+run's job also get `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the Secret `providers`, where it has them.
 
 ## The cluster config
 

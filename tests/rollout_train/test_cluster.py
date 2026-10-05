@@ -36,7 +36,7 @@ def test_the_example_describes_this_machine() -> None:
     assert cluster.name == "home" and cluster.namespace == "rollout-home"
     assert cluster.ledger.url == "sqlite:///~/.cache/rollout/ledger.db" and cluster.ledger.url_secret is None
     assert cluster.blobs.kind == "files" and cluster.blobs.settings == {"directory": "~/.cache/rollout/blobs"}
-    assert set(cluster.inference) == {"local-vllm", "tinker"}
+    assert set(cluster.inference) == {"local-vllm", "tinker", "openai", "anthropic"}
     local = cluster.inference["local-vllm"]
     assert local.kind == "vllm" and local.gpus == 1 and local.local and local.auth.kind == "none"
     assert local.models["Qwen/Qwen3.5-4B"].max_lora_rank == 64
@@ -280,7 +280,7 @@ def test_a_runpod_trainer_takes_the_capabilities_of_the_trainer_it_runs() -> Non
 def test_each_provider_and_trainer_is_metered_or_scheduled_by_its_kind_unless_it_says() -> None:
     cluster = load(EXAMPLE)
     assert {name: each.allocation for name, each in cluster.inference.items()} == {
-        "local-vllm": "scheduled", "tinker": "metered",
+        "local-vllm": "scheduled", "tinker": "metered", "openai": "metered", "anthropic": "metered",
     }  # fmt: skip
     assert {name: each.allocation for name, each in cluster.trainers.items()} == {
         "local-lora": "scheduled", "local-full": "scheduled", "tinker-lora": "metered",

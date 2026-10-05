@@ -25,6 +25,7 @@ secrets:
   stores: stores              # POSTGRES_PASSWORD, ROOT_ACCESS_KEY_ID, ROOT_SECRET_ACCESS_KEY
   gatewayKeys: gateway-keys   # gateway.keys: one `KID SECRET` line
   tinker: tinker              # TINKER_API_KEY, or credentials.json (what `tinker auth login` writes); optional
+  providers: providers        # OPENAI_API_KEY, ANTHROPIC_API_KEY: the hosted APIs' keys, for the gateway and runs; optional
 
 # The ledger and the blob store.
 stores:

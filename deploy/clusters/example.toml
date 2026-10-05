@@ -1,8 +1,9 @@
 # A cluster of one machine with one 16 GB GPU (an RTX 5080): the ledger in SQLite, blobs in files, vLLM engines on the
-# GPU, a LoRA trainer that shares it, Tinker for training and sampling elsewhere, the Minecraft worlds, and GSM8K in
-# rollout-verifiers' own Python. Copy it to ~/.config/rollout/cluster.toml (or name it with --cluster or
-# ROLLOUT_CLUSTER). docs/guide/cluster.md describes every field. Secrets are named here, never written: TINKER_API_KEY
-# is read from the environment of whatever samples or trains on Tinker, when it does.
+# GPU, a LoRA trainer that shares it, Tinker for training and sampling elsewhere, OpenAI's and Anthropic's models for
+# evals and judges, the Minecraft worlds, and GSM8K in rollout-verifiers' own Python. Copy it to
+# ~/.config/rollout/cluster.toml (or name it with --cluster or ROLLOUT_CLUSTER). docs/guide/cluster.md describes every
+# field. Secrets are named here, never written: TINKER_API_KEY, OPENAI_API_KEY and ANTHROPIC_API_KEY are read from the
+# environment of whatever samples or trains there, when it does.
 name = "home"
 
 [ray]
@@ -59,6 +60,47 @@ cost = { input = 0.33, cached_input = 0.066, output = 1.005 }   # dollars per mi
 [inference.tinker.models."Qwen/Qwen3.5-9B"]
 context = 65536
 cost = { input = 0.66, cached_input = 0.132, output = 1.995 }
+
+# Hosted APIs, metered: what they sample is never trained on, so they serve evals, judges and other slots that are
+# not trained. Prices are dollars per million tokens, from each provider's pricing page (OpenAI's
+# developers.openai.com/api/docs/pricing, Anthropic's platform.claude.com/docs/en/about-claude/pricing), checked on
+# 2026-10-05. Thinking (reasoning) tokens are billed as output tokens. OpenAI prices prompts of more than 272K input
+# tokens higher; these are the shorter prompts' prices. `options` say the most a reply writes and what each model takes.
+[inference.openai]
+kind = "api"
+endpoint = "rollout_openai:hosted"            # OpenAI's Responses API
+api_key_env = "OPENAI_API_KEY"
+concurrency = 16                              # requests at once, from each gateway
+[inference.openai.models."gpt-6-astra"]       # the flagship
+context = 1050000
+cost = { input = 10.0, cached_input = 1.0, output = 50.0 }
+options = { max_output_tokens = 128000 }
+[inference.openai.models."gpt-6.1-sol"]
+context = 1050000
+cost = { input = 2.0, cached_input = 0.10, output = 10.0 }
+options = { max_output_tokens = 128000 }
+[inference.openai.models."gpt-6-luna"]        # the small one
+context = 1050000
+cost = { input = 0.10, cached_input = 0.01, output = 0.50 }
+options = { max_output_tokens = 128000 }
+
+[inference.anthropic]
+kind = "api"
+endpoint = "rollout_anthropic:hosted"         # Anthropic's Messages API
+api_key_env = "ANTHROPIC_API_KEY"
+concurrency = 16
+[inference.anthropic.models."claude-opus-5-5"]
+context = 1000000
+cost = { input = 4.0, cached_input = 0.20, output = 20.0 }
+options = { max_output_tokens = 128000, thinking = "adaptive", sampling = false, forced_tool_choice = false }
+[inference.anthropic.models."claude-sonnet-5-5"]
+context = 1000000
+cost = { input = 2.0, cached_input = 0.20, output = 10.0 }
+options = { max_output_tokens = 128000, thinking = "adaptive", sampling = false, forced_tool_choice = false }
+[inference.anthropic.models."claude-haiku-4-5-20251001"]
+context = 200000
+cost = { input = 1.0, cached_input = 0.10, output = 5.0 }
+options = { max_output_tokens = 64000, thinking = "budget" }
 
 [trainers.local-lora]
 kind = "lora"

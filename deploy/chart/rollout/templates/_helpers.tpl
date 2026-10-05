@@ -32,6 +32,15 @@ ledger's URL (in the cluster config) holds no password: PGPASSWORD does. */}}
   value: {{ .Values.state.path }}/huggingface
 {{- end }}
 
+{{/* The hosted APIs' keys, for what samples them (the gateway, each run's job): from the Secret `secrets.providers`,
+each key optional, so a provider whose key is missing is refused when it is asked, and the rest go on. */}}
+{{- define "rollout.providerEnv" -}}
+- name: OPENAI_API_KEY
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.providers }}, key: OPENAI_API_KEY, optional: true}}
+- name: ANTHROPIC_API_KEY
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.providers }}, key: ANTHROPIC_API_KEY, optional: true}}
+{{- end }}
+
 {{/* What a process outside the Ray cluster needs to reach it: the cluster's token (KubeRay keeps it in a Secret named
 after the cluster, and gives it to Ray's own pods itself). */}}
 {{- define "rollout.rayClientEnv" -}}

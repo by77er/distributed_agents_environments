@@ -3,7 +3,7 @@
 # torn down when the job ends. `rollout_train.submitting.rendered` fills in each run's name, entrypoint, runtime
 # environment and metadata, sizes the head from the run's demand (its requests, Ray's CPUs and GPUs) within this pod's
 # limits, adds worker pods made from it where one pod cannot hold the run, and, with Kueue, its queue's label and
-# `suspend`; the rest is this file's. When the driver or its pod is lost, the job is submitted again up to
+# `suspend`; the rest is this file's. Its pods have the hosted APIs' keys from the Secret `providers`, by reference. When the driver or its pod is lost, the job is submitted again up to
 # `backoffLimit` times, and the run goes on from the ledger.
 apiVersion: ray.io/v1
 kind: RayJob
@@ -34,6 +34,7 @@ spec:
               workingDir: /opt/rollout/source
               env:
                 {{- include "rollout.env" . | nindent 16 }}
+                {{- include "rollout.providerEnv" . | nindent 16 }}
                 - {name: RAY_ENABLE_UV_RUN_RUNTIME_ENV, value: "0"}
               volumeMounts:
                 {{- include "rollout.volumeMounts" . | nindent 16 }}

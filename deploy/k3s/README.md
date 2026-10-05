@@ -77,8 +77,9 @@ Every pod of the platform, a run's head pod among them, mounts the same things:
 - the Secret `gateway-keys` at `/etc/rollout-secrets/gateway`, and the Secret `tinker` at `/root/.tinker`.
 
 Each process gets the stores' credentials from the Secret `stores` (`PGPASSWORD`, `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`), `AWS_ENDPOINT_URL`, and `TINKER_API_KEY` where the Secret `tinker` has one. Every container
-has requests and a memory limit (`values.yaml`), which keep the node's memory from running out.
+`AWS_SECRET_ACCESS_KEY`), `AWS_ENDPOINT_URL`, and `TINKER_API_KEY` where the Secret `tinker` has one. The gateway and
+each run's head pod also get `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` where the Secret `providers` has them. Every
+container has requests and a memory limit (`values.yaml`), which keep the node's memory from running out.
 
 ### Install
 
@@ -91,8 +92,13 @@ kubectl -n rollout create secret generic stores --from-literal=POSTGRES_PASSWORD
 kubectl -n rollout create secret generic gateway-keys --from-literal=gateway.keys="k1 $(openssl rand -hex 32)"
 kubectl -n rollout create secret generic tinker --from-file=credentials.json=$HOME/.tinker/credentials.json \
   --from-literal=TINKER_API_KEY="$(python3 -c 'import json, os; d = json.load(open(os.path.expanduser("~/.tinker/credentials.json"))); print(d["keys"][d["default"]]["key"], end="")')"
+kubectl -n rollout create secret generic providers --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY" \
+  --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
 helm upgrade --install rollout deploy/chart/rollout -n rollout
 ```
+
+The Secret `providers` holds the hosted APIs' keys (either may be left out), which the cluster config's
+`[inference.openai]` and `[inference.anthropic]` name.
 
 The Secret `tinker` holds both what `tinker auth login` wrote, which Tinker's SDK reads from `/root/.tinker`, and its
 default key as `TINKER_API_KEY`, which the cluster config names; `rollout cluster check` in a pod then finds every
