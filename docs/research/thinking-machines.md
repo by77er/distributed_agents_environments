@@ -2,7 +2,7 @@
 
 See [training](../libraries/rollout-train/training.md), [channels and engines](../libraries/rollout-train/channels.md),
 [checkpoints](../libraries/rollout-train/checkpoints.md), [deploying](../guide/deploying.md),
-[LoRA trainer](../implementations/rollout-lora.md), [the policy graph](policy-dag.md)
+[LoRA trainer](../implementations/rollout-lora.md), [the checkpoint graph](policy-dag.md)
 
 This page asks how this system trains and samples through Thinking Machines' hosted API (Tinker) as naturally as it
 does through `LoraTrainer` and `VllmEngine`, and compares Prime Intellect's offerings. The design below is implemented
@@ -149,7 +149,7 @@ over tokens, not a mean.
   [completers.py](https://github.com/thinking-machines-lab/tinker-cookbook/blob/main/tinker_cookbook/completers.py)).
 - The sampler can also score: `include_prompt_logprobs`, top-k logprobs at prompt or sampled positions, and the
   logprobs of chosen ids at chosen positions (`target_prompt_logprobs`, SDK 0.30.0). Distillation teachers would need
-  these ([policy graph](policy-dag.md#distillation)).
+  these ([checkpoint graph](policy-dag.md#distillation)).
 
 ### Checkpoints and weights
 
@@ -354,8 +354,8 @@ proposal left open:
   `create_training_client_from_state` and a fresh optimizer, warmed up.
 - **The segment ratio** takes the custom loss with one optimizer step too (its logprobs are `old`), rather than
   `importance_sampling` after a forward pass: the same cost.
-- **Adam.** `AdamParams`' defaults are 0.95 and 1e-12, not torch's; the trainer passes `beta1`, `beta2` and `eps`
-  (torch's by default).
+- **Adam.** `AdamParams`' defaults are 0.95 and 1e-12, not torch's; the trainer passes torch's (`beta1` 0.9, `beta2`
+  0.999, `eps` 1e-8).
 - **Qwen3.5's q, k and v.** Renamed, the PEFT adapter keeps Tinker's `in_proj_q`, `in_proj_k` and `in_proj_v`, and
   vLLM 0.30 adapts Qwen3.5's linear attention only as `in_proj_qkv` (packed with `in_proj_z`). The conversion joins the
   three: A stacked and B block-diagonal (three times the rank), or B stacked at the same rank when they share one A.
@@ -416,10 +416,10 @@ layout, converted as `weights = "peft"` converts one; no Tinker call):
   rank-32 adapter, 15,600 with `max_lora_rank = 128`. It widens the gap between behaviour and trainer logprobs (the
   adapter was trained over bfloat16); the truncated importance weight absorbs it, and `kl_floor` and `mean_mismatch`
   measure it.
-- Tinker adapts the unembedding by default; `train_unembed` is false here, and whether vLLM serves an `lm_head`
-  adapter is *unverified*.
+- Tinker adapts the unembedding by default; the trainer asks it not to (`train_unembed=False`), and whether vLLM serves
+  an `lm_head` adapter is *unverified*.
 
-**Distillation teachers** from the [policy graph](policy-dag.md#distillation) gain an option. A teacher of another
+**Distillation teachers** from the [checkpoint graph](policy-dag.md#distillation) gain an option. A teacher of another
 base (`Qwen/Qwen3.5-397B-A17B`, say) can score the student's tokens with `target_prompt_logprobs` or top-k prompt
 logprobs, since the Qwen3.5 family shares a tokenizer (*unverified* across sizes; to check as for the student).
 
@@ -584,7 +584,7 @@ groups, two steps), audited before anything longer:
 - Per-account rate limits.
 - Whether sampled logprobs are post-temperature.
 - Whether vLLM serves an unembedding adapter (vLLM 0.30's Qwen3.5 maps `lm_head` adapters onto its output embeddings;
-  not run). `train_unembed` is false by default.
+  not run). The trainer does not adapt the unembedding (`train_unembed=False`).
 - What training is billed on: every token of a datum (assumed), or the trained rows only.
 - How often turns hit Tinker's prefix cache.
 - Checkpoint sizes: 86.5 million parameters for a rank-32 adapter of the 9B model without the output layer, in
