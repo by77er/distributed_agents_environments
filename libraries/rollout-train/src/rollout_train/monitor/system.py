@@ -58,6 +58,7 @@ from rollout_train.monitor.environments import Read, described, listed, page_of
 from rollout_train.monitor.feed import NOTES, FeedReader, plain
 from rollout_train.monitor.lineage import lineage
 from rollout_train.monitor.machines import kind_of, machines
+from rollout_train.monitor.queue import from_kueue, from_ray, ray_totals
 from rollout_train.monitor.scores import CHECKPOINT, evals_in, evals_of, history_of, path_of, subjects_in, suites_in
 from rollout_train.monitor.statistics import newest, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
@@ -100,7 +101,7 @@ from rollout_train.settings import EVALS_SUITE, TRAINER, Desired, desired_settin
 from rollout_train.settings import PAUSED as PAUSE
 from rollout_train.settings import checked as checked_setting
 from rollout_train.stores import opened
-from rollout_train.submitting import backend_of, followed, stopped, submit
+from rollout_train.submitting import KubernetesApi, backend_of, followed, stopped, submit
 from rollout_train.validation import with_weights
 
 if TYPE_CHECKING:
@@ -791,6 +792,20 @@ class System:
             beats, now=time.time(), claims=claims, fences=fences, leases=await held.all() if held else [],
             serving=serving,
         )  # fmt: skip
+
+    async def queue(self) -> dict[str, Any]:
+        """How the runs share what the cluster gives them (`rollout_train.monitor.queue`): as Kueue says, where the
+        cluster config names a queue (`[kubernetes] queue`), read with the API server the config names; else as the
+        runs' drivers say in their beats, with the Ray cluster's totals where this process is connected to Ray."""
+        called = cast(dict[str, str], (await self._names())["runs"])
+        section = self._cluster.kubernetes if self._cluster is not None else None
+        if section is not None and section.queue is not None:
+            api = getattr((self._backends or {}).get("kubernetes"), "api", None)
+            found = launches_of(self._ledger)
+            listed = await found.all() if found is not None and await asyncio.to_thread(present, self._ledger) else []
+            given = api if isinstance(api, KubernetesApi) else KubernetesApi(section.api)
+            return await from_kueue(given, section.namespace, section.queue, listed, called)
+        return from_ray(await self._beats(), called, ray_totals())
 
     @contextlib.asynccontextmanager
     async def one_reading(self) -> AsyncGenerator[None]:

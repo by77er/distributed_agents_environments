@@ -185,8 +185,8 @@ class RayJobs:
 
 
 class KubernetesApi:
-    """What makes, reads and deletes RayJobs: the API server at `base`, with the service account's token and CA (by
-    default the pod's own), over `transport` where given (a test's)."""
+    """What makes, reads and deletes RayJobs, and reads Kueue's objects: the API server at `base`, with the service
+    account's token and CA (by default the pod's own), over `transport` where given (a test's)."""
 
     ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 
@@ -241,6 +241,17 @@ class KubernetesApi:
             return []
         response.raise_for_status()
         return cast(list[dict[str, Any]], response.json().get("items") or [])
+
+    async def read(self, path: str) -> dict[str, Any] | None:
+        """What the API server answers at `path` (`/apis/GROUP/VERSION/...`): none where it is not found. Raises
+        `RuntimeError` for any other refusal (a resource the account may not read, an API that is not served)."""
+        async with self._client() as client:
+            response = await client.get(path)
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 300:
+            raise RuntimeError(f"the API server refused {path} ({response.status_code}): {response.text[:TAIL]}")
+        return cast(dict[str, Any], response.json())
 
     async def delete(self, namespace: str, name: str) -> None:
         async with self._client() as client:

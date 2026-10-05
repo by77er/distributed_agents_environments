@@ -5,6 +5,7 @@ A topic is a thing the page shows, by name:
 
 - `system`: where every run stands (`System.snapshot`);
 - `machines`: every machine that beats and the roles on it (`System.machines`);
+- `queue`: how the runs share what the cluster gives them, as Kueue or Ray says (`System.queue`);
 - `launches`: the runs asked for, each with its job and state (`System.launches`);
 - `offers`: what a run can be asked for on the monitor's cluster (`System.offers`);
 - `presets`, `preset/NAME`: every preset's newest version, and one preset's versions (`System.presets`,
@@ -119,6 +120,8 @@ class Hub:
             return await system.snapshot()
         if topic == "machines":
             return await system.machines()
+        if topic == "queue":
+            return await system.queue()
         if topic == "launches":
             return await system.launches()
         if topic == "offers":

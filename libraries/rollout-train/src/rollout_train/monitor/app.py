@@ -71,6 +71,8 @@ def create_app(
     - `/api/system`: where every run stands (`System.snapshot`);
     - `/api/machines`: every machine that beats and the roles on it, what each holds and how full it is
       (`System.machines`);
+    - `/api/queue`: how the runs share what the cluster gives them: its capacity and what is used, the runs admitted
+      and what each holds, and the runs that wait, in the queue's order, with why (`System.queue`);
     - `/api/evals`: the suites, their versions and the evals that played them (`System.evals`); `POST
       /api/suites/{name}` makes a suite or its next version, which its name then points to (`System.save_suite`);
     - `/api/evals/subjects`: every subject (a checkpoint or a base model) that has had an eval
@@ -156,6 +158,9 @@ def create_app(
 
     async def machines(request: Request) -> Response:
         return answered(request, await hub.read("machines"))
+
+    async def queue(request: Request) -> Response:
+        return answered(request, await hub.read("queue"))
 
     async def group(request: Request) -> Response:
         run, number = request.path_params["run"], int(request.path_params["number"])
@@ -438,6 +443,7 @@ def create_app(
         Route("/favicon.svg", icon),
         Route("/api/system", state),
         Route("/api/machines", machines),
+        Route("/api/queue", queue),
         Route("/api/offers", offered),
         Route("/api/launches", launches, methods=["GET", "POST"]),
         Route("/api/launches/check", check, methods=["POST"]),
