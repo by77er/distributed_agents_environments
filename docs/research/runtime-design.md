@@ -27,7 +27,7 @@ Read against main `0f90a2b`. Names in `code` that do not exist yet are what this
 | What replaces `Platform.open()` | `RunActors`: a run job's assembly of its placement group, trainer actor, engine hosts and runners, closed when the job ends. The loop no longer publishes to engines: it writes what each channel serves, and whatever serves follows |
 | The gateway | One Ray Serve application for the cluster. It builds each run's channels from the run's start (provider, model, renderer, limits) and samples them through one interface: engine host actors, vLLM servers elsewhere, Tinker's sampler (all asked for a checkpoint by name), or a frontier API |
 | Launchers | One detached launcher actor per cluster. It offers capacity, inference providers and trainers with their capabilities and the pairs that bridge, environments and sandbox pools; it validates and submits Ray jobs, and nothing else |
-| The acceptance test | A GSM8K run trained on Tinker (LoRA, Qwen/Qwen3.5-4B) and served on the local vLLM pool through the Tinker → PEFT bridge, launched from the New run form, with the `math` suite on a schedule, spend capped near $2 |
+| The acceptance test | A GSM8K run trained on Tinker (LoRA (low-rank adaptation), Qwen/Qwen3.5-4B) and served on the local vLLM pool through the Tinker → PEFT (parameter-efficient fine-tuning) bridge, launched from the New run form, with the `math` suite on a schedule, spend capped near $2 |
 
 ## What profiles hold today, and where each part goes
 
@@ -387,7 +387,7 @@ model with Qwen3.5's linear-attention layers when each of q, k and v has an A of
 | The trained channel | token-exact, sampled-token logprobs, honours sampling, and `loads` reached by a bridge from the trainer's format | The importance weight needs the behaviour logprob of each exact sampled token. Local vLLM and Tinker qualify; OpenAI and Anthropic do not: "the OpenAI Responses API returns text, not the sampled token ids and their logprobs, which the importance weight needs" |
 | Another channel (a fixed opponent, a judge) | any | Its turns are recorded and never trained on |
 | An eval's subject | any; a checkpoint needs a bridge to the provider's `loads` | |
-| An SFT data source (a dataset's turns) | any | Without sampled logprobs the data is supervised: the trainer computes logprobs itself and nothing is importance-corrected. The dataset records `supervision: "supervised"` (else `"importance"`), and the imitation step records it |
+| An SFT (supervised fine-tuning) data source (a dataset's turns) | any | Without sampled logprobs the data is supervised: the trainer computes logprobs itself and nothing is importance-corrected. The dataset records `supervision: "supervised"` (else `"importance"`), and the imitation step records it |
 | A distillation teacher | prompt logprobs (to score the student's tokens), and top-k logprobs with k at least the objective's `distillation.top_k` where it reads them; logprobs confirmed by a live test (not Tinker's yet); the same renderer family as the student | A teacher for every route, and a route for the environment the run plays (`rollout_train.validation`) |
 | A trainer that scores (distillation on the student's side, recomputed logprobs for supervised data) | the trainer's `scores` | |
 
@@ -669,6 +669,17 @@ What changes in the loop and evals:
 
 ### How a launch becomes a run
 
+The sequence below, in words:
+
+1. The New run form posts the environment, settings and preset to the monitor.
+2. The monitor asks the environment worker for its declarations (sandboxes, tools, version), validates the launch,
+   and records it as asked.
+3. The launcher claims the launch, validates it again against the capacity free now, and submits a Ray job whose
+   entrypoint is `rollout_train.jobs train --launch ID`.
+4. The job asks the environment worker for rows, the program's shape and the curriculum, reserves its placement group
+   and starts its actors, and notes the launch running.
+5. Runners sample through the gateway with signed keys, and the gateway samples the engine hosts by checkpoint name.
+
 ```mermaid
 sequenceDiagram
     participant Form as New run form
@@ -858,6 +869,17 @@ So the gateway asks every token-level backend the same question (sample this pro
 records what comes back with the checkpoint the answer names.
 
 ### A Tinker-trained run served locally, and evals
+
+The sequence below, in words:
+
+1. The training loop asks the Tinker trainer for a step, and gets back the sampler checkpoint and state
+   (`weights/tinker.json`).
+2. The loop records the checkpoint (format `tinker`), and runs the bridge task `rollout_tinker.bridges:peft`, which
+   records the bridging and stores the PEFT files as blobs.
+3. The loop records that the policy channel serves the checkpoint, with the bridged PEFT files.
+4. The engine host follows that record, fetches the files, and loads the adapter under the checkpoint's id.
+5. For each turn the gateway asks the engine host to generate with that adapter, and gets back tokens, logprobs and
+   the checkpoint that served them.
 
 ```mermaid
 sequenceDiagram
@@ -1082,6 +1104,9 @@ shared code changes (the loop, the gateway, contracts).
 | 20 | The acceptance run | The GSM8K run below, launched from the form; its numbers recorded in `docs/implementations/rollout-tinker.md` | all | the run itself, audited before it is trusted | — |
 
 ### What can run in parallel
+
+The graph below shows which commits each commit of the table depends on, the same as the table's "Depends on"
+column; the paragraph after it names the tracks that can start at once.
 
 ```mermaid
 flowchart LR

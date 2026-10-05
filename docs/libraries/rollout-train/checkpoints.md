@@ -82,13 +82,13 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
 A full checkpoint holds every weight of a model, in the model's own layout (`config.json`, safetensors files, the
 tokenizer), as a trainer of every weight writes it or a merge makes it.
 
-- **A merge folds a LoRA checkpoint into the weights it was trained over** (`rollout_train.merging.merge`; `rollout
-  merge`): each adapted layer's weight becomes W + (alpha / rank) · B · A, in a full checkpoint of its own. Its parent
-  is the LoRA checkpoint, its base the model the merged weights came from, and no run made it. What folds an adapter
-  in is named as `module:name` (`rollout_lora.merge:merge`). An adapter trained over a quantized model merges into
-  the same model's unquantized weights (`--base Qwen/Qwen3.5-9B` for one trained over `…-AWQ-4bit`): the layers have
-  the same names. A Tinker checkpoint's weights are a pointer: what merges is the adapter its
-  [bridge](#bridges) made of them (`peft-from-tinker`), which must have run first.
+- **A merge folds a LoRA (low-rank adaptation) checkpoint into the weights it was trained over**
+  (`rollout_train.merging.merge`; `rollout merge`): each adapted layer's weight becomes W + (alpha / rank) · B · A, in a
+  full checkpoint of its own. Its parent is the LoRA checkpoint, its base the model the merged weights came from, and no
+  run made it. What folds an adapter in is named as `module:name` (`rollout_lora.merge:merge`). An adapter trained over
+  a quantized model merges into the same model's unquantized weights (`--base Qwen/Qwen3.5-9B` for one trained over
+  `…-AWQ-4bit`): the layers have the same names. A Tinker checkpoint's weights are a pointer: what merges is the adapter
+  its [bridge](#bridges) made of them (`peft-from-tinker`), which must have run first.
 - **A run started from a full checkpoint trains over it.** Its trained channel's engines and its trainer load that
   checkpoint's files as their model (fetched to `directory/bases/ID`). With a LoRA trainer, the run's first step
   begins a new adapter over those weights, and its checkpoints' base is the full checkpoint's id; with a trainer of
@@ -137,7 +137,7 @@ each bridge once per checkpoint.
 | Bridge | Task | What it does |
 |---|---|---|
 | `none` | none | Tinker's sampler reads the checkpoint's pointer: its own files are served |
-| `peft-from-tinker` | `rollout_tinker.bridges:peft` | Tinker's archive of the sampler checkpoint downloaded and written in PEFT's layout ([rollout-tinker](../../implementations/rollout-tinker.md#serving-tinkers-adapters-here)); its settings name the service it asks |
+| `peft-from-tinker` | `rollout_tinker.bridges:peft` | Tinker's archive of the sampler checkpoint downloaded and written in the layout of PEFT (parameter-efficient fine-tuning) ([rollout-tinker](../../implementations/rollout-tinker.md#serving-tinkers-adapters-here)); its settings name the service it asks |
 | `verbatim`, `full-reload` | `rollout_train.bridges:verbatim` | each file linked (or copied) as it is, so its blobs are the same |
 | `merge-quantize` | `rollout_lora.bridges:merge_quantize` | the adapter merged into its base as full weights, which a provider that quantizes as it loads (vLLM's `quantization = "fp8"`) serves; refused for a provider model quantized beforehand |
 

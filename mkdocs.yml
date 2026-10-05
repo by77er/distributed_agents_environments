@@ -4,6 +4,8 @@ site_description: Reinforcement learning for agents, from one GPU to a cluster
 docs_dir: docs
 site_dir: site
 use_directory_urls: false  # the built site also works when opened straight from disk
+exclude_docs: |
+  includes/
 
 theme:
   name: material
@@ -19,31 +21,50 @@ theme:
     - search.highlight
     - search.share
     - content.code.copy
+    - content.tooltips
     - toc.follow
+  # Indigo keeps links and the header at a contrast of at least 4.5:1 in both schemes. The toggle cycles through the
+  # system's preference, light and dark.
   palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: teal
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: teal
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/brightness-4
-        name: Switch to light mode
+        name: Switch to the system's preference
 
 markdown_extensions:
   - tables
   - admonition
   - attr_list
+  - abbr
   - toc:
       permalink: true
+      permalink_title: Link to this section
       slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}  # GitHub-compatible anchors
   - pymdownx.highlight
   - pymdownx.inlinehilite
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.snippets:
+      base_path: [docs/includes]
+      auto_append: [abbreviations.md]  # every page explains these abbreviations on hover and focus
+      check_paths: true
 
 plugins:
   - search:

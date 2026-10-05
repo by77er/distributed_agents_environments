@@ -172,7 +172,7 @@ The binding's `ToolBinding` says where it is served:
 | `ToolBinding` | The tool set is |
 |---|---|
 | `ToolBinding(local="name")` | in the runner's process, registered as `tool_sets={"name": tool_set}` |
-| `ToolBinding(url="http://host:8700")` | served over HTTP, wherever its own infrastructure runs ([below](#serving-a-tool-set-over-http)) |
+| `ToolBinding(url="http://host:8700")` | served over HTTP, wherever its own infrastructure runs ([serving a tool set over HTTP](#serving-a-tool-set-over-http)) |
 
 Tool names are unique within a run: an imported tool that shares a name with another import or with a `@tool`
 method raises `ValueError`.

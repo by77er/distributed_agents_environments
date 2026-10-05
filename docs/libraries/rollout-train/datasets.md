@@ -128,14 +128,14 @@ rollout imitate PROFILE --dataset REF [--start REF] [--name NAME] [--directory R
     [--learning-rate R] [--warmup N] [--passes N] [--resume-optimizer]
 ```
 
-The profile's trainer takes the step: the LoRA trainer, or the trainer of every weight (`rollout_lora:FullTrainer`).
-A dataset of examples is trained on by a likelihood (`sft`, unless the run names another likelihood preset), each
-example weighted 1; a dataset of pairs or labelled examples by the preference preset the run names
-(`--set objective.preset=dpo`), its items the [pairs or labelled examples](training.md#objectives) the manifest
-holds. A dataset's kind and the objective's family must agree. The step is a run of its own (the profile's directory, or `--directory`), registered under
-`--name`; its start record says `kind: imitation`, the dataset, and the checkpoint it trains from. It trains from
-the newest checkpoint the run made, else `--start` (any [reference](checkpoints.md#references)), else the profile's
-`[trainer] start`, else the base model.
+The profile's trainer takes the step: the LoRA (low-rank adaptation) trainer, or the trainer of every weight
+(`rollout_lora:FullTrainer`). A dataset of examples is trained on by a likelihood (`sft`, unless the run names another
+likelihood preset), each example weighted 1; a dataset of pairs or labelled examples by the preference preset the run
+names (`--set objective.preset=dpo`), its items the [pairs or labelled examples](training.md#objectives) the manifest
+holds. A dataset's kind and the objective's family must agree. The step is a run of its own (the profile's directory, or
+`--directory`), registered under `--name`; its start record says `kind: imitation`, the dataset, and the checkpoint it
+trains from. It trains from the newest checkpoint the run made, else `--start` (any
+[reference](checkpoints.md#references)), else the profile's `[trainer] start`, else the base model.
 
 - **Its parents** are the checkpoint it trained from, then the checkpoints that sampled the examples it trained on,
   by depth. The checkpoint graph shows those as learned-from edges. A step

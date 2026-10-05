@@ -23,12 +23,12 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 - **The gateway speaks the three APIs verifiers relays:** Chat Completions (verifiers' `null`, `bash` and most
   harnesses), Responses (Codex) and Messages (Claude Code), with streaming, tool calls, reasoning, errors and
   `Idempotency-Key` in each. This is also the front door for testing black-box harnesses against each other.
-- **The spike:** `primeintellect/gsm8k` 0.1.4 from the Environments Hub, Qwen/Qwen3-0.6B on vLLM. The base model
-  solved 36 of 100 starts of a frozen suite through `rollout eval`; verifiers' own `vf-eval`, against the gateway,
-  scored 0.39 on the same tasks, with the same outcome on 83 of 100 (both measured before the gateway closed
-  Qwen3's thinking at its budget, so partly limited by finishing within 768 tokens). A LoRA run took 3 steps. The
-  recorded logprobs differ from the trainer's, recomputed on the same tokens, by 0.0167 per token on average (median
-  0.0007), as vLLM and the trainer always do here: the tokens are the ones sampled.
+- **The spike:** `primeintellect/gsm8k` 0.1.4 from the Environments Hub, Qwen/Qwen3-0.6B on vLLM. The base model solved
+  36 of 100 starts of a frozen suite through `rollout eval`; verifiers' own `vf-eval`, against the gateway, scored 0.39
+  on the same tasks, with the same outcome on 83 of 100 (both measured before the gateway closed Qwen3's thinking at its
+  budget, so partly limited by finishing within 768 tokens). A LoRA (low-rank adaptation) run took 3 steps. The recorded
+  logprobs differ from the trainer's, recomputed on the same tokens, by 0.0167 per token on average (median 0.0007), as
+  vLLM and the trainer always do here: the tokens are the ones sampled.
 - **What does not carry over:** an episode is all or nothing (ours can resume mid-episode); every agent of a
   multi-agent verifiers environment would share the one model address; tasksets have no order, so our curriculum
   has nothing to unlock; splits are whatever each taskset's config calls them.
@@ -36,7 +36,7 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
   commands and changed pins. Hub packages written for v0 do not load on the version that installs beside vLLM.
 - **Exporting our environments as verifiers packages** is possible for single-agent ones (a taskset of our starts,
   a harness that runs our program against the interception endpoint) and costs our durability and exact recording
-  inside Prime's stack ([below](#exporting-our-environments-as-verifiers-packages)).
+  inside Prime's stack ([exporting our environments](#exporting-our-environments-as-verifiers-packages)).
 
 ## How the pieces map
 
@@ -49,9 +49,9 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 | A harness (`null`, `bash`, Codex, Claude Code) | A harness inside the environment, given a model address | Cleanly: verifiers runs it |
 | The interception server | The gateway's APIs for harnesses | Both stand between harness and model; verifiers' relays to ours |
 | verifiers' renderers rebuilding tokens from requests | Our renderer rendering each request before sampling it | Ours records; verifiers' eval client records no tokens |
-| A runtime (`subprocess`, `docker`, `prime`, `modal`) | Where the episode runner runs the program | `subprocess` here; remote ones need a tunnel ([below](#runtimes-and-sandbox-leases)) |
-| `Env.run(task, agents)` with several agents | A program with several model slots | Not mapped: one address for every agent ([below](#multi-agent-environments)) |
-| `Episode`, retried whole | An episode, played again as a new attempt when its run is lost | Both start the episode over ([below](#durability)) |
+| A runtime (`subprocess`, `docker`, `prime`, `modal`) | Where the episode runner runs the program | `subprocess` here; remote ones need a tunnel ([runtimes and sandbox leases](#runtimes-and-sandbox-leases)) |
+| `Env.run(task, agents)` with several agents | A program with several model slots | Not mapped: one address for every agent ([multi-agent environments](#multi-agent-environments)) |
+| `Episode`, retried whole | An episode, played again as a new attempt when its run is lost | Both start the episode over ([durability](#durability)) |
 | `BestOfNEnv`, `-r n` rollouts of a task | A group: `group_size` episodes of one start | Ours is the unit of a group-relative update |
 | `vf-eval -n N` over the first tasks | A suite: frozen starts, one per seed | Different selection; both reproducible |
 
@@ -119,9 +119,9 @@ statistics:
 | 2 | 0.0362 | 0.0047 | 0.0056 | 0.012 |
 | 3 | 0.0408 | 0.0067 | 0.0059 | 0.008 |
 
-Step 1's segments were sampled by the weights it started from, so its `mean_mismatch` is the engine's and the
-trainer's numerical difference alone; later steps add staleness. Each step moved the policy by a KL of 0.006 to
-0.008.
+Step 1's segments were sampled by the weights it started from, so its `mean_mismatch` is the engine's and the trainer's
+numerical difference alone; later steps add staleness. Each step moved the policy by a Kullback-Leibler (KL) divergence
+of 0.006 to 0.008.
 
 **Token exactness.** Every recorded segment of the base model's turns was scored again by `rollout_lora`'s policy
 (the base model, its adapter zero), token for token, against the logprobs the gateway kept:

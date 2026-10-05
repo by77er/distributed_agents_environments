@@ -20,7 +20,7 @@ libraries; it is installed with either the `gpu` or the `tinker` extra.
 | Module | What it holds |
 |---|---|
 | `settings` | `StepSettings`: a step's settings, which the LoRA, full-weight and Tinker trainers take alike. Importing it does not load torch |
-| `terms` | The loss of one weighted segment (`policy_gradient`, `likelihood`) or of preference items (`pair`, `labelled`), the importance weight, the KL estimators, aggregation, and what a minibatch's terms add up to (`SUMS`, `tally`) |
+| `terms` | The loss of one weighted segment (`policy_gradient`, `likelihood`) or of preference items (`pair`, `labelled`), the importance weight, the Kullback-Leibler (KL) divergence estimators, aggregation, and what a minibatch's terms add up to (`SUMS`, `tally`) |
 | `distillation` | The loss of one distilled segment (`distillation`, and `distilled` for either family): the policy-gradient form, the top-k divergences (`top_k_divergence`), and a policy gradient's distillation term |
 | `step` | `PolicyStep`, a step over a batch on a local policy; `Plan`, which items a step takes and in which minibatches; `metrics` and `line`, a step's and a minibatch's statistics |
 

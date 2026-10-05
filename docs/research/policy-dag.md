@@ -59,7 +59,7 @@ Whether it is on policy or off it is decided by its inputs: whose samples it tra
 |---|---|---|
 | Samples | the teachers' trajectories | the student's own |
 | Where from | episodes in other runs (the teachers'), or episodes it plays with the teachers served | episodes it plays with the student served, as a training run does |
-| Objective | `likelihood` on the teachers' sampled tokens (forward KL on samples), as imitation does | per-token reverse KL toward the teachers: each sampled token's advantage is `log teacher(x) − log student_old(x)`, under the token ratio and importance weight the policy gradient already uses |
+| Objective | `likelihood` on the teachers' sampled tokens (forward Kullback-Leibler (KL) divergence on samples), as imitation does | per-token reverse KL toward the teachers: each sampled token's advantage is `log teacher(x) − log student_old(x)`, under the token ratio and importance weight the policy gradient already uses |
 | Needs | the teachers' tokens only | the teachers' logprobs of the student's tokens |
 
 Several teachers:
@@ -68,9 +68,10 @@ Several teachers:
 - On policy, each segment needs one target. Either a teacher is chosen by row (`teacher_by_row`: the teacher that
   was trained on those rows), or the target is the teachers' mixture (`log mean exp` of their logprobs).
 
-The teachers' logprobs come from the trainer, in the step: teachers of the same base are LoRA adapters it can load
-beside the student's, without gradient. Teachers of another base are scored by an engine, through a request that
-names the exact teacher checkpoint. The `Trainer` protocol would take the teachers' checkpoints with the batch.
+The teachers' logprobs come from the trainer, in the step: teachers of the same base are LoRA (low-rank adaptation)
+adapters it can load beside the student's, without gradient. Teachers of another base are scored by an engine, through a
+request that names the exact teacher checkpoint. The `Trainer` protocol would take the teachers' checkpoints with the
+batch.
 
 ### The records (proposed)
 

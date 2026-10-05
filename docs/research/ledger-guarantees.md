@@ -186,7 +186,7 @@ over its replacement" (`ledger.py:10-12`, checkpoints.md "The ledger").
 
 - A claim is an append to `runs/RUN/claims` under `GROUP/EPISODE/ATTEMPT`, under the runner's fence `runners/NAME`.
   The runner whose append succeeded then takes the episode's fence, `runs/RUN/episodes/GROUP/EPISODE`
-  ([below](#the-fence-per-episode)).
+  ([the fence per episode](#the-fence-per-episode)).
 - `Claims.holds` says a claim holds if all of these are true:
   - it is its episode's latest attempt (no claim of a higher attempt exists);
   - it is not noted in `interrupted`;

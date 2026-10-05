@@ -113,7 +113,7 @@ headers name as for a sample:
 A key is signed, and says by itself which session it samples for: the gateway verifies it with nothing but the
 secret, and looks nothing up.
 
-```
+```text
 rk1.KID.PAYLOAD.SIGNATURE
 ```
 

@@ -207,8 +207,8 @@ Code: `rollout_train.inference.remote` · See [`RemoteEngine`](../../guide/refer
 [`RemoteChannel`](../../guide/reference.md#remotechannel), [deploying](../../guide/deploying.md#engines-on-other-machines)
 
 An engine elsewhere is a stock vLLM OpenAI-compatible server, or a router or proxy in front of several. The model a
-request names is the checkpoint it samples from: the base model by its own name, a LoRA checkpoint by its id, loaded as
-an adapter of that name.
+request names is the checkpoint it samples from: the base model by its own name, a LoRA (low-rank adaptation) checkpoint
+by its id, loaded as an adapter of that name.
 
 `RemoteEngine(model, address=, connection=)` is an `Engine` over that API, serving `model` under its own name:
 

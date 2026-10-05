@@ -53,12 +53,12 @@ learning_rate = 1e-6
 
 ### Merging
 
-`rollout_lora.merge.merge(base, adapter, into)` folds an adapter in PEFT's layout into a model (a name or a
-directory) and writes the merged model to `into`, reading the base's safetensors files one at a time: each adapted
-layer's weight becomes W + (alpha / rank) · B · A, computed in float32 and stored in the base's dtype, and every
-other weight is copied, with the configuration and tokenizer. It refuses an adapter whose layers the base lacks or
-whose update has another shape. It is what `rollout merge` calls by default
-([full weights and merges](../libraries/rollout-train/checkpoints.md#full-weights-and-merges)).
+`rollout_lora.merge.merge(base, adapter, into)` folds an adapter in the layout of PEFT (parameter-efficient fine-tuning)
+into a model (a name or a directory) and writes the merged model to `into`, reading the base's safetensors files one at
+a time: each adapted layer's weight becomes W + (alpha / rank) · B · A, computed in float32 and stored in the base's
+dtype, and every other weight is copied, with the configuration and tokenizer. It refuses an adapter whose layers the
+base lacks or whose update has another shape. It is what `rollout merge` calls by default ([full weights and
+merges](../libraries/rollout-train/checkpoints.md#full-weights-and-merges)).
 
 ## Settings
 
@@ -88,7 +88,7 @@ A step is told where its files go (`into`) and leaves:
 |---|---|
 | `weights/` | The adapter, in PEFT's layout (`adapter_config.json`, `adapter_model.safetensors`), which vLLM loads as it is. Weights are saved as float32: the next step starts from this file, and updates are smaller than bfloat16 resolves |
 | `state/optimizer.pt` | The optimizer's state after the step |
-| `state/minibatches.jsonl` | What each minibatch of the step did: segments, tokens, loss, clipped share, KL estimate, learning rate, gradient norm |
+| `state/minibatches.jsonl` | What each minibatch of the step did: segments, tokens, loss, clipped share, Kullback-Leibler (KL) divergence estimate, learning rate, gradient norm |
 
 The trainer keeps nothing of its own between steps: a step starts from the adapter and the optimizer's state of
 the checkpoint it is given, so any `LoraTrainer` can take any step from any checkpoint. A run keeps each step's files as a

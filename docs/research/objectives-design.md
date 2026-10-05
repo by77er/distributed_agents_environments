@@ -9,17 +9,17 @@ note: see [Design notes](README.md) for the others.
 
 ## Goals
 
-- An objective is chosen by its **family**, the primary selector, and composed from **components**. These are
-  orthogonal settings (the advantage, the ratio, clipping, importance correction, KL, entropy, aggregation, the
-  reference), so a combination is a configuration rather than another hard-coded loss. *Built.*
+- An objective is chosen by its **family**, the primary selector, and composed from **components**. These are orthogonal
+  settings (the advantage, the ratio, clipping, importance correction, Kullback-Leibler (KL) divergence, entropy,
+  aggregation, the reference), so a combination is a configuration rather than another hard-coded loss. *Built.*
 - The objectives of the literature ship as **presets**: each one a family plus component values, cited, and tested
   against a direct transcription of the paper's formula. A run names a preset and overrides any component. *Built.*
 - Two more sources of supervision: **distillation** from a teacher's logprobs, on-policy and off-policy (not black-box
   distillation from text alone), *built* as library code; and **LLM judges** as a source of rewards and preferences,
   *proposed*.
-- One definition serves every training provider. Local LoRA and full-weight trainers compute it in torch. Tinker runs
-  it through its custom-loss path, or through its built-in loss when the composition is one Tinker has built in.
-  *Built.*
+- One definition serves every training provider. Local LoRA (low-rank adaptation) and full-weight trainers compute it in
+  torch. Tinker runs it through its custom-loss path, or through its built-in loss when the composition is one Tinker
+  has built in. *Built.*
 
 ## Families
 
@@ -57,7 +57,7 @@ validation refuses the rest. Every component below is built but those marked pro
 | `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient, after the group's baseline) | policy_gradient; distillation (`reward` in the policy-gradient form) |
 | `kl.coefficient` | a number | policy_gradient, distillation |
 | `entropy.coefficient` | a number | policy_gradient |
-| `aggregate` | `token_mean` (over the minibatch's tokens), `segment_mean` (over each segment's tokens, then segments), `segment_sum` (summed over each segment's tokens, then a mean over segments, as REINFORCE and RLOO), `constant` (summed and divided by a fixed token count, `constant_tokens`, as Dr. GRPO) | policy_gradient, likelihood, distillation; a preference loss is a mean over its items |
+| `aggregate` | `token_mean` (over the minibatch's tokens), `segment_mean` (over each segment's tokens, then segments), `segment_sum` (summed over each segment's tokens, then a mean over segments, as REINFORCE and RLOO), `constant` (summed and divided by a fixed token count, `constant_tokens`, as Dr. GRPO (group relative policy optimization)) | policy_gradient, likelihood, distillation; a preference loss is a mean over its items |
 | `reference` | `base` (the adapter switched off, or a frozen copy for a full-weight trainer), `none`; `checkpoint` (a named one) proposed | preference, and policy_gradient or distillation with a KL to the reference |
 | `preference.loss` | `sigmoid` (DPO), `hinge`, `square` (IPO), `margin` (SimPO), `odds_ratio` (ORPO), `kto` | preference |
 | `preference.beta`, `preference.margin` | numbers (for `odds_ratio`, beta weighs the term, as TRL's ORPO) | preference |

@@ -39,12 +39,12 @@ How the turns went, read from each agent's next observation (`last_action`):
 ## Candidates
 
 All of these are rejection sampling over the policy's own episodes except the frontier one. "Sampled tokens" is
-what an SFT step learns from; every example also carries its prompt as context.
+what an SFT (supervised fine-tuning) step learns from; every example also carries its prompt as context.
 
 | Dataset | Rule | Size today | Value | Risks |
 |---|---|---|---|---|
 | **Solved, all** | completed and solved episodes, every turn | 65 episodes, 13 tasks, 2.88M sampled tokens | the most data | half its turns are failed actions; the easy tasks dominate (t018 9, t004 7 episodes) |
-| **Best-of-group** | per group, the solved episode with the highest reward, then the shortest | 26 episodes, 13 tasks, 1.26M sampled tokens | the policy's best play for each start, one per group; it is what GRPO's advantage already prefers | small; still half failed actions |
+| **Best-of-group** | per group, the solved episode with the highest reward, then the shortest | 26 episodes, 13 tasks, 1.26M sampled tokens | the policy's best play for each start, one per group; it is what GRPO (group relative policy optimization)'s advantage already prefers | small; still half failed actions |
 | **Solved, capped per task** | solved, at most 3 episodes per task, highest reward first | 39 episodes, 13 tasks, 1.54M sampled tokens | evens out the tasks | thinner on the hard tasks than their share of play |
 | **Guided to unguided** (exists: `rollout imitate`) | solved episodes that were guided; the `way` guidance cut from their prompts | 40 episodes, 9 tasks, 1.56M sampled tokens | teaches what guidance showed, without it | only guided tasks; a cut that cannot be made exactly drops the turn |
 | **Actions that worked** (a turn filter) | of any of the above, only turns whose action came back ok | about 50% of their turns | stops the model imitating its own mistakes | "ok" is not "useful": a move or a mine that worked can still be aimless |
@@ -83,8 +83,8 @@ A dataset is a record like a checkpoint, made once and never changed.
   checkpoints: @18 to @29 for the first dataset). The graph then shows "learned from" edges to where the data came
   from, the way a distillation's teachers are shown. The step's batch already records each example's source; its
   record adds the dataset's id.
-- **Both trainers take one**, with the likelihood objective: the LoRA trainer and the full-weight trainer
-  (`rollout_lora:FullTrainer`), through the same `Weighted` segments.
+- **Both trainers take one**, with the likelihood objective: the LoRA (low-rank adaptation) trainer and the full-weight
+  trainer (`rollout_lora:FullTrainer`), through the same `Weighted` segments.
 
 The commands: `rollout dataset make RULE --run RUN [--turns FILTER ...] [--name NAME]` writes the record and the
 manifest; `rollout imitate PROFILE --dataset REF` takes the step.

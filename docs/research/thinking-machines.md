@@ -31,9 +31,9 @@ Vendors change prices, model lists and APIs often (Tinker retired 22 models in J
   and normalisation are folded into the advantages ([the objective on Tinker](#the-objective-on-tinker)). The segment
   ratio (GSPO) with more than one optimizer step per step needs the custom-loss path, which costs more.
 - **It needed no change to `Trainer`, `Engine`, `Channel`, the checkpoints or the loop.** A checkpoint's weights
-  directory holds a small pointer file naming its Tinker checkpoints (optionally beside a downloaded PEFT adapter). The
-  engine reads the pointer when the channel publishes. A profile switches backends by naming `rollout_tinker`
-  classes.
+  directory holds a small pointer file naming its Tinker checkpoints (optionally beside a downloaded PEFT
+  (parameter-efficient fine-tuning) adapter). The engine reads the pointer when the channel publishes. A profile
+  switches backends by naming `rollout_tinker` classes.
 - **Prime Intellect offers no equivalent API today.** Its shared hosted LoRA training stops taking new runs on
   2026-10-05. Its hosted training runs its own rollouts and loss through `verifiers` environments. Its useful pieces
   for us are GPU pods and the open-source `prime-rl` ([Prime Intellect, for contrast](#prime-intellect-for-contrast)).
@@ -134,7 +134,7 @@ over tokens, not a mean.
   and an advantage of 0 removes a position from the loss.
 - `ppo` takes `loss_fn_config={"clip_low_threshold": ..., "clip_high_threshold": ...}`, which are absolute bounds on
   the ratio. `cispo` defaults to 0.0 and 4.0.
-- The documentation recommends a KL penalty go into the reward, not the loss.
+- The documentation recommends a Kullback-Leibler (KL) divergence penalty go into the reward, not the loss.
 - **Custom losses.** `forward_backward_custom` runs a forward pass, calls your function on the client, then runs a
   `forward_backward` on a linear surrogate with the same gradient. It takes "1.5x as many FLOPs" and "up to 3x as long
   (wall time)" ([custom](https://tinker-docs.thinkingmachines.ai/tinker/losses/custom/index.md)). Since SDK 0.30.1 it
@@ -293,7 +293,7 @@ Notation per sampled token: `p` is now (with gradient), `old` is at the step's s
 engine recorded), `A` is the segment's advantage, `U` is the minibatch's units, and `w = min(exp(old − b), truncate)`.
 Ours is
 
-```
+```text
 token ratio:   loss = Σ_tokens −w · min(r·A, clip(r, 1−lo, 1+hi)·A) / U,     r = exp(p − old)
 ```
 
@@ -603,41 +603,44 @@ groups, two steps), audited before anything longer:
 ## Sources
 
 **Thinking Machines (Tinker)**
-- Whole documentation in one file: https://tinker-docs.thinkingmachines.ai/llms-full.txt (index: `llms.txt`)
-- Overview: https://tinker-docs.thinkingmachines.ai/tinker/index.md
-- Quickstart: https://tinker-docs.thinkingmachines.ai/tinker/quickstart/index.md
-- SDK cheatsheet: https://tinker-docs.thinkingmachines.ai/tinker/sdk-cheatsheet/index.md
-- Models & Pricing: https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/index.md and
-  https://tinker-docs.thinkingmachines.ai/tinker/models.json
-- Model deprecations: https://tinker-docs.thinkingmachines.ai/tinker/model-deprecations/index.md
-- Data model & permissions: https://tinker-docs.thinkingmachines.ai/tinker/data-model/index.md
-- Loss functions: https://tinker-docs.thinkingmachines.ai/tinker/losses/index.md, `.../losses/ppo/index.md`,
+
+- [Whole documentation in one file](https://tinker-docs.thinkingmachines.ai/llms-full.txt) (index: `llms.txt`)
+- [Overview](https://tinker-docs.thinkingmachines.ai/tinker/index.md)
+- [Quickstart](https://tinker-docs.thinkingmachines.ai/tinker/quickstart/index.md)
+- [SDK cheatsheet](https://tinker-docs.thinkingmachines.ai/tinker/sdk-cheatsheet/index.md)
+- [Models & Pricing](https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/index.md) and
+  [models (JSON)](https://tinker-docs.thinkingmachines.ai/tinker/models.json)
+- [Model deprecations](https://tinker-docs.thinkingmachines.ai/tinker/model-deprecations/index.md)
+- [Data model & permissions](https://tinker-docs.thinkingmachines.ai/tinker/data-model/index.md)
+- [Loss functions](https://tinker-docs.thinkingmachines.ai/tinker/losses/index.md), `.../losses/ppo/index.md`,
   `.../losses/cispo/index.md`, `.../losses/importance-sampling/index.md`, `.../losses/custom/index.md`
-- LoRA primer: https://tinker-docs.thinkingmachines.ai/tinker/lora-primer/index.md
-- Checkpoints: https://tinker-docs.thinkingmachines.ai/tinker/howto/checkpoints/index.md
-- OpenAI-compatible inference: https://tinker-docs.thinkingmachines.ai/tinker/compatible-apis/openai/index.md
-- Under the hood: https://tinker-docs.thinkingmachines.ai/tinker/under-the-hood/index.md
-- Session metrics: https://tinker-docs.thinkingmachines.ai/tinker/session-metrics/index.md
-- API reference: https://tinker-docs.thinkingmachines.ai/tinker/api-reference/serviceclient/index.md,
+- [LoRA primer](https://tinker-docs.thinkingmachines.ai/tinker/lora-primer/index.md)
+- [Checkpoints](https://tinker-docs.thinkingmachines.ai/tinker/howto/checkpoints/index.md)
+- [OpenAI-compatible inference](https://tinker-docs.thinkingmachines.ai/tinker/compatible-apis/openai/index.md)
+- [Under the hood](https://tinker-docs.thinkingmachines.ai/tinker/under-the-hood/index.md)
+- [Session metrics](https://tinker-docs.thinkingmachines.ai/tinker/session-metrics/index.md)
+- [API reference](https://tinker-docs.thinkingmachines.ai/tinker/api-reference/serviceclient/index.md),
   `.../trainingclient/index.md`, `.../samplingclient/index.md`, `.../restclient/index.md`, `.../types/index.md`
-- PEFT export: https://tinker-docs.thinkingmachines.ai/cookbook/deployment/lora-adapter/index.md
-- Changelog: https://tinker-docs.thinkingmachines.ai/changelog/index.md
-- SDK: https://github.com/thinking-machines-lab/tinker and https://pypi.org/project/tinker/
-- Cookbook: https://github.com/thinking-machines-lab/tinker-cookbook (`tinker_cookbook/completers.py`,
+- [PEFT export](https://tinker-docs.thinkingmachines.ai/cookbook/deployment/lora-adapter/index.md)
+- [Changelog](https://tinker-docs.thinkingmachines.ai/changelog/index.md)
+- [SDK](https://github.com/thinking-machines-lab/tinker) and [tinker on PyPI](https://pypi.org/project/tinker/)
+- [Cookbook](https://github.com/thinking-machines-lab/tinker-cookbook) (`tinker_cookbook/completers.py`,
   `tinker_cookbook/renderers/base.py`)
-- Announcements: https://thinkingmachines.ai/news/announcing-tinker/ and
-  https://thinkingmachines.ai/news/tinker-general-availability/
+- [Announcements](https://thinkingmachines.ai/news/announcing-tinker/) and
+  [tinker general availability](https://thinkingmachines.ai/news/tinker-general-availability/)
 
 **Prime Intellect**
-- What Lab is, and the LoRA shutdown notice: https://docs.primeintellect.ai/hosted-training/what-is-lab
-- Models and pricing: https://docs.primeintellect.ai/hosted-training/models-and-pricing
-- Advanced configs: https://docs.primeintellect.ai/hosted-training/advanced-configs
-- Full fine-tuning: https://docs.primeintellect.ai/hosted-training/full-finetuning
-- Volumes: https://docs.primeintellect.ai/hosted-training/volumes
-- Dedicated runs API: https://docs.primeintellect.ai/api-reference/training/create-dedicated-run
-- Inference: https://docs.primeintellect.ai/inference/overview and
-  https://docs.primeintellect.ai/inference/adapter-deployments
-- Sandboxes: https://docs.primeintellect.ai/sandboxes/overview
-- prime-rl: https://docs.primeintellect.ai/prime-rl/overview, `.../prime-rl/training`, `.../prime-rl/algorithms`,
-  `.../prime-rl/advanced`, and https://github.com/PrimeIntellect-ai/prime-rl (v0.9.0)
-- verifiers: https://docs.primeintellect.ai/verifiers/overview and https://docs.primeintellect.ai/verifiers/v1/harnesses
+
+- [What Lab is, and the LoRA shutdown notice](https://docs.primeintellect.ai/hosted-training/what-is-lab)
+- [Models and pricing](https://docs.primeintellect.ai/hosted-training/models-and-pricing)
+- [Advanced configs](https://docs.primeintellect.ai/hosted-training/advanced-configs)
+- [Full fine-tuning](https://docs.primeintellect.ai/hosted-training/full-finetuning)
+- [Volumes](https://docs.primeintellect.ai/hosted-training/volumes)
+- [Dedicated runs API](https://docs.primeintellect.ai/api-reference/training/create-dedicated-run)
+- [Inference](https://docs.primeintellect.ai/inference/overview) and
+  [adapter deployments](https://docs.primeintellect.ai/inference/adapter-deployments)
+- [Sandboxes](https://docs.primeintellect.ai/sandboxes/overview)
+- [prime-rl](https://docs.primeintellect.ai/prime-rl/overview), `.../prime-rl/training`, `.../prime-rl/algorithms`,
+  `.../prime-rl/advanced`, and [prime-rl on GitHub](https://github.com/PrimeIntellect-ai/prime-rl) (v0.9.0)
+- [verifiers](https://docs.primeintellect.ai/verifiers/overview) and
+  [harnesses](https://docs.primeintellect.ai/verifiers/v1/harnesses)

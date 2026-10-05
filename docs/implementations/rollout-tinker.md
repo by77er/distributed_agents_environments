@@ -12,10 +12,11 @@ Code: `rollout_tinker` · See [Thinking Machines' API](../research/thinking-mach
 [LoRA trainer](rollout-lora.md), [objectives in torch](rollout-objectives.md)
 
 `TinkerTrainer` implements the [`Trainer`](../guide/reference.md#trainer) protocol and `TinkerEngine` the
-[`Engine`](../guide/reference.md#engine) protocol on Thinking Machines' hosted API, Tinker. The trainer takes LoRA steps
-there with the objective [`rollout_objectives`](rollout-objectives.md) composes, sent as one of Tinker's built-in
-losses where it is one and as a custom loss otherwise; the engine samples there, token ids in, ids and logprobs out. Neither uses this machine's GPU. The loop, the gateway, the ledger, the renderer and
-the objective are the platform's own: Tinker holds the weights and does the arithmetic.
+[`Engine`](../guide/reference.md#engine) protocol on Thinking Machines' hosted API, Tinker. The trainer takes LoRA
+(low-rank adaptation) steps there with the objective [`rollout_objectives`](rollout-objectives.md) composes, sent as one
+of Tinker's built-in losses where it is one and as a custom loss otherwise; the engine samples there, token ids in, ids
+and logprobs out. Neither uses this machine's GPU. The loop, the gateway, the ledger, the renderer and the objective are
+the platform's own: Tinker holds the weights and does the arithmetic.
 
 ## Installing
 
@@ -108,10 +109,10 @@ answer) in four minutes, eight episodes at once:
 
 Qwen3.5-9B thinks past 1,024 tokens on most GSM8K problems, so the cap, not the problem, ends its thinking.
 
-`colocated` and `training_gib` do nothing for a remote trainer: there is nothing on this machine to share, and a
-step's files are pointers. A channel served on engines here names Tinker's bridge (`reshard = "peft-from-tinker"`,
-[below](#serving-tinkers-adapters-here)). An engine's options are `max_model_len` (the longest turn; Tinker's context for
-`Qwen/Qwen3.5-9B` is 64K), `project` and `service`.
+`colocated` and `training_gib` do nothing for a remote trainer: there is nothing on this machine to share, and a step's
+files are pointers. A channel served on engines here names Tinker's bridge (`reshard = "peft-from-tinker"`, [serving
+Tinker's adapters here](#serving-tinkers-adapters-here)). An engine's options are `max_model_len` (the longest turn;
+Tinker's context for `Qwen/Qwen3.5-9B` is 64K), `project` and `service`.
 
 ### Settings
 
@@ -136,11 +137,11 @@ The trainer takes the LoRA trainer's settings between steps (`Changeable`): `lea
 `max_kl`, `max_gradient_norm` and its objective's numbers (`objective.clip.low`, `objective.importance.cap`, ...). The
 next step reads them, on the same client.
 
-**The reference.** Tinker's SDK offers prompt logprobs from a sampler of the base model
-(`sample_async(..., include_prompt_logprobs=True)`), which could give the reference's logprobs of a segment's tokens;
-the provider declares them unchecked until a live test confirms them, so an objective that reads the reference (a KL
-to it, DPO, IPO, KTO) is refused on Tinker, by validation before a run starts and by the trainer if it is made with
-one. SimPO and ORPO, which read none, train on Tinker through the custom loss.
+**The reference.** Tinker's SDK offers prompt logprobs from a sampler of the base model (`sample_async(...,
+include_prompt_logprobs=True)`), which could give the reference's logprobs of a segment's tokens; the provider declares
+them unchecked until a live test confirms them, so an objective that reads the reference (a Kullback-Leibler (KL)
+divergence to it, DPO, IPO, KTO) is refused on Tinker, by validation before a run starts and by the trainer if it is
+made with one. SimPO and ORPO, which read none, train on Tinker through the custom loss.
 
 ## A step
 
@@ -221,18 +222,18 @@ storage until deleted: `uv run tinker checkpoint delete --run-id RUN` (or by pat
 
 The `peft-from-tinker` bridge ([bridges](../libraries/rollout-train/checkpoints.md#bridges)) runs
 `rollout_tinker.bridges:peft`, a Ray task of two CPUs: it asks Tinker for the archive of the sampler checkpoint the
-pointer names (Tinker's own names), turns it into PEFT's layout (`rollout_tinker.weights.peft_adapter`, on the CPU),
-and keeps it as blobs, noted under `CHECKPOINT@peft-from-tinker`. Its settings name the service it asks (`service`,
-by default a session with Tinker, which finds its key as the trainer does) and a `project`. Tinker
-names an adapted weight `base_model.model.` and its name in a plain text model (`model.layers.0.mlp.up_proj.weight`,
-`model.unembed_tokens.weight`); the adapter's names are the model's own, read from its configuration and its
-safetensors' headers: under `model.language_model.` for Qwen3.5, and the unembedding the model's `lm_head`, or its
-`embed_tokens` where the two are tied. Adapters of experts (a mixture of experts) and of the model families Tinker
-names otherwise (GPT-OSS, DeepSeek, Kimi, Nemotron) are refused. Qwen3.5's linear-attention layers hold one
-`in_proj_qkv` projection where Tinker adapts `in_proj_q`, `in_proj_k` and `in_proj_v` apart, and vLLM loads only the
-joined name: the three are joined into one adapter (A stacked and B block-diagonal, three times the rank; at the same
-rank when they share one A), which is the same update. `rollout_tinker.weights.ranks(directory)` says the largest
-rank, which an engine's `max_lora_rank` must reach. Then:
+pointer names (Tinker's own names), turns it into the layout of PEFT (parameter-efficient fine-tuning)
+(`rollout_tinker.weights.peft_adapter`, on the CPU), and keeps it as blobs, noted under `CHECKPOINT@peft-from-tinker`.
+Its settings name the service it asks (`service`, by default a session with Tinker, which finds its key as the trainer
+does) and a `project`. Tinker names an adapted weight `base_model.model.` and its name in a plain text model
+(`model.layers.0.mlp.up_proj.weight`, `model.unembed_tokens.weight`); the adapter's names are the model's own, read from
+its configuration and its safetensors' headers: under `model.language_model.` for Qwen3.5, and the unembedding the
+model's `lm_head`, or its `embed_tokens` where the two are tied. Adapters of experts (a mixture of experts) and of the
+model families Tinker names otherwise (GPT-OSS, DeepSeek, Kimi, Nemotron) are refused. Qwen3.5's linear-attention layers
+hold one `in_proj_qkv` projection where Tinker adapts `in_proj_q`, `in_proj_k` and `in_proj_v` apart, and vLLM loads
+only the joined name: the three are joined into one adapter (A stacked and B block-diagonal, three times the rank; at
+the same rank when they share one A), which is the same update. `rollout_tinker.weights.ranks(directory)` says the
+largest rank, which an engine's `max_lora_rank` must reach. Then:
 
 - `rollout_vllm:VllmEngine` serves it, as the commented profile in `tinker.toml` shows (`reshard = "peft-from-tinker"`);
 - `rollout merge CHECKPOINT --base Qwen/Qwen3.5-9B` folds the bridged adapter into the model, a full checkpoint of
@@ -242,7 +243,7 @@ rank, which an engine's `max_lora_rank` must reach. Then:
 A rank-32 adapter of `Qwen/Qwen3.5-9B` without the output layer has 86.5 million parameters, about 0.35 GB in
 float32.
 
-On this machine's 16 GB card (measured with a synthetic adapter in Tinker's layout, converted so), vLLM loads the
+On a 16 GB card (measured with a synthetic adapter in Tinker's layout, converted so), vLLM loads the
 joined adapter and samples from it. The full model does not fit at an 8,192-token context even in FP8: its weights take
 10.8 GiB, leaving 0.25 GiB of cache at 0.88 of the card, not one turn. The 4-bit checkpoint one-gpu.toml serves does:
 85,000 tokens of cache at 0.78 of the card with a rank-32 adapter, 15,600 with `max_lora_rank = 128` (for q, k and v

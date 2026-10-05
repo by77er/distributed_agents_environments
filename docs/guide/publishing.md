@@ -64,15 +64,22 @@ platform's own Python, with nothing built, and its jobs start at once.
 
 An import is refused, with the reason the monitor shows under its form, where:
 
-| Step | Refused when |
-|---|---|
-| Fetching | the URL does not clone at the ref (a branch, a tag or a commit; none: the default branch). Git asks for no credentials: the URL is one the platform can read |
-| The project | the subdirectory has no `pyproject.toml`, it has no `[project]` with a name, its `requires-python` leaves out the platform's Python, or its files hold more than 256 MiB |
-| The entry point | none is named and the project declares none, or several and none is named; it is no `module:name`; its module is neither in the project's directory nor in its `src/` |
-| The dependencies | one is no requirement |
-| Its Python | Ray could not build its runtime environment (uv could not install the dependencies left) |
-| Loading | the entry point does not import in its runtime environment |
-| The checks | one of the checks `rollout env check` runs without a model fails: its rows build (keys and titles unique, `counts_for` naming rows it has), its description and version say something, one seed draws one start and its eval data is the same each time, training draws no eval start; and one [episode](../libraries/rollout-train/episodes.md) played with a scripted model ends, with a reward in the range its description gives and a result that says what it says it does ([checking an environment](testing.md#checking-an-environment)). The episode is not played where the environment's program imports a tool set or declares a sandbox, which an import cannot serve: that finding passes, flagged |
+- **Fetching:** the URL does not clone at the ref (a branch, a tag or a commit; none: the default branch). Git asks for
+  no credentials: the URL is one the platform can read.
+- **The project:** the subdirectory has no `pyproject.toml`, it has no `[project]` with a name, its `requires-python`
+  leaves out the platform's Python, or its files hold more than 256 MiB.
+- **The entry point:** none is named and the project declares none, or several and none is named; it is no
+  `module:name`; its module is neither in the project's directory nor in its `src/`.
+- **The dependencies:** one is no requirement.
+- **Its Python:** Ray could not build its runtime environment (uv could not install the dependencies left).
+- **Loading:** the entry point does not import in its runtime environment.
+- **The checks:** one of the checks `rollout env check` runs without a model fails: its rows build (keys and titles
+  unique, `counts_for` naming rows it has), its description and version say something, one seed draws one start and its
+  eval data is the same each time, training draws no eval start; and one
+  [episode](../libraries/rollout-train/episodes.md) played with a scripted model ends, with a reward in the range its
+  description gives and a result that says what it says it does ([checking an
+  environment](testing.md#checking-an-environment)). The episode is not played where the environment's program imports a
+  tool set or declares a sandbox, which an import cannot serve: that finding passes, flagged.
 
 The checks run in a Ray job on the cluster, in the version's runtime environment, so an environment that imports in
 the job is one a run can play. Before pushing, the same checks run in a checkout of the platform, with the project's

@@ -55,7 +55,7 @@ def sandboxes(self) -> Mapping[str, SandboxSpec]:
 |---|---|
 | `kind` | the kind of sandbox (`minecraft`): the binding names the pool that serves each kind |
 | `parameters` | what the pool makes it from: a task and its seeds, an image |
-| `slots` | the model slots a harness inside it samples: each slot's address is put in its environment ([below](#harnesses-inside-a-sandbox)) |
+| `slots` | the model slots a harness inside it samples: each slot's address is put in its environment ([harnesses inside a sandbox](#harnesses-inside-a-sandbox)) |
 | `process` | a process it runs from its start (`Process`: `command`, `environment`, `directory`), launched by the pool with the lease's environment added to its own |
 | `mounts` | files it sees, read-only (`Mount`: `source`, as the pool finds it, and `target`, inside): an environment version's files, its virtual environment |
 | `scratch` | a directory it may write, empty at the start, and the most it may hold (`Scratch`: `path`, `mib`). Without one it writes nowhere |
@@ -145,9 +145,10 @@ provider:
 - **At most `provider.size`** leases at once, counting those being made.
 - **Its leases are kept** in `leases` (in memory by default) under its `name`, the provider's kind unless it is
   given one: pools that share a table need names of their own. A key leased from another pool is refused.
-- **`admits(key)`**, when given, says whether a key may hold a lease now. A key it refuses raises `LeaseRefused`,
-  and the lease the key had is released: nothing is made for it, even for a moment. Beside a ledger it says whether
-  the key's claim holds ([below](#in-training-a-lease-ends-with-its-claim)); without it every key is admitted.
+- **`admits(key)`**, when given, says whether a key may hold a lease now. A key it refuses raises `LeaseRefused`, and
+  the lease the key had is released: nothing is made for it, even for a moment. Beside a ledger it says whether the
+  key's claim holds ([in training, a lease ends with its claim](#in-training-a-lease-ends-with-its-claim)); without it
+  every key is admitted.
 - **A sandbox is never made again under a key whose lease it was.** A lease whose sandbox is gone (it ended with
   the pool's process, say) is lost, and its key gets `SandboxLost`: a new sandbox would not be the one its run was
   playing in.
