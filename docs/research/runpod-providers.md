@@ -21,7 +21,7 @@ Code: `deploy/images`, `.github/workflows/images.yml`, `rollout_train.pods`, `ro
 | Identities and live pods | `rollout_train.pods.identity` | `pod_identity(name)` is `spiffe://rollout/pod/NAME`; `GATEWAY_IDENTITY` is `spiffe://rollout/gateway`; `live(beats, role)` is the pods whose newest beat is fresh and names the identity named for the pod, with their addresses |
 | A server known by its identity | `Connection.identity` | The URI SAN a server's certificate must carry, checked in the TLS handshake (in place of the host name, which a pod reached by IP has not), before anything is sent. `requiring(context, identity)` does the same for a server's context, of its clients |
 | RunPod's pods API | `rollout_runpod.RunPod` | Create (image, GPU types, environment, console secrets by reference, an exposed TCP port, a volume), start, stop, delete, list; a pod's public address from its port mappings. The key is read from `RUNPOD_API_KEY` at each request and never kept, logged or put in an error |
-| step-ca, as the launcher uses it | `rollout_runpod.StepCa` | A one-time token for a pod's first certificate (what `step ca token` makes, signed with a JWK provisioner's key), and revoking a certificate by its serial (passive: it is not renewed) |
+| step-ca, for pods' certificates | `rollout_runpod.StepCa` | A one-time token for a pod's first certificate (what `step ca token` makes, signed with a JWK provisioner's key), and revoking a certificate by its serial (passive: it is not renewed) |
 
 How it is tested, with no network, Docker or step-ca (`tests/rollout_train/pods`, `tests/rollout_runpod`,
 `tests/deploy`):

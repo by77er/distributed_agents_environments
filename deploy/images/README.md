@@ -26,16 +26,16 @@ What both share is in `common/`:
 ## Certificates
 
 Every pod has a certificate from the cluster's step-ca, good for 24 hours, whose one URI SAN is
-`spiffe://rollout/pod/NAME` (NAME: `ROLLOUT_POD_NAME`, the launcher's name for the pod):
+`spiffe://rollout/pod/NAME` (NAME: `ROLLOUT_POD_NAME`, the pod's name):
 
-1. The launcher mints a one-time token for that identity (`rollout_runpod.StepCa.pod_token`), good for 15 minutes,
-   and gives it to the pod as `STEP_TOKEN`.
+1. The pod is given a one-time token for that identity as `STEP_TOKEN` (`rollout_runpod.StepCa.pod_token` mints one,
+   good for 15 minutes).
 2. The pod fetches the root, checking it against `STEP_FINGERPRINT`, makes its key itself, and asks for its
    certificate with the token (`step ca certificate`). step-ca takes a token once.
 3. The pod renews its certificate at about two thirds of its life, over mutual TLS with the one it has
    (`step ca renew --daemon`), and publishes each new one; Envoy reads it without a restart.
-4. A certificate the launcher has revoked (`rollout_runpod.StepCa.revoke`: a pod it stopped, deleted or no longer
-   counts as its own) is not renewed, and lapses within a day.
+4. A revoked certificate (`rollout_runpod.StepCa.revoke`, for a pod stopped or deleted) is not renewed, and lapses
+   within a day.
 
 The certificates are kept on the pod's volume (`ROLLOUT_CERTS`, default `/workspace/certs`): a pod started again renews
 the one it has while it is valid, and needs a new token only when it has lapsed.

@@ -7601,7 +7601,7 @@ A pod, as it is asked for.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | `str` | required | The pod's name: the launcher's, which its certificate's identity is made from (`spiffe://rollout/pod/NAME`). |
+| `name` | `str` | required | The pod's name, which its certificate's identity is made from (`spiffe://rollout/pod/NAME`). |
 | `image` | `str` | required |  |
 | `gpu_types` | `Sequence[str]` | required | RunPod's GPU type ids, in order of preference (`NVIDIA GeForce RTX 4090`, `NVIDIA H100 80GB HBM3`). |
 | `gpu_count` | `int` | `1` |  |

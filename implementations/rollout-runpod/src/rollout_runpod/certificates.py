@@ -1,23 +1,23 @@
-"""The cluster's certificate authority, step-ca, as a launcher uses it: one-time tokens for pods' first certificates,
-and revoking a pod's certificate.
+"""The cluster's certificate authority, step-ca, for the pods a cluster rents: one-time tokens for pods' first
+certificates, and revoking a pod's certificate.
 
-A pod gets its first certificate with a one-time token the launcher mints before it asks for the pod: a JWT signed by
+A pod gets its first certificate with a one-time token minted before the pod is asked for: a JWT signed by
 one of step-ca's JWK provisioners, naming the pod's identity (`spiffe://rollout/pod/NAME`) as its subject and its only
 SAN, good for 15 minutes, and once (step-ca keeps the token's id). The pod makes its key itself, sends a certificate
 request with the token (`step ca certificate`), and gets a certificate for that identity and no other, good for 24
 hours. From then on the pod renews it itself, over mutual TLS with the certificate it has (`step ca renew --daemon`),
 at about two thirds of its life.
 
-step-ca renews any certificate it has not revoked, so the launcher's account of which pods are its own reaches the CA
-as revocations: when a pod is stopped or deleted, or is no longer one the launcher counts as its own, the launcher
-revokes the certificate its beats name (`revoke`). Revocation in step-ca is passive: the certificate is not renewed, and
+step-ca renews any certificate it has not revoked, so which pods are the cluster's own reaches the CA as revocations:
+when a pod is stopped or deleted, or is no longer counted as the cluster's, the certificate its beats name is revoked
+(`revoke`). Revocation in step-ca is passive: the certificate is not renewed, and
 lapses within a day. A pod that is gone cannot renew anyway, so its certificate lapses all the same.
 
 The token is what `step ca token` makes: a JWT (`ES256`, the provisioner's key id as `kid`) whose claims are the
 provisioner's name (`iss`), the CA's sign or revoke endpoint (`aud`), the subject (`sub`), the SANs (`sans`), the root
 certificate's SHA-256 fingerprint (`sha`), a random id (`jti`) and its times. The provisioner's private key is a JWK
 (EC P-256), the decrypted form of the `encryptedKey` in step-ca's configuration
-(`step crypto jwe decrypt < encrypted.json > provisioner.jwk`), kept as a secret file of the launcher's.
+(`step crypto jwe decrypt < encrypted.json > provisioner.jwk`), kept as a secret file.
 """
 
 import base64

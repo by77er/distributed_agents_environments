@@ -355,7 +355,8 @@ one URL that passes requests on. What makes either safe:
 Pods rented on RunPod run an image of their own: `deploy/images/inference` (a stock vLLM server, the follower beside
 it, Envoy in front) or `deploy/images/trainer` (the training service a run reaches with
 `rollout_train.pods.RemoteTrainer`). Each is reached at a public TCP port over mutual TLS, with certificates from the
-cluster's step-ca; the launcher's side is `rollout_runpod` (RunPod's API, one-time tokens, revocation). What is built,
+cluster's step-ca; `rollout_runpod` holds what renting and admitting them takes (RunPod's API, one-time tokens,
+revocation). What is built,
 the security model, and how they become provider kinds are in
 [RunPod pods as inference and training providers](../research/runpod-providers.md).
 

@@ -8,8 +8,8 @@ then `{{ RUNPOD_SECRET_name }}`, which RunPod fills in on the pod). A value that
 console secret (a one-time token minted for this pod alone, which RunPod's API cannot store as a secret) goes in
 `PodSpec.sensitive`: sent, never logged, never in the pod's `repr`.
 
-How many pods a cluster may have, and when an idle pod is stopped, are the caller's rules (the launcher's): this
-client does what it is asked.
+How many pods a cluster may have, and when an idle pod is stopped, are the caller's rules: this client does what it is
+asked.
 """
 
 import logging
@@ -41,7 +41,7 @@ class PodSpec:
     """A pod, as it is asked for."""
 
     name: str
-    """The pod's name: the launcher's, which its certificate's identity is made from (`spiffe://rollout/pod/NAME`)."""
+    """The pod's name, which its certificate's identity is made from (`spiffe://rollout/pod/NAME`)."""
     image: str
     gpu_types: Sequence[str]
     """RunPod's GPU type ids, in order of preference (`NVIDIA GeForce RTX 4090`, `NVIDIA H100 80GB HBM3`)."""
