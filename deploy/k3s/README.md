@@ -67,19 +67,22 @@ LocalQueue `runs` in the namespace, and the cluster config names the queue and t
 ([Kueue](../../docs/deploy/helm.md#kueue)). A run waiting for admission says so on its launch tile;
 `kubectl -n rollout get workloads` lists what Kueue holds.
 
-Every pod of the platform, a run's head pod among them, mounts the same things:
+Each role is given only what its code reads ([what each role is given](../../docs/deploy/helm.md#what-each-role-is-given)):
 
-- the volume `state` at `/root/.cache/rollout` (the code's `~/.cache/rollout`; the containers run as root): run
-  directories, Minecraft's servers and worlds, the Hugging Face cache (`HF_HOME`), node-local scratch;
-- the ConfigMap `rollout` at `/etc/rollout`: `cluster.toml` (the cluster config, [docs/guide/cluster.md](../../docs/guide/cluster.md);
-  `ROLLOUT_CLUSTER` names it), `rayjob.yaml` (what its `[kubernetes] rayjob` names) and `presets/`, each naming the
-  stores above. The chart's `files/` holds them;
-- the Secret `gateway-keys` at `/etc/rollout-secrets/gateway`, and the Secret `tinker` at `/root/.tinker`.
+- the ConfigMap `rollout` at `/etc/rollout`, for every role but the long-lived Ray cluster: `cluster.toml` (the cluster
+  config, [docs/guide/cluster.md](../../docs/guide/cluster.md); `ROLLOUT_CLUSTER` names it), `rayjob.yaml` (what its
+  `[kubernetes] rayjob` names) and `presets/`, each naming the stores above. The chart's `files/` holds them;
+- the volume `state` at `/root/.cache/rollout` (the code's `~/.cache/rollout`; the containers run as root), for the
+  gateway, the monitors, the sandbox pools and runs: run directories, Minecraft's servers and worlds, the Hugging Face
+  cache (`HF_HOME`), node-local scratch;
+- of the Secrets, what each reads: the ledger's password (`stores`) for every role that reads the ledger, the blob
+  store's keys for the gateway, the monitors and runs, the hosted APIs' keys (`providers`) for the gateway and runs,
+  and Tinker's (`tinker`), the gateway's keys and the rest for runs alone. The long-lived Ray cluster, which checks
+  environments imported from git, is given none.
 
-Each process gets the stores' credentials from the Secret `stores` (`PGPASSWORD`, `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`), `AWS_ENDPOINT_URL`, and `TINKER_API_KEY` where the Secret `tinker` has one. The gateway and
-each run's head pod also get `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` where the Secret `providers` has them. Every
-container has requests and a memory limit (`values.yaml`), which keep the node's memory from running out.
+NetworkPolicies let each role reach only the roles it uses ([network
+policies](../../docs/deploy/helm.md#network-policies)). Every container has requests and a memory limit
+(`values.yaml`), which keep the node's memory from running out.
 
 ### Install
 
@@ -101,8 +104,8 @@ The Secret `providers` holds the hosted APIs' keys (either may be left out), whi
 `[inference.openai]` and `[inference.anthropic]` name.
 
 The Secret `tinker` holds both what `tinker auth login` wrote, which Tinker's SDK reads from `/root/.tinker`, and its
-default key as `TINKER_API_KEY`, which the cluster config names; `rollout cluster check` in a pod then finds every
-secret resolved.
+default key as `TINKER_API_KEY`, which the cluster config names. Runs' pods, which read them, are given both; each
+role's pod is checked for what it reads with `rollout cluster check --role ROLE`.
 
 ### Volumes
 

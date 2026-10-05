@@ -57,16 +57,20 @@ spec:
             - --allow-host
             - {{ $host | quote }}
             {{- end }}
-          env:
-            {{- include "rollout.env" $ | nindent 12 }}
+          env:  # (the ledger, the blob stores it reads episodes from and imports into, Ray's token, its own token)
+            {{- include "rollout.configEnv" $ | nindent 12 }}
+            {{- include "rollout.ledgerEnv" $ | nindent 12 }}
+            {{- include "rollout.blobsEnv" $ | nindent 12 }}
+            {{- include "rollout.r2Env" (dict "root" $ "keys" (list "WRITER_ACCESS_KEY_ID" "WRITER_SECRET_ACCESS_KEY")) | nindent 12 }}
+            {{- include "rollout.cacheEnv" $ | nindent 12 }}
             {{- include "rollout.rayClientEnv" $ | nindent 12 }}
             - name: ROLLOUT_MONITOR_TOKEN
               valueFrom: {secretKeyRef: {name: {{ $.Values.secrets.monitor }}, key: ROLLOUT_MONITOR_TOKEN}}
           ports: [{containerPort: 8765, name: http}]
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10}
-          volumeMounts: {{- include "rollout.volumeMounts" $ | nindent 12 }}
+          volumeMounts: {{- include "rollout.volumeMounts" (dict "root" $ "names" (list "state" "config")) | nindent 12 }}
           resources: {{- toYaml $monitor.resources | nindent 12 }}
-      volumes: {{- include "rollout.volumes" $ | nindent 8 }}
+      volumes: {{- include "rollout.volumes" (dict "root" $ "names" (list "state" "config")) | nindent 8 }}
 ---
 apiVersion: v1
 kind: Service

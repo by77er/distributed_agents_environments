@@ -244,7 +244,8 @@ def test_every_monitor_asks_for_runs_and_imports_with_the_cluster_config_and_rea
         assert "--cluster" in monitor["command"]
         names = {each["name"] for each in monitor["env"]}
         assert {"ROLLOUT_CLUSTER", "RAY_AUTH_MODE", "RAY_AUTH_TOKEN", "AWS_ACCESS_KEY_ID"} <= names
-        assert {"R2_WRITER_ACCESS_KEY_ID", "R2_READER_SECRET_ACCESS_KEY"} <= names  # (a second store's keys, optional)
+        assert {"R2_WRITER_ACCESS_KEY_ID", "R2_WRITER_SECRET_ACCESS_KEY"} <= names  # (a second store's, optional)
+        assert not {"R2_READER_ACCESS_KEY_ID", "TINKER_API_KEY", "ROLLOUT_LEDGER_TOKEN"} & names  # (it reads none)
 
 
 def test_the_monitors_ask_for_a_token_the_chart_makes_and_answer_only_under_their_names(
@@ -274,6 +275,155 @@ def test_the_monitors_ask_for_a_token_the_chart_makes_and_answer_only_under_thei
     assert allowed[-2:] == ["monitor.localhost", "monitor.example.com"]
     named = render("--set", "secrets.monitor=page-token")
     assert [each["metadata"]["name"] for each in named if each["kind"] == "Secret"] == ["page-token"]
+
+
+def workloads(rendered: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Every pod the chart makes, by its workload's name (`ray/GROUP` for the long-lived Ray cluster's, `rayjob/head`
+    and `rayjob/submitter` for each run's, from files/rayjob.yaml), as its pod spec."""
+    found: dict[str, dict[str, Any]] = {}
+    for each in rendered:
+        kind, name = each["kind"], each["metadata"]["name"]
+        if kind in ("Deployment", "StatefulSet", "Job"):
+            found[name] = each["spec"]["template"]
+        elif kind == "CronJob":
+            found[name] = each["spec"]["jobTemplate"]["spec"]["template"]
+        elif kind == "RayCluster":
+            found["ray/head"] = each["spec"]["headGroupSpec"]["template"]
+            for group in each["spec"]["workerGroupSpecs"]:
+                found[f"ray/{group['groupName']}"] = group["template"]
+    job = yaml.safe_load(config_of(rendered)["rayjob.yaml"])["spec"]
+    found["rayjob/head"] = job["rayClusterSpec"]["headGroupSpec"]["template"]
+    found["rayjob/submitter"] = job["submitterPodTemplate"]
+    return found
+
+
+def secrets_of(pod: dict[str, Any]) -> set[str]:
+    """The Secrets a pod references: `NAME:KEY` for each variable read from one, `NAME/` for each mounted."""
+    spec: Any = pod["spec"]
+    env: list[Any] = [each for container in spec["containers"] for each in container.get("env") or list[Any]()]
+    references: list[Any] = [(each.get("valueFrom") or dict[str, Any]()).get("secretKeyRef") for each in env]
+    found = {f"{ref['name']}:{ref['key']}" for ref in references if ref}
+    volumes: list[Any] = spec.get("volumes") or []
+    found |= {f"{each['secret']['secretName']}/" for each in volumes if "secret" in each}
+    return found
+
+
+R2_WRITER = {"r2:WRITER_ACCESS_KEY_ID", "r2:WRITER_SECRET_ACCESS_KEY"}
+R2 = R2_WRITER | {"r2:READER_ACCESS_KEY_ID", "r2:READER_SECRET_ACCESS_KEY"}
+STORE_KEYS = {"stores:ROOT_ACCESS_KEY_ID", "stores:ROOT_SECRET_ACCESS_KEY"}
+DATABASE = {"stores:POSTGRES_PASSWORD"}
+PROVIDERS = {"providers:OPENAI_API_KEY", "providers:ANTHROPIC_API_KEY"}
+GIVEN: dict[str, set[str]] = {
+    "ledger": DATABASE | {"ledger:ROLLOUT_LEDGER_TOKEN"},
+    "gateway": DATABASE | STORE_KEYS | PROVIDERS | {"gateway-keys/", "gateway-tls/"},
+    "monitor-main": DATABASE | STORE_KEYS | R2_WRITER | {"ray:auth_token", "monitor-token:ROLLOUT_MONITOR_TOKEN"},
+    "sandboxes-minecraft": DATABASE,
+    "presets": DATABASE,
+    "pods-reaper": DATABASE | {"runpod:RUNPOD_API_KEY", "step-ca/"},
+    "ray/head": set(),
+    "ray/gpu": set(),
+    "ray/cpu": set(),
+    "rayjob/head": DATABASE | STORE_KEYS | R2 | PROVIDERS | {
+        "tinker:TINKER_API_KEY", "ledger:ROLLOUT_LEDGER_TOKEN", "runpod:RUNPOD_API_KEY", "gateway-keys/", "tinker/",
+        "step-ca/", "gateway-tls/",
+    },
+    "rayjob/submitter": set(),
+    "postgres": {"stores:POSTGRES_PASSWORD"},
+    "s3": STORE_KEYS,
+    "buckets": STORE_KEYS,
+    "step-ca": {"step-ca-password:password"},
+    "pki-publish": {"step-ca-password:password"},
+    "pki-publish-now": {"step-ca-password:password"},
+    "tunnel": {"tunnel:token"},
+}  # fmt: skip
+"""What each workload is given, Secret by Secret: what its code reads (`Cluster.secrets_of` its role), no more."""
+
+
+def test_each_role_is_given_only_the_secrets_its_code_reads() -> None:
+    every = render("--set", "runpod.reaper=true", "--set", "stepCa.enabled=true", "--set", "tunnel.enabled=true")
+    given = {name: secrets_of(pod) for name, pod in workloads(every).items()}
+    assert given == GIVEN
+    for name in ("ray/head", "ray/gpu", "ray/cpu"):  # (where code imported from anywhere is checked)
+        assert not workloads(every)[name]["spec"].get("volumes"), name
+    cluster = parsed(tomllib.loads(config_of(every)["cluster.toml"]))
+    roles = {"gateway": "gateway", "monitor-main": "monitor", "ledger": "ledger", "sandboxes-minecraft": "pool",
+             "pods-reaper": "reaper", "rayjob/head": "run"}  # fmt: skip
+    pods = workloads(every)
+    for workload, role in roles.items():
+        spec: Any = pods[workload]["spec"]
+        containers: list[Any] = spec["containers"]
+        env: list[Any] = [each for container in containers for each in container.get("env") or list[Any]()]
+        mounts: list[Any] = [each for container in containers for each in container.get("volumeMounts") or list[Any]()]
+        names: set[str] = {each["name"] for each in env}
+        paths: set[str] = {each["mountPath"] for each in mounts}
+        for where, secret in cluster.secrets_of(role).items():  # (each secret the role reads, it is given)
+            if secret.env is not None:
+                assert secret.env in names, (workload, where)
+            else:
+                assert any(str(secret.file).startswith(path) for path in paths), (workload, where)
+
+
+def test_nothing_reaches_a_pod_but_the_roles_that_use_it() -> None:
+    every = render("--set", "stepCa.enabled=true", "--set", "tunnel.enabled=true")
+    policies = {each["metadata"]["name"]: each["spec"] for each in every if each["kind"] == "NetworkPolicy"}
+    assert policies["default-deny-ingress"] == {"podSelector": {}, "policyTypes": ["Ingress"]}
+
+    def sources(name: str) -> set[str]:
+        found: set[str] = set()
+        for rule in policies[name].get("ingress", []):
+            for peer in rule.get("from", []):
+                selector = peer.get("podSelector", {})
+                if "namespaceSelector" in peer:
+                    found.add(peer["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"])
+                elif "ipBlock" in peer:
+                    found.add(peer["ipBlock"]["cidr"])
+                else:
+                    labels = selector.get("matchLabels", {})
+                    found |= (
+                        {labels.get("app") or f"ray.io/cluster={labels.get('ray.io/cluster')}"} if labels else set()
+                    )
+                    for expression in selector.get("matchExpressions", []):
+                        found |= set(expression["values"])
+        return found
+
+    assert sources("postgres") == {"gateway", "monitor", "ledger", "sandboxes", "presets", "pods-reaper", "run"}
+    assert sources("s3") == {"gateway", "monitor", "run", "buckets"}
+    assert sources("gateway") == {"run", "sandboxes", "kube-system"}  # (and its Ingress, through the controller)
+    assert sources("ledger") == {"tunnel"}
+    assert sources("step-ca") == {"tunnel", "pki", "run", "pods-reaper"}
+    assert sources("monitors") == {"monitor"}  # (people reach it through a port-forward, which no policy stops)
+    assert sources("sandboxes-minecraft") == {"run"}
+    assert sources("ray") == {"ray.io/cluster=ray", "kuberay", "monitor", "kube-system"}
+    assert sources("runs") == {"run", "run-submitter", "gateway", "kuberay"}
+    labelled = {name: pod["metadata"]["labels"] for name, pod in workloads(every).items()}
+    selected = [policy["podSelector"] for name, policy in policies.items() if name != "default-deny-ingress"]
+
+    def matches(selector: dict[str, Any], labels: dict[str, str]) -> bool:
+        wanted = selector.get("matchLabels", {})
+        expressions = selector.get("matchExpressions", [])
+        return all(labels.get(key) == value for key, value in wanted.items()) and all(
+            labels.get(each["key"]) in each["values"] for each in expressions
+        )
+
+    reached = {"postgres", "s3", "gateway", "ledger", "step-ca", "monitor-main", "sandboxes-minecraft", "rayjob/head",
+               "rayjob/submitter"}  # fmt: skip
+    for name in reached:  # (each pod something reaches is let reached by some policy)
+        assert any(matches(selector, labelled[name]) for selector in selected), name
+    egress = {name: spec for name, spec in policies.items() if "Egress" in spec["policyTypes"]}
+    assert set(egress) == {"ray-workers-egress", "sandboxes-minecraft-egress"}
+    for spec in egress.values():
+        (internet,) = [rule for rule in spec["egress"] if "ipBlock" in rule["to"][0]]
+        assert internet["to"][0]["ipBlock"] == {"cidr": "0.0.0.0/0", "except": [
+            "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"]}  # fmt: skip
+    assert egress["ray-workers-egress"]["podSelector"]["matchLabels"] == {"ray.io/cluster": "ray",
+                                                                          "ray.io/node-type": "worker"}  # fmt: skip
+    opened = render("--set", "monitors.main.ingress=true", "--set", "ledger.ingress.enabled=true",
+                    "--set", "ledger.service.type=NodePort")  # fmt: skip
+    policies = {each["metadata"]["name"]: each["spec"] for each in opened if each["kind"] == "NetworkPolicy"}
+    assert sources("monitors") == {"monitor", "kube-system"} and sources("ledger") == {"0.0.0.0/0"}
+    assert not [each for each in render("--set", "networkPolicies.enabled=false") if each["kind"] == "NetworkPolicy"]
+    plain = render("--set", "networkPolicies.egress=false")
+    assert not [each for each in plain if each["kind"] == "NetworkPolicy" and "Egress" in each["spec"]["policyTypes"]]
 
 
 def test_with_kueue_runs_are_admitted_whole_through_a_queue_the_chart_makes(rendered: list[dict[str, Any]]) -> None:

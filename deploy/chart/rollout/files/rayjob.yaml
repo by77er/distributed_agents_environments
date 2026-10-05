@@ -3,8 +3,10 @@
 # torn down when the job ends. `rollout_train.submitting.rendered` fills in each run's name, entrypoint, runtime
 # environment and metadata, sizes the head from the run's demand (its requests, Ray's CPUs and GPUs) within this pod's
 # limits, adds worker pods made from it where one pod cannot hold the run, and, with Kueue, its queue's label and
-# `suspend`; the rest is this file's. Its pods have the hosted APIs' keys from the Secret `providers`, by reference. When the driver or its pod is lost, the job is submitted again up to
-# `backoffLimit` times, and the run goes on from the ledger.
+# `suspend`; the rest is this file's. Its pods are given everything a run uses (`rollout.runEnv`: the stores, Tinker's
+# key, the ledger service's token, the hosted APIs' keys, RunPod's), each by reference to its Secret, and mount the
+# gateway's keys, step-ca's root and provisioner key and the gateway's certificate. When the driver or its pod is
+# lost, the job is submitted again up to `backoffLimit` times, and the run goes on from the ledger.
 apiVersion: ray.io/v1
 kind: RayJob
 metadata:
@@ -17,6 +19,8 @@ spec:
   # The pod that submits the job and follows it (KubeRay gives it the `ray job submit` command): it uses 0.06 of a CPU
   # and 130 MiB, measured, and Kueue counts its requests with the run's (rollout_train.demand.SUBMITTER).
   submitterPodTemplate:
+    metadata:
+      labels: {app: run-submitter}
     spec:
       restartPolicy: Never
       containers:
@@ -43,12 +47,10 @@ spec:
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               workingDir: /opt/rollout/source
               env:
-                {{- include "rollout.env" . | nindent 16 }}
-                {{- include "rollout.providerEnv" . | nindent 16 }}
-                {{- include "rollout.podEnv" . | nindent 16 }}
+                {{- include "rollout.runEnv" . | nindent 16 }}
                 - {name: RAY_ENABLE_UV_RUN_RUNTIME_ENV, value: "0"}
               volumeMounts:
-                {{- include "rollout.volumeMounts" . | nindent 16 }}
+                {{- include "rollout.volumeMounts" (dict "root" . "names" (list "state" "config" "gateway-keys" "tinker" "step-ca" "gateway-tls")) | nindent 16 }}
               resources: {{- toYaml .Values.rayjob.resources | nindent 16 }}
           volumes:
-            {{- include "rollout.volumes" . | nindent 12 }}
+            {{- include "rollout.volumes" (dict "root" . "names" (list "state" "config" "gateway-keys" "tinker" "step-ca" "gateway-tls")) | nindent 12 }}

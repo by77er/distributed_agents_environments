@@ -8,13 +8,14 @@ is for whoever uses a freshly deployed platform; it points to the pages that des
 
 ## Check the platform
 
-1. Every secret and project the cluster config names resolves:
+1. The secrets each role reads resolve in its pod ([what each role is given](helm.md#what-each-role-is-given)):
 
     ```bash
-    kubectl -n rollout exec deploy/gateway -- rollout cluster check
+    kubectl -n rollout exec deploy/gateway -- rollout cluster check --role gateway
+    kubectl -n rollout exec deploy/monitor-main -- rollout cluster check --role monitor
     ```
 
-2. The monitor's page opens at its host, and its Machines page lists the
+2. The monitor's page opens ([opening the monitor](access.md#opening-the-monitor)), and its Machines page lists the
    [gateway](../libraries/rollout-train/gateway.md)'s replicas ([the
    machines](../libraries/rollout-train/monitor.md#the-machines)).
 

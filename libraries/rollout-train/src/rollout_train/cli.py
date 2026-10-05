@@ -801,8 +801,9 @@ def _monitor_token(cluster: "Cluster | None", host: str, port: int) -> str:
     return token
 
 
-def _check_cluster(given: str | None) -> int:
-    """Say what the cluster config holds and, on this node, what of it does not resolve; 1 if something does not."""
+def _check_cluster(given: str | None, role: str = "run") -> int:
+    """Say what the cluster config holds and, on this node, what of it that `role` reads does not resolve; 1 if
+    something does not."""
     from rollout_train.cluster import ClusterError, find, inspect, load
 
     try:
@@ -815,10 +816,11 @@ def _check_cluster(given: str | None) -> int:
     for kind, names in (("inference providers", cluster.inference), ("trainers", cluster.trainers),
                         ("sandbox pools", cluster.sandboxes), ("environments", cluster.environments)):  # fmt: skip
         print(f"  {kind}: {', '.join(names) or 'none'}")
-    problems = inspect(cluster)
+    problems = inspect(cluster, role=role)
     for problem in problems:
         print(f"  {problem}")
-    print(f"  {len(problems)} not resolved on this node" if problems else "  everything it names resolves on this node")
+    reads = "everything it names" if role == "run" else f"everything a {role} reads"
+    print(f"  {len(problems)} not resolved on this node" if problems else f"  {reads} resolves on this node")
     return 1 if problems else 0
 
 
@@ -1109,6 +1111,10 @@ def main() -> None:
         "check", help="read the cluster config, and say which of its secrets and projects do not resolve on this node"
     )
     cluster_checking.add_argument("--cluster", **_cluster_option("the cluster config"))
+    cluster_checking.add_argument(
+        "--role", default="run", choices=["run", "gateway", "monitor", "ledger", "pool", "reaper"],
+        help="check only the secrets this role reads (run: every secret, the default)",
+    )  # fmt: skip
     pki = commands.add_parser("pki", help="the certificates the platform holds, from the cluster's step-ca")
     pki_commands = pki.add_subparsers(dest="pki_command", required=True)
     pki_publishing = pki_commands.add_parser(
@@ -1130,7 +1136,7 @@ def main() -> None:
     pod_reaping.add_argument("--cluster", **_cluster_option("the cluster config"))
     arguments = parser.parse_args()
     if arguments.command == "cluster":
-        sys.exit(_check_cluster(arguments.cluster))
+        sys.exit(_check_cluster(arguments.cluster, arguments.role))
     if arguments.command == "pods":
         sys.exit(asyncio.run(_pods(arguments.pod_command, _cluster_of(arguments.cluster))))
     if arguments.command == "pki":

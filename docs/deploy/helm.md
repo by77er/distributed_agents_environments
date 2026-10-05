@@ -38,9 +38,10 @@ By role, in the namespace it is installed into (these pages use `rollout`):
 - **The monitor.** One Deployment per entry of `monitors`, each behind a Service (and an Ingress where
   `monitors.NAME.ingress` asks), and an Ingress for Ray's dashboard; and the Secret `monitor-token`, the token the
   monitors ask for, made where it is missing ([opening the monitor](access.md#opening-the-monitor)).
-- **What every pod mounts.** The state volume, the ConfigMap `rollout` with the cluster config, and the Secrets for
-  gateway keys, Tinker, step-ca's root and provisioner key, and the gateway's certificate ([what every pod is
-  given](#what-every-pod-is-given)).
+- **What each role is given.** Only what its code reads: the cluster config (the ConfigMap `rollout`), and of the
+  state volume and the Secrets, what it uses ([what each role is given](#what-each-role-is-given)).
+- **Network policies** (with `networkPolicies.enabled`, the default): nothing reaches a pod but the roles that use it
+  ([network policies](#network-policies)).
 
 - **Each run's job.** A RayJob made by a monitor when a run is asked for from its page (or by `rollout train
   --cluster` with Kubernetes credentials), from `files/rayjob.yaml`: a head pod of the platform's image sized from
@@ -95,6 +96,8 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `monitors.NAME.ingress`, `.host`, `.hosts` | `false`, `monitor.localhost`, none | Whether a monitor has an Ingress, its host, and more names the monitor answers under (beside `localhost`, `127.0.0.1` and its Service's names) |
 | `secrets.monitor` | `monitor-token` | The monitors' token (`ROLLOUT_MONITOR_TOKEN`), which the chart makes where it is missing |
 | `ingress.className`, `ingress.rayHost` | `traefik`, `ray.localhost` | The ingress controller, and the host of Ray's dashboard |
+| `networkPolicies.enabled`, `.egress` | `true`, `true` | The namespace's NetworkPolicies, and the egress limits of the long-lived Ray cluster's workers and the sandbox pools ([network policies](#network-policies)) |
+| `networkPolicies.ingressController`, `.kuberay`, `.dns` | K3s's Traefik in `kube-system`, `kuberay`, K3s's CoreDNS | Where the ingress controller, KubeRay's operator and the cluster's DNS run |
 
 Every container has `resources` with requests and a memory limit; [what runs where](roles.md#what-each-role-needs)
 lists them.
@@ -215,7 +218,7 @@ uninstalled ([opening the monitor](access.md#opening-the-monitor)). Make the oth
 
     The chart gives these keys only to what samples hosted APIs: the gateway's pods and each run's job (its RayJob's
     pods, through `files/rayjob.yaml`), as environment variables read from the Secret by reference
-    (`rollout.providerEnv` in `templates/_helpers.tpl`). They are never in the ConfigMap: the cluster config names
+    (`rollout.providerEnv` in `templates/_helpers.tpl`, [what each role is given](#what-each-role-is-given)). They are never in the ConfigMap: the cluster config names
     them (`api_key_env`), and the RayJob template holds only the reference. To change a key, update the Secret and
     restart the gateway (`kubectl -n rollout rollout restart deploy/gateway`); runs started after read the new one.
 
@@ -231,39 +234,72 @@ uninstalled ([opening the monitor](access.md#opening-the-monitor)). Make the oth
     kubectl -n rollout create secret generic tunnel --from-literal=token="$(cloudflared tunnel token rollout)"
     ```
 
-    The chart gives `ROLLOUT_LEDGER_TOKEN` and the `R2_*` keys to every process of the platform, and `RUNPOD_API_KEY`
-    to runs' jobs and the reaper. The Secrets `step-ca` and `gateway-tls` are written by the chart's
+    The chart gives `ROLLOUT_LEDGER_TOKEN` to the ledger service and runs' jobs, the `R2_*` keys to runs' jobs (and
+    the writer's to the monitors, which read episodes kept there), and `RUNPOD_API_KEY` to runs' jobs and the reaper
+    ([what each role is given](#what-each-role-is-given)). The Secrets `step-ca` and `gateway-tls` are written by the chart's
     `rollout pki publish`; with a step-ca of your own, make them yourself (`root_ca.crt`, `provisioner.jwk`; `tls.crt`,
     `tls.key`, `ca.crt`).
 
 Another provider's key (a tool set's token, say) is named in the cluster config by environment variable (`token_env`,
-`key_env`). Put each in a Secret, and add it to the environment of the pods that use it (`templates/_helpers.tpl`).
+`key_env`). Put each in a Secret, and add it to the environment of the roles that use it (`templates/_helpers.tpl`):
+a run's job (`rollout.runEnv`), and the gateway for a provider it samples.
 
-## What every pod is given
+## What each role is given
 
-Every pod of the platform (the Ray head and workers, the gateway, the monitors) mounts the same things:
+Each role is given only what its code reads (`rollout_train.cluster.Cluster.secrets_of`, `templates/_helpers.tpl`),
+each Secret by reference, so a role that is broken into holds no more than it needs. Code imported from anywhere is
+checked on the long-lived Ray cluster, whose pods hold nothing at all: the monitor hands the job server the
+environment's zip itself. A Secret that is a file is mounted read-only, readable by its owner only.
 
-- the state volume at `state.path`: run directories, Minecraft's servers and worlds, the Hugging Face cache
-  (`HF_HOME`), scratch space;
-- the ConfigMap `rollout` at `/etc/rollout`, with the cluster config at `/etc/rollout/cluster.toml`, which
-  `ROLLOUT_CLUSTER` names;
-- the Secret `gateway-keys` at `/etc/rollout-secrets/gateway`, and the Secret `tinker` at `/root/.tinker`;
-- the Secret `step-ca` at `/etc/rollout-secrets/step-ca` and the Secret `gateway-tls` at `/etc/rollout-secrets/tls`,
-  where they exist: what runs' drivers and the gateway lease and reach RunPod's pods with.
+| Role | Variables from Secrets | Secrets mounted | Volumes |
+|---|---|---|---|
+| The ledger service (`ledger`) | `PGPASSWORD`; `ROLLOUT_LEDGER_TOKEN` (`ledger`) | none | the cluster config |
+| The gateway | `PGPASSWORD`; `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (it records turns in the blob store); `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` (`providers`) | `gateway-keys`, `gateway-tls` (the certificate it reaches RunPod's pods with) | the state volume (tokenizers), the cluster config |
+| Each monitor | `PGPASSWORD`; the blob store's keys (it reads episodes and stores imports); `R2_WRITER_ACCESS_KEY_ID`, `R2_WRITER_SECRET_ACCESS_KEY` (`r2`: episodes kept there); the Ray cluster's token; `ROLLOUT_MONITOR_TOKEN` (`monitor-token`) | none | the state volume, the cluster config |
+| Each sandbox pool | `PGPASSWORD` (its leases are kept beside the ledger) | none | the state volume, the cluster config |
+| The reaper (`pods-reaper`) | `PGPASSWORD`; `RUNPOD_API_KEY` (`runpod`) | `step-ca` (what a deleted pod's certificate is revoked with) | the cluster config |
+| The presets Job | `PGPASSWORD` | none | the cluster config |
+| The long-lived Ray cluster's head and workers | none (KubeRay gives them the cluster's token itself) | none | none |
+| Each run's job (`files/rayjob.yaml`) | everything a run uses: `PGPASSWORD`, the blob store's keys, the four `R2_*` keys, `TINKER_API_KEY`, `ROLLOUT_LEDGER_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `RUNPOD_API_KEY` | `gateway-keys` (it signs its agents' keys), `tinker`, `step-ca` (it mints pods' one-time tokens), `gateway-tls` | the state volume, the cluster config |
+| The pod that submits a run's job | none | none | none |
+| Postgres, the S3 store, the `buckets` Job | their own (`stores`) | none | their volumes |
+| step-ca, the `pki-publish` jobs, the tunnel | their own (`step-ca-password`, `tunnel`) | none | step-ca's volume |
 
-And has these environment variables:
+`PGPASSWORD` is the Secret `stores`' `POSTGRES_PASSWORD` (the ledger's URL in the cluster config holds none), and the
+blob store's keys its `ROOT_ACCESS_KEY_ID` and `ROOT_SECRET_ACCESS_KEY`, with `AWS_ENDPOINT_URL` and
+`AWS_DEFAULT_REGION`. Every role but Ray's reads the cluster config at `/etc/rollout/cluster.toml` (`ROLLOUT_CLUSTER`)
+from the ConfigMap `rollout`, and those that load models keep them under `HF_HOME` on the state volume. To see what a
+role's pod is missing of what it reads, run `rollout cluster check --role ROLE` there
+([the cluster config](#the-cluster-config)).
 
-| Variable | From |
+## Network policies
+
+With `networkPolicies.enabled` (the default), nothing in the namespace reaches a pod unless a policy lets it
+(`templates/networkpolicies.yaml`); K3s enforces NetworkPolicies itself. Each role is reached only by the roles that use
+it, picked by the labels the chart sets (`app`, and KubeRay's `ray.io/cluster`):
+
+| Pods | Reached by |
 |---|---|
-| `ROLLOUT_CLUSTER` | `/etc/rollout/cluster.toml` |
-| `PGPASSWORD` | the Secret `stores`, `POSTGRES_PASSWORD`; the ledger's URL holds no password |
-| `AWS_ENDPOINT_URL`, `AWS_DEFAULT_REGION` | the S3 store's Service, and `us-east-1` |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | the Secret `stores`, `ROOT_ACCESS_KEY_ID` and `ROOT_SECRET_ACCESS_KEY` |
-| `TINKER_API_KEY` | the Secret `tinker`, where it has one |
-| `HF_HOME` | `huggingface` under the state volume |
+| Postgres (5432) | the gateway, the monitors, the ledger service, the sandbox pools, the presets Job, the reaper, runs |
+| The S3 store (7070) | the gateway, the monitors, runs, the `buckets` Job |
+| The gateway | runs, and harnesses inside sandboxes; the ingress controller (its Ingress) |
+| The ledger service | the tunnel; the ingress controller with `ledger.ingress`; anything with a `ledger.service.type` other than `ClusterIP`; the roles `networkPolicies.ledgerFrom` names |
+| step-ca (with `stepCa.enabled`) | the tunnel, the `pki-publish` jobs, runs, the reaper |
+| The monitors (8765) | one another; the ingress controller where a monitor's Ingress is on |
+| Each sandbox pool | runs, at the pool's port |
+| The long-lived Ray cluster | its own pods and KubeRay's operator; the monitors and the ingress controller at its job server and dashboard (8265) |
+| Each run's Ray cluster and the pod that submits its job | one another (every run's), KubeRay's operator, the gateway |
 
-The monitors also get `RAY_AUTH_MODE=token` and the Ray cluster's token, to reach its job server. The gateway and each
-run's job also get `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the Secret `providers`, where it has them.
+`networkPolicies.ingressController` and `networkPolicies.kuberay` say where the ingress controller's pods
+(K3s's Traefik) and KubeRay's operator are. A kubelet's probes and `kubectl port-forward` reach a pod through the node,
+not the pod network, and no policy stops them, so the monitor is still opened through a port-forward, and backups
+through one ([backups](backups.md)).
+
+With `networkPolicies.egress` (the default), the pods that run code from elsewhere reach out only where they must:
+the long-lived Ray cluster's workers (where imported environments are checked) reach their own cluster, the cluster's
+DNS and the internet (to build an environment's Python); the sandbox pools reach Postgres, the gateway (a harness inside a
+sandbox samples through it), the DNS and the internet (Minecraft's server and JDK). Neither reaches any other address in `networkPolicies.privateRanges`: not the stores,
+the gateway, a run, the Kubernetes API or the node. The other roles' egress is not limited.
 
 ## The cluster config
 
@@ -284,10 +320,11 @@ prefix = "{{ .Values.stores.prefix }}"
 Its other sections describe what this cluster offers: the inference providers and their models, the trainers, the
 sandbox pools and the environments. Edit them to match your GPUs and models, then upgrade the chart. Pods read the
 file when they start, so restart the gateway and the monitors after an upgrade that changes it. To check it, run
-`rollout cluster check` in a pod:
+`rollout cluster check` in a role's pod, for what that role reads:
 
 ```bash
-kubectl -n rollout exec deploy/gateway -- rollout cluster check
+kubectl -n rollout exec deploy/gateway -- rollout cluster check --role gateway
+kubectl -n rollout exec deploy/monitor-main -- rollout cluster check --role monitor
 ```
 
 To use a managed Postgres or a cloud bucket in place of the chart's stores, change `[ledger]` and `[blobs]` in this

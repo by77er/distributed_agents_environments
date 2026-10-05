@@ -21,8 +21,8 @@ the Python environment it runs in, and recorded as a version beside the ledger (
    symbolic links. The version's id is the zip's SHA-256.
 4. **Store** (`stored`): the zip as a blob, and where Ray fetches it as a runtime environment's `working_dir`. Ray
    tells an archive by its name, so a store in S3 hands Ray a copy of the blob's object named `KEY.zip`
-   (`s3://BUCKET/KEY.zip`, which each node reads with the cluster's credentials), and a store of files a `.zip`
-   beside its blobs, which the job's submitter uploads to the cluster.
+   (`s3://BUCKET/KEY.zip`, which each node of a run's Ray cluster reads with the run's credentials), and a store of
+   files a `.zip` beside its blobs, which the job's submitter uploads to the cluster.
 5. **Runtime environment** (`runtime_env_of`): the zip as the `working_dir`; `src` on `PYTHONPATH` for a project laid
    out so; and, under `uv`, the project's dependencies the platform does not hold (`missing`). Ray builds that Python
    environment on each node the first time a job asks for it: a copy of the platform's virtual environment with those
@@ -30,7 +30,9 @@ the Python environment it runs in, and recorded as a version beside the ledger (
    dependencies the platform holds runs in the platform's Python, with nothing built.
 6. **Check** (`checked_on_ray`): a Ray job in that runtime environment imports the entry point, runs the checks
    `rollout env check` runs without a model (`rollout_train.check.checked`, and an episode answered by a scripted
-   model, where its program needs no tool set or sandbox), and says what the environment says of itself.
+   model, where its program needs no tool set or sandbox), and says what the environment says of itself. The job is
+   handed the zip itself, as a local file its submitter uploads to the cluster (`checked_with`), never where it is
+   stored: the cluster that checks it runs code imported from anywhere, and holds no store's key.
 7. **Record**: the version, beside the ledger. Importing the same source again returns the version recorded.
 
 Each step refuses with a reason (`Refused`): a source that does not clone, no `pyproject.toml`, no entry point, a
@@ -52,7 +54,7 @@ import tempfile
 import time
 import tomllib
 import zipfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -77,6 +79,7 @@ __all__ = [
     "Refused",
     "Source",
     "checked_on_ray",
+    "checked_with",
     "entry_point_of",
     "fetched",
     "missing",
@@ -203,7 +206,9 @@ async def publish(
     reference, package = await stored(blobs, data)
     runtime_env = runtime_env_of(package, project.root, needed)
     said("checking")
-    report = await checked_on_ray(jobs, project.entry_point, runtime_env, within=within)
+    async with checked_with(package, data, scratch) as local:
+        checking = runtime_env_of(local, project.root, needed)
+        report = await checked_on_ray(jobs, project.entry_point, checking, within=within)
     said("recording")
     version = EnvironmentVersion(
         name=project.name, version=id, source=source.url, ref=source.ref or None, commit=commit,
@@ -463,6 +468,23 @@ async def stored(blobs: Blobs, data: bytes) -> tuple[BlobReference, str]:
             raise Refused(f"the blob store at {blobs.directory} lost the zip it was just given")
         return reference, str(target)
     raise Refused(f"Ray cannot fetch a blob of the store {type(blobs).__name__}: it reads files and S3")
+
+
+@contextlib.asynccontextmanager
+async def checked_with(package: str, data: bytes, scratch: Path) -> AsyncGenerator[str]:
+    """The zip a check's job is handed: `package` where it is a file here (a store of files'), else `data` written
+    to a file under `scratch` for as long as the check runs. Ray's job submitter uploads a local zip to the cluster, so
+    the cluster's nodes never fetch it from the store."""
+    if "://" not in package:
+        yield package
+        return
+    await asyncio.to_thread(scratch.mkdir, parents=True, exist_ok=True)
+    local = scratch / f"check-{hashlib.sha256(data).hexdigest()}-{os.getpid()}-{id(data)}.zip"
+    await asyncio.to_thread(local.write_bytes, data)
+    try:
+        yield str(local)
+    finally:
+        await asyncio.to_thread(local.unlink, True)
 
 
 def runtime_env_of(package: str, root: str, dependencies: Sequence[str]) -> dict[str, JsonValue]:

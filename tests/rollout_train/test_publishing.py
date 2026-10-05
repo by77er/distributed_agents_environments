@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 import rollout
+from rollout.contracts import BlobReference
 from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout_train import FileLedger
 from rollout_train import publishing as publishing_module
@@ -226,6 +227,32 @@ async def published_with(
     assert isinstance(versions, FileEnvironmentVersions)
     blobs = FileBlobStore(tmp_path / "blobs")
     return await publish(source, versions=versions, blobs=blobs, jobs="http://ray:8265", scratch=tmp_path / "scratch")
+
+
+async def test_the_check_is_handed_the_zip_itself_so_the_cluster_checking_it_holds_no_stores_key(
+    tmp_path: Path, blob_store: Blobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = repository(tmp_path / "source", tiny(src=True), under="envs/words")
+    handed: list[tuple[str, bytes]] = []
+
+    async def here(jobs: str, entry_point: str, runtime_env: Any, **_: Any) -> dict[str, Any]:
+        package = Path(str(runtime_env["working_dir"]))
+        handed.append((str(package), await asyncio.to_thread(package.read_bytes)))  # (a file here, as the check runs)
+        return {"loaded": True, "findings": [], "described": {}}
+
+    monkeypatch.setattr(publishing_module, "checked_on_ray", here)
+    versions = environment_versions_of(FileLedger(tmp_path / "ledger"))
+    assert versions is not None
+    made = await publish(Source(str(source), None, "envs/words"), versions=versions, blobs=blob_store,
+                         jobs="http://ray:8265", scratch=tmp_path / "scratch")  # fmt: skip
+    ((local, data),) = handed
+    stored_at = str(made.version.runtime_env["working_dir"])
+    assert data == await blob_store.read(BlobReference.model_validate(made.version.blob))
+    if isinstance(blob_store, FileBlobStore):
+        assert local == stored_at  # (a store of files' zip is a file here already)
+    else:
+        assert stored_at.startswith("s3://") and "://" not in local  # (what runs fetch, and what the check is handed)
+        assert not await asyncio.to_thread(Path(local).exists)  # (removed once checked)
 
 
 async def test_an_import_records_a_version_whose_id_is_the_zip_and_the_same_source_is_that_version(

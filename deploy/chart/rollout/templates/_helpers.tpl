@@ -11,13 +11,25 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 postgresql://rollout@postgres.{{ .Release.Namespace }}:5432/rollout
 {{- end }}
 
-{{/* What every process of the platform is given: the cluster config, and the stores' endpoint and credentials. The
-ledger's URL (in the cluster config) holds no password: PGPASSWORD does. */}}
-{{- define "rollout.env" -}}
+{{/* What each role is given is what its code reads, and nothing more (docs/deploy/helm.md#what-each-role-is-given):
+each of these is a part of a container's environment, and `rollout.volumes` and `rollout.volumeMounts` take the names
+of the volumes a role mounts. A run's job is given everything a run uses (`rollout.runEnv`). */}}
+
+{{/* The cluster config, which every process of the platform reads. */}}
+{{- define "rollout.configEnv" -}}
 - name: ROLLOUT_CLUSTER
   value: /etc/rollout/cluster.toml
+{{- end }}
+
+{{/* The ledger's password: its URL (in the cluster config) holds none. */}}
+{{- define "rollout.ledgerEnv" -}}
 - name: PGPASSWORD
   valueFrom: {secretKeyRef: {name: {{ .Values.secrets.stores }}, key: POSTGRES_PASSWORD}}
+{{- end }}
+
+{{/* The blob store's endpoint and keys (the store's root keys: versitygw has no others), for what reads or writes
+blobs. */}}
+{{- define "rollout.blobsEnv" -}}
 - name: AWS_ENDPOINT_URL
   value: http://s3.{{ .Release.Namespace }}:7070
 - name: AWS_DEFAULT_REGION
@@ -26,20 +38,91 @@ ledger's URL (in the cluster config) holds no password: PGPASSWORD does. */}}
   valueFrom: {secretKeyRef: {name: {{ .Values.secrets.stores }}, key: ROOT_ACCESS_KEY_ID}}
 - name: AWS_SECRET_ACCESS_KEY
   valueFrom: {secretKeyRef: {name: {{ .Values.secrets.stores }}, key: ROOT_SECRET_ACCESS_KEY}}
-- name: TINKER_API_KEY
-  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.tinker }}, key: TINKER_API_KEY, optional: true}}
+{{- end }}
+
+{{/* A second blob store's keys ([stores.r2]), each optional: those `keys` names (WRITER_…, READER_…), from `root`. */}}
+{{- define "rollout.r2Env" -}}
+{{- range $key := .keys }}
+- name: R2_{{ $key }}
+  valueFrom: {secretKeyRef: {name: {{ $.root.Values.secrets.r2 }}, key: {{ $key }}, optional: true}}
+{{- end }}
+{{- end }}
+
+{{/* The platform's token for the ledger service: what the service checks tokens against, and what runs' drivers sign
+pods' tokens with. */}}
+{{- define "rollout.ledgerTokenEnv" -}}
 - name: ROLLOUT_LEDGER_TOKEN
   valueFrom: {secretKeyRef: {name: {{ .Values.secrets.ledger }}, key: ROLLOUT_LEDGER_TOKEN, optional: true}}
-{{- range $key := list "WRITER_ACCESS_KEY_ID" "WRITER_SECRET_ACCESS_KEY" "READER_ACCESS_KEY_ID" "READER_SECRET_ACCESS_KEY" }}
-- name: R2_{{ $key }}
-  valueFrom: {secretKeyRef: {name: {{ $.Values.secrets.r2 }}, key: {{ $key }}, optional: true}}
 {{- end }}
+
+{{/* Tinker's key, for what trains or samples on Tinker (a run's job). */}}
+{{- define "rollout.tinkerEnv" -}}
+- name: TINKER_API_KEY
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.tinker }}, key: TINKER_API_KEY, optional: true}}
+{{- end }}
+
+{{/* Where models' tokenizers and weights are kept, on the state volume. */}}
+{{- define "rollout.cacheEnv" -}}
 - name: HF_HOME
   value: {{ .Values.state.path }}/huggingface
 {{- end }}
 
+{{/* What reaches RunPod: its API key (runs' drivers, which lease pods, and the reaper). */}}
+{{- define "rollout.podEnv" -}}
+- name: RUNPOD_API_KEY
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.runpod }}, key: RUNPOD_API_KEY, optional: true}}
+{{- end }}
+
 {{/* The hosted APIs' keys, for what samples them (the gateway, each run's job): from the Secret `secrets.providers`,
 each key optional, so a provider whose key is missing is refused when it is asked, and the rest go on. */}}
+{{- define "rollout.providerEnv" -}}
+- name: OPENAI_API_KEY
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.providers }}, key: OPENAI_API_KEY, optional: true}}
+- name: ANTHROPIC_API_KEY
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.providers }}, key: ANTHROPIC_API_KEY, optional: true}}
+{{- end }}
+
+{{/* Everything a run uses, for each run's job (files/rayjob.yaml): the stores, both stores' keys, Tinker's, the
+ledger service's token, the hosted APIs' keys and RunPod's. */}}
+{{- define "rollout.runEnv" -}}
+{{ include "rollout.configEnv" . }}
+{{ include "rollout.ledgerEnv" . }}
+{{ include "rollout.blobsEnv" . }}
+{{- include "rollout.r2Env" (dict "root" . "keys" (list "WRITER_ACCESS_KEY_ID" "WRITER_SECRET_ACCESS_KEY" "READER_ACCESS_KEY_ID" "READER_SECRET_ACCESS_KEY")) }}
+{{ include "rollout.tinkerEnv" . }}
+{{ include "rollout.ledgerTokenEnv" . }}
+{{ include "rollout.providerEnv" . }}
+{{ include "rollout.podEnv" . }}
+{{ include "rollout.cacheEnv" . }}
+{{- end }}
+
+{{/* What a process outside the Ray cluster needs to reach it: the cluster's token (KubeRay keeps it in a Secret named
+after the cluster, and gives it to Ray's own pods itself). */}}
+{{- define "rollout.rayClientEnv" -}}
+- name: RAY_AUTH_MODE
+  value: token
+- name: RAY_AUTH_TOKEN
+  valueFrom: {secretKeyRef: {name: {{ .Values.ray.name }}, key: auth_token}}
+{{- end }}
+
+{{/* An egress rule to the cluster's DNS (`networkPolicies.dns`). */}}
+{{- define "rollout.dnsEgress" -}}
+{{- $dns := .Values.networkPolicies.dns }}
+to:
+  - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: {{ $dns.namespace }}}}
+    podSelector:
+      matchLabels: {{- toYaml $dns.podLabels | nindent 8 }}
+ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+{{- end }}
+
+{{/* An egress rule to every address but the private ranges (`networkPolicies.privateRanges`): the internet. */}}
+{{- define "rollout.internetEgress" -}}
+to:
+  - ipBlock:
+      cidr: 0.0.0.0/0
+      except: {{- toYaml .Values.networkPolicies.privateRanges | nindent 8 }}
+{{- end }}
+
 {{/* The pod that publishes the root, the provisioner's key and the gateway's certificate (templates/step-ca.yaml), as a
 Job's or a CronJob's template: given Values, Release and step-ca's in-cluster url. */}}
 {{- define "rollout.pkiPod" -}}
@@ -64,55 +147,46 @@ spec:
       persistentVolumeClaim: {claimName: data-step-ca-0, readOnly: true}
 {{- end }}
 
-{{/* What reaches RunPod: its API key (runs' drivers, which lease pods, and the reaper). */}}
-{{- define "rollout.podEnv" -}}
-- name: RUNPOD_API_KEY
-  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.runpod }}, key: RUNPOD_API_KEY, optional: true}}
+{{/* Where each volume is mounted: the state volume, the ConfigMap `rollout`, and the Secrets that are files (the
+gateway's keys, Tinker's credentials, step-ca's root and provisioner key, the gateway's certificate). */}}
+{{- define "rollout.mountPaths" -}}
+state: {{ .Values.state.path }}
+config: /etc/rollout
+gateway-keys: /etc/rollout-secrets/gateway
+tinker: /root/.tinker
+step-ca: /etc/rollout-secrets/step-ca
+gateway-tls: /etc/rollout-secrets/tls
 {{- end }}
 
-{{- define "rollout.providerEnv" -}}
-- name: OPENAI_API_KEY
-  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.providers }}, key: OPENAI_API_KEY, optional: true}}
-- name: ANTHROPIC_API_KEY
-  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.providers }}, key: ANTHROPIC_API_KEY, optional: true}}
-{{- end }}
-
-{{/* What a process outside the Ray cluster needs to reach it: the cluster's token (KubeRay keeps it in a Secret named
-after the cluster, and gives it to Ray's own pods itself). */}}
-{{- define "rollout.rayClientEnv" -}}
-- name: RAY_AUTH_MODE
-  value: token
-- name: RAY_AUTH_TOKEN
-  valueFrom: {secretKeyRef: {name: {{ .Values.ray.name }}, key: auth_token}}
-{{- end }}
-
+{{/* The mounts of the volumes `names` names (of `rollout.mountPaths`), from `root`. */}}
 {{- define "rollout.volumeMounts" -}}
-- {name: state, mountPath: {{ .Values.state.path }}}
-- {name: config, mountPath: /etc/rollout, readOnly: true}
-- {name: gateway-keys, mountPath: /etc/rollout-secrets/gateway, readOnly: true}
-- {name: tinker, mountPath: /root/.tinker, readOnly: true}
-- {name: step-ca, mountPath: /etc/rollout-secrets/step-ca, readOnly: true}
-- {name: gateway-tls, mountPath: /etc/rollout-secrets/tls, readOnly: true}
+{{- $paths := include "rollout.mountPaths" .root | fromYaml }}
+{{- range $name := .names }}
+- {name: {{ $name }}, mountPath: {{ index $paths $name }}{{ if ne $name "state" }}, readOnly: true{{ end }}}
+{{- end }}
 {{- end }}
 
+{{/* The volumes `names` names, from `root`: each Secret optional, readable by its owner only. */}}
 {{- define "rollout.volumes" -}}
+{{- $root := .root }}
+{{- $secrets := dict "gateway-keys" $root.Values.secrets.gatewayKeys "tinker" $root.Values.secrets.tinker "step-ca" $root.Values.secrets.stepCa "gateway-tls" $root.Values.secrets.gatewayTls }}
+{{- range $name := .names }}
+{{- if eq $name "state" }}
 - name: state
-  persistentVolumeClaim: {claimName: {{ .Values.state.claim }}}
+  persistentVolumeClaim: {claimName: {{ $root.Values.state.claim }}}
+{{- else if eq $name "config" }}
 - name: config
   configMap:
     name: rollout
     items:
       - {key: cluster.toml, path: cluster.toml}
       - {key: rayjob.yaml, path: rayjob.yaml}
-      {{- range $path, $_ := .Files.Glob "files/presets/*.toml" }}
+      {{- range $path, $_ := $root.Files.Glob "files/presets/*.toml" }}
       - {key: {{ trimPrefix "files/" $path | replace "/" "_" }}, path: {{ trimPrefix "files/" $path }}}
       {{- end }}
-- name: gateway-keys
-  secret: {secretName: {{ .Values.secrets.gatewayKeys }}, optional: true, defaultMode: 0400}
-- name: tinker
-  secret: {secretName: {{ .Values.secrets.tinker }}, optional: true, defaultMode: 0400}
-- name: step-ca
-  secret: {secretName: {{ .Values.secrets.stepCa }}, optional: true, defaultMode: 0400}
-- name: gateway-tls
-  secret: {secretName: {{ .Values.secrets.gatewayTls }}, optional: true, defaultMode: 0400}
+{{- else }}
+- name: {{ $name }}
+  secret: {secretName: {{ index $secrets $name }}, optional: true, defaultMode: 0400}
+{{- end }}
+{{- end }}
 {{- end }}

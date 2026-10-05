@@ -25,10 +25,12 @@ spec:
               image: {{ include "rollout.image" . }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command: [rollout, pods, reap, --cluster]
-              env:
-                {{- include "rollout.env" . | nindent 16 }}
+              env:  # (the leases, beside the ledger, and RunPod's key)
+                {{- include "rollout.configEnv" . | nindent 16 }}
+                {{- include "rollout.ledgerEnv" . | nindent 16 }}
                 {{- include "rollout.podEnv" . | nindent 16 }}
-              volumeMounts: {{- include "rollout.volumeMounts" . | nindent 16 }}
+              # (step-ca's root and provisioner key, which a deleted pod's certificate is revoked with)
+              volumeMounts: {{- include "rollout.volumeMounts" (dict "root" . "names" (list "config" "step-ca")) | nindent 16 }}
               resources: {{- toYaml .Values.runpod.resources | nindent 16 }}
-          volumes: {{- include "rollout.volumes" . | nindent 12 }}
+          volumes: {{- include "rollout.volumes" (dict "root" . "names" (list "config" "step-ca")) | nindent 12 }}
 {{- end }}

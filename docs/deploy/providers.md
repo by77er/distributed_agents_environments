@@ -181,7 +181,7 @@ A run on it says `trainer.provider = "h100-lora"`, `channels.policy.provider = "
 3. **step-ca**, for the pods' certificates: `stepCa.enabled: true` and its password in the Secret `step-ca-password`
    (`password`). It makes itself on its first start, with a JWK provisioner (`launcher`) whose certificates last 24
    hours, and `rollout pki publish` (a CronJob every six hours, and once at each install) writes its root and the
-   provisioner's key to the Secret `step-ca`, which every pod of the platform mounts at `/etc/rollout-secrets/step-ca`.
+   provisioner's key to the Secret `step-ca`, which runs' jobs and the reaper mount at `/etc/rollout-secrets/step-ca`.
    The provider's `step_ca` names them there. A step-ca of your own does as well: put its root (`root_ca.crt`) and the
    provisioner's decrypted key (`provisioner.jwk`) in the Secret `step-ca`.
 4. **The gateway's certificate**, `spiffe://rollout/gateway`, which the gateway and runs' drivers present to pods: the

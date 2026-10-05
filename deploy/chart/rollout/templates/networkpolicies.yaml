@@ -1,0 +1,233 @@
+# Who may reach what in the release's namespace (`networkPolicies.enabled`): nothing reaches a pod unless a policy
+# below lets it, each role by the labels the chart sets (`app`, and KubeRay's `ray.io/cluster` on the long-lived Ray
+# cluster's pods). K3s enforces NetworkPolicies itself. A kubelet's probes and `kubectl port-forward` reach a pod
+# through the node, not the pod network, and policies do not stop them: a monitor is opened through a port-forward
+# (docs/deploy/access.md). With `networkPolicies.egress`, the long-lived Ray cluster's workers (where code imported
+# from anywhere is checked) and the sandbox pools reach only the internet, the cluster's DNS and the services they use:
+# no other address in a private range.
+{{- if .Values.networkPolicies.enabled }}
+{{- $np := .Values.networkPolicies }}
+{{- $ingress := dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $np.ingressController.namespace)) "podSelector" (dict "matchLabels" $np.ingressController.podLabels) }}
+{{- $kuberay := dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $np.kuberay.namespace)) }}
+{{- $tunnel := dict "podSelector" (dict "matchLabels" (dict "app" "tunnel")) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# The ledger's database: the roles that read and write the ledger.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {app: postgres}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [gateway, monitor, ledger, sandboxes, presets, pods-reaper, run]}
+      ports: [{port: 5432}]
+---
+# The blob store: what records and reads blobs, and the Job that makes its bucket.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: s3
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {app: s3}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [gateway, monitor, run, buckets]}
+      ports: [{port: 7070}]
+---
+# The gateway: runs (their agents and harnesses), harnesses inside sandboxes, and its Ingress through the ingress
+# controller.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {app: gateway}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [run, sandboxes]}
+        - {{- toYaml $ingress | nindent 10 }}
+      ports: [{port: {{ .Values.gateway.port }}}]
+{{- if .Values.ledger.enabled }}
+---
+# The ledger service: pods outside the cluster, through the tunnel, an Ingress or a Service of another type.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ledger
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {app: ledger}}
+  policyTypes: [Ingress]
+  ingress:
+    - ports: [{port: {{ .Values.ledger.port }}}]
+      {{- if ne .Values.ledger.service.type "ClusterIP" }}
+      from: [{ipBlock: {cidr: 0.0.0.0/0}}]  # (a LoadBalancer's or a NodePort's: from anywhere)
+      {{- else }}
+      from:
+        - {{- toYaml $tunnel | nindent 10 }}
+        {{- if .Values.ledger.ingress.enabled }}
+        - {{- toYaml $ingress | nindent 10 }}
+        {{- end }}
+        {{- range $np.ledgerFrom }}
+        - podSelector: {matchLabels: {app: {{ . }}}}
+        {{- end }}
+      {{- end }}
+{{- end }}
+{{- if .Values.stepCa.enabled }}
+---
+# step-ca: pods outside the cluster through the tunnel, the Job that publishes its root, and what revokes pods'
+# certificates (runs' drivers, the reaper).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: step-ca
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {app: step-ca}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - {{- toYaml $tunnel | nindent 10 }}
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [pki, run, pods-reaper]}
+      ports: [{port: 9000}]
+{{- end }}
+---
+# The monitors: one another (a monitor asks another for a run's episodes), and an Ingress where one has it. People
+# reach them through `kubectl port-forward`, which no policy stops.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitors
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {app: monitor}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: monitor}}
+        {{- range $_, $monitor := .Values.monitors }}
+        {{- if $monitor.ingress }}
+        - {{- toYaml $ingress | nindent 10 }}
+        {{- end }}
+        {{- end }}
+      ports: [{port: 8765}]
+{{- range $kind, $pool := .Values.sandboxes }}
+{{- if $pool.enabled }}
+---
+# The pool of {{ $kind }} sandboxes: runs, which acquire from it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandboxes-{{ $kind }}
+  labels: {{- include "rollout.labels" $ | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {app: sandboxes, sandboxes: {{ $kind }}}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: run}}}]
+      ports: [{port: {{ $pool.port }}}]
+{{- end }}
+{{- end }}
+---
+# The long-lived Ray cluster: its own pods, KubeRay, the monitors (its job server, where imports are checked), and Ray's
+# dashboard's Ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ray
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {ray.io/cluster: {{ .Values.ray.name }}}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {ray.io/cluster: {{ .Values.ray.name }}}}
+        - {{- toYaml $kuberay | nindent 10 }}
+    - from:
+        - podSelector: {matchLabels: {app: monitor}}
+        - {{- toYaml $ingress | nindent 10 }}
+      ports: [{port: 8265}]
+---
+# Each run's Ray cluster (its head and workers, `app: run`) and the pod that submits its job: one another, KubeRay, and
+# the gateway, which samples channels served by a run's engine hosts.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: runs
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [run, run-submitter]}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [run, run-submitter, gateway]}
+        - {{- toYaml $kuberay | nindent 10 }}
+{{- if $np.egress }}
+---
+# The long-lived Ray cluster's workers run code imported from anywhere: they reach their own cluster, the cluster's
+# DNS, and the internet (to build an environment's Python), and no other private address.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ray-workers-egress
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {ray.io/cluster: {{ .Values.ray.name }}, ray.io/node-type: worker}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {ray.io/cluster: {{ .Values.ray.name }}}}}]
+    - {{- include "rollout.dnsEgress" . | nindent 6 }}
+    - {{- include "rollout.internetEgress" . | nindent 6 }}
+{{- range $kind, $pool := .Values.sandboxes }}
+{{- if $pool.enabled }}
+---
+# The pool of {{ $kind }} sandboxes runs what episodes do in them: it reaches the ledger (its leases), the gateway (a
+# harness inside a sandbox samples through it), the cluster's DNS and the internet, and no other private address.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandboxes-{{ $kind }}-egress
+  labels: {{- include "rollout.labels" $ | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {app: sandboxes, sandboxes: {{ $kind }}}}
+  policyTypes: [Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: postgres}}}]
+      ports: [{port: 5432}]
+    - to: [{podSelector: {matchLabels: {app: gateway}}}]
+      ports: [{port: {{ $.Values.gateway.port }}}]
+    - {{- include "rollout.dnsEgress" $ | nindent 6 }}
+    - {{- include "rollout.internetEgress" $ | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

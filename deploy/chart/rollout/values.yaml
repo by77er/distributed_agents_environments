@@ -184,3 +184,18 @@ monitors:
 ingress:
   className: traefik
   rayHost: ray.localhost      # Ray's dashboard; it asks for the cluster's token
+
+# Who may reach what in the namespace (templates/networkpolicies.yaml): nothing reaches a pod unless a policy lets it,
+# and each role is reached only by the roles that use it. `ingressController` is where the ingress controller's pods
+# are (what the Ingresses' traffic comes from), `kuberay` KubeRay's operator's namespace, `dns` the cluster's DNS.
+# With `egress`, the long-lived Ray cluster's workers (which check code imported from anywhere) and the sandbox pools
+# reach the internet, the DNS and the services they use, and no other address in `privateRanges`. `ledgerFrom` names
+# more roles (by their `app` label) that reach the ledger service from inside the cluster.
+networkPolicies:
+  enabled: true
+  egress: true
+  ingressController: {namespace: kube-system, podLabels: {app.kubernetes.io/name: traefik}}
+  kuberay: {namespace: kuberay}
+  dns: {namespace: kube-system, podLabels: {k8s-app: kube-dns}}
+  privateRanges: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+  ledgerFrom: []

@@ -40,7 +40,7 @@ do not edit by hand.
 - **[`rollout_train.ledger_service`](#rollout_trainledger_service)** — The ledger over HTTP: the service, the client every role can use, pods' tokens. [`app`](#app), [`Conflict`](#rollout_trainledger_serviceconflict), [`Forbidden`](#forbidden), [`HttpLedger`](#httpledger), [`LedgerUnreachable`](#ledgerunreachable), [`PLATFORM`](#platform), [`pod_token`](#pod_token), [`Scope`](#scope), [`scope_of`](#scope_of)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
-- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#rollout_trainpublishingpublish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
+- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`checked_with`](#checked_with), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#rollout_trainpublishingpublish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteEntryFacts`](#suiteentryfacts), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`LEDGER_TOKEN`](#ledger_token), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets), [`served_ledger`](#served_ledger)
@@ -6626,6 +6626,12 @@ A cluster, as its config describes it. It holds no secret, only references to se
 
 - `@property def namespace(self) -> str`
 - `def secrets(self) -> dict[str, Secret]` — Every secret the config names, by where (`inference.tinker.auth.key`).
+- `def secrets_of(self, role: str = 'run') -> dict[str, Secret]` — The secrets a role reads (`SECRET_ROLES`), by where, as `secrets` says them: a run's job reads every one but
+  the monitor's token; the gateway the ledger's, its keys and those of the providers it samples (a hosted API's
+  key, a server's token); a monitor the ledger's, the blob stores' (but their read-only keys, which only pods
+  read) and its own token; the ledger service the ledger's and the platform's token; a sandbox pool the ledger's;
+  the reaper the ledger's and RunPod's keys. What each role is given on Kubernetes is this
+  (docs/deploy/helm.md).
 
 ### `ClusterError`
 
@@ -6705,11 +6711,12 @@ class GuardsSection
 *function* · `libraries/rollout-train/src/rollout_train/cluster.py`
 
 ```python
-def inspect(cluster: Cluster, environ: Mapping[str, str] | None = None) -> list[str]
+def inspect(cluster: Cluster, environ: Mapping[str, str] | None = None, role: str = 'run') -> list[str]
 ```
 
-What is wrong with the cluster on this node, in words: each secret reference that does not resolve (by name,
-never by value), and each environment's project with no `uv.lock`. Empty: nothing.
+What is wrong with the cluster on this node, in words: each secret reference `role` reads
+(`Cluster.secrets_of`) that does not resolve (by name, never by value), and each environment's project with no
+`uv.lock`. Empty: nothing.
 
 ### `KubernetesSection`
 
@@ -8640,6 +8647,18 @@ rollout_train.publishing check`), on the cluster whose job server is `jobs`: wha
 environment says of itself (`described`), and the job's Python (`python`, and where it imported `rollout` and
 `rollout_train` from: `platform`). Raises `Refused` where the job's Python environment is not built, the entry
 point does not load, a check fails, or the job does not end within `within` seconds.
+
+### `checked_with`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+async def checked_with(package: str, data: bytes, scratch: Path) -> AsyncGenerator[str]
+```
+
+The zip a check's job is handed: `package` where it is a file here (a store of files'), else `data` written
+to a file under `scratch` for as long as the check runs. Ray's job submitter uploads a local zip to the cluster, so
+the cluster's nodes never fetch it from the store.
 
 ### `entry_point_of`
 

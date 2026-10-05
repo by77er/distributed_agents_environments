@@ -19,7 +19,9 @@ spec:
           image: {{ include "rollout.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: [rollout, preset, load, /etc/rollout/presets, --cluster]
-          env: {{- include "rollout.env" . | nindent 12 }}
-          volumeMounts: {{- include "rollout.volumeMounts" . | nindent 12 }}
+          env:  # (the ledger, which presets are kept beside)
+            {{- include "rollout.configEnv" . | nindent 12 }}
+            {{- include "rollout.ledgerEnv" . | nindent 12 }}
+          volumeMounts: {{- include "rollout.volumeMounts" (dict "root" . "names" (list "config")) | nindent 12 }}
           resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
-      volumes: {{- include "rollout.volumes" . | nindent 8 }}
+      volumes: {{- include "rollout.volumes" (dict "root" . "names" (list "config")) | nindent 8 }}

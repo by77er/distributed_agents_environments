@@ -96,6 +96,7 @@ metadata:
 spec:
   backoffLimit: 10
   template:
+    metadata: {labels: {app: buckets}}
     spec:
       restartPolicy: OnFailure
       containers:

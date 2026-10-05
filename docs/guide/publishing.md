@@ -94,7 +94,9 @@ An import is refused, with the reason the monitor shows under its form, where:
   tool set or declares a sandbox, which an import cannot serve: that finding passes, flagged.
 
 The checks run in a Ray job on the cluster, in the version's runtime environment, so an environment that imports in
-the job is one a run can play. Before pushing, the same checks run in a checkout of the platform, with the project's
+the job is one a run can play. The job is handed the project's zip by the monitor itself, and the cluster it runs on
+holds no key to any store and reaches nothing in the platform but itself: an imported environment is code from
+anywhere ([what each role is given](../deploy/helm.md#what-each-role-is-given)). Before pushing, the same checks run in a checkout of the platform, with the project's
 directory (or its `src/`) on the path:
 
 ```bash

@@ -47,10 +47,12 @@ echo "http://localhost:8765/login?token=$token"
 ## Check the configuration
 
 `rollout cluster check` reads the cluster config and says which of its secrets and projects do not resolve on the
-node it runs on. On Kubernetes, run it in a platform pod:
+node it runs on; `--role` checks only what one role reads, since each role's pod is given only that
+([what each role is given](../deploy/helm.md#what-each-role-is-given)). On Kubernetes, run it in the role's pod:
 
 ```bash
-kubectl -n rollout exec deploy/gateway -- rollout cluster check
+kubectl -n rollout exec deploy/gateway -- rollout cluster check --role gateway
+kubectl -n rollout exec deploy/monitor-main -- rollout cluster check --role monitor
 ```
 
 [The cluster config](../guide/cluster.md) describes every field.

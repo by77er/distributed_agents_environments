@@ -24,13 +24,14 @@ spec:
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           workingDir: /opt/rollout/source
           command: [rollout, pool, --kind, {{ $kind }}, --cluster, --host, 0.0.0.0, --port, {{ $pool.port | quote }}]
-          env:
-            {{- include "rollout.env" $ | nindent 12 }}
+          env:  # (the ledger, which its leases are kept beside: nothing else)
+            {{- include "rollout.configEnv" $ | nindent 12 }}
+            {{- include "rollout.ledgerEnv" $ | nindent 12 }}
           ports: [{containerPort: {{ $pool.port }}, name: http}]
           readinessProbe: {httpGet: {path: /capacity, port: http}, periodSeconds: 10, timeoutSeconds: 5}
-          volumeMounts: {{- include "rollout.volumeMounts" $ | nindent 12 }}
+          volumeMounts: {{- include "rollout.volumeMounts" (dict "root" $ "names" (list "state" "config")) | nindent 12 }}
           resources: {{- toYaml $pool.resources | nindent 12 }}
-      volumes: {{- include "rollout.volumes" $ | nindent 8 }}
+      volumes: {{- include "rollout.volumes" (dict "root" $ "names" (list "state" "config")) | nindent 8 }}
 ---
 apiVersion: v1
 kind: Service

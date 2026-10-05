@@ -128,7 +128,8 @@ the old one once the keys it signed have expired.
 
 ## Keep the stores private
 
-Postgres and the S3 store have ClusterIP Services only. Never give them an Ingress, a NodePort or a LoadBalancer:
+Postgres and the S3 store have ClusterIP Services only, and their NetworkPolicies let only the roles that use them
+reach them ([network policies](helm.md#network-policies)). Never give them an Ingress, a NodePort or a LoadBalancer:
 whoever reaches the ledger's database can rewrite any run's record. To reach them from your machine for a copy or a
 backup, use `kubectl port-forward`, which goes through the Kubernetes API with your credentials. Processes outside the
 cluster, such as GPU pods elsewhere, never connect to the database: they are given scoped access through the ledger

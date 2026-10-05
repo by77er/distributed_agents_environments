@@ -13,8 +13,8 @@ deployment.
   checkpoints' files, [episodes](../libraries/rollout-train/episodes.md)' trajectories, datasets and imported
   environments, by their SHA-256: S3 or an S3-compatible store on a cluster, a directory of files on one machine. Both
   are the platform's only lasting state besides the state volume.
-- **The state volume.** Node-local files every pod mounts at `~/.cache/rollout`: run directories, Minecraft's servers
-  and worlds, the Hugging Face cache (`HF_HOME`) and scratch space.
+- **The state volume.** Node-local files the roles that keep files mount at `~/.cache/rollout`: run directories,
+  Minecraft's servers and worlds, the Hugging Face cache (`HF_HOME`) and scratch space.
 - **The Ray cluster.** Runs every run's work. On Kubernetes it is a RayCluster that KubeRay keeps: a head that runs no
   tasks, a GPU worker group and a CPU worker group, each started from zero by the autoscaler when work waits for it
   and removed when idle. Bridges between checkpoint formats, merges and environment builds run on it as Ray tasks.
@@ -67,14 +67,14 @@ Raise them for bigger models or more episodes at once.
 | S3-compatible store (blobs) | 0.25 | 256 MiB / 2 GiB | none | 200 GiB volume |
 | Ray head | 0.5 | 2 GiB / 3 GiB | none | none |
 | Ray autoscaler | 0.1 | 256 MiB / 1 GiB | none | none |
-| Ray GPU worker (one per run that asks for a GPU) | 4 | 8 GiB / 14 GiB | 1 | the state volume |
-| Ray CPU worker (runs that use no local GPU) | 1, advertising 4 to Ray | 2 GiB / 4 GiB | none | the state volume |
+| Ray GPU worker (one per run that asks for a GPU) | 4 | 8 GiB / 14 GiB | 1 | none |
+| Ray CPU worker (runs that use no local GPU) | 1, advertising 4 to Ray | 2 GiB / 4 GiB | none | none |
 | A run's Ray cluster (one head pod, sized from the run) | the run's demand and 0.25 more (3.75 for the acceptance run) | its demand and 2 GiB (5 GiB for the acceptance run) / 14 GiB | the whole cards its engine hosts and trainer take | the state volume |
 | The pod that submits a run's job | 0.1 | 256 MiB / 512 MiB | none | none |
 | The Minecraft worlds' pool (`sandboxes-minecraft`, four worlds) | 4 | 7.5 GiB / 10 GiB | none | the state volume |
 | Gateway, per replica | 0.25 | 512 MiB / 2 GiB | none | none |
 | Monitor | 0.25 | 512 MiB / 3 GiB | none | none |
-| State volume, shared by every pod | | | | 200 GiB |
+| State volume, shared by the pods that mount it | | | | 200 GiB |
 | In-cluster registry and BuildKit (K3s only) | 1 for BuildKit | 1 GiB / 8 GiB for BuildKit | none | 100 GiB and 150 GiB |
 
 What drives the numbers:

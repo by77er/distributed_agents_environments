@@ -76,6 +76,12 @@ __all__ = [
 HOME = Path("~/.config/rollout")
 ROLES = ("gateway", "monitor", "runners", "pools", "engines", "trainers", "workers", "bridges")
 """The roles `[placement.ROLE]` may steer."""
+SECRET_ROLES = ("run", "gateway", "monitor", "ledger", "pool", "reaper")
+"""The roles whose secrets `Cluster.secrets_of` says: a run's job, the gateway, a monitor, the ledger service, a sandbox
+pool served from a pod of its own, and the reaper of RunPod's pods."""
+KEYED_BY_THE_GATEWAY = ("api", "vllm", "vllm-servers")
+"""The kinds of inference provider the gateway samples with a key or a token of theirs
+(`rollout_train.gateway.directory`); it reaches RunPod's pods, which it samples too, with its certificate."""
 SCRATCH = "~/.cache/rollout/scratch"
 """Where a node keeps its working files unless the config says (`[scratch] directory`): on disk, since a machine's /tmp
 may be memory."""
@@ -315,6 +321,45 @@ class Cluster:
         for name, tool in self.tools.items():
             note(f"tools.{name}.auth.token", tool.auth.token)
         return found
+
+    def secrets_of(self, role: str = "run") -> dict[str, Secret]:
+        """The secrets a role reads (`SECRET_ROLES`), by where, as `secrets` says them: a run's job reads every one but
+        the monitor's token; the gateway the ledger's, its keys and those of the providers it samples (a hosted API's
+        key, a server's token); a monitor the ledger's, the blob stores' (but their read-only keys, which only pods
+        read) and its own token; the ledger service the ledger's and the platform's token; a sandbox pool the ledger's;
+        the reaper the ledger's and RunPod's keys. What each role is given on Kubernetes is this
+        (docs/deploy/helm.md)."""
+        if role not in SECRET_ROLES:
+            raise ValueError(f"a role is one of {', '.join(SECRET_ROLES)}, not {role!r}")
+        every = self.secrets()
+        if role == "run":
+            return {where: secret for where, secret in every.items() if where != "monitor.token"}
+
+        def provider(where: str) -> InferenceProvider | TrainerProvider | None:
+            kind, _, rest = where.partition(".")
+            name = rest.split(".")[0]
+            if kind == "inference":
+                return self.inference.get(name)
+            return self.trainers.get(name) if kind == "trainers" else None
+
+        def wanted(where: str) -> bool:
+            if where == "ledger.url":
+                return True
+            if role == "ledger":
+                return where == "ledger.token"
+            if role == "gateway":
+                found = provider(where) if where.startswith("inference.") else None
+                keyed = found is not None and found.kind in KEYED_BY_THE_GATEWAY
+                return where == "gateway.keys" or (where.startswith("blobs.") and ".reader." not in where) or keyed
+            if role == "monitor":
+                stored = where.startswith(("blobs.", "stores.")) and ".reader." not in where
+                return stored or where == "monitor.token"
+            if role == "reaper":
+                found = provider(where)
+                return found is not None and found.kind in RUNPOD and where.endswith(".api_key")
+            return False  # (a pool: the ledger's alone)
+
+        return {where: secret for where, secret in every.items() if wanted(where)}
 
 
 def find(given: str | None = None, environ: Mapping[str, str] | None = None) -> Path:
@@ -926,11 +971,12 @@ class _Table:
             raise ClusterError(f"{self.where} has no {', '.join(sorted(self.table))}")
 
 
-def inspect(cluster: Cluster, environ: Mapping[str, str] | None = None) -> list[str]:
-    """What is wrong with the cluster on this node, in words: each secret reference that does not resolve (by name,
-    never by value), and each environment's project with no `uv.lock`. Empty: nothing."""
+def inspect(cluster: Cluster, environ: Mapping[str, str] | None = None, role: str = "run") -> list[str]:
+    """What is wrong with the cluster on this node, in words: each secret reference `role` reads
+    (`Cluster.secrets_of`) that does not resolve (by name, never by value), and each environment's project with no
+    `uv.lock`. Empty: nothing."""
     problems: list[str] = []
-    for where, secret in cluster.secrets().items():
+    for where, secret in cluster.secrets_of(role).items():
         if secret.resolve(environ) is None:
             problems.append(f"{where}: {secret} is not set on this node")
     for name, python in cluster.environments.items():

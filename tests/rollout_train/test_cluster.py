@@ -225,6 +225,60 @@ context = 8192
     assert inspect(cluster) == []
     monkeypatch.delenv("ENGINES_TOKEN")
     assert inspect(cluster) == ["inference.lab.auth.token: $ENGINES_TOKEN is not set on this node"]
+    assert inspect(cluster, role="monitor") == []  # (a monitor reads no server's token)
+
+
+def test_each_role_reads_only_the_secrets_its_code_uses(tmp_path: Path) -> None:
+    text = (
+        SMALL
+        + """
+[tls]
+ca = "~/ca.pem"
+certificate = "~/gateway.crt"
+key = "~/gateway.key"
+[gateway]
+keys_file = "~/gateway.keys"
+[monitor]
+token_env = "MONITOR_TOKEN"
+[stores.r2]
+kind = "rollout_s3:S3BlobStore"
+bucket = "b"
+access_key_id_env = "R2_WRITER_ID"
+secret_access_key_env = "R2_WRITER_SECRET"
+reader = { access_key_id_env = "R2_READER_ID", secret_access_key_env = "R2_READER_SECRET" }
+[inference.openai]
+kind = "api"
+endpoint = "rollout_openai:hosted"
+api_key_env = "OPENAI_API_KEY"
+[inference.openai.models."gpt"]
+context = 1000
+[inference.tinker]
+kind = "tinker"
+[inference.tinker.models."m"]
+context = 8192
+[inference.pods]
+kind = "runpod-inference"
+image = "ghcr.io/x/y@sha256:0"
+gpu_types = ["NVIDIA H100 80GB HBM3"]
+api_key_env = "RUNPOD_KEY"
+[inference.pods.models."m"]
+context = 8192
+"""
+    )
+    cluster = load(write(tmp_path / "cluster.toml", text.replace("[ledger]", '[ledger]\ntoken_env = "LEDGER_TOKEN"')))
+    every = set(cluster.secrets())
+    assert set(cluster.secrets_of("run")) == every - {"monitor.token"}
+    assert set(cluster.secrets_of("gateway")) == {"gateway.keys", "inference.openai.api_key"}
+    assert set(cluster.secrets_of("monitor")) == {
+        "stores.r2.access_key_id",
+        "stores.r2.secret_access_key",
+        "monitor.token",
+    }  # (a store's read-only key is a pod's: never the monitor's)
+    assert set(cluster.secrets_of("ledger")) == {"ledger.token"}
+    assert set(cluster.secrets_of("reaper")) == {"inference.pods.api_key"}
+    assert cluster.secrets_of("pool") == {}
+    with pytest.raises(ValueError, match="a role is one of"):
+        cluster.secrets_of("everyone")
 
 
 def test_the_parsed_config_is_handed_on_as_json(tmp_path: Path) -> None:

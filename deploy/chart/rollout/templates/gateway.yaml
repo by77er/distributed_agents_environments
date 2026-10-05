@@ -24,15 +24,19 @@ spec:
             - 0.0.0.0:{{ .Values.gateway.port }}
             - --proxied
             - "*"
-          env:
-            {{- include "rollout.env" . | nindent 12 }}
+          env:  # (the ledger and the blob store it records turns in, the hosted APIs' keys)
+            {{- include "rollout.configEnv" . | nindent 12 }}
+            {{- include "rollout.ledgerEnv" . | nindent 12 }}
+            {{- include "rollout.blobsEnv" . | nindent 12 }}
             {{- include "rollout.providerEnv" . | nindent 12 }}
+            {{- include "rollout.cacheEnv" . | nindent 12 }}
           ports: [{containerPort: {{ .Values.gateway.port }}, name: http}]
           readinessProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 10, timeoutSeconds: 5}
           livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 6}
-          volumeMounts: {{- include "rollout.volumeMounts" . | nindent 12 }}
+          # (its keys, and the certificate it reaches pods with)
+          volumeMounts: {{- include "rollout.volumeMounts" (dict "root" . "names" (list "state" "config" "gateway-keys" "gateway-tls")) | nindent 12 }}
           resources: {{- toYaml .Values.gateway.resources | nindent 12 }}
-      volumes: {{- include "rollout.volumes" . | nindent 8 }}
+      volumes: {{- include "rollout.volumes" (dict "root" . "names" (list "state" "config" "gateway-keys" "gateway-tls")) | nindent 8 }}
 ---
 apiVersion: v1
 kind: Service
