@@ -46,6 +46,7 @@ PUBLIC_MODULES = [
     ("rollout_train.published", "Versions of environments imported from their source, beside the ledger."),
     ("rollout_train.publishing", "Importing an environment from git: fetched, stored, checked on Ray, recorded."),
     ("rollout_train.validation", "One pure check of a run's settings against a cluster, with its rule table."),
+    ("rollout_train.slots", "A program's model slots bound to a run's channels, and the bindings a run may not make."),
     ("rollout_train.testing", "Test doubles: a scripted engine and a readable token format."),
     # implementations
     ("rollout_vllm", "An engine on vLLM."),

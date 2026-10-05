@@ -23,6 +23,8 @@ from rollout_train.cluster import Cluster, auth_problem
 from rollout_train.providers import InferenceProvider, SettingSpec, TrainerProvider, settings_of
 from rollout_train.registry import Taken, valid
 from rollout_train.run_settings import KINDS, TRAINING, RunSettings, is_trainers, key_of
+from rollout_train.slots import Declared
+from rollout_train.slots import problems as slot_problems
 
 __all__ = [
     "RULES",
@@ -96,6 +98,10 @@ class EnvironmentFacts:
     """The tool sets its programs import by name that are served elsewhere (`[tools.NAME]`)."""
     slots: frozenset[str] | None = None
     """Its programs' slots (none: not known)."""
+    untrained: frozenset[str] = frozenset()
+    """Those of its slots that are not trained (a judge, a fixed opponent): each must be bound by name."""
+    judges: frozenset[str] = frozenset()
+    """Those of its slots that judge: bound to a channel serving the run's own checkpoints only with `self_judging`."""
     episodes_per_group: int | None = None
     turns_per_episode: float | None = None
     prompt_tokens: int | None = None
@@ -291,6 +297,10 @@ def _settings(run: _Run) -> None:
                 run.refuse(
                     "settings", key, f"the environment's programs have no slot {slot} ({', '.join(sorted(known))})"
                 )
+    if run.environment is not None and run.environment.slots is not None:  # (rollout_train.slots)
+        declared = Declared(run.environment.slots, run.environment.untrained, run.environment.judges)
+        for key, reason in slot_problems(settings, declared, run.serving()):
+            run.refuse("settings", key, reason)
     if settings["distill.k"] is not None and settings["distill.channel"] is None:
         run.refuse(
             "settings", "distill.k", "distill.k says how a teacher is matched: name its channel, distill.channel"

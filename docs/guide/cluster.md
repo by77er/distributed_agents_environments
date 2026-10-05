@@ -269,8 +269,9 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `channels.NAME.bridge` | `auto` | Or `merge-quantize` |
 | `channels.NAME.mode` | | `fixed` or `follows`; the trained channel serves what the run trains |
 | `channels.NAME.checkpoint` | | What a fixed channel serves (none: the base model) |
-| `channels.NAME.follows`, `.lag` | , 0 | The channel a following channel follows, and how many checkpoints behind |
-| `slots.SLOT` | | The channel a program's slot samples |
+| `channels.NAME.follows`, `.lag` | , 0 | The channel a following channel follows, and how many of its serving records behind |
+| `slots.SLOT` | the trained channel, for a trained slot | The channel a program's slot samples; a slot that is not trained (a judge, a fixed opponent) has no default |
+| `self_judging` | false | Whether a judge may be bound to a channel serving the run's own checkpoints |
 | `distill.channel`, `distill.k` | | A teacher's channel; top-k matched (none: the teacher scores) |
 | `eval.suite`, `eval.episodes` | | An eval's suite and episodes |
 | `check.episodes` | 1 | |
@@ -332,7 +333,7 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 
 | Rule | Refuses when |
 |---|---|
-| `settings` | a key the kind does not take; a wrong type or a value out of range; a required key missing; a channel that contradicts itself (`provider` and `providers`, `weights` without `weighted`, a mode on the trained channel, following nothing); a slot naming no channel |
+| `settings` | a key the kind does not take; a wrong type or a value out of range; a required key missing; a channel that contradicts itself (`provider` and `providers`, `weights` without `weighted`, a mode on the trained channel, following nothing); a slot naming no channel; a slot the program declares and the run does not bind (one that is not trained has no default); a channel a slot samples without a provider or a model; a judge bound to the trained channel, or one following it, without `self_judging` (`rollout_train.slots`) |
 | `providers` | the trainer or a channel's provider is not offered |
 | `auth` | a provider is reached with no auth away from this machine |
 | `capabilities` | a provider of the trained channel is not token-exact, returns no sampled-token logprobs, or does not honour sampling |

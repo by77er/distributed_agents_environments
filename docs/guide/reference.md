@@ -31,6 +31,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`offered_json`](#offered_json), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#runtime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
+- **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#problems), [`serving`](#serving), [`subject`](#subject)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer), [`StepSettings`](#stepsettings)
@@ -6100,7 +6101,7 @@ it (a trainer's own setting among them).
 *constant* · `libraries/rollout-train/src/rollout_train/run_settings.py`
 
 ```python
-KEYS: tuple[Key, ...] = (Key('kind', _S, 'train', False, EVERY, 'The kind of run', choices=KINDS), Key('name', _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"), Key('environment', _S + _N, None, False, SAMPLING, 'The environment, `module:name`'), Key('groups', _I, 100, False, TRAINED | {'check'}, 'Groups it plays', least=1), Key('seed', _I, 0, False, EVERY, 'The seed its draws start from', least=0), Key('start', _S + _N, None, False, EVERY, 'The checkpoint it trains from or evaluates; none: the base model'), Key('bookmark', _S + _N, None, False, TRAINING, 'A bookmark it moves to each checkpoint it makes'), Key('episodes_at_once', _I, 6, False, SAMPLING, 'Episodes it keeps work waiting for', least=1), Key('trainer.provider', _S + _N, None, False, TRAINING, 'The trainer, a `[trainers.NAME]` of the cluster'), Key('trainer.channel', _S, 'policy', False, TRAINED, 'The trained channel'), Key('trainer.model', _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"), Key('channels.*.provider', _S + _N, None, False, SAMPLING, 'What samples the channel, an `[inference.NAME]`'), Key('channels.*.providers', ('list', 'null'), None, False, SAMPLING, 'Several providers serving it, in order'), Key('channels.*.routing', _S, 'spill', False, SAMPLING, 'How turns are shared among them', choices=ROUTING), Key('channels.*.weights', ('table', 'null'), None, False, SAMPLING, "Each provider's weight, for `weighted`"), Key('channels.*.model', _S + _N, None, False, SAMPLING, "The model it serves, among its providers'"), Key('channels.*.renderer', _S + _N, None, False, SAMPLING, 'The renderer, `module:name`'), Key('channels.*.thinking_tokens', _I + _N, None, False, SAMPLING, 'Thinking budget per turn', least=1), Key('channels.*.answer_tokens', _I + _N, None, False, SAMPLING, 'Room for the answer after it', least=1), Key('channels.*.replicas', _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1), Key('channels.*.bridge', _S, 'auto', False, SAMPLING, 'The bridge', choices=('auto', 'merge-quantize')), Key('channels.*.mode', _S + _N, None, False, SAMPLING, '`fixed` or `follows`; none: the trained channel serves what the run trains, another serves `fixed`', choices=('fixed', 'follows')), Key('channels.*.checkpoint', _S + _N, None, False, SAMPLING, 'What a `fixed` channel serves; none: the base model'), Key('channels.*.follows', _S + _N, None, False, SAMPLING, 'The channel a `follows` channel follows'), Key('channels.*.lag', _I, 0, False, SAMPLING, 'How many checkpoints behind it follows', least=0), Key('slots.*', _S, None, False, SAMPLING, "The channel a program's slot samples"), Key('distill.channel', _S + _N, None, False, TRAINED, "The teacher's channel, for distillation"), Key('distill.k', _I + _N, None, False, TRAINED, 'Top-k logprobs matched; none: the teacher scores', least=1), Key('eval.suite', _S + _N, None, False, frozenset({'eval'}), 'The suite an eval plays, by name or `NAME@N`'), Key('eval.episodes', _I + _N, None, False, frozenset({'eval'}), 'Episodes of each start', least=1), Key('check.episodes', _I, 1, False, frozenset({'check'}), 'Scripted episodes a check plays', least=1), Key('imitation.dataset', _S + _N, None, False, frozenset({'imitate'}), 'The dataset, by name or id'), Key('imitation.limit', _I + _N, None, False, frozenset({'imitate'}), 'At most this many segments', least=1), Key('imitation.passes', _I, 1, False, frozenset({'imitate'}), 'Passes over the dataset', least=1), Key('imitation.warmup', _I, 0, False, frozenset({'imitate'}), 'Warm-up updates', least=0), Key('imitation.resume_optimizer', _B, False, False, frozenset({'imitate'}), "Go on from the start's optimizer"), Key('imitation.without', ('list',), [], False, frozenset({'imitate'}), 'Datasets whose segments are left out'), Key('groups_per_step', _I, 4, True, TRAINED, 'Groups a step waits for', least=1), Key('max_lag', _I, 1, True, TRAINED, 'Checkpoints behind the newest a turn may begin', least=0), Key('evals.suite', _S + _N, None, True, TRAINED, 'The suite its checkpoints play, by name or `NAME@N`'), Key('evals.every', _I, 1, True, TRAINED, 'Every this many steps', least=1), Key('evals.episodes', _I + _N, None, True, TRAINED, "Episodes of each start; none: the suite's", least=1), Key('limits.spend', ('float', 'null'), None, True, TRAINING, 'Dollars: the run ends once its estimate reaches this', least=0), Key('share', ('float',), 1.0, True, SAMPLING, "Its weight in a shared pool's fair shares", least=0, above=True))
+KEYS: tuple[Key, ...] = (Key('kind', _S, 'train', False, EVERY, 'The kind of run', choices=KINDS), Key('name', _S + _N, None, False, EVERY, "What the run is called (the launch's name); never kept in a preset"), Key('environment', _S + _N, None, False, SAMPLING, 'The environment, `module:name`'), Key('groups', _I, 100, False, TRAINED | {'check'}, 'Groups it plays', least=1), Key('seed', _I, 0, False, EVERY, 'The seed its draws start from', least=0), Key('start', _S + _N, None, False, EVERY, 'The checkpoint it trains from or evaluates; none: the base model'), Key('bookmark', _S + _N, None, False, TRAINING, 'A bookmark it moves to each checkpoint it makes'), Key('episodes_at_once', _I, 6, False, SAMPLING, 'Episodes it keeps work waiting for', least=1), Key('trainer.provider', _S + _N, None, False, TRAINING, 'The trainer, a `[trainers.NAME]` of the cluster'), Key('trainer.channel', _S, 'policy', False, TRAINED, 'The trained channel'), Key('trainer.model', _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"), Key('channels.*.provider', _S + _N, None, False, SAMPLING, 'What samples the channel, an `[inference.NAME]`'), Key('channels.*.providers', ('list', 'null'), None, False, SAMPLING, 'Several providers serving it, in order'), Key('channels.*.routing', _S, 'spill', False, SAMPLING, 'How turns are shared among them', choices=ROUTING), Key('channels.*.weights', ('table', 'null'), None, False, SAMPLING, "Each provider's weight, for `weighted`"), Key('channels.*.model', _S + _N, None, False, SAMPLING, "The model it serves, among its providers'"), Key('channels.*.renderer', _S + _N, None, False, SAMPLING, 'The renderer, `module:name`'), Key('channels.*.thinking_tokens', _I + _N, None, False, SAMPLING, 'Thinking budget per turn', least=1), Key('channels.*.answer_tokens', _I + _N, None, False, SAMPLING, 'Room for the answer after it', least=1), Key('channels.*.replicas', _I + _N, None, False, SAMPLING, "Engine hosts; none: the provider's", least=1), Key('channels.*.bridge', _S, 'auto', False, SAMPLING, 'The bridge', choices=('auto', 'merge-quantize')), Key('channels.*.mode', _S + _N, None, False, SAMPLING, '`fixed` or `follows`; none: the trained channel serves what the run trains, another serves `fixed`', choices=('fixed', 'follows')), Key('channels.*.checkpoint', _S + _N, None, False, SAMPLING, 'What a `fixed` channel serves; none: the base model'), Key('channels.*.follows', _S + _N, None, False, SAMPLING, 'The channel a `follows` channel follows'), Key('channels.*.lag', _I, 0, False, SAMPLING, 'How many checkpoints behind it follows', least=0), Key('slots.*', _S, None, False, SAMPLING, "The channel a program's slot samples"), Key('self_judging', _B, False, False, SAMPLING, "Whether a judge may be bound to a channel serving the run's own"), Key('distill.channel', _S + _N, None, False, TRAINED, "The teacher's channel, for distillation"), Key('distill.k', _I + _N, None, False, TRAINED, 'Top-k logprobs matched; none: the teacher scores', least=1), Key('eval.suite', _S + _N, None, False, frozenset({'eval'}), 'The suite an eval plays, by name or `NAME@N`'), Key('eval.episodes', _I + _N, None, False, frozenset({'eval'}), 'Episodes of each start', least=1), Key('check.episodes', _I, 1, False, frozenset({'check'}), 'Scripted episodes a check plays', least=1), Key('imitation.dataset', _S + _N, None, False, frozenset({'imitate'}), 'The dataset, by name or id'), Key('imitation.limit', _I + _N, None, False, frozenset({'imitate'}), 'At most this many segments', least=1), Key('imitation.passes', _I, 1, False, frozenset({'imitate'}), 'Passes over the dataset', least=1), Key('imitation.warmup', _I, 0, False, frozenset({'imitate'}), 'Warm-up updates', least=0), Key('imitation.resume_optimizer', _B, False, False, frozenset({'imitate'}), "Go on from the start's optimizer"), Key('imitation.without', ('list',), [], False, frozenset({'imitate'}), 'Datasets whose segments are left out'), Key('groups_per_step', _I, 4, True, TRAINED, 'Groups a step waits for', least=1), Key('max_lag', _I, 1, True, TRAINED, 'Checkpoints behind the newest a turn may begin', least=0), Key('evals.suite', _S + _N, None, True, TRAINED, 'The suite its checkpoints play, by name or `NAME@N`'), Key('evals.every', _I, 1, True, TRAINED, 'Every this many steps', least=1), Key('evals.episodes', _I + _N, None, True, TRAINED, "Episodes of each start; none: the suite's", least=1), Key('limits.spend', ('float', 'null'), None, True, TRAINING, 'Dollars: the run ends once its estimate reaches this', least=0), Key('share', ('float',), 1.0, True, SAMPLING, "Its weight in a shared pool's fair shares", least=0, above=True))
 ```
 
 Every key a run takes, beside the trainer's own (`trainer.FIELD`).
@@ -6814,6 +6815,8 @@ What the environment's worker says of it, asked beforehand.
 | `sandboxes` | `frozenset[str]` | `frozenset()` | The sandbox kinds its programs need. |
 | `tool_sets` | `frozenset[str]` | `frozenset()` | The tool sets its programs import by name that are served elsewhere (`[tools.NAME]`). |
 | `slots` | `frozenset[str] \| None` | `None` | Its programs' slots (none: not known). |
+| `untrained` | `frozenset[str]` | `frozenset()` | Those of its slots that are not trained (a judge, a fixed opponent): each must be bound by name. |
+| `judges` | `frozenset[str]` | `frozenset()` | Those of its slots that judge: bound to a channel serving the run's own checkpoints only with `self_judging`. |
 | `episodes_per_group` | `int \| None` | `None` |  |
 | `turns_per_episode` | `float \| None` | `None` |  |
 | `prompt_tokens` | `int \| None` | `None` | Prompt tokens of a turn, on average: with the two above, what a step's spend is estimated from. |
@@ -6929,6 +6932,74 @@ class SuiteFacts
 | `name` | `str` | required |  |
 | `newest` | `int` | required | Its newest version's number. |
 | `environments` | `frozenset[str]` | `frozenset()` |  |
+
+## `rollout_train.slots`
+
+A program's model slots bound to a run's channels, and the bindings a run may not make.
+
+### `bound`
+
+*function* · `libraries/rollout-train/src/rollout_train/slots.py`
+
+```python
+def bound(settings: RunSettings, declared: Declared) -> dict[str, str]
+```
+
+The channel each declared slot samples: the one `slots.SLOT` names, else, for a trained slot, the subject
+channel (an untrained slot the settings do not bind is left out: `problems` refuses it).
+
+### `Declared`
+
+*class* · `libraries/rollout-train/src/rollout_train/slots.py`
+
+```python
+class Declared
+```
+
+The slots a program declares: their names, those that are not trained, and those that judge.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `names` | `frozenset[str]` | required |  |
+| `untrained` | `frozenset[str]` | `frozenset()` |  |
+| `judges` | `frozenset[str]` | `frozenset()` |  |
+
+**Methods**
+
+- `@classmethod def of(cls, slots: Mapping[str, ModelSlot]) -> 'Declared'`
+
+### `problems`
+
+*function* · `libraries/rollout-train/src/rollout_train/slots.py`
+
+```python
+def problems(settings: RunSettings, declared: Declared, own: Collection[str] | None = None) -> list[tuple[str, str]]
+```
+
+What a run's bindings of the declared slots break, as `(key, reason)`: an untrained slot left unbound; a channel
+a slot is bound to with no provider or model (`settings.providers` where the run names providers); a judge bound
+to a channel serving the run's own checkpoints (`own`, by default `serving`) without `self_judging`.
+
+### `serving`
+
+*function* · `libraries/rollout-train/src/rollout_train/slots.py`
+
+```python
+def serving(settings: RunSettings) -> set[str]
+```
+
+The channels that serve the run's own checkpoints: the trained channel, and those that follow it (directly or
+through others).
+
+### `subject`
+
+*function* · `libraries/rollout-train/src/rollout_train/slots.py`
+
+```python
+def subject(settings: RunSettings) -> str
+```
+
+The channel a trained slot the settings do not bind samples: the trained channel.
 
 ## `rollout_train.testing`
 

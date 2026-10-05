@@ -209,6 +209,68 @@ def test_settings_pass_channels_that_follow_and_attach_to_slots() -> None:
     ]
 
 
+JUDGED = dataclasses.replace(
+    ENVIRONMENT, slots=frozenset({"policy", "judge"}), untrained=frozenset({"judge"}), judges=frozenset({"judge"})
+)
+"""An environment whose policy answers and whose judge, not trained, scores the answer."""
+JUDGE: dict[str, JsonValue] = {
+    "channels.judge.provider": "openai", "channels.judge.model": "gpt-5", "channels.judge.mode": "fixed",
+    "slots.judge": "judge",
+}  # fmt: skip
+
+
+def test_a_judge_bound_to_a_fixed_channel_passes() -> None:
+    assert refusals(findings(JUDGE, environment=JUDGED)) == []
+    following = {
+        "channels.judge.provider": "local-vllm", "channels.judge.model": "Qwen/Qwen3.5-4B",
+        "channels.judge.mode": "follows", "channels.judge.follows": "policy", "channels.judge.lag": 3,
+        "slots.judge": "judge", "self_judging": True,
+    }  # fmt: skip
+    assert refusals(findings(following, environment=JUDGED)) == []  # (a snapshot of the policy, said so)
+
+
+def test_a_slot_the_program_declares_must_be_bound() -> None:
+    assert refused("settings", findings(environment=JUDGED)) == [
+        "slot judge is not trained, so it samples no channel by default: bind it to one (slots.judge)"
+    ]
+
+
+def test_a_judges_channel_needs_a_provider_that_offers_its_model() -> None:
+    assert refused("models", findings({**JUDGE, "channels.judge.model": "gpt-9"}, environment=JUDGED)) == [
+        "provider openai does not serve gpt-9 (it serves gpt-5)"
+    ]
+    unprovided = refused("settings", findings({**JUDGE, "channels.judge.provider": None}, environment=JUDGED))
+    assert unprovided == ["channel judge, which slot judge samples, needs a provider"]
+    unmodelled = refused("settings", findings({**JUDGE, "channels.judge.model": None}, environment=JUDGED))
+    assert unmodelled == ["channel judge, which slot judge samples, needs a model"]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"slots.judge": "policy"},
+        {
+            "channels.rival.provider": "local-vllm", "channels.rival.model": "Qwen/Qwen3.5-4B",
+            "channels.rival.mode": "follows", "channels.rival.follows": "policy", "slots.judge": "rival",
+        },
+    ],
+    ids=["the trained channel", "a channel following it"],
+)  # fmt: skip
+def test_self_judging_needs_the_explicit_setting(changes: dict[str, JsonValue]) -> None:
+    assert refused("settings", findings(changes, environment=JUDGED)) == [
+        f"slot judge judges, and channel {changes['slots.judge']} serves the run's own checkpoints: the policy would "
+        "judge itself (self_judging allows it)"
+    ]
+    assert refusals(findings({**changes, "self_judging": True}, environment=JUDGED)) == []
+
+
+def test_a_following_channel_must_name_an_existing_channel() -> None:
+    ghost = {**JUDGE, "channels.judge.mode": "follows", "channels.judge.follows": "ghost"}
+    assert refused("settings", findings(ghost, environment=JUDGED)) == [
+        "channel judge follows another channel of the run: name it"
+    ]
+
+
 # providers
 
 
