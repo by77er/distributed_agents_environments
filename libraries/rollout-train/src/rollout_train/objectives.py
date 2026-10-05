@@ -129,7 +129,8 @@ class Kl:
     """`none`; `reference`: the reference model (`Objective.reference`); `old`: the policy at the step's start."""
     estimator: str = "k3"
     """With `log_r` the target's logprob less the policy's: `k1` is `-log_r`, `k2` is `log_r² / 2`, `k3` is
-    `exp(log_r) - 1 - log_r` (Schulman's estimators)."""
+    `exp(log_r) - 1 - log_r` (Schulman's estimators). `k1` is taken in the reward only: in the loss its gradient is
+    the policy's logprob's, whose mean over the policy's own samples is 0 (`problems` refuses it)."""
     placement: str = "loss"
     """`loss`: added to each token's loss, with its gradient. `reward`: taken from each token's advantage, with none."""
     coefficient: float = 0.0
@@ -627,6 +628,13 @@ def _problem(found: Component, value: JsonValue) -> str | None:
     return None
 
 
+_K1_IN_THE_LOSS = (
+    "a k1 KL penalty in the loss does not pull toward its target: its gradient is that of the policy's logprob alone, "
+    "which averages to 0 over the policy's own samples, so it adds noise and no pull. kl.estimator = k3 in the loss, "
+    "or kl.placement = reward with k1"
+)
+
+
 def problems(objective: Objective, overrides: Mapping[str, JsonValue] | None = None) -> list[tuple[str, str]]:
     """What is wrong with an objective, as (dotted key, reason): an override of a component its family does not accept,
     and combinations that mean nothing."""
@@ -657,6 +665,8 @@ def problems(objective: Objective, overrides: Mapping[str, JsonValue] | None = N
             found.append(("kl.coefficient", "kl.coefficient weighs a KL penalty, and kl.target is none"))
         if objective.kl.target != "reference" and objective.reference != "none":
             found.append(("reference", f"a {family} objective reads the reference only for kl.target = reference"))
+        if objective.kl.target != "none" and objective.kl.estimator == "k1" and objective.kl.placement == "loss":
+            found.append(("kl.estimator", _K1_IN_THE_LOSS))
     if objective.distills:
         found += _distillation_problems(objective)
     if family == PREFERENCE:

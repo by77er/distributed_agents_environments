@@ -76,7 +76,9 @@ For each sampled token of a segment with advantage `A`:
    (`dual`); `sg(clip(r))·A·now` (`weight`, CISPO: every token keeps a gradient). With no ratio, `A·now`.
 4. **A KL penalty** (`kl.*`), `k` of `log_r = target - now` with the target the reference or old: `k1 = -log_r`,
    `k2 = log_r²/2`, `k3 = exp(log_r) - 1 - log_r`. In the `loss` it adds `coefficient · k` to each token's loss, with
-   its gradient; in the `reward` it takes `coefficient · k` from each token's advantage, with none.
+   its gradient; in the `reward` it takes `coefficient · k` from each token's advantage, with none. `k1` is refused in
+   the loss: its gradient is the logprob's alone, whose mean over the policy's own samples is 0, so it would add noise
+   and no pull toward the target.
 5. **An entropy bonus**: `entropy.coefficient` times each position's entropy is taken from its loss.
 
 Each token's loss is `-w · surrogate`, with the penalty and the bonus. `aggregate` reduces a segment's tokens: a sum

@@ -122,11 +122,13 @@ def test_the_kl_estimators_and_where_the_penalty_goes() -> None:
     base = objective(importance__correction="none", clip__kind="none", ratio="none")
     _, plain, _ = evaluated(base)
     loss = objective(importance__correction="none", clip__kind="none", ratio="none", kl__target="reference",
-                     kl__estimator="k1", kl__coefficient=0.5)  # fmt: skip
+                     kl__estimator="k3", kl__coefficient=0.5)  # fmt: skip
     assert loss.reference == "base"  # (a KL to the reference reads the base model)
     _, penalized, found = evaluated(loss, reference=reference)
-    assert penalized == pytest.approx([each + 0.5 for each in plain])  # (k1's gradient is the logprob's)
-    assert found.kl == pytest.approx(float((torch.tensor(LOGPROBS, dtype=torch.float64) - reference).sum()))  # type: ignore[attr-defined]
+    log_r = reference - torch.tensor(LOGPROBS, dtype=torch.float64)
+    pulled = (0.5 * (1 - log_r.exp())).tolist()  # (k3's gradient: 0 where the policy is the reference)
+    assert penalized == pytest.approx([each + pull for each, pull in zip(plain, pulled, strict=True)])
+    assert found.kl == pytest.approx(float((log_r.exp() - 1 - log_r).sum()))  # type: ignore[attr-defined]
     reward = objective(importance__correction="none", clip__kind="none", ratio="none", kl__target="reference",
                        kl__estimator="k1", kl__placement="reward", kl__coefficient=0.5)  # fmt: skip
     _, shaped, _ = evaluated(reward, reference=reference)

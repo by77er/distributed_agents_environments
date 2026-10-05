@@ -61,6 +61,25 @@ def test_a_family_accepts_its_components_and_refuses_the_rest() -> None:
         assert problems(preset.objective) == [], preset.name
 
 
+K1_IN_THE_LOSS = (
+    "a k1 KL penalty in the loss does not pull toward its target: its gradient is that of the policy's logprob alone, "
+    "which averages to 0 over the policy's own samples, so it adds noise and no pull. kl.estimator = k3 in the loss, "
+    "or kl.placement = reward with k1"
+)
+
+
+@pytest.mark.parametrize("preset", ["dapo", "grpo", "on_policy_distillation"])
+def test_a_k1_kl_penalty_is_refused_in_the_loss_and_taken_in_the_reward(preset: str) -> None:
+    k1: dict[str, JsonValue] = {"kl.target": "reference", "kl.estimator": "k1", "kl.coefficient": 0.01}
+    _, said = composed(preset, k1)
+    assert said == [("kl.estimator", K1_IN_THE_LOSS)]
+    with pytest.raises(ValueError, match="does not pull toward its target"):
+        resolved(preset, k1)
+    assert resolved(preset, {**k1, "kl.placement": "reward"}).kl.estimator == "k1"
+    for estimator in ("k2", "k3"):
+        assert resolved(preset, {**k1, "kl.estimator": estimator}).kl.placement == "loss"
+
+
 def test_what_changes_between_steps_is_a_number() -> None:
     changeable = {each.key for each in COMPONENTS if each.changeable}
     assert changeable == {

@@ -557,6 +557,18 @@ def test_an_importance_correction_needs_behaviour_logprobs_and_a_preference_loss
         assert refused("capabilities", findings({**api, "objective.preset": preset})) == [], preset
 
 
+def test_a_k1_kl_penalty_in_the_loss_is_refused_and_one_in_the_reward_is_not() -> None:
+    k1: dict[str, JsonValue] = {**LOCAL_LORA, "objective.preset": "grpo", "objective.kl.estimator": "k1"}
+    found = findings(k1)
+    assert refused("objective", found) == [
+        "a k1 KL penalty in the loss does not pull toward its target: its gradient is that of the policy's logprob "
+        "alone, which averages to 0 over the policy's own samples, so it adds noise and no pull. kl.estimator = k3 in "
+        "the loss, or kl.placement = reward with k1"
+    ]
+    assert [each.key for each in found if each.rule == "objective"] == ["objective.kl.estimator"]
+    assert refused("objective", findings({**k1, "objective.kl.placement": "reward"})) == []
+
+
 def test_a_reference_the_trainer_cannot_give_is_refused() -> None:
     assert refused("objective", findings({"objective.preset": "dpo"})) == [
         "the tinker-lora trainer gives no reference logprobs (Tinker's SDK offers prompt logprobs from a sampler of "

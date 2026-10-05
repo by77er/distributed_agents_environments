@@ -6914,7 +6914,7 @@ A penalty for the policy's divergence from a target, estimated on the sampled to
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `target` | `str` | `'none'` | `none`; `reference`: the reference model (`Objective.reference`); `old`: the policy at the step's start. |
-| `estimator` | `str` | `'k3'` | With `log_r` the target's logprob less the policy's: `k1` is `-log_r`, `k2` is `log_r² / 2`, `k3` is `exp(log_r) - 1 - log_r` (Schulman's estimators). |
+| `estimator` | `str` | `'k3'` | With `log_r` the target's logprob less the policy's: `k1` is `-log_r`, `k2` is `log_r² / 2`, `k3` is `exp(log_r) - 1 - log_r` (Schulman's estimators). `k1` is taken in the reward only: in the loss its gradient is the policy's logprob's, whose mean over the policy's own samples is 0 (`problems` refuses it). |
 | `placement` | `str` | `'loss'` | `loss`: added to each token's loss, with its gradient. `reward`: taken from each token's advantage, with none. |
 | `coefficient` | `float` | `0.0` |  |
 

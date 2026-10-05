@@ -54,7 +54,7 @@ validation refuses the rest. Every component below is built but those marked pro
 | `importance.level` | `token`, `segment` | policy_gradient, distillation |
 | `importance.cap`, `importance.floor` | numbers: the cap, and the lowest weight a mask keeps | policy_gradient, distillation |
 | `kl.target` | `none`, `reference`, `old` | policy_gradient, distillation |
-| `kl.estimator` | `k1`, `k2`, `k3` | policy_gradient, distillation |
+| `kl.estimator` | `k1` (in the reward only: in the loss its gradient is the logprob's, whose mean over the policy's own samples is 0, so it pulls nowhere), `k2`, `k3` | policy_gradient, distillation |
 | `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient, after the group's baseline) | policy_gradient; distillation (`reward` in the policy-gradient form) |
 | `kl.coefficient` | a number | policy_gradient, distillation |
 | `entropy.coefficient` | a number | policy_gradient |

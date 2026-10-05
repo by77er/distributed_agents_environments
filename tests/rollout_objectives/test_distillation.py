@@ -86,7 +86,7 @@ def test_a_token_the_teacher_did_not_score_adds_nothing_and_counts_in_the_mean()
     old = torch.tensor([-1.1, -1.9, -0.6], dtype=torch.float64)
     scores = TeacherScores("t", [-0.5, None, -3.0])
     objective = resolved("on_policy_distillation")
-    found = distilled(objective, Distilled(segment_of(3), scores), now, old)
+    found = distilled(objective, Distilled(segment_of(3), scores), now, old, old.clone())  # (on-policy: weights of 1)
     found.loss.backward()
     assert now.grad is not None and float(now.grad[1]) == 0.0
     expected = -((-0.5 + 1.1) * now[0] + (-3.0 + 0.6) * now[2])
@@ -135,13 +135,14 @@ def test_a_kl_in_the_reward_is_taken_from_the_advantage_and_one_in_the_loss_is_a
     k1 = old - reference  # (k1: -(reference - now))
     reward = resolved("on_policy_distillation", {"kl.target": "reference", "kl.estimator": "k1",
                                                   "kl.placement": "reward", "kl.coefficient": 0.1})  # fmt: skip
-    found = distillation(reward, now, old, taught, reference=reference)
+    found = distillation(reward, now, old, taught, old.clone(), reference)  # (on-policy: weights of 1)
     expected = -(((taught.logprobs - old) - 0.1 * k1) * now).sum()
     torch.testing.assert_close(found.loss, expected)
-    loss = resolved("on_policy_distillation", {"kl.target": "reference", "kl.estimator": "k1",
+    loss = resolved("on_policy_distillation", {"kl.target": "reference", "kl.estimator": "k3",
                                                 "kl.coefficient": 0.1})  # fmt: skip
-    found = distillation(loss, now, old, taught, reference=reference)
-    torch.testing.assert_close(found.loss, (-(taught.logprobs - old) * now + 0.1 * (now - reference)).sum())
+    found = distillation(loss, now, old, taught, old.clone(), reference)
+    log_r = reference - now
+    torch.testing.assert_close(found.loss, (-(taught.logprobs - old) * now + 0.1 * (log_r.exp() - 1 - log_r)).sum())
 
 
 def test_a_policy_gradient_with_a_distillation_term_adds_the_term_times_its_coefficient() -> None:

@@ -152,7 +152,7 @@ accept it; validation refuses the rest. The numbers can change between steps; wh
 | `importance.level` | `token`, `segment` | policy_gradient, distillation |
 | `importance.cap`, `importance.floor` | numbers | policy_gradient, distillation |
 | `kl.target` | `none`, `reference`, `old` (the step's start) | policy_gradient, distillation |
-| `kl.estimator` | `k1`, `k2`, `k3` | policy_gradient, distillation |
+| `kl.estimator` | `k1` (in the reward only), `k2`, `k3` | policy_gradient, distillation |
 | `kl.placement` | `loss`, `reward` (taken from each token's advantage, with no gradient) | policy_gradient, distillation (`reward` in the policy-gradient form only) |
 | `kl.coefficient` | a number | policy_gradient, distillation |
 | `entropy.coefficient` | a number | policy_gradient |
@@ -174,7 +174,9 @@ accept it; validation refuses the rest. The numbers can change between steps; wh
 
 A component that follows from another follows where it is not given: a KL to the reference reads `reference = base`, a
 preference loss with a reference reads it and one without (`margin`, `odds_ratio`) reads none, and an odds ratio is
-length-normalized. A policy gradient's `distillation.*` components shape its distillation term, so they are refused
+length-normalized. A k1 KL penalty is refused in the loss: its gradient is the policy's logprob's alone, whose mean
+over the policy's own samples is 0, so it adds noise and no pull toward its target (k3 in the loss, or k1 in the
+reward, pulls). A policy gradient's `distillation.*` components shape its distillation term, so they are refused
 while `distillation.coefficient` is 0, and the coefficient changes between steps but not to or from 0.
 
 **Presets** are the literature's objectives, each a family and component values pinned to its paper (its test compares
