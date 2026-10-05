@@ -20,7 +20,8 @@ This package has the renderers of two Qwen families. It is installed with `uv sy
 ## What a renderer function is called with
 
 A run's settings name one for a [channel](../libraries/rollout-train/channels.md) (`channels.policy.renderer =
-"rollout_qwen:qwen35"`), and the run's driver calls it with the channel's `model`. Given a
+"rollout_qwen:qwen35"`), or leave it out, and the renderer that says it renders the channel's model is taken (below).
+The run's driver calls it with the channel's `model`. Given a
 [checkpoint](../libraries/rollout-train/checkpoints.md)'s name or path, the function loads that checkpoint's tokenizer
 ([`tokenizer_of`](../guide/reference.md#tokenizer_of)). Given a tokenizer, it uses it as it is. Either way it returns a
 [`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer): prompts are rendered with the tokenizer's own chat
@@ -30,6 +31,13 @@ Each function says the models it renders ([`renders`](../guide/reference.md#rend
 `qwen3.5`, `qwen3` those whose name holds `qwen3` not followed by `.`, another digit or `-coder`, case ignored.
 `rollout_train.recorder.renderers.rendered(function, model)` says whether a function renders a model (`None` when the
 function says nothing).
+
+The package declares both functions in the entry-point group `rollout.renderers` (`qwen35 = "rollout_qwen:qwen35"`,
+`qwen3 = "rollout_qwen:qwen3"`), so the platform finds them without being told: `renderers_for(model, base)` lists the
+declared renderers that render a model, or, where none does, the model a quantized one was made from. A run whose
+channel names a model and no renderer gets the one renderer that renders it, recorded in its start; the New run form
+shows it beside the model, and offers a choice only where several do. A package that adds a model family declares its
+renderers the same way.
 
 ## How thinking is delimited
 

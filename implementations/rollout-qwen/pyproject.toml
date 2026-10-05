@@ -8,6 +8,10 @@ dependencies = [
     "transformers>=4.57",
 ]
 
+[project.entry-points."rollout.renderers"]  # found by the platform, each saying the models it renders (`renders`)
+qwen35 = "rollout_qwen:qwen35"
+qwen3 = "rollout_qwen:qwen3"
+
 [tool.uv.sources]
 rollout-train = { workspace = true }
 

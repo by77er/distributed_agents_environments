@@ -9,6 +9,9 @@ dependencies = [
     "transformers>=5.10",
 ]
 
+[project.entry-points."rollout.renderers"]  # found by the platform, each saying the models it renders (`renders`)
+gemma4 = "rollout_gemma:gemma4"
+
 [tool.uv.sources]
 rollout = { workspace = true }
 rollout-train = { workspace = true }

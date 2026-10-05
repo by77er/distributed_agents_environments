@@ -578,11 +578,11 @@ async def submit(
     resumes: str | None = None,
     backend: Backend | None = None,
 ) -> Launch:
-    """Record a launch of a run with these settings and start its job (`ask`, then `start`): a training run's with
-    what it trains said (`rollout_train.validation.with_weights`)."""
-    from rollout_train.validation import with_weights
+    """Record a launch of a run with these settings and start its job (`ask`, then `start`), with what follows from its
+    settings said: what it trains and each channel's renderer (`rollout_train.validation.completed`)."""
+    from rollout_train.validation import completed
 
-    launch = await ask(with_weights(settings, cluster), ledger, preset=preset, resumes=resumes)
+    launch = await ask(completed(settings, cluster), ledger, preset=preset, resumes=resumes)
     return await start(launch, cluster, ledger, backend)
 
 

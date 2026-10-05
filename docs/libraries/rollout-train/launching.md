@@ -234,7 +234,7 @@ there), with each number; one that fits but finds less free now waits, with a no
 | `cluster`, `kinds`, `submits` | The cluster's name, the kinds of run, and where jobs go (`ray` or `kubernetes`) |
 | `environments` | The cluster config's (`environment`, `python`: `platform` or `project`), then every published version beside the ledger (`environment` as `NAME@VERSION`, `name`, `source`, `commit`, `imported`, `sandboxes`); each with the renderer `families` runs and presets on it named for their trained channel |
 | `trainers` | Each trainer: `name`, `kind`, `produces`, `format`, `models`, `gpus`, `colocate_with`, `segment_tokens`, `cost`, `families` (the objective families it takes), `allocation` (`metered` or `scheduled`), `concurrency`, `weights` (`lora` or `full`: what it trains), and its `settings` (each `key`, `types`, `default`, `changeable`) |
-| `inference` | Each provider: `name`, `kind`, `gpus`, `replicas`, `allocation`, `concurrency`, `capabilities`, `weights` (those it serves a run's checkpoints as: `lora` with adapters, `full` with full-weight reload), and its `models` (each `model`, `context`, `base`, `max_lora_rank`, `cost`, the `renderers` runs and presets named for it so far and their `families`) |
+| `inference` | Each provider: `name`, `kind`, `gpus`, `replicas`, `allocation`, `concurrency`, `capabilities`, `weights` (those it serves a run's checkpoints as: `lora` with adapters, `full` with full-weight reload), and its `models` (each `model`, `context`, `base`, `max_lora_rank`, `cost`, the `renderers` that say they render it, or the model it was quantized from, and their `families`; none for a provider that renders messages itself) |
 | `pairs` | Each trainer and provider: the `bridge` chain's names, or none and why it is `refused` (no bridge, or a provider that cannot serve the trainer's weights) |
 | `sandboxes` | Each pool's `size` and `provider` |
 | `presets` | Each preset's newest version: `name`, `version`, `id`, `settings`, `note`, `saved` |
@@ -244,5 +244,9 @@ there), with each number; one that fits but finds less free now waits, with a no
 
 `examined(settings, cluster, ledger)` is `checked` with what it found beside the findings: the environment's facts, one
 step's estimated spend on the run's metered parts (`spend_of`) and what the run trains (`weights_of`). The monitor's
-`POST /api/launches/check` answers with it. A training run is submitted with its `weights` said (its trainer's, where
-the settings do not say), so its start records what it trains.
+`POST /api/launches/check` answers with it. Both the check and the submission first say what follows from the settings
+(`completed`): a training run's `weights` (its trainer's, where the settings do not say), and each channel's renderer
+where it names a model and no renderer and exactly one declared renderer renders that model (`with_renderers`). So a
+run's start records both. The `renderer` rule refuses a channel sampling tokens whose model no renderer renders, or
+several do with none said, or a renderer said that says it renders other models; a hosted API takes messages and
+needs none.

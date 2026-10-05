@@ -35,6 +35,7 @@ from rollout_train.presence import Beat, alive
 from rollout_train.presets import Presets
 from rollout_train.providers import settings_of
 from rollout_train.published import environment_versions_of, is_published
+from rollout_train.recorder.renderers import renderers_for
 from rollout_train.registry import registry_of, resolved
 from rollout_train.run_settings import WEIGHTS, RunSettings, layered
 from rollout_train.validation import (
@@ -45,6 +46,7 @@ from rollout_train.validation import (
     Spend,
     SuiteFacts,
     check,
+    completed,
     serves,
     spend_of,
     weights_of,
@@ -263,6 +265,7 @@ async def examined(
 ) -> Examined:
     """A run's settings checked on this cluster with the facts gathered now (`checked`), with those facts' environment,
     one step's estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`)."""
+    settings = completed(settings, cluster)
     environment = settings.get("environment")
     facts = await environment_facts(str(environment) if environment else None, cluster, ledger, loaded=loaded)
     known = await ledger_facts(settings, ledger, own=own, gpus=gpus, free=free)
@@ -339,7 +342,7 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
             "commit": version.commit, "imported": version.imported,
             "sandboxes": cast(JsonValue, listed if isinstance(listed, list) else []),
         })  # fmt: skip
-    renderers, families = await _renderers(ledger)
+    _, families = await _renderers(ledger)
     for each in environments:
         each["families"] = cast(JsonValue, families.get(str(each["environment"]), []))
     trainers: list[dict[str, Any]] = []
@@ -361,12 +364,15 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
         capabilities = asdict(provider.capabilities)
         capabilities["loads"] = sorted(provider.capabilities.loads)
         capabilities["unchecked"] = sorted(provider.capabilities.unchecked)
-        models = [
-            {"model": model, "context": offer.context, "base": offer.base, "max_lora_rank": offer.max_lora_rank,
-             "cost": dict(offer.cost), "renderers": renderers.get(model, renderers.get(offer.base or "", [])),
-             "families": sorted({_family(each) for each in renderers.get(model, renderers.get(offer.base or "", []))})}
-            for model, offer in provider.models.items()
-        ]  # fmt: skip
+        models: list[dict[str, Any]] = []
+        for model, offer in provider.models.items():
+            # (the renderers that say they render the model; a hosted API renders messages itself)
+            rendering = renderers_for(model, offer.base) if provider.capabilities.token_exact else []
+            models.append({
+                "model": model, "context": offer.context, "base": offer.base, "max_lora_rank": offer.max_lora_rank,
+                "cost": dict(offer.cost), "renderers": rendering,
+                "families": sorted({_family(each) for each in rendering}),
+            })  # fmt: skip
         inference.append({
             "name": name, "kind": provider.kind, "gpus": provider.gpus, "replicas": provider.replicas,
             "allocation": provider.allocation, "concurrency": provider.concurrency, "capabilities": capabilities,

@@ -79,6 +79,36 @@ def rendered(factory: object, model: str) -> bool | None:
     return bool(cast(re.Pattern[str], pattern).search(model)) if isinstance(pattern, re.Pattern) else None
 
 
+RENDERERS = "rollout.renderers"
+"""The entry-point group renderer packages declare their functions in, each as `NAME = "module:name"`."""
+
+
+def known() -> dict[str, str]:
+    """Every renderer the installed packages declare, as `module:name`, by its entry point's name."""
+    from importlib.metadata import entry_points
+
+    return {each.name: each.value for each in entry_points(group=RENDERERS)}
+
+
+def renderers_for(model: str, base: str | None = None) -> list[str]:
+    """The declared renderers (`known`) that render `model`, as `module:name`; where none says it renders `model`, those
+    that render `base`, the model it was quantized from. A renderer whose package does not import here is left out."""
+    from rollout.names import named
+
+    def matching(name: str) -> list[str]:
+        found: list[str] = []
+        for reference in known().values():
+            try:
+                factory = named(reference)
+            except Exception:  # (a renderer whose package does not import here)
+                continue
+            if rendered(factory, name):
+                found.append(reference)
+        return found
+
+    return matching(model) or (matching(base) if base else [])
+
+
 def tokenizer_of(model: str) -> Tokenizer:
     """The tokenizer of a checkpoint, by its name or path."""
     from transformers import AutoTokenizer

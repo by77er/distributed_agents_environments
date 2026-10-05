@@ -41,11 +41,14 @@ __all__ = [
     "Spend",
     "SuiteFacts",
     "check",
+    "completed",
     "estimated_spend",
     "refusals",
+    "renderers_of",
     "serves",
     "spend_of",
     "weights_of",
+    "with_renderers",
     "with_weights",
 ]
 
@@ -84,6 +87,11 @@ RULES: tuple[Rule, ...] = (
         "full weights on one without full reload",
     ),
     Rule("models", "a model not offered, or not the one trained"),
+    Rule(
+        "renderer",
+        "a channel sampling tokens whose model no renderer renders, that several do with none said, or "
+        "a renderer said that says it renders other models",
+    ),
     Rule("rank", "the adapter's rank, as the provider sees it, above its highest"),
     Rule("segment", "segments longer than the trainer or the context takes"),
     Rule("start", "the start does not exist, was released, or is in a format the trainer cannot start from"),
@@ -509,6 +517,48 @@ def with_weights(settings: RunSettings, cluster: Cluster) -> RunSettings:
     return RunSettings({**settings.values, "weights": said})
 
 
+def renders_tokens(settings: RunSettings, cluster: Cluster, channel: str) -> bool:
+    """Whether a channel's provider samples tokens, so the channel needs a renderer: not a hosted API, which takes
+    messages and renders them itself."""
+    provider = cluster.inference.get(str(settings.get(f"channels.{channel}.provider")))
+    return provider is None or provider.capabilities.token_exact
+
+
+def renderers_of(settings: RunSettings, cluster: Cluster, channel: str) -> list[str]:
+    """The renderers that render a channel's model, as `module:name` (`rollout_train.recorder.renderers.renderers_for`):
+    over the model its provider says a quantized model was made from, where none renders the model itself."""
+    from rollout_train.recorder.renderers import renderers_for
+
+    model = settings.get(f"channels.{channel}.model")
+    if not isinstance(model, str):
+        return []
+    provider = cluster.inference.get(str(settings.get(f"channels.{channel}.provider")))
+    offer = provider.models.get(model) if provider is not None else None
+    return renderers_for(model, offer.base if offer is not None else None)
+
+
+def with_renderers(settings: RunSettings, cluster: Cluster) -> RunSettings:
+    """A run's settings with each channel's renderer said where it names a model and no renderer, and exactly one
+    renderer renders that model (`renderers_of`)."""
+    filled: dict[str, JsonValue] = {}
+    for key, model in settings.values.items():
+        if not (key.startswith("channels.") and key.endswith(".model") and isinstance(model, str)):
+            continue
+        channel = key.removeprefix("channels.").removesuffix(".model")
+        if settings.get(f"channels.{channel}.renderer") is not None or not renders_tokens(settings, cluster, channel):
+            continue
+        found = renderers_of(settings, cluster, channel)
+        if len(found) == 1:
+            filled[f"channels.{channel}.renderer"] = found[0]
+    return RunSettings({**settings.values, **filled}) if filled else settings
+
+
+def completed(settings: RunSettings, cluster: Cluster) -> RunSettings:
+    """A run's settings with what follows from them said: what it trains (`with_weights`) and each channel's renderer
+    (`with_renderers`), as its start records them."""
+    return with_renderers(with_weights(settings, cluster), cluster)
+
+
 def serves(provider: InferenceProvider, weights: str) -> str | None:
     """Why `provider` cannot serve a run's checkpoints of `weights` (`lora`: adapters by name; `full`: full weights
     reloaded in place), if it cannot."""
@@ -582,6 +632,37 @@ def _models(run: _Run) -> None:
     if run.kind in TRAINING and facts is not None and facts.model and trainer_model and facts.model != trainer_model:
         run.refuse("models", "start", f"the start {start} was trained over {facts.model}, and this run trains "
                    f"{trainer_model}")  # fmt: skip
+
+
+def _renderer(run: _Run) -> None:
+    from rollout.names import named
+    from rollout_train.recorder.renderers import rendered
+
+    for key, model in run.settings.values.items():
+        if not (key.startswith("channels.") and key.endswith(".model") and isinstance(model, str)):
+            continue
+        channel = key.removeprefix("channels.").removesuffix(".model")
+        if not renders_tokens(run.settings, run.cluster, channel):
+            continue
+        said = run.settings.get(f"channels.{channel}.renderer")
+        found = renderers_of(run.settings, run.cluster, channel)
+        where = f"channels.{channel}.renderer"
+        if said is None:
+            if not found:
+                run.refuse("renderer", where, f"no renderer here says it renders {model}: name one")
+            elif len(found) > 1:
+                run.refuse("renderer", where, f"several renderers render {model} ({', '.join(found)}): name one")
+            continue
+        try:
+            factory = named(str(said))
+        except Exception:
+            continue  # (whether it imports is the settings' and the job's to say)
+        provider = run.cluster.inference.get(str(run.settings.get(f"channels.{channel}.provider")))
+        offer = provider.models.get(model) if provider is not None else None
+        base = offer.base if offer is not None else None
+        if rendered(factory, model) is False and (base is None or rendered(factory, base) is False):
+            better = f"; {', '.join(found)} does" if found else ""
+            run.refuse("renderer", where, f"{said} says it renders other models than {model}{better}")
 
 
 def _rank(run: _Run) -> None:
@@ -990,6 +1071,7 @@ _RULES: Mapping[str, Callable[[_Run], None]] = {
     "bridge": _bridge,
     "weights": _weights,
     "models": _models,
+    "renderer": _renderer,
     "rank": _rank,
     "segment": _segment,
     "start": _start,

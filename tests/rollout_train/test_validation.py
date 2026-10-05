@@ -23,8 +23,10 @@ from rollout_train.validation import (
     Spend,
     SuiteFacts,
     check,
+    completed,
     estimated_spend,
     refusals,
+    renderers_of,
     serves,
     spend_of,
     weights_of,
@@ -104,10 +106,11 @@ LEDGER = LedgerFacts(
 LOCAL_LORA: dict[str, JsonValue] = {
     "trainer.provider": "local-lora",
     "channels.policy.model": "Qwen/Qwen3-0.6B",
+    "channels.policy.renderer": "rollout_qwen:qwen3",
     "trainer.rank": 16,
     "trainer.learning_rate": 5e-5,
 }
-"""The acceptance run trained here instead, on a small model."""
+"""The acceptance run trained here instead, on a small model, with the renderer of its family."""
 FULL: dict[str, JsonValue] = {**LOCAL_LORA, "trainer.provider": "local-full", "trainer.rank": None}
 
 
@@ -839,6 +842,21 @@ def test_only_scheduled_parts_ask_for_the_clusters_gpus() -> None:
     ]
     metered = with_provider(CLUSTER, "lab", gpus=2.0, allocation="metered")
     assert refused("capacity", findings(lab, cluster=metered)) == []
+
+
+# renderer
+
+
+def test_a_channels_renderer_follows_from_its_model_and_must_render_it() -> None:
+    unsaid = RunSettings({**ACCEPTANCE, "channels.policy.renderer": None})
+    assert completed(unsaid, CLUSTER)["channels.policy.renderer"] == "rollout_qwen:qwen35"
+    assert renderers_of(RunSettings({**LOCAL_LORA, "channels.policy.renderer": None}), CLUSTER, "policy") == [
+        "rollout_qwen:qwen3"
+    ]
+    assert refused("renderer", findings({"channels.policy.renderer": "rollout_qwen:qwen3"})) == [
+        "rollout_qwen:qwen3 says it renders other models than Qwen/Qwen3.5-4B; rollout_qwen:qwen35 does"
+    ]
+    assert refused("renderer", findings({"channels.policy.renderer": None})) == []  # (one renders it: it is filled)
 
 
 # name

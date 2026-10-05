@@ -412,6 +412,7 @@
   .field { display: grid; gap: 4px; min-width: 0; align-content: start; }
   .field > span { font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--quiet); }
   .field small { color: var(--faint); font-size: 12px; }
+  .field-value { display: flex; align-items: center; min-height: 32px; color: var(--quiet); font-family: var(--mono, ui-monospace, monospace); font-size: 13px; }
   .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; }
   .launch-form input, .launch-form select, .field input, .field select, .setting input, .setting select {
     font: 13px var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line-strong); border-radius: 3px;

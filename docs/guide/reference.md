@@ -38,7 +38,7 @@ do not edit by hand.
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
-- **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_weights`](#with_weights)
+- **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
@@ -5653,8 +5653,8 @@ driver notes its run stopped. Raises `KeyError` for a launch that is not going.
 async def submit(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, preset: str | None = None, resumes: str | None = None, backend: Backend | None = None) -> Launch
 ```
 
-Record a launch of a run with these settings and start its job (`ask`, then `start`): a training run's with
-what it trains said (`rollout_train.validation.with_weights`).
+Record a launch of a run with these settings and start its job (`ask`, then `start`), with what follows from its
+settings said: what it trains and each channel's renderer (`rollout_train.validation.completed`).
 
 ## `rollout_train.launches`
 
@@ -8215,6 +8215,17 @@ A checkpoint a run's settings name (its start, a fixed channel's), as the ledger
 | `formats` | `frozenset[str]` | `frozenset()` | The formats its files are in (`rollout_train.bridges.format_of`). |
 | `model` | `str \| None` | `None` | The model it was trained over. |
 
+### `completed`
+
+*function* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+def completed(settings: RunSettings, cluster: Cluster) -> RunSettings
+```
+
+A run's settings with what follows from them said: what it trains (`with_weights`) and each channel's renderer
+(`with_renderers`), as its start records them.
+
 ### `EnvironmentFacts`
 
 *class* · `libraries/rollout-train/src/rollout_train/validation.py`
@@ -8295,6 +8306,17 @@ def refusals(findings: list[Finding]) -> list[Finding]
 
 The findings that refuse the run.
 
+### `renderers_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+def renderers_of(settings: RunSettings, cluster: Cluster, channel: str) -> list[str]
+```
+
+The renderers that render a channel's model, as `module:name` (`rollout_train.recorder.renderers.renderers_for`):
+over the model its provider says a quantized model was made from, where none renders the model itself.
+
 ### `Rule`
 
 *class* · `libraries/rollout-train/src/rollout_train/validation.py`
@@ -8313,7 +8335,7 @@ class Rule
 *constant* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
+RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('renderer', 'a channel sampling tokens whose model no renderer renders, that several do with none said, or a renderer said that says it renders other models'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, or needs sandboxes or tool sets the cluster lacks'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
 ```
 
 Every rule `check` applies, in the order it reports them.
@@ -8383,6 +8405,17 @@ def weights_of(settings: RunSettings, cluster: Cluster) -> str | None
 ```
 
 What a run trains: its `weights`, else what its trainer makes (`lora` or `full`); none where neither is known.
+
+### `with_renderers`
+
+*function* · `libraries/rollout-train/src/rollout_train/validation.py`
+
+```python
+def with_renderers(settings: RunSettings, cluster: Cluster) -> RunSettings
+```
+
+A run's settings with each channel's renderer said where it names a model and no renderer, and exactly one
+renderer renders that model (`renderers_of`).
 
 ### `with_weights`
 

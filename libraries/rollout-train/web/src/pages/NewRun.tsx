@@ -12,7 +12,7 @@ import { Card, Empty, Head } from "../components/ui";
 import { publishedParts, readable } from "../lib/environments";
 import {
   bridgeOf, channelModelChoices, type Choice, choiceText, componentsOf, defaultOf, fielded, filled, launchSettings, modelChoices, objectiveGroups,
-  objectivePreset, pick, providerChoices, renderersOf, type Role, same, servesWhy, settled, trainedOf, trainerChoices, weightChoices,
+  objectivePreset, pick, providerChoices, rendererFor, renderersOf, type Role, same, servesWhy, settled, trainedOf, trainerChoices, weightChoices,
 } from "../lib/form";
 import { presetsPlace } from "../lib/places";
 import { EVALS_EPISODES, EVALS_EVERY, EVALS_SUITE, evalsSettings, NO_EVALS, shown, typed } from "../lib/settings";
@@ -92,6 +92,9 @@ function Picker({ value, choices, onChange, label, empty }: { value: unknown; ch
 
 const asNumber = (text: string): number | undefined => (text.trim() === "" ? undefined : Number(text));
 const text = (value: unknown): string => (value == null ? "" : String(value));
+
+/** A renderer by its function's name (`rollout_qwen:qwen35` is `qwen35`). */
+const rendererName = (reference: string): string => reference.split(":").pop() ?? reference;
 
 function Form({ offers, system }: { offers: Offers; system: System }) {
   const navigate = useNavigate();
@@ -425,7 +428,8 @@ function ChannelFields({ offers, settings, channel, slot, role, trainer, weights
   const chooseProvider = (picked: string) => {
     if (trained) return setUpstream({ [key("provider")]: picked });
     const next = offers.inference.find(each => each.name === picked);
-    set({ ...bound, [key("provider")]: picked, [key("model")]: pick(channelModelChoices(next, settings["trainer.model"] as string | undefined, serving), settings[key("model")]) });
+    const model = pick(channelModelChoices(next, settings["trainer.model"] as string | undefined, serving), settings[key("model")]);
+    set({ ...bound, [key("provider")]: picked, [key("model")]: model, [key("renderer")]: rendererFor(next, model, settings[key("renderer")]) });
   };
   const chooseMode = (mode: string) => {
     if (mode === "follows") {
@@ -442,12 +446,19 @@ function ChannelFields({ offers, settings, channel, slot, role, trainer, weights
           <Picker value={providerName} choices={providers} onChange={chooseProvider} label={`${channel} provider`} />
         </Field>
         <Field label="Model" keys={[key("model")]} refusals={refusals} marked={marked(key("model"))}>
-          <Picker value={settings[key("model")]} choices={models} onChange={picked => set({ ...bound, [key("model")]: picked })} label={`${channel} model`} />
+          <Picker value={settings[key("model")]} choices={models}
+            onChange={picked => set({ ...bound, [key("model")]: picked, [key("renderer")]: rendererFor(provider, picked, settings[key("renderer")]) })} label={`${channel} model`} />
         </Field>
         <Field label="Renderer" keys={[key("renderer")]} refusals={refusals} marked={marked(key("renderer"))}>
-          <input value={text(settings[key("renderer")])} list={`renderers-${channel}`} placeholder={trained ? "module:name" : "optional"} spellCheck={false} aria-label={`${channel} renderer`}
-            onChange={event => set({ [key("renderer")]: event.target.value.trim() || undefined })} />
-          <datalist id={`renderers-${channel}`}>{renderers.map(each => <option key={each} value={each} />)}</datalist>
+          {renderers.length > 1 ? (
+            <select value={text(settings[key("renderer")])} onChange={event => set({ [key("renderer")]: event.target.value })} aria-label={`${channel} renderer`}>
+              {renderers.map(each => <option key={each} value={each}>{rendererName(each)}</option>)}
+            </select>
+          ) : (
+            <span className="field-value" aria-label={`${channel} renderer`} title={text(settings[key("renderer")])}>
+              {provider && provider.capabilities.token_exact === false ? "the provider's own" : renderers.length ? rendererName(renderers[0]) : "none renders this model"}
+            </span>
+          )}
         </Field>
         {trained ? null : (
           <Field label="Serves" keys={[key("mode"), key("follows")]} refusals={refusals} marked={marked(key("mode"))}>

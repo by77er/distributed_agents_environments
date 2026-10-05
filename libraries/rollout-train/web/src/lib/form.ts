@@ -107,9 +107,18 @@ export function channelModelChoices(provider: OfferedProvider | undefined, train
   }));
 }
 
-/** The renderers known for a model (or the model it was quantized from), as runs and presets named them. */
+/** The renderers that say they render a model (or the model it was quantized from); none for a hosted API, which
+ * renders messages itself. */
 export const renderersOf = (provider: OfferedProvider | undefined, model: unknown): string[] =>
   provider?.models.find(each => each.model === model)?.renderers ?? [];
+
+/** The renderer a channel's model takes: the one said where it still renders the model, else the first that does;
+ * none where none does (the check then says why) or the provider renders messages itself. */
+export function rendererFor(provider: OfferedProvider | undefined, model: unknown, said: unknown): string | undefined {
+  const renderers = renderersOf(provider, model);
+  if (typeof said === "string" && renderers.includes(said)) return said;
+  return renderers[0];
+}
 
 /** What follows from a choice upstream: a trainer that trains the weights, a model it trains, and for the trained
  * channel a provider that can serve it, a model it serves and a renderer, each kept where it still fits. */
@@ -127,8 +136,7 @@ export function settled(offers: Offers, settings: Record<string, unknown>): Reco
   const provider = offers.inference.find(each => each.name === next[`channels.${channel}.provider`]);
   const model = pick(channelModelChoices(provider, next["trainer.model"] as string | undefined, true), next[`channels.${channel}.model`]);
   if (model !== undefined) next[`channels.${channel}.model`] = model;
-  const renderers = renderersOf(provider, next[`channels.${channel}.model`]);
-  if (!next[`channels.${channel}.renderer`] && renderers.length) next[`channels.${channel}.renderer`] = renderers[0];
+  next[`channels.${channel}.renderer`] = rendererFor(provider, next[`channels.${channel}.model`], next[`channels.${channel}.renderer`]);
   return next;
 }
 
