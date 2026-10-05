@@ -593,10 +593,17 @@ class RemoteChannel:
         self, asked: Callable[[CheckpointServer], Awaitable[T]], adapter: str | None, session: str
     ) -> T:
         """What `asked` gets of the session's server, counted as a request in flight. A server that does not answer
-        takes no turn until the next look; one that no longer has the checkpoint is asked for the one before."""
+        takes no turn until the next look; one that no longer has the checkpoint is asked for the one before. While no
+        server would take it, the turn waits for one, looking again, for as long as a turn waits for a replica: one
+        server that missed a look or a request does not fail every turn in flight."""
         address = self.server_of(session)
-        if address is None:
-            raise Unserved(f"no server of {self.name} would take a turn of session {session}")
+        waited_until = time.monotonic() + self._patience
+        while address is None:
+            if time.monotonic() > waited_until:
+                raise Unserved(f"no server of {self.name} would take a turn of session {session}")
+            await asyncio.sleep(self._every)
+            await self.refresh(now=True)
+            address = self.server_of(session)
         started = time.monotonic()
         if self._in_flight == 0:
             self._throughput.busy(started)

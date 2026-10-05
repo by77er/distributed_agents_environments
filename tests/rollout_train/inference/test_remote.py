@@ -267,6 +267,22 @@ async def test_turns_sample_the_newest_checkpoint_a_server_has_within_bounds_and
     routes.close()
 
 
+async def test_a_turn_waits_out_a_server_that_missed_a_look_rather_than_fail(tmp_path: Path) -> None:
+    checkpoints, presence = shared(tmp_path)
+    fence = await checkpoints.ledger.take(scope("r"))
+    await serve(checkpoints, fence, None)
+    async with engine_host("gpu-1", checkpoints, "r", tmp_path / "gpu-1", presence) as only:
+        recorder = routed(checkpoints, only.address)
+        routes = routes_of(recorder)
+        assert await routes.reaches("r", "policy")
+        channel = routes.channel("r", "policy")
+        # The only server missed a look (one request or probe it did not answer): every turn in flight would have no
+        # server until the next one. A turn waits for it instead of failing.
+        channel._has.clear()  # pyright: ignore[reportPrivateUsage]
+        assert await said(recorder, "r_1/policy") == [("base", 0)]
+    routes.close()
+
+
 async def test_a_server_that_has_not_loaded_the_newest_yet_samples_the_one_before(tmp_path: Path) -> None:
     checkpoints, presence = shared(tmp_path)
     fence = await checkpoints.ledger.take(scope("r"))

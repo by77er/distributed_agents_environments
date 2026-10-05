@@ -86,6 +86,8 @@ LINKS = "x-rollout-links"
 """The header a request declares its links to earlier requests in."""
 ATTEMPTS = 3
 """Times a turn is sampled before it fails, when the weights it began with stop being served (`Unserved`)."""
+BACKOFF = 1.0
+"""Seconds before a turn's second attempt, doubled before each after it."""
 
 
 logger = logging.getLogger(__name__)
@@ -236,6 +238,8 @@ class Gateway:
             return await self._hosted_turn(grant, sampler, request, links)
         failure: Exception | None = None
         for attempt in range(1, ATTEMPTS + 1):
+            if attempt > 1:
+                await asyncio.sleep(BACKOFF * 2 ** (attempt - 2))  # (a server that did not answer, a moment to again)
             try:
                 return await self._turn(grant, sampler, request, links, attempt)
             except Unserved as error:
