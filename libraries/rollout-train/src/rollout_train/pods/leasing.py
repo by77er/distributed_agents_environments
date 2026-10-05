@@ -66,6 +66,7 @@ __all__ = [
     "PodsDidNotStart",
     "needs_of",
     "pod_name",
+    "pods_store",
     "reap",
     "tag_of",
 ]
@@ -136,6 +137,16 @@ def needs_of(settings: "RunSettings", cluster: "Cluster") -> list[PodNeed]:
         raise ValueError(f"the trainer {trainer.name} takes its steps on {trainer.colocate_with}'s pods: the run's "
                          f"trained channel is served there")  # fmt: skip
     return needs
+
+
+def pods_store(settings: "RunSettings", cluster: "Cluster") -> str | None:
+    """The blob store a run's RunPod providers read and write (`[stores.NAME]`), where they name one: the store its
+    blobs go to."""
+    for need in needs_of(settings, cluster):
+        table = _table(cluster, need.provider)
+        if table is not None and table.store is not None:
+            return table.store
+    return None
 
 
 def tag_of(cluster: "Cluster") -> str:

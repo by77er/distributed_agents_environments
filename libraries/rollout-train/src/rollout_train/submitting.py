@@ -261,6 +261,11 @@ class KubernetesApi:
             response.raise_for_status()
 
 
+DEADLINE_GRACE = 1800
+"""Seconds past a run's `limits.hours` its RayJob may go on (its driver ends it at its hours, and releases its pods)
+before Kubernetes stops it (`activeDeadlineSeconds`)."""
+
+
 def rendered(
     template: Mapping[str, Any],
     launch: Launch,
@@ -301,6 +306,9 @@ def rendered(
     spec["jobId"] = name
     spec["runtimeEnvYAML"] = yaml.safe_dump(json.loads(json.dumps(dict(runtime_env))), sort_keys=True)
     spec["metadata"] = {"kind": launch.asked.kind, "launch": launch.id, "name": launch.asked.name}
+    hours = launch.asked.settings.get("limits.hours")
+    if isinstance(hours, int | float) and not isinstance(hours, bool):  # (the driver ends it at its hours: this, after)
+        spec["activeDeadlineSeconds"] = int(float(hours) * 3600 + DEADLINE_GRACE)
     made["spec"] = spec
     return made
 

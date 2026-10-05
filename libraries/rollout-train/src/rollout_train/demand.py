@@ -21,7 +21,8 @@ config alone:
 
 Bridges run one at a time (a checkpoint is bridged before the next is served, and a chain's bridges in turn), so one
 bundle the size of the largest holds every bridge the run runs. Channels on servers elsewhere (`vllm-servers`, RunPod
-pods, which are scheduled where they run) and on Tinker ask the run's Ray cluster for nothing.
+pods, which are scheduled where they run) and on Tinker ask the run's Ray cluster for nothing, nor does a trainer on
+RunPod's pods (`runpod-trainer`): the run leases its pods (`rollout_train.pods.leasing`), outside Kueue's quota.
 
 The driver reserves its parts as one placement group (`reserve`) before it starts any of them, so a run starts only
 with all of it reserved and never waits half-placed. The group is `PACK`: Ray puts its bundles on as few nodes as hold
@@ -313,7 +314,7 @@ def demand(settings: "RunSettings", cluster: Cluster, *, sandboxes: Collection[s
     provider = cluster.trainers.get(str(settings["trainer.provider"])) if kind in (train, imitate) else None
     hosts = _hosts(settings, cluster)
     bundles: list[Bundle] = []
-    if provider is not None and provider.allocation == "scheduled":
+    if provider is not None and provider.allocation == "scheduled" and provider.kind != "runpod-trainer":
         shared = provider.colocate_with if colocating(settings, cluster) else None
         trainer = Part(TRAINER, Resources(cpus=TRAINER_CPUS, gpus=provider.gpus / 2 if shared else provider.gpus))
         with_it = next((part for channel, name, part in hosts

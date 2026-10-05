@@ -86,5 +86,5 @@ async def test_an_eval_ends_once_it_spends_its_limit(
             await ran(evaluation)
     assert len(api.requests) == 2  # (one at a time: the second reaches the limit, and no third is sampled)
     ended = newest_record(await evaluation.ledger.read(table(evaluation.run.id, ENDS)))
-    assert ended["how"] == "failed" and "limits.spend" in ended["detail"]
+    assert ended["how"] == "stopped" and "limits.spend" in ended["detail"]
     assert await spent(evaluation) == pytest.approx([0.3, 0.3])

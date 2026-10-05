@@ -10,15 +10,21 @@ job, or as a RayJob on Kubernetes; `rollout train --here` runs it in the calling
 
 1. checks the run's settings again against the cluster config, with what it finds now (`rollout_train.launching
    .checked`): a refusal ends the run, the reasons recorded as its end and on its launch;
-2. reserves what the run needs as one placement group (`Run.start`, `rollout_train.demand`), then starts it there: an
-   engine host actor of its own for each replica of a channel on a `vllm` provider (`rollout_train.inference.hosts`),
+2. reserves what the run needs as one placement group (`Run.start`, `rollout_train.demand`), and claims the pods its
+   RunPod providers give it (`rollout_train.pods.leasing.Pods`: warm ones taken, others started, each waited for until
+   it is ready, or deleted and the run failed past its provider's `start_timeout`), renewed while it runs and released
+   warm on the way out, however it ends; its blobs then go to the store those providers name. Then it starts in the
+   group: an engine host actor of its own for each replica of a channel on a `vllm` provider
+   (`rollout_train.inference.hosts`),
    the trainer as an actor with its share of a GPU (half of the card where it is colocated with the trained channel's
-   engines, which then sleep while it steps), on the driver's node, since a step's files are handed to it by path, and
-   a bundle for the bridges' tasks. While the group or an actor waits for Ray, the driver beats as `run/RUN` saying
+   engines, which then sleep while it steps), on the driver's node, since a step's files are handed to it by path (a
+   `runpod-trainer`'s steps go to its pod's training service instead, `rollout_train.pods.RemoteTrainer`), and a bundle
+   for the bridges' tasks. While the group or an actor waits for Ray, the driver beats as `run/RUN` saying
    what it waits for (and its demand), and notes it on its launch;
 3. samples every channel its settings name through a gateway in its own process (`rollout_train.gateway.Gateway`):
-   a channel on engine hosts or on servers elsewhere (`vllm-servers`, RunPod pods) is a routed channel, sampled by
-   checkpoint name from what the run's serving records say (`rollout_train.inference.Routes`); a channel on Tinker is
+   a channel on engine hosts or on servers elsewhere (`vllm-servers`, RunPod pods: the pods its leases name, found by
+   their beats, `rollout_train.pods.routing`) is a routed channel, sampled by checkpoint name from what the run's
+   serving records say (`rollout_train.inference.Routes`); a channel on Tinker is
    sampled by engines in this process; a channel on a hosted API (`api`) is sampled through its provider's endpoint
    (`rollout_train.inference.api.ApiChannel`), its turns never trained on. Its start records its settings, so the
    cluster's gateway can serve its channels on providers it reaches (`rollout_train.gateway.ChannelDirectory`);
@@ -30,8 +36,10 @@ job, or as a RayJob on Kubernetes; `rollout train --here` runs it in the calling
    trainer makes;
 6. on the way out, ends what it started (Ray ends the actors with the job in any case), and notes how it ended.
 
-An eval with `limits.spend` ends once what it and its parts spent on hosted APIs reaches the limit (`SpendReached`),
-failed with that reason: the gateway samples no more on them for it from then on.
+A run with `limits.spend` (a training run or an eval) ends once what it spent reaches the limit (`SpendReached`): its
+turns on hosted APIs (an eval's with its parts'), and its pods' hours at their price, counted at each renewal. A run
+with `limits.hours` ends once it has run that long (`HoursReached`); its RayJob's `activeDeadlineSeconds` stops it half
+an hour after that in any case. Either ends the run stopped, with the reason, its pods released.
 
 A run's channel on a `vllm` provider gets engine hosts of its own (`Run.start`, `hosted`).
 """
@@ -73,9 +81,10 @@ from rollout_train.inference.channel import MAX_LAG
 from rollout_train.launching import Refused, checked, declared, ray_free
 from rollout_train.ledger import Fence
 from rollout_train.machine import measured
+from rollout_train.pods.leasing import pods_store
 from rollout_train.presence import presence_of
-from rollout_train.providers import INFERENCE_KINDS, TrainerProvider, settings_of
-from rollout_train.record import ENDS, STARTS, end, ending, scope, start_header, table, trained_objective
+from rollout_train.providers import INFERENCE_KINDS, RUNPOD, TrainerProvider, settings_of
+from rollout_train.record import ENDS, STARTS, LimitReached, end, ending, scope, start_header, table, trained_objective
 from rollout_train.record import FAILED as RUN_FAILED
 from rollout_train.registry import Entry, registry_of, resolved
 from rollout_train.rollouts.scheduler import EpisodeRunner
@@ -88,6 +97,7 @@ if TYPE_CHECKING:
     from rollout_train.objectives import Objective
 
 __all__ = [
+    "HoursReached",
     "NotEnoughMemory",
     "Run",
     "SpendReached",
@@ -114,8 +124,12 @@ class NotEnoughMemory(Exception):
     """Stopping is better than exhausting the machine (a host may shut down rather than kill one process)."""
 
 
-class SpendReached(Exception):
+class SpendReached(LimitReached):
     """A run spent what its `limits.spend` allows."""
+
+
+class HoursReached(LimitReached):
+    """A run ran as long as its `limits.hours` allows."""
 
 
 def available_memory_gib() -> float:
@@ -300,7 +314,13 @@ class Run:
     """When it asked Ray for its placement group."""
     reserved_at: float | None = None
     """When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own)."""
+    pods: Any = None
+    """Its pods on RunPod (`rollout_train.pods.leasing.Pods`), where its providers give it any."""
+    began: float = field(default_factory=time.time)
+    """When this start of it began: what `limits.hours` counts from."""
     _said: str | None = field(default=None, init=False, repr=False)
+    _unspent: float = field(default=0.0, init=False, repr=False)
+    """Dollars its pods cost before its gateway could count them."""
 
     @property
     def ledger(self) -> Any:
@@ -326,12 +346,15 @@ class Run:
         self.directory = run_directory(self.cluster, self.run.id)
         await asyncio.to_thread(self.directory.mkdir, parents=True, exist_ok=True)
         self.runs.add(self.run.id)
+        if (store := pods_store(self.settings, self.cluster)) is not None:  # (what its pods read and write)
+            self.stores = self.stores.writing_to(self.cluster, store)
         start = self.settings["start"]
         if isinstance(start, str):
             self.origin = await resolved(self.ledger, registry_of(self.ledger), start)
         if self.environment is not None and self.kind in (TRAIN, EVAL, CHECK):
             self.sandboxes, _ = await asyncio.to_thread(declared, self.environment)
         await self._reserved()
+        await self._leased(stack)
         if training:
             await self._trainer()
         self._channels()
@@ -340,6 +363,33 @@ class Run:
             self._colocated()
         if self.kind in (TRAIN, EVAL, CHECK):
             await self._played(stack)
+
+    async def _leased(self, stack: contextlib.AsyncExitStack) -> None:
+        """The run's pods on RunPod (`rollout_train.pods.leasing`): claimed now (each waited for until it is ready, or
+        deleted and the run failed), renewed while the run runs, what they cost counted toward its `limits.spend`,
+        and released warm on the way out, however the run ends."""
+        from rollout_train.pods.leasing import Pods, needs_of
+
+        needs = needs_of(self.settings, self.cluster)
+        if not needs:
+            return
+        pods = Pods(self.run.id, self.cluster, self.ledger, told=self._told)
+        self.pods = pods
+        stack.push_async_callback(pods.release)
+        earlier = sum(each.dollars for each in await pods.store.times(self.run.id))  # (its starts before this one)
+        await pods.claim(needs)
+        await self._pods_spent(earlier)
+        _background(stack, pods.renewing(self._pods_spent))
+        if self.noted is not None:
+            await self.noted("running")
+
+    async def _pods_spent(self, dollars: float) -> None:
+        """Count what its pods cost toward its spend: in its gateway's, once it has one."""
+        self._unspent += dollars
+        spending = self.gateway.spending if self.gateway is not None else None
+        if spending is not None and self._unspent:
+            unspent, self._unspent = self._unspent, 0.0
+            await spending.counted(self.run.id, unspent)
 
     async def _reserved(self) -> None:
         """The run's placement group (`rollout_train.demand.reserve`), waited for until Ray has reserved all of it."""
@@ -393,6 +443,9 @@ class Run:
         model = self.settings.trainer_model
         if model is None:
             raise ValueError("the run says no model its trainer trains (trainer.model, or the trained channel's)")
+        if provider.kind == "runpod-trainer":
+            self.trainer = await self._on_pod(provider)
+            return
         model = await self._over(provider, model)
         given: dict[str, Any] = {
             key.removeprefix("trainer."): value for key, value in self.settings.values.items() if is_trainers(key)
@@ -424,6 +477,29 @@ class Run:
             name, handle, f"{asks.said()} on the driver's node" if asks.cpus or asks.gpus else "the driver's node"
         )
         self.trainer_handle = handle
+
+    async def _on_pod(self, provider: TrainerProvider) -> Trainer:
+        """The trainer of a `runpod-trainer`: the training service of the pod the run holds for its steps (its own, or
+        its host's), reached at the address its beat says, its identity checked; its budget and the settings it takes
+        between steps as the pod says."""
+        from rollout_train.pods import RemoteTrainer, live
+        from rollout_train.presence import presence_of
+
+        held = self.pods.of("trainer") if self.pods is not None else []
+        presence = presence_of(self.ledger)
+        if not held or presence is None:
+            raise ValueError(f"the run holds no pod for its trainer {provider.name}'s steps")
+        (address,) = [each for each in live(await presence.beats()) if each.name == held[0].pod] or [None]
+        if address is None:
+            raise ValueError(f"pod {held[0].pod} does not beat: its steps cannot be asked of it")
+        connection = provider.auth.connection(self.cluster.tls, identity=address.identity)
+        said = await RemoteTrainer(address.address, self.checkpoints, connection=connection).describe()
+        budget = Budget(**dict(said.get("budget") or {}))
+        return RemoteTrainer(
+            address.address, self.checkpoints, weights=str(said.get("weights") or provider.capabilities.produces),
+            budget=budget, objective=objective_in(self.settings), changeable=dict(said.get("changeable") or {}),
+            connection=connection,
+        )  # fmt: skip
 
     async def _over(self, provider: TrainerProvider, model: str) -> str:
         """What the trainer is made over: the model; for a run that starts from a full checkpoint (or an adapter over
@@ -471,11 +547,12 @@ class Run:
                 continue
             servers: list[Any] = []
             connection = None
+            leased = [name for name in providers if self.cluster.inference[name].kind in RUNPOD]
             for name in providers:
                 provider = self.cluster.inference[name]
                 if provider.kind == "vllm":
                     servers += self.hosted(channel, name, str(model))
-                else:
+                elif provider.kind not in RUNPOD:
                     via = provider.settings.get("via")
                     servers += [str(via)] if via else list(provider.endpoints)
                     connection = connection or provider.auth.connection(self.cluster.tls)
@@ -483,8 +560,20 @@ class Run:
             routes[channel] = Route(
                 made, str(model), tuple(servers), limits, max_lag=lag if isinstance(lag, int) else MAX_LAG,
                 **({"connection": connection} if connection is not None else {}),
+                discover=self._discovered(channel, leased, str(model)) if leased else None,
             )  # fmt: skip
         self.routes = Routes(routes, self.ledger) if routes else None
+
+    def _discovered(self, channel: str, providers: Sequence[str], model: str) -> Any:
+        """What a channel on RunPod's pods asks at each look for its servers: the pods the run's leases name for it."""
+        from rollout_train.pods.routing import LeasedServers
+
+        auth = self.cluster.inference[providers[0]].auth
+
+        def discover(run: str) -> LeasedServers:
+            return LeasedServers(self.ledger, run, channel, providers, model, auth, self.cluster.tls)
+
+        return discover
 
     def _sequence(self) -> int | None:
         """The longest turn the trained channel takes: the longest segment its trainer trains on."""
@@ -583,6 +672,7 @@ class Run:
         }  # fmt: skip
         store = TurnStore(self.ledger, self.stores.blobs)
         self.gateway = Gateway(store, keyring, self.channels, self.routes, models, hooks=[feed], hosted=self.on_apis)
+        await self._pods_spent(0.0)  # (what its pods cost before it had a gateway)
         port = _free_port()
         self.recorder = GatewayEndpoints.of(self.gateway, f"http://127.0.0.1:{port}")
         _background(stack, _serve(self.gateway, port))
@@ -885,7 +975,7 @@ async def _train(run: Run) -> None:
         run.started["blobs"] = dict(run.stores.location)
         run.started["directory"] = str(live.directory)
         async with ending(run.ledger, run.run.id):
-            await train(
+            await _within_limits(live, train(
                 environment, live.trainer, run.checkpoints, start=live.origin, channel=live.channel,
                 base=str(run.settings.get(f"channels.{live.channel}.model")), directory=live.directory / "checkpoints",
                 publish=live.publish, groups=int(cast(int, run.settings["groups"])),
@@ -895,7 +985,7 @@ async def _train(run: Run) -> None:
                 episodes_at_once=int(cast(int, run.settings["episodes_at_once"])), binding=live.binding(environment),
                 run=run.run.id, started=run.started, hooks=[live.feed], kept=live.bookmarked, made=live.made,
                 reshard=live.bridged if live.chain else None, evals=schedule, desired=desired, scheduled=scheduled,
-            )  # fmt: skip
+            ))  # fmt: skip
 
 
 async def _evaluate(run: Run) -> None:
@@ -929,7 +1019,7 @@ async def _evaluate(run: Run) -> None:
             run.started["directory"] = str(live.directory)
             run.started["environment"] = suite.environments[0]
             async with ending(run.ledger, run.run.id):
-                said = await _within_spend(live, evaluate(
+                said = await _within_limits(live, evaluate(
                     run.checkpoints, run=run.run.id, suite=suite, subject=subject,
                     base=str(run.settings.get(f"channels.{live.channel}.model")), channel=live.channel,
                     directory=live.directory / "checkpoints", publish=live.publish, environments=played,
@@ -944,29 +1034,53 @@ async def _evaluate(run: Run) -> None:
         print(f"{suite.id} {each['environment']}: {solved} episodes (mean reward {each['reward']})", flush=True)
 
 
-async def _within_spend[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
-    """Do a run's work, ending it once what it and the runs it plays spent on hosted APIs reaches its `limits.spend`
-    (`SpendReached`, with the parts it played ended failed with the same reason); without a limit, just do it."""
-    limit = live.settings["limits.spend"]
-    gateway = live.gateway
-    if not isinstance(limit, int | float) or isinstance(limit, bool) or gateway is None or gateway.spending is None:
+async def _within_limits[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
+    """Do a run's work, ending it once it reaches a limit its settings set: what it and the runs it plays spent reaches
+    `limits.spend` (`SpendReached`: their turns on hosted APIs, and its pods' hours at their price), or it has run for
+    `limits.hours` since it began (`HoursReached`). The run ends stopped, with the reason (`ending`), and the parts it
+    played end failed with the same reason. Without a limit, just do it."""
+
+    def number(value: Any) -> float | None:
+        return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+    spend, hours = number(live.settings["limits.spend"]), number(live.settings["limits.hours"])
+    spending = live.gateway.spending if live.gateway is not None else None
+    watched: dict[str, asyncio.Future[Any]] = {}
+    if spend is not None and spending is not None:
+        watched["spend"] = asyncio.ensure_future(spending.cap(live.runs, spend).reached.wait())
+    elif spend is not None and live.pods is not None:  # (no gateway: its pods are all it spends)
+        watched["spend"] = asyncio.ensure_future(_pods_reach(live, spend))
+    if hours is not None:
+        watched["hours"] = asyncio.ensure_future(asyncio.sleep(max(0.0, live.began + hours * 3600 - time.time())))
+    if not watched:
         return await work
-    spending = gateway.spending
-    cap = spending.cap(live.runs, float(limit))
     task = asyncio.ensure_future(work)
-    reached = asyncio.ensure_future(cap.reached.wait())
     try:
-        await asyncio.wait([task, reached], return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait([task, *watched.values()], return_when=asyncio.FIRST_COMPLETED)
     finally:
-        reached.cancel()
+        for each in watched.values():
+            each.cancel()
     if task.done():
         return task.result()
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
-    why = f"it spent ${await spending.total(live.runs):.2f}, which reaches limits.spend ${float(limit):g}"
+    reached: LimitReached
+    if "spend" in watched and watched["spend"].done() and not watched["spend"].cancelled():
+        total = await spending.total(live.runs) if spending is not None else float(getattr(live.pods, "spent", 0.0))
+        reached = SpendReached(f"it spent ${total:.2f}, which reaches limits.spend ${spend:g}")
+    else:
+        reached = HoursReached(f"it ran {hours:g} hours, which reaches limits.hours")
     for each in sorted(live.runs - {live.run.id}):
-        await end(live.ledger, each, RUN_FAILED, f"{SpendReached.__name__}: {why}")
-    raise SpendReached(why)
+        await end(live.ledger, each, RUN_FAILED, f"{type(reached).__name__}: {reached}")
+    raise reached
+
+
+async def _pods_reach(live: Run, limit: float, *, every: float = 10.0) -> None:
+    """Return once what the run's pods cost reaches `limit` dollars."""
+    while True:
+        if float(getattr(live.pods, "spent", 0.0)) >= limit:
+            return
+        await asyncio.sleep(every)
 
 
 def imitated(settings: RunSettings, kind: str) -> "Objective":
@@ -1041,12 +1155,12 @@ async def _imitate(run: Run) -> None:
         }  # fmt: skip
         await ledger.append(table(run.run.id, STARTS), str(fence.number), start, fence)
         async with ending(ledger, run.run.id):
-            checkpoint = await imitate(
+            checkpoint = await _within_limits(live, imitate(
                 run.checkpoints, live.trainer, taught, fence=fence, run=run.run.id, start=live.origin,
                 base=str(model), directory=live.directory / "checkpoints",
                 limit=limit if isinstance(limit, int) else None, seed=int(cast(int, run.settings["seed"])),
                 resume_optimizer=bool(run.settings["imitation.resume_optimizer"]),
-            )  # fmt: skip
+            ))  # fmt: skip
     parents = ", ".join(checkpoint.parents) or "the base model"
     metrics = {key: round(value, 4) for key, value in checkpoint.metrics.items()}
     print(f"made {checkpoint.id} (from {parents}): {json.dumps(metrics)}", flush=True)
@@ -1121,6 +1235,9 @@ async def _driven(launches: Any, id: str, work: Coroutine[Any, Any, None]) -> No
         await work
     except asyncio.CancelledError:
         await asyncio.shield(launches.note(id, expect=OPEN, state=STOPPED, detail="stopped"))
+        raise
+    except LimitReached as reached:
+        await launches.note(id, expect=OPEN, state=STOPPED, detail=f"stopped: {reached}"[-4000:])
         raise
     except Refused as refused:
         await launches.note(id, expect=OPEN, state=FAILED, detail=f"refused: {refused}")

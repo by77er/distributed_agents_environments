@@ -210,7 +210,17 @@ KEYS: tuple[Key, ...] = (
         None,
         True,
         TRAINING | {"eval"},
-        "Dollars: an eval ends once it spends this; a training run whose step is estimated above it is refused",
+        "Dollars: the run ends once it spends this (hosted APIs' turns, its pods' hours); a training run whose step "
+        "is estimated above it is refused",
+        least=0,
+    ),
+    Key(
+        "limits.hours",
+        ("float", "null"),
+        None,
+        False,
+        frozenset(KINDS),
+        "Hours: the run ends once it has run this long, its pods released",
         least=0,
     ),
     # The objective: its preset, fixed, and its components (fixed or changeable, each as `COMPONENTS` says).

@@ -132,13 +132,21 @@ async def end(ledger: Ledger, run: str, how: str, detail: str | None = None) -> 
         await ledger.append(table(run, ENDS), number, said, Fence(scope(run), max(mine)))
 
 
+class LimitReached(Exception):
+    """A run reached a limit its settings set (`limits.spend`, `limits.hours`): it ends stopped, with the reason."""
+
+
 @contextlib.asynccontextmanager
 async def ending(ledger: Ledger, run: str) -> AsyncGenerator[None]:
-    """Say how the work inside ends (`end`): finished, stopped (cancelled: an interrupt) or failed (it raised)."""
+    """Say how the work inside ends (`end`): finished, stopped (cancelled: an interrupt; or a limit reached, with the
+    reason) or failed (it raised)."""
     try:
         yield
     except asyncio.CancelledError:
         await asyncio.shield(end(ledger, run, STOPPED))
+        raise
+    except LimitReached as reached:
+        await end(ledger, run, STOPPED, f"{type(reached).__name__}: {reached}"[:500])
         raise
     except (Exception, SystemExit) as error:
         await end(ledger, run, FAILED, f"{type(error).__name__}: {error}"[:500])
