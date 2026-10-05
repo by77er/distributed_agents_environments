@@ -25,7 +25,7 @@ from rollout_train.inference.remote import CheckpointServer, Connection, RemoteC
 from rollout_train.ledger import Ledger
 from rollout_train.record import recorded_settings
 from rollout_train.run_settings import RunSettings
-from rollout_train.serving import qualified, serving_of
+from rollout_train.serving import Serving, qualified, serving_of
 
 if TYPE_CHECKING:
     from rollout_train.cluster import Cluster
@@ -131,7 +131,7 @@ class ChannelDirectory:
             settings.get(f"channels.{name}.answer_tokens"),
         )
 
-        async def wanted() -> Sequence[Any]:
+        async def wanted() -> Sequence[Serving]:
             return await serving_of(self.ledger, run, name)
 
         return RemoteChannel(
