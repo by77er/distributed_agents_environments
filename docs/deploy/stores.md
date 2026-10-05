@@ -29,7 +29,7 @@ url_env = "ROLLOUT_LEDGER_URL"
   [episode](../libraries/rollout-train/episodes.md) runner holds a pool of connections. A managed Postgres needs as
   many.
 - Expose Postgres only inside the cluster. Processes outside it (GPU pods elsewhere) are given scoped access through
-  the ledger service the [runtime design](../research/runtime-design.md#decisions-after-review) describes, never
+  the ledger service ([the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http)), never
   the database itself.
 
 ## Blobs in S3

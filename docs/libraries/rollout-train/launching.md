@@ -139,7 +139,11 @@ runs, which a test calls on a `Run` built directly:
    than its nodes now). A refusal ends the run: its start records its settings, its end says the refusals, and the
    launch fails with them.
 3. **What it claims** (`Run.start`): first the run's placement group, reserved whole ([what a run
-   needs](#what-a-run-needs)), then in it, as actors the job owns, so they go with it:
+   needs](#what-a-run-needs)); then the pods its RunPod providers give it (`rollout_train.pods.leasing.Pods`: warm ones
+   taken, others started, each waited for until its beat says it is ready for the run, or deleted and the run failed
+   past its provider's `start_timeout`), renewed every 30 seconds and released warm on the way out
+   ([GPU pods on RunPod](../../deploy/providers.md#gpu-pods-on-runpod)); its blobs then go to the store those providers
+   name. Then in the group, as actors the job owns, so they go with it:
    - each channel on a `vllm` provider: an engine host per replica (`run/RUN/engine/CHANNEL/N`,
      [engine hosts](channels.md#engine-hosts)), bound to the run's channel, asking for one CPU and the provider's GPUs
      per replica (half of them where the trainer is colocated with them) in its bundle, started from the model's
@@ -151,15 +155,18 @@ runs, which a test calls on a `Run` built directly:
      trainer's `implementation` with the model (`trainer.model`, else the trained channel's; for a run that starts from
      full weights, or an adapter over them, those weights fetched here), the trainer settings it takes, the objective
      the settings resolve to, and Tinker's project where the config names one. `TrainerClient` is the `Trainer` the
-     loop steps over the actor.
+     loop steps over the actor. A `runpod-trainer`'s steps go to the training service of the pod the run holds for
+     them (`RemoteTrainer`, reached at the address its beat says, checked by its identity), and it asks Ray for
+     nothing.
 
    While the group or any of these waits for Ray, the driver beats as `run/RUN` (kind `run`, with what it waits for:
    each part, what it asked for, and an actor's state where Ray says) and notes it on its launch (`waits for
    run/RUN/engine/policy/0 (1 GPU, 1 CPU), run/RUN/bridge (2 CPUs, 1 GiB)`), every two seconds, until each is
    ready.
 4. **The channels.** Every channel the settings name is sampled through a gateway in the driver's process
-   ([the gateway](gateway.md)): a channel on engine hosts, or on servers at addresses (`vllm-servers`,
-   `runpod-inference`: their `via` or their addresses, reached as their auth says), is a routed channel, sampled by
+   ([the gateway](gateway.md)): a channel on engine hosts, on servers at addresses (`vllm-servers`: their `via` or
+   their addresses, reached as their auth says), or on the pods the run leases (`runpod-inference`, `runpod-host`:
+   found at each look by their leases and beats, reached over mutual TLS), is a routed channel, sampled by
    checkpoint name from what each run's serving records say (its evals' and their parts' too); a channel on Tinker
    is sampled by engines in the driver's process; a channel on an `api` provider is sampled through its provider's
    endpoint, with the key the driver's environment has (`ApiChannel`, [hosted APIs](gateway.md#hosted-apis)), its
@@ -205,7 +212,8 @@ demand; a metered trainer's actor asks Ray for nothing and runs on the driver's 
 
 Bridges run one at a time (a checkpoint is bridged before the next is served, and a chain's bridges in turn), so one
 bundle the size of the largest holds them all. Channels on servers elsewhere (`vllm-servers`, RunPod pods) and on
-Tinker ask the run's Ray cluster for nothing.
+Tinker ask the run's Ray cluster for nothing, nor does a trainer on RunPod's pods: the run leases those, outside
+Kueue's quota.
 
 The driver reserves the bundles as one placement group (`reserve`, named `run/RUN`) before it starts any part, so a
 run starts only with all of it reserved and never waits half-placed for a task Ray cannot place. The group is `PACK`:

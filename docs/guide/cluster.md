@@ -164,11 +164,14 @@ eval's: every episode of the suite's starts, each turn's thinking and answer bud
 dearest metered provider of the channel it plays. Their tokens are the episodes (for a step, the groups it waits for times
 the episodes of a group), times the turns an episode plays and the samples a turn takes, as the environment's
 description says them (`turns`, `samples_per_turn`: every agent of a team samples each turn), each sample its
-thinking and answer budgets and its `prompt_tokens`.
+thinking and answer budgets and its `prompt_tokens`. A training run's step on RunPod's pods costs each pod's `price` for
+as long as a step of the same trainer and model took here lately (a host's pod once); where no such run made three
+checkpoints, the estimate says it is not known yet.
 
 **Metered or scheduled.** Each inference provider and trainer says how it is allocated (`allocation`), by default as
-its kind is: `tinker` and `api` are `metered`; `vllm`, `vllm-servers`, `runpod-inference`, `runpod-trainer`, `lora` and
-`full` are `scheduled`. A metered one is always available: a run is bounded by its `limits.spend`, the provider's rate
+its kind is: `tinker` and `api` are `metered`; `vllm`, `vllm-servers`, `runpod-inference`, `runpod-host`,
+`runpod-trainer`, `lora` and `full` are `scheduled`. RunPod's pods are leased by the runs that use them, outside the
+capacity rule and Kueue's quota; a provider's `max_pods` caps them. A metered one is always available: a run is bounded by its `limits.spend`, the provider's rate
 limits and its `concurrency` (requests sent at once; none: unbounded), which only a metered one takes. A scheduled
 one is capacity a run is placed on: its GPUs count toward the capacity rule. One that asks for the cluster's GPUs is
 scheduled.
@@ -211,7 +214,7 @@ rollout bookmark diamonds first:20 --cluster lab
 
 ## Inference providers
 
-| Capability | `vllm` | `vllm-servers` | `tinker` | `api` | `runpod-inference` |
+| Capability | `vllm` | `vllm-servers` | `tinker` | `api` | `runpod-inference`, `runpod-host` |
 |---|---|---|---|---|---|
 | token-exact | yes | yes | yes | no | yes |
 | sampled-token logprobs | yes | yes | yes | no | yes |
@@ -223,9 +226,9 @@ rollout bookmark diamonds first:20 --cluster lab
 | streaming | no | no | no | yes | no |
 | loads | `peft`, `full` | `peft` | `tinker` | nothing | `peft` |
 | bills | nothing | nothing | tokens | tokens | hours |
-| allocation | scheduled | scheduled | metered | metered | scheduled |
+| allocation | scheduled | scheduled | metered | metered | scheduled (leased pods) |
 | auth | `none`, `bearer`, `mtls` (default `none`) | `none`, `bearer`, `mtls` (must say) | `vendor` | `vendor`, `bearer` (default `vendor`: the key `api_key_env` names) | `mtls` (each pod's identity from its heartbeat) |
-| its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs` | `addresses`, `via`, `loader`, `max_logprobs` | `project` / `project_env` | `endpoint`, `base_url`, `api_key_env` / `api_key_file` | `image`, `gpu_types`, `pods`, `idle_stop`, `volume_gb`, `secrets`, `step_ca`, `max_logprobs`, `api_key_env` |
+| its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs` | `addresses`, `via`, `loader`, `max_logprobs` | `project` / `project_env` | `endpoint`, `base_url`, `api_key_env` / `api_key_file` | its pods' table ([GPU pods on RunPod](../deploy/providers.md#the-providers-table)): `image`, `gpu_types`, `gpu_count`, `cloud`, `regions`, `price`, `max_pods`, `idle_stop`, `start_timeout`, `volume_gb`, `container_disk_gb`, `store`, `step_ca`, `secrets`, `api_key_env`, `memory_fraction` (and `sleep`, on a host), `max_logprobs` |
 
 Tinker's prompt and top-k logprobs are declared as its SDK says (`Capabilities.unchecked`): the SDK takes prompt
 logprobs and a top k at prompt and sampled positions, whose width Tinker's server bounds without the SDK saying how
@@ -233,9 +236,16 @@ far (declared as 20). Nothing relies on them, and `TinkerEngine` does not ask fo
 them.
 
 `max_logprobs` is the top-k a provider declares. A `vllm` provider's engines are started with it (`VllmEngine`'s
-`max_logprobs`, which vLLM caps a request's top k at), so a model's `options` do not set it. A `vllm-servers` or
-`runpod-inference` provider's servers must have been started with at least as many (`--max-logprobs`, 20 unless
-given).
+`max_logprobs`, which vLLM caps a request's top k at), so a model's `options` do not set it. A `vllm-servers`
+provider's servers must have been started with at least as many (`--max-logprobs`, 20 unless given); a RunPod
+provider's pods are started with it.
+
+**RunPod's pods.** A `runpod-inference` pod serves a run's channel; a `runpod-host` pod serves it and takes the steps of
+a `runpod-trainer` whose `colocate_with` names the host, on one GPU. A run leases its pods when it starts (warm ones
+first), renews them, and releases them when it ends; a released pod stays warm for `idle_stop` seconds, and
+`rollout pods reap` deletes what no run holds ([GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod)). A run
+is refused more pods than a provider's `max_pods`, pods without `step_ca`, or a cluster whose pods cannot reach the
+ledger service (`[ledger] public` and `token_env`).
 
 **Auth.** `auth` is a kind or a table: `auth = "none"`, `auth = { kind = "bearer", token_env = "ENGINES_TOKEN" }`,
 `auth = { kind = "vendor", key_env = "OPENAI_API_KEY" }`, `auth = { kind = "mtls", identity = "spiffe://…" }`.
@@ -288,7 +298,7 @@ options = { max_output_tokens = 128000, thinking = "adaptive", sampling = false,
   model's prices.
 - **Rate limits and an overloaded API** (429, 5xx, 529) are asked again with backoff (`retry-after` honoured);
   credentials refused or a request rejected end the episode as failed, with the reason.
-- **An eval's `limits.spend`** ends it once what it spent on hosted APIs reaches the limit, failed with that reason.
+- **An eval's `limits.spend`** ends it once what it spent on hosted APIs reaches the limit, stopped with that reason.
 
 The example config (`deploy/clusters/example.toml`) and the chart's offer `openai` and `anthropic`, their current
 models priced from each vendor's pricing page, with the date the prices were checked.
@@ -306,7 +316,7 @@ models priced from each vendor's pricing page, with the date the prices were che
 | scores given tokens | yes | yes | yes | yes |
 | starts from | `peft`, `full` | `full` | `tinker` | as the trainer it runs |
 | auth | `none` | `none` | `vendor` | `mtls` |
-| allocation | scheduled | scheduled | metered | scheduled |
+| allocation | scheduled | scheduled | metered | scheduled (a leased pod: its own, or a `runpod-host`'s it names in `colocate_with`) |
 | settings | `rollout_lora.settings:LoraSettings`, less `frozen_reference` | the same, less `rank` | `rollout_tinker.settings:TinkerSettings`, less `project` and `weights` | `LoraSettings` |
 
 `settings_of(kind)` reads a trainer's settings from its dataclass, without importing the trainer or torch: each field
@@ -370,7 +380,8 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `groups_per_step` | 4 | Changeable |
 | `max_lag` | 1 | Changeable |
 | `evals.suite`, `evals.every`, `evals.episodes` | , 1, | Changeable |
-| `limits.spend` | | Changeable: dollars. An eval ends once it spends this on hosted APIs; a training run whose one step is estimated above it is refused |
+| `limits.spend` | | Changeable: dollars. The run ends, stopped, once it spends this: its turns on hosted APIs (an eval's with its parts') and its pods' hours at their price. A training run whose one step is estimated above it is refused |
+| `limits.hours` | | Hours: the run ends, stopped, once it has run this long, its pods released; its RayJob is stopped half an hour later in any case (`activeDeadlineSeconds`) |
 
 Settings are given in layers, each over the last (`layered`): the schema's defaults, a preset, a file
 (`from_file`: TOML or JSON, dotted keys or tables; JSON's `null` unsets a key), then the flags (`from_flags`:

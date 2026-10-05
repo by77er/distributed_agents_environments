@@ -203,4 +203,13 @@ uv run pytest tests/rollout_lora -m live --basetemp ~/.cache/rollout/pytest-gpu 
 ```
 
 A test that spends money is skipped unless asked for in the environment: `tests/rollout_tinker/test_live.py` runs with
-`ROLLOUT_TINKER=1` and a Tinker key ([Tinker](../implementations/rollout-tinker.md)).
+`ROLLOUT_TINKER=1` and a Tinker key ([Tinker](../implementations/rollout-tinker.md)), and
+`tests/rollout_runpod/test_live.py` with `ROLLOUT_RUNPOD=1`, a RunPod key (`RUNPOD_API_KEY`) and a bucket
+(`ROLLOUT_RUNPOD_BUCKET=s3://BUCKET/PREFIX`): it leases a pod of a cheap GPU that never becomes ready, which its start
+timeout deletes, and reaps an orphan, for a few cents; with a deployment (`ROLLOUT_RUNPOD_CLUSTER`), it leases a
+provider's pod, samples it and releases it ([GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod)):
+
+```bash
+ROLLOUT_RUNPOD=1 uv run pytest -s tests/rollout_runpod/test_live.py -p no:cacheprovider \
+    --basetemp ~/.cache/pytest-tmp/runpod-live
+```

@@ -31,7 +31,7 @@ pages here describe the ones that exist.
 | A blob store | `Blobs` (`rollout.harness`) | [messages, files and digests](../guide/content.md#media-and-blobs), [the stores](../guide/cluster.md#the-stores) |
 | A checkpoint format bridge | a bridge's task (`module:name`) | [bridges](../libraries/rollout-train/checkpoints.md#bridges), [bridges in the cluster config](../guide/cluster.md#bridges) |
 | Environments from another framework | `Environment` (`rollout.environment`) | [verifiers environments](../implementations/rollout-verifiers.md) |
-| GPU pods elsewhere as providers | provider kinds `runpod-inference`, `runpod-trainer` | [RunPod pods as providers](../research/runpod-providers.md) (a design note) |
+| GPU pods elsewhere as providers | provider kinds `runpod-inference`, `runpod-trainer`, `runpod-host`; leases (`rollout_train.pods.leases`) | [GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod), [RunPod pods as providers](../research/runpod-providers.md) |
 
 ## Read in this order
 

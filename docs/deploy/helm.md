@@ -20,10 +20,21 @@ By role, in the namespace it is installed into (these pages use `rollout`):
   present the cluster's token, which KubeRay keeps in a Secret named after the cluster. Its job server is at
   `ray-head-svc.rollout:8265`.
 - **The gateway.** A Deployment of stateless replicas behind a Service at `gateway.rollout:8900` and an Ingress.
+- **The ledger service.** A Deployment `ledger` (`rollout ledger serve --cluster`) behind a Service at
+  `ledger.rollout:8840`, for pods outside the cluster; reachable from outside through an Ingress or a Service of
+  another type when `ledger.ingress` or `ledger.service` asks ([the ledger over
+  HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http)).
+- **For RunPod's pods** ([GPU pods on RunPod](providers.md#gpu-pods-on-runpod)): with `runpod.reaper`, a CronJob
+  `pods-reaper` (`rollout pods reap`, every minute); with `stepCa.enabled`, a StatefulSet `step-ca`, its Service at
+  `step-ca.rollout:9000`, and a CronJob `pki-publish` and a hook Job (`rollout pki publish`) that write its root and
+  provisioner key (the Secret `step-ca`) and a gateway certificate (`gateway-tls`), under a ServiceAccount `pki` that
+  may write those two Secrets; with `tunnel.enabled`, a Deployment `tunnel` running cloudflared, which carries
+  `tunnel.hostnames` to the ledger service and step-ca.
 - **The monitor.** One Deployment per entry of `monitors`, each behind a Service and an Ingress, and an Ingress for
   Ray's dashboard.
 - **What every pod mounts.** The state volume, the ConfigMap `rollout` with the cluster config, and the Secrets for
-  gateway keys and Tinker ([what every pod is given](#what-every-pod-is-given)).
+  gateway keys, Tinker, step-ca's root and provisioner key, and the gateway's certificate ([what every pod is
+  given](#what-every-pod-is-given)).
 
 - **Each run's job.** A RayJob made by a monitor when a run is asked for from its page (or by `rollout train
   --cluster` with Kubernetes credentials), from `files/rayjob.yaml`: a head pod of the platform's image sized from
@@ -58,6 +69,11 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `state.size` | `200Gi` | The state volume |
 | `state.path` | `/root/.cache/rollout` | Where pods mount the state volume: the code's `~/.cache/rollout` |
 | `secrets.stores`, `secrets.gatewayKeys`, `secrets.tinker`, `secrets.providers` | `stores`, `gateway-keys`, `tinker`, `providers` | The names of the Secrets the chart reads ([secrets](#make-the-secrets)) |
+| `secrets.ledger`, `secrets.runpod`, `secrets.r2`, `secrets.stepCa`, `secrets.gatewayTls` | `ledger`, `runpod`, `r2`, `step-ca`, `gateway-tls` | The Secrets for the ledger service's token, RunPod's key, a second bucket's two keys, step-ca's root and provisioner key, and the gateway's certificate ([secrets](#make-the-secrets)) |
+| `ledger.public`, `ledger.ingress`, `ledger.service` | none, off, `ClusterIP` | Where pods outside the cluster reach the ledger service, and how it is exposed |
+| `runpod.reaper` | `false` | The CronJob that deletes the pods no run holds |
+| `stepCa.enabled`, `stepCa.passwordSecret`, `stepCa.dnsNames` | `false`, `step-ca-password`, none | The chart's step-ca, its password's Secret, more names for its certificate |
+| `tunnel.enabled`, `tunnel.secret`, `tunnel.hostnames` | `false`, `tunnel`, none | A Cloudflare Tunnel to the ledger service and step-ca, its token's Secret, and its hostnames |
 | `stores.postgres.storage`, `stores.s3.storage` | `20Gi`, `200Gi` | The stores' volumes; cannot change once made |
 | `stores.bucket`, `stores.prefix` | `rollout-blobs`, `blobs/` | Where blobs are kept in the S3 store |
 | `ray.version` | `2.59.0` | Ray's version, which must be the image's |
@@ -141,7 +157,7 @@ kubectl get --raw /apis/visibility.kueue.x-k8s.io/v1beta2/clusterqueues/rollout/
 
 ## Make the Secrets
 
-The chart reads four Secrets and makes none of them, so that uninstalling the chart never deletes a credential.
+The chart reads the Secrets below and makes none of them, so that uninstalling the chart never deletes a credential.
 Make them once, before the first install:
 
 1. The namespace:
@@ -192,6 +208,23 @@ Make them once, before the first install:
     them (`api_key_env`), and the RayJob template holds only the reference. To change a key, update the Secret and
     restart the gateway (`kubectl -n rollout rollout restart deploy/gateway`); runs started after read the new one.
 
+6. **For RunPod's pods**, only to rent them ([GPU pods on RunPod](providers.md#what-a-deployment-provides)):
+
+    ```bash
+    kubectl -n rollout create secret generic ledger --from-literal=ROLLOUT_LEDGER_TOKEN="$(openssl rand -hex 32)"
+    kubectl -n rollout create secret generic runpod --from-literal=RUNPOD_API_KEY="$RUNPOD_API_KEY"
+    kubectl -n rollout create secret generic r2 \
+      --from-literal=WRITER_ACCESS_KEY_ID="$R2_WRITER_ID" --from-literal=WRITER_SECRET_ACCESS_KEY="$R2_WRITER_SECRET" \
+      --from-literal=READER_ACCESS_KEY_ID="$R2_READER_ID" --from-literal=READER_SECRET_ACCESS_KEY="$R2_READER_SECRET"
+    kubectl -n rollout create secret generic step-ca-password --from-literal=password="$(openssl rand -hex 24)"
+    kubectl -n rollout create secret generic tunnel --from-literal=token="$(cloudflared tunnel token rollout)"
+    ```
+
+    The chart gives `ROLLOUT_LEDGER_TOKEN` and the `R2_*` keys to every process of the platform, and `RUNPOD_API_KEY`
+    to runs' jobs and the reaper. The Secrets `step-ca` and `gateway-tls` are written by the chart's
+    `rollout pki publish`; with a step-ca of your own, make them yourself (`root_ca.crt`, `provisioner.jwk`; `tls.crt`,
+    `tls.key`, `ca.crt`).
+
 Another provider's key (a tool set's token, say) is named in the cluster config by environment variable (`token_env`,
 `key_env`). Put each in a Secret, and add it to the environment of the pods that use it (`templates/_helpers.tpl`).
 
@@ -203,7 +236,9 @@ Every pod of the platform (the Ray head and workers, the gateway, the monitors) 
   (`HF_HOME`), scratch space;
 - the ConfigMap `rollout` at `/etc/rollout`, with the cluster config at `/etc/rollout/cluster.toml`, which
   `ROLLOUT_CLUSTER` names;
-- the Secret `gateway-keys` at `/etc/rollout-secrets/gateway`, and the Secret `tinker` at `/root/.tinker`.
+- the Secret `gateway-keys` at `/etc/rollout-secrets/gateway`, and the Secret `tinker` at `/root/.tinker`;
+- the Secret `step-ca` at `/etc/rollout-secrets/step-ca` and the Secret `gateway-tls` at `/etc/rollout-secrets/tls`,
+  where they exist: what runs' drivers and the gateway lease and reach RunPod's pods with.
 
 And has these environment variables:
 

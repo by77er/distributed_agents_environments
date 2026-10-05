@@ -1,8 +1,9 @@
 # Runtime design: one cluster config, run settings, providers, roles on Ray, one gateway
 
 **Status: in progress.** The cluster config, run settings and presets, provider declarations, bridges, validation,
-engine hosts, published environments, runs submitted as Ray jobs, the New run form, the Presets page and a run's gang
-placement (a placement group, and Kueue's admission on Kubernetes) are built ([the cluster config](../guide/cluster.md),
+engine hosts, published environments, runs submitted as Ray jobs, the New run form, the Presets page, a run's gang
+placement (a placement group, and Kueue's admission on Kubernetes), the ledger service, and RunPod's pods leased by
+runs ([RunPod pods as providers](runpod-providers.md)) are built ([the cluster config](../guide/cluster.md),
 [the monitor](../libraries/rollout-train/monitor.md#launching-a-run),
 [launching runs](../libraries/rollout-train/launching.md)); the environment worker is not. A design note: see [Design notes](README.md) for the others.
 
@@ -1445,7 +1446,11 @@ The user settled the design's open questions on 2026-10-04:
   a runner claims and records episodes of the runs it is given; the monitor asks launches and changes settings; the
   launcher claims launches). The service keeps what docs/research/ledger-guarantees.md §10 lists: request ids for
   retries, the fence checked when an append is applied, `Fenced` as its own error, deciding reads from the primary,
-  and change streams by commit position.
+  and change streams by commit position. *Built*: the ledger service (`rollout ledger serve`, the chart's `ledger`)
+  and `HttpLedger`, which every role can use by its URL; two scopes of token, the platform's (everything) and a pod's
+  (its run's serving records, starts and checkpoints, its own beat and lease, while its lease names the run); takes by
+  request id, appends that tell their own record, `Fenced` as its own error. In the chart, the cluster's own roles keep
+  the database and pods outside the cluster use the service.
 - **Environments are published without a redeploy.** An environment's source is fetched at a commit, kept in the blob
   store, and recorded as a version whose id is the source's hash; a run records the version it resolved in its start;
   the environment's code runs in a Python environment of its own. That last step runs on Ray's runtime environments
@@ -1483,11 +1488,24 @@ The user settled the design's open questions on 2026-10-04:
   untrained channels (a fixed judge, a base model for evals) may later be shared across runs, since contention there
   costs only speed. *Built*: there are no shared pools; each run starts engine hosts of its own.
 
+- **RunPod's pods scale to zero.** A run leases the pods its RunPod providers give it when it starts and releases them
+  when it ends, however it ends; a pod serves one run at a time. A released pod stays warm for its provider's
+  `idle_stop` (600 seconds unless said), and the next run with the same image, model and provider takes it with no cold
+  start, reset to that run (its lease names the run and holds a ledger token for it). A reaper (`rollout pods reap`, a
+  CronJob) deletes idle pods past their idle stop, the pods of leases not renewed for 5 minutes, and pods with the
+  cluster's tag that no lease names: no runs, no pods. A pod's time, its warm time included, is charged to the run that
+  last held it, and counts toward a running run's `limits.spend`. Pods are outside Kueue's quota; a provider's
+  `max_pods` caps what it spends. *Built* ([RunPod pods as providers](runpod-providers.md)).
+
 ### Later directions
 
 - **An elastic pool of RunPod pods.** Pods become scheduled capacity that grows and shrinks: a node pool whose size
   follows the queue of runs waiting for GPUs, each pod joining as a Ray worker (or a Kubernetes node) over mutual TLS
   and stopped when idle, with the gang rule unchanged.
+- **Location-aware stores.** A checkpoint stays where both its trainer and its servers are (RunPod's region, or a network
+  volume they share) and goes to the shared bucket only for readers elsewhere; a checkpoint in the cluster's own store
+  is copied to the pods' bucket when a run serves it on RunPod, recorded as a second location of the same checkpoint.
+  Designed ([RunPod pods as providers](runpod-providers.md#later)).
 - **A trainer across several pods or nodes.** For models too large for one card, pipeline- and tensor-parallel
   training: the trainer becomes a group of actors placed together across nodes with fast interconnect (a placement
   group spreading over nodes; topology-aware admission in Kueue; RunPod's multi-node clusters), its checkpoints

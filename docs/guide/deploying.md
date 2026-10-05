@@ -218,11 +218,13 @@ on. What makes either safe:
 ### Pods on RunPod
 
 Pods rented on RunPod run an image of their own: `deploy/images/inference` (a stock vLLM server, the follower beside
-it, Envoy in front) or `deploy/images/trainer` (the training service a run reaches with
-`rollout_train.pods.RemoteTrainer`). Each is reached at a public TCP port over mutual TLS, with certificates from the
-cluster's step-ca; `rollout_runpod` holds what renting and admitting them takes (RunPod's API, one-time tokens,
-revocation). What is built, the security model, and how they become provider kinds are in
-[RunPod pods as inference and training providers](../research/runpod-providers.md).
+it, Envoy in front), `deploy/images/trainer` (the training service a run reaches with
+`rollout_train.pods.RemoteTrainer`), or `deploy/images/host` (both on one GPU). A run leases the pods its RunPod
+providers give it when it starts and releases them when it ends; a released pod stays warm for the next run, and
+`rollout pods reap` deletes what no run holds. Each pod is reached at a public TCP port over mutual TLS, with
+certificates from the cluster's step-ca, and reaches the cluster through the ledger service with a token of its own.
+What a deployment provides is in [GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod); how the pieces fit
+and the security model in [RunPod pods as inference and training providers](../research/runpod-providers.md).
 
 ## The gateway
 
@@ -232,7 +234,8 @@ gateway](../libraries/rollout-train/gateway.md#a-runner-served-by-the-gateway)).
 
 `rollout gateway --cluster` serves a replica of the cluster's [gateway](../libraries/rollout-train/gateway.md): it
 samples every channel a run's start names on the cluster's providers whose servers answer vLLM's API at their endpoints
-(`vllm-servers`, `runpod-inference`, and a `vllm` provider's `listen`), for programs and harnesses that hold a signed
+(`vllm-servers`, and a `vllm` provider's `listen`) or are the pods the run leases (`runpod-inference`, `runpod-host`),
+for programs and harnesses that hold a signed
 key, and records every turn in the cluster's ledger and blob store before it replies. Replicas keep no session, so as
 many as wanted stand behind one proxy, and any of them may stop at any moment.
 

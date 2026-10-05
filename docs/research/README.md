@@ -11,11 +11,11 @@ pages are the reference; a design note never overrides them.
 
 - [Runtime design](runtime-design.md), **in progress**: one cluster config, run settings and presets, providers and
   the bridges between their formats, every role on Ray, one gateway, and runs that claim their own resources.
-- [RunPod pods as providers](runpod-providers.md), **in progress**: GPU pods on RunPod serving a channel or taking
-  training steps, with mutual TLS (mTLS) and step-ca certificates. The images and the code on the pods are built;
-  the provider kinds are not wired yet.
+- [RunPod pods as providers](runpod-providers.md), **built**: GPU pods on RunPod leased by runs for their channels,
+  their training steps, or both on one GPU, with mutual TLS (mTLS) and step-ca certificates; warm for the next run,
+  and reaped when no run holds them.
 - [Ledger guarantees](ledger-guarantees.md), **built**: what the ledger promises its writers and readers (fences,
-  claims, retries), each promise with the test that holds it. Its last section proposes an HTTP ledger service.
+  claims, retries), each promise with the test that holds it. Its last section is what the HTTP ledger service keeps.
 - [Minecraft memory](minecraft-memory.md), **built**: the memory of the Minecraft team's worlds measured on real
   servers and episodes, the Java and Node settings chosen from it, and why several worlds do not share one server.
 - [Cleanup inventory](cleanup-inventory.md), **in progress**: what to remove and what to factor out, ranked, and the

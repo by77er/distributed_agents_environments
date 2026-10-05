@@ -622,11 +622,12 @@ process, a runner started again, or another runner, plays the episode again as a
 
 ## 10. The HTTP ledger service
 
-Every role in a cluster is to reach the ledger through `HttpLedger(url, token)`, which implements `Ledger`, `Presence`,
-`Leases`, `Launches` and `DesiredSettings` against a service in front of the database
-([runtime design](runtime-design.md#decisions-after-review)); neither is built yet. Every property above holds today
-because each operation is one transaction on one database, answered over a connection that either commits or fails.
-HTTP adds:
+Every role can reach the ledger through `HttpLedger(url, token)` (`rollout_train.ledger_service`), which implements
+`Ledger` and the stores beside it (`Presence`, `Leases`, `Launches`, `DesiredSettings`, the registry, presets,
+environment versions, pods' leases) against a service in front of the database
+([runtime design](runtime-design.md#decisions-after-review)). Every property above holds because each operation is
+one transaction on one database, answered over a connection that either commits or fails; the service calls the same
+stores, one transaction each. HTTP adds:
 
 - lost responses;
 - retries;
@@ -634,7 +635,14 @@ HTTP adds:
 - caches;
 - a delay between deciding and acting.
 
-Below is what each operation must keep.
+Below is what each operation must keep. The service keeps, today: a take's request id, stored with the number it took
+in the take's transaction (a retry gets the same number); an append's answer with the record the table holds, which the
+client compares with its own on a retry; the answers of other operations retried with the same id, kept by the replica
+that gave them; `Fenced` (and a name taken, a row missing, a request refused, a token that may not, a compare-and-set
+that lost) as an error of its own, never retried; client deadlines of 30 seconds, well under `STALE`; and two scopes of
+token, the platform's (everything) and a pod's (its run's serving records, starts and checkpoints, its own beat and
+lease, while its lease names the run). The scopes of the other roles, synchronous claims, streams and presigned uploads
+are what it must keep as more roles use it.
 
 ### Operations and what each needs
 
