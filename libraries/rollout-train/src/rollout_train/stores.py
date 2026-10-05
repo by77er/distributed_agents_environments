@@ -8,10 +8,17 @@ read on this node from the environment variable or file the config names, where 
 `rollout_s3:S3BlobStore` with a `bucket`; the store's credentials come from its own environment). The stores beside
 the ledger (checkpoints, the registry, presets) are reached through it.
 
-A run's `starts` record notes where its blobs are (`location`, `Stores.location`), and the monitor reads finished
-episodes from there, wherever it runs (`opened`). A process the run starts elsewhere (an engine host, a bridge's task)
-is told where the ledger is as `ledger_at`: the cluster config itself, so that it reads the ledger's URL on its own
-node (`cluster_ledger`), and no secret is handed on.
+A cluster may name blob stores beside the default (`[stores.NAME]`: an R2 bucket that RunPod's pods reach, say). A run
+writes to one store (`Stores.open(cluster, store=NAME)`: a run whose trainer or servers are RunPod's writes to the
+store its RunPod providers name), and its `starts` record notes where that is (`location`, `Stores.location`), with
+the names of the variables its key is read from, never the key. Every blob reference says its store in its URI
+(`s3://BUCKET/PREFIX…`), and whoever reads a checkpoint's files finds each in the store that holds it: its own, or
+the store a run's start names (`rollout_train.checkpoints.Checkpoints.files`). A process that reads such references
+holds the keys of every store. The monitor reads finished episodes from where a run's start says, wherever it runs
+(`opened`). A pod gets a store's location and a key of its own (`for_pods`): the read-only key (the store's `reader`)
+for one that only reads, the store's own for one that writes. A process the run starts elsewhere (an engine host, a
+bridge's task) is told where the ledger is as `ledger_at`: the cluster config itself, so that it reads the ledger's URL
+on its own node (`cluster_ledger`), and no secret is handed on.
 """
 
 from collections.abc import Mapping
@@ -37,6 +44,7 @@ __all__ = [
     "Stores",
     "blobs_at",
     "cluster_ledger",
+    "for_pods",
     "ledger_at",
     "ledger_of",
     "ledger_url",
@@ -57,10 +65,12 @@ SERVICES = ("http://", "https://")
 
 def location(store: Mapping[str, Any], directory: Path) -> dict[str, Any]:
     """Where a blob store is (`store`: a `[blobs]` table, `kind` and the store's settings; empty: files under
-    `directory`), without any setting that looks like a credential."""
+    `directory`), without any setting that looks like a credential (the names of the variables one is read from,
+    `…_env`, are kept)."""
     if not store:
         return {"kind": FILES, "directory": str(directory)}
-    return {key: value for key, value in store.items() if not any(word in key.lower() for word in SECRET)}
+    return {key: value for key, value in store.items()
+            if key.endswith(("_env", "_file")) or not any(word in key.lower() for word in SECRET)}  # fmt: skip
 
 
 def opened(where: Mapping[str, Any]) -> Blobs:
@@ -122,13 +132,42 @@ def ledger_at(cluster: "Cluster") -> dict[str, JsonValue]:
     return {"kind": "rollout_train.stores:cluster_ledger", "cluster": dict(cluster.described)}
 
 
-def blobs_at(cluster: "Cluster") -> dict[str, JsonValue]:
-    """Where a cluster's blob store is (its `[blobs]`), as `opened` opens it: a directory of files made absolute."""
-    settings = dict(cluster.blobs.settings)
-    if cluster.blobs.kind == "files":
+def blobs_at(cluster: "Cluster", store: str | None = None) -> dict[str, JsonValue]:
+    """Where a cluster's blob store is (its `[blobs]`, or the store `[stores.NAME]` names), as `opened` opens it: a
+    directory of files made absolute. Raises `KeyError` for a store the cluster does not name."""
+    section = cluster.blobs if store is None else cluster.stores[store]
+    settings = dict(section.settings)
+    if section.kind == "files":
         directory = Path(str(settings["directory"])).expanduser().absolute()
         return {"kind": FILES, "directory": str(directory)}
-    return {"kind": cluster.blobs.kind, **settings}
+    return {"kind": section.kind, **settings}
+
+
+def for_pods(
+    cluster: "Cluster", store: str | None, *, writes: bool, environ: Mapping[str, str] | None = None
+) -> tuple[dict[str, JsonValue], dict[str, str]]:
+    """Where a pod finds a store, and the variables it is given with the store's key: the store's own key for a pod
+    that writes (a trainer's), its read-only key (`reader`) for one that only reads, where it names one. The key is
+    read here (`environ`, by default this process's environment); the location names the variables the pod reads it
+    from. Raises `ValueError` where the key is named and not set here."""
+    import os
+
+    from rollout_train.cluster import CREDENTIALS
+
+    said = blobs_at(cluster, store)
+    section = cluster.blobs if store is None else cluster.stores[store]
+    names = dict(section.reader) if not writes and section.reader else {
+        key: str(said[key]) for key in CREDENTIALS if isinstance(said.get(key), str)
+    }  # fmt: skip
+    environment = os.environ if environ is None else environ
+    given: dict[str, str] = {}
+    for key, variable in names.items():
+        value = environment.get(variable, "")
+        if not value:
+            raise ValueError(f"the key of store {store or 'blobs'} is not set here: {variable}")
+        said[key] = variable
+        given[variable] = value
+    return said, given
 
 
 @dataclass(frozen=True)
@@ -141,13 +180,21 @@ class Stores:
     location: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
 
     @classmethod
-    def open(cls, cluster: "Cluster", environ: Mapping[str, str] | None = None) -> "Stores":
+    def open(
+        cls, cluster: "Cluster", environ: Mapping[str, str] | None = None, *, store: str | None = None
+    ) -> "Stores":
         """The stores a cluster's config names, opened on this node: the ledger from `[ledger]` (its URL read from the
-        secret it names, where it names one), the blob store from `[blobs]`. Raises `ClusterError` where the ledger's
-        URL is not set here or is neither a database's nor the ledger service's."""
+        secret it names, where it names one), the blob store from `[blobs]` (or `[stores.NAME]`, with `store`).
+        Raises `ClusterError` where the ledger's URL is not set here or is neither a database's nor the ledger
+        service's."""
         ledger = ledger_of(cluster, environ)
-        where = blobs_at(cluster)
+        where = blobs_at(cluster, store)
         return cls(ledger, opened(where), where)
+
+    def writing_to(self, cluster: "Cluster", store: str | None) -> "Stores":
+        """The same ledger, with blobs written to `store` (`[stores.NAME]`; none: the default)."""
+        where = blobs_at(cluster, store)
+        return Stores(self.ledger, opened(where), where)
 
     @property
     def checkpoints(self) -> "Checkpoints":

@@ -209,6 +209,7 @@ def test_every_monitor_asks_for_runs_and_imports_with_the_cluster_config_and_rea
         assert monitor["command"][-1] == "--cluster"
         names = {each["name"] for each in monitor["env"]}
         assert {"ROLLOUT_CLUSTER", "RAY_AUTH_MODE", "RAY_AUTH_TOKEN", "AWS_ACCESS_KEY_ID"} <= names
+        assert {"R2_WRITER_ACCESS_KEY_ID", "R2_READER_SECRET_ACCESS_KEY"} <= names  # (a second store's keys, optional)
 
 
 def test_with_kueue_runs_are_admitted_whole_through_a_queue_the_chart_makes(rendered: list[dict[str, Any]]) -> None:

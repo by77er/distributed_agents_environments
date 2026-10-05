@@ -36,6 +36,19 @@ kind = "rollout_s3:S3BlobStore"               # the endpoint and the credentials
 bucket = "{{ .Values.stores.bucket }}"
 prefix = "{{ .Values.stores.prefix }}"
 
+# A second blob store, which RunPod's pods reach (an R2 bucket): a run whose trainer or servers are RunPod's writes its
+# blobs there, and every reader finds each blob in the store its reference names. Its keys come from the Secret `r2`:
+# R2 scopes a key to a bucket, so a writer's key may write anywhere in it.
+# [stores.r2]
+# kind = "rollout_s3:S3BlobStore"
+# bucket = "rollout"
+# prefix = "blobs/"
+# endpoint_url = "https://ACCOUNT_ID.r2.cloudflarestorage.com"
+# region = "auto"
+# access_key_id_env = "R2_WRITER_ACCESS_KEY_ID"
+# secret_access_key_env = "R2_WRITER_SECRET_ACCESS_KEY"
+# reader = { access_key_id_env = "R2_READER_ACCESS_KEY_ID", secret_access_key_env = "R2_READER_SECRET_ACCESS_KEY" }
+
 [scratch]
 directory = "{{ .Values.state.path }}/scratch"
 

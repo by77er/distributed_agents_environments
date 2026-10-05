@@ -131,7 +131,8 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 | `[kubernetes]` | `namespace`, `rayjob`, `api` (`https://kubernetes.default.svc`), `queue` | With it, each run's job is a RayJob made from the template `rayjob` names (relative to the config file's directory), sized from the run's demand, in `namespace`, through the API server `api` with the pod's service account ([launching](../libraries/rollout-train/launching.md#a-rayjob)). `queue`: the Kueue LocalQueue that admits each RayJob whole; it is made suspended, and starts once admitted ([Kueue](../libraries/rollout-train/launching.md#kueue)) |
 | `[capacity]` | `cpus`, `memory_gib`, `gpus` | The most the cluster schedules for one run (with Kueue, the queue's quota). A run whose Ray cluster would ask for more is refused, with the numbers ([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)); each is unbounded where it is not said |
 | `[ledger]` | `url`, or `url_env` / `url_file`; `token_env` / `token_file`; `public` | A URL holding a password is refused: name it instead. `url` is a database's, or the ledger service's (`https://…`), which needs the platform's token (`token_env`). The ledger service checks tokens against the same token. `public`: where pods outside the cluster reach the ledger service ([the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http)) |
-| `[blobs]` | `kind` (`files` or `module:name`), `directory` or the store's settings | A setting that looks like a credential is refused |
+| `[blobs]` | `kind` (`files` or `module:name`), `directory` or the store's settings; `access_key_id_env`, `secret_access_key_env` | A setting that looks like a credential is refused. The store's key is its environment's, or read from the two variables it names |
+| `[stores.NAME]` | as `[blobs]`, and `reader = { access_key_id_env, secret_access_key_env }` | A blob store beside the default: an R2 bucket that RunPod's pods reach. A run whose trainer or servers are RunPod's writes its blobs to the store its RunPod providers name (`store`); a reader finds each blob in the store its reference names. `reader` names the read-only key inference pods are given; trainer pods get the store's own |
 | `[scratch]` | `directory` | Node-local |
 | `[tls]` | `ca`, `certificate`, `key`, `identity` (`spiffe://rollout/gateway`) | The cluster's CA, and the client certificate it presents; paths |
 | `[gateway]` | `url`, `listen`, `replicas`, `keys_file` / `keys_env`, `lifetime` | |
@@ -190,9 +191,12 @@ references do not resolve (by name, never by value) and which environment projec
   names the URL (`url_env`, `url_file`), it is read there and then; a name that is not set here is an error that says
   the name, and the URL itself is never printed;
 - **the blob store** `[blobs]` names: files in `directory`, or `kind = "module:name"` called with the table's other
-  settings. An S3 store (or any S3-compatible service, such as versitygw) is
+  settings. An S3 store (or any S3-compatible service, such as versitygw or R2) is
   `kind = "rollout_s3:S3BlobStore"` with `bucket`, and optionally `prefix`, `endpoint_url` and `region`; its
-  credentials come from the node's `AWS_*` environment, never from the config.
+  credentials come from the node's `AWS_*` environment, or from the variables it names (`access_key_id_env`,
+  `secret_access_key_env`), never from the config. `Stores.open(cluster, store=NAME)` writes to `[stores.NAME]`
+  instead. Every blob reference says its store in its URI (`s3://BUCKET/PREFIX…`); a checkpoint's files are read from
+  the store that holds them, which a run's start names, so a process that reads them holds every store's key.
 
 `Stores.location` is where the blob store is, as any process opens it: what a run's start records. The stores beside
 the ledger are reached through it: `checkpoints`, `registry` and `presets`.

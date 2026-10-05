@@ -133,11 +133,16 @@ class LedgerSection:
 
 @dataclass(frozen=True)
 class BlobsSection:
+    """A blob store: the cluster's default (`[blobs]`), or another, by name (`[stores.NAME]`)."""
+
     kind: str = "files"
     """`files`, or `module:name` of the store."""
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
-    """The store's settings (a `directory` for files), none of them a credential: those are the store's own, from its
-    environment."""
+    """The store's settings (a `directory` for files), none of them a credential: those come from its environment, or
+    from the variables it names (`access_key_id_env`, `secret_access_key_env`)."""
+    reader: Mapping[str, str] = field(default_factory=dict[str, str])
+    """The variables a read-only key is read from (`access_key_id_env`, `secret_access_key_env`), for whoever only
+    reads it (inference pods): a named store's `reader`."""
 
 
 @dataclass(frozen=True)
@@ -248,6 +253,8 @@ class Cluster:
     """What runs record as where they ran; the Ray namespace is `rollout-NAME`."""
     ledger: LedgerSection
     blobs: BlobsSection = field(default_factory=BlobsSection)
+    stores: Mapping[str, BlobsSection] = field(default_factory=dict[str, BlobsSection])
+    """Blob stores beside the default, by name (`[stores.NAME]`): an R2 bucket that RunPod's pods reach, say."""
     scratch: str = SCRATCH
     """Node-local: checkpoints in use, fetched bases, bridge work, built Pythons."""
     ray: RaySection = field(default_factory=RaySection)
@@ -283,6 +290,12 @@ class Cluster:
 
         note("ledger.url", self.ledger.url_secret)
         note("ledger.token", self.ledger.token)
+        for name, store in (("blobs", self.blobs), *((f"stores.{each}", said) for each, said in self.stores.items())):
+            for key in CREDENTIALS:
+                if isinstance(env := store.settings.get(key), str):
+                    note(f"{name}.{key.removesuffix('_env')}", Secret(env=env))
+                if key in store.reader:
+                    note(f"{name}.reader.{key.removesuffix('_env')}", Secret(env=store.reader[key]))
         note("gateway.keys", self.gateway.keys)
         for kind, providers in (("inference", self.inference), ("trainers", self.trainers)):
             for name, provider in providers.items():
@@ -365,15 +378,9 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
         raise ClusterError(f"[ledger] public is the ledger service's address outside the cluster, http(s)://… (not "
                            f"{public!r})")  # fmt: skip
     ledger.done()
-    blobs = table.section("blobs")
-    blob_kind = blobs.text("kind", "files")
-    blob_settings = blobs.rest()
-    if blob_kind == "files" and set(blob_settings) - {"directory"}:
-        raise ClusterError(f"[blobs] of files has only a directory (not {', '.join(sorted(blob_settings))})")
-    if blob_kind != "files" and ":" not in blob_kind:
-        raise ClusterError(f"[blobs] kind is files or module:name, not {blob_kind!r}")
-    if blob_kind == "files":
-        blob_settings.setdefault("directory", "~/.cache/rollout/blobs")
+    blobs_said = _blobs(table.section("blobs"), "[blobs]")
+    stores = {name: _blobs(_Table(each, f"[stores.{name}]"), f"[stores.{name}]", named=True)
+              for name, each in table.tables("stores").items()}  # fmt: skip
     scratch = table.section("scratch")
     scratch_directory = scratch.text("directory", SCRATCH)
     scratch.done()
@@ -488,7 +495,8 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
     return Cluster(
         name=name,
         ledger=LedgerSection(url, url_secret, ledger_token, public),
-        blobs=BlobsSection(blob_kind, blob_settings),
+        blobs=blobs_said,
+        stores=stores,
         scratch=scratch_directory,
         ray=ray_said,
         kubernetes=kubernetes,
@@ -667,6 +675,30 @@ def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:
 
     provider = replace(provider, settings=settings)
     return replace(provider, capabilities=provider.runs.capabilities)
+
+
+CREDENTIALS = ("access_key_id_env", "secret_access_key_env")
+"""What names a store's key: the variables it is read from."""
+
+
+def _blobs(said: "_Table", where: str, *, named: bool = False) -> BlobsSection:
+    kind = said.text("kind", "files")
+    reader: dict[str, str] = {}
+    if named and "reader" in said.table:
+        given = said.take("reader")
+        if not isinstance(given, dict) or set(cast(dict[str, Any], given)) != set(CREDENTIALS):
+            raise ClusterError(f"{where} reader names a read-only key: {' and '.join(CREDENTIALS)}")
+        reader = {str(key): str(value) for key, value in cast(dict[str, Any], given).items()}
+    settings = said.rest()
+    if kind == "files" and set(settings) - {"directory"}:
+        raise ClusterError(f"{where} of files has only a directory (not {', '.join(sorted(settings))})")
+    if kind != "files" and ":" not in kind:
+        raise ClusterError(f"{where} kind is files or module:name, not {kind!r}")
+    if (CREDENTIALS[0] in settings) != (CREDENTIALS[1] in settings):
+        raise ClusterError(f"{where} names its key whole: {' and '.join(CREDENTIALS)}")
+    if kind == "files":
+        settings.setdefault("directory", "~/.cache/rollout/blobs")
+    return BlobsSection(kind, settings, reader)
 
 
 def _sandboxes(kind: str, described: dict[str, Any]) -> SandboxesSection:

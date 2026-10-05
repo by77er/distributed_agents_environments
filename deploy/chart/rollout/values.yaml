@@ -27,6 +27,9 @@ secrets:
   tinker: tinker              # TINKER_API_KEY, or credentials.json (what `tinker auth login` writes); optional
   providers: providers        # OPENAI_API_KEY, ANTHROPIC_API_KEY: the hosted APIs' keys, for the gateway and runs; optional
   ledger: ledger              # ROLLOUT_LEDGER_TOKEN: the platform's token for the ledger service; optional
+  r2: r2                      # a second blob store's two keys, for [stores.r2]; optional: WRITER_ACCESS_KEY_ID,
+                              # WRITER_SECRET_ACCESS_KEY (read and write: the platform, trainer pods), READER_ACCESS_KEY_ID,
+                              # READER_SECRET_ACCESS_KEY (read only: inference pods)
 
 # The ledger and the blob store.
 stores:

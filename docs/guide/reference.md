@@ -35,7 +35,7 @@ do not edit by hand.
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Distillation`](#distillation), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`objective_in`](#objective_in), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts), [`WEIGHTS`](#weights)
-- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`FILES`](#files), [`ledger_at`](#ledger_at), [`ledger_of`](#ledger_of), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`opened_ledger`](#opened_ledger), [`Stores`](#stores)
+- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`FILES`](#files), [`for_pods`](#for_pods), [`ledger_at`](#ledger_at), [`ledger_of`](#ledger_of), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`opened_ledger`](#opened_ledger), [`Stores`](#stores)
 - **[`rollout_train.ledger_service`](#rollout_trainledger_service)** — The ledger over HTTP: the service, the client every role can use, pods' tokens. [`app`](#app), [`Conflict`](#rollout_trainledger_serviceconflict), [`Forbidden`](#forbidden), [`HttpLedger`](#httpledger), [`LedgerUnreachable`](#ledgerunreachable), [`PLATFORM`](#platform), [`pod_token`](#pod_token), [`Scope`](#scope), [`scope_of`](#scope_of)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
@@ -6262,10 +6262,13 @@ machine.
 class BlobsSection
 ```
 
+A blob store: the cluster's default (`[blobs]`), or another, by name (`[stores.NAME]`).
+
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `kind` | `str` | `'files'` | `files`, or `module:name` of the store. |
-| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The store's settings (a `directory` for files), none of them a credential: those are the store's own, from its environment. |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The store's settings (a `directory` for files), none of them a credential: those come from its environment, or from the variables it names (`access_key_id_env`, `secret_access_key_env`). |
+| `reader` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | The variables a read-only key is read from (`access_key_id_env`, `secret_access_key_env`), for whoever only reads it (inference pods): a named store's `reader`. |
 
 ### `BridgeSection`
 
@@ -6315,6 +6318,7 @@ A cluster, as its config describes it. It holds no secret, only references to se
 | `name` | `str` | required | What runs record as where they ran; the Ray namespace is `rollout-NAME`. |
 | `ledger` | `LedgerSection` | required |  |
 | `blobs` | `BlobsSection` | `field(default_factory=BlobsSection)` |  |
+| `stores` | `Mapping[str, BlobsSection]` | `field(default_factory=dict[str, BlobsSection])` | Blob stores beside the default, by name (`[stores.NAME]`): an R2 bucket that RunPod's pods reach, say. |
 | `scratch` | `str` | `SCRATCH` | Node-local: checkpoints in use, fetched bases, bridge work, built Pythons. |
 | `ray` | `RaySection` | `field(default_factory=RaySection)` |  |
 | `kubernetes` | `KubernetesSection \| None` | `None` |  |
@@ -7725,10 +7729,11 @@ The ledger and the blob store a cluster config names, opened on this node.
 *function* · `libraries/rollout-train/src/rollout_train/stores.py`
 
 ```python
-def blobs_at(cluster: 'Cluster') -> dict[str, JsonValue]
+def blobs_at(cluster: 'Cluster', store: str | None = None) -> dict[str, JsonValue]
 ```
 
-Where a cluster's blob store is (its `[blobs]`), as `opened` opens it: a directory of files made absolute.
+Where a cluster's blob store is (its `[blobs]`, or the store `[stores.NAME]` names), as `opened` opens it: a
+directory of files made absolute. Raises `KeyError` for a store the cluster does not name.
 
 ### `cluster_ledger`
 
@@ -7750,6 +7755,19 @@ FILES = 'rollout.harness.blobs:FileBlobStore'
 ```
 
 The store of files in a directory (`{"kind": FILES, "directory": …}`).
+
+### `for_pods`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def for_pods(cluster: 'Cluster', store: str | None, *, writes: bool, environ: Mapping[str, str] | None = None) -> tuple[dict[str, JsonValue], dict[str, str]]
+```
+
+Where a pod finds a store, and the variables it is given with the store's key: the store's own key for a pod
+that writes (a trainer's), its read-only key (`reader`) for one that only reads, where it names one. The key is
+read here (`environ`, by default this process's environment); the location names the variables the pod reads it
+from. Raises `ValueError` where the key is named and not set here.
 
 ### `ledger_at`
 
@@ -7793,7 +7811,8 @@ def location(store: Mapping[str, Any], directory: Path) -> dict[str, Any]
 ```
 
 Where a blob store is (`store`: a `[blobs]` table, `kind` and the store's settings; empty: files under
-`directory`), without any setting that looks like a credential.
+`directory`), without any setting that looks like a credential (the names of the variables one is read from,
+`…_env`, are kept).
 
 ### `opened`
 
@@ -7835,9 +7854,11 @@ run's `starts` record).
 
 **Methods**
 
-- `@classmethod def open(cls, cluster: 'Cluster', environ: Mapping[str, str] | None = None) -> 'Stores'` — The stores a cluster's config names, opened on this node: the ledger from `[ledger]` (its URL read from the
-  secret it names, where it names one), the blob store from `[blobs]`. Raises `ClusterError` where the ledger's
-  URL is not set here or is neither a database's nor the ledger service's.
+- `@classmethod def open(cls, cluster: 'Cluster', environ: Mapping[str, str] | None = None, *, store: str | None = None) -> 'Stores'` — The stores a cluster's config names, opened on this node: the ledger from `[ledger]` (its URL read from the
+  secret it names, where it names one), the blob store from `[blobs]` (or `[stores.NAME]`, with `store`).
+  Raises `ClusterError` where the ledger's URL is not set here or is neither a database's nor the ledger
+  service's.
+- `def writing_to(self, cluster: 'Cluster', store: str | None) -> 'Stores'` — The same ledger, with blobs written to `store` (`[stores.NAME]`; none: the default).
 - `@property def checkpoints(self) -> 'Checkpoints'`
 - `@property def registry(self) -> 'Registry'` — Run names, bookmarks, and dataset and suite names, beside the ledger.
 - `@property def presets(self) -> 'Presets'`
@@ -9803,8 +9824,11 @@ Implements `Blobs` in an S3 bucket.
 
 **Methods**
 
-- `def __init__(self, bucket: str, *, prefix: str = 'blobs/', endpoint_url: str | None = None, region: str | None = None, client: 'S3Client | None' = None, refresh_after: float = REFRESH_AFTER) -> None` — `client` replaces the boto3 client this store would create (e.g. with custom credentials).
+- `def __init__(self, bucket: str, *, prefix: str = 'blobs/', endpoint_url: str | None = None, region: str | None = None, client: 'S3Client | None' = None, refresh_after: float = REFRESH_AFTER, access_key_id_env: str | None = None, secret_access_key_env: str | None = None) -> None` — `client` replaces the boto3 client this store would create (e.g. with custom credentials).
+  `access_key_id_env` and `secret_access_key_env` name the environment variables the store's key is read from
+  (both, or neither: boto3's usual sources). Raises `ValueError` where one is named and not set.
 - `@classmethod def from_url(cls, url: str, **options: Any) -> 'S3BlobStore'` — A store for `s3://bucket/prefix`.
+- `def holds(self, reference: BlobReference) -> bool` — Whether a reference names an object of this store's bucket and prefix (`s3://BUCKET/PREFIX…`).
 - `async def put(self, data: bytes, media_type: str) -> BlobReference`
 - `async def read(self, reference: BlobReference) -> bytes`
 - `async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None`

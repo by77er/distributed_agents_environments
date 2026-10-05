@@ -98,3 +98,20 @@ def test_urls_name_a_bucket_and_a_prefix() -> None:
     assert S3BlobStore.from_url("s3://my-bucket", client=object()).prefix == ""  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="s3://bucket/prefix"):
         S3BlobStore.from_url("https://my-bucket/prefix")
+
+
+async def test_a_store_reads_its_own_credentials_from_the_variables_it_names(
+    s3_bucket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WRITER_KEY_ID", "writer")
+    monkeypatch.setenv("WRITER_SECRET", "writer-secret")
+    store = S3BlobStore(s3_bucket, access_key_id_env="WRITER_KEY_ID", secret_access_key_env="WRITER_SECRET")
+    credentials = store.client._request_signer._credentials  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType, reportAttributeAccessIssue, reportUnknownVariableType]
+    assert credentials.access_key == "writer"  # pyright: ignore[reportUnknownMemberType]
+    reference = await store.put(b"named", "text/plain")
+    assert store.holds(reference) and await store.read(reference) == b"named"
+    assert not S3BlobStore("another-bucket", client=store.client).holds(reference)
+    with pytest.raises(ValueError, match="not set here: MISSING_SECRET"):
+        S3BlobStore(s3_bucket, access_key_id_env="WRITER_KEY_ID", secret_access_key_env="MISSING_SECRET")
+    with pytest.raises(ValueError, match="named both"):
+        S3BlobStore(s3_bucket, access_key_id_env="WRITER_KEY_ID")

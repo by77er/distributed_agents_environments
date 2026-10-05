@@ -12,8 +12,10 @@ requests: a put that finds the object between them is not seen.
 
 Connection settings come from boto3's usual sources unless given: credentials (environment variables, `~/.aws`,
 instance and pod roles), the region, and the endpoint of an S3-compatible service (`AWS_ENDPOINT_URL_S3` or
-`AWS_ENDPOINT_URL`). With a custom endpoint, requests use path-style addressing (`endpoint/bucket/key`), which every
-S3-compatible service accepts.
+`AWS_ENDPOINT_URL`). A store's own credentials may be named instead (`access_key_id_env`, `secret_access_key_env`: the
+environment variables they are read from when the store is made), so that one process holds several stores, each with
+its own key: the cluster's bucket and an R2 bucket, say. With a custom endpoint, requests use path-style addressing
+(`endpoint/bucket/key`), which every S3-compatible service accepts.
 """
 
 import asyncio
@@ -48,11 +50,15 @@ class S3BlobStore:
         region: str | None = None,
         client: "S3Client | None" = None,
         refresh_after: float = REFRESH_AFTER,
+        access_key_id_env: str | None = None,
+        secret_access_key_env: str | None = None,
     ) -> None:
-        """`client` replaces the boto3 client this store would create (e.g. with custom credentials)."""
+        """`client` replaces the boto3 client this store would create (e.g. with custom credentials).
+        `access_key_id_env` and `secret_access_key_env` name the environment variables the store's key is read from
+        (both, or neither: boto3's usual sources). Raises `ValueError` where one is named and not set."""
         self.bucket = bucket
         self.prefix = prefix if not prefix or prefix.endswith("/") else f"{prefix}/"
-        self.client = client or _client(endpoint_url, region)
+        self.client = client or _client(endpoint_url, region, _credentials(access_key_id_env, secret_access_key_env))
         self.refresh_after = refresh_after
 
     @classmethod
@@ -62,6 +68,10 @@ class S3BlobStore:
         if parsed.scheme != "s3" or not parsed.netloc:
             raise ValueError(f"expected s3://bucket/prefix, not {url!r}")
         return cls(parsed.netloc, prefix=parsed.path.lstrip("/"), **options)
+
+    def holds(self, reference: BlobReference) -> bool:
+        """Whether a reference names an object of this store's bucket and prefix (`s3://BUCKET/PREFIX…`)."""
+        return reference.uri.startswith(f"s3://{self.bucket}/{self.prefix}")
 
     async def put(self, data: bytes, media_type: str) -> BlobReference:
         digest = blob_digest(data)
@@ -160,7 +170,20 @@ class S3BlobStore:
         return response["Body"].read()
 
 
-def _client(endpoint_url: str | None, region: str | None) -> "S3Client":
+def _credentials(key_env: str | None, secret_env: str | None) -> tuple[str, str] | None:
+    """The key the variables named hold (none where neither is named)."""
+    if key_env is None and secret_env is None:
+        return None
+    if key_env is None or secret_env is None:
+        raise ValueError("a store's credentials are named both: access_key_id_env and secret_access_key_env")
+    key, secret = os.environ.get(key_env, ""), os.environ.get(secret_env, "")
+    if not key or not secret:
+        missing = [name for name, value in ((key_env, key), (secret_env, secret)) if not value]
+        raise ValueError(f"the store's credentials are not set here: {', '.join(missing)}")
+    return key, secret
+
+
+def _client(endpoint_url: str | None, region: str | None, credentials: tuple[str, str] | None = None) -> "S3Client":
     import boto3
     from botocore.config import Config
 
@@ -173,7 +196,11 @@ def _client(endpoint_url: str | None, region: str | None) -> "S3Client":
         response_checksum_validation="when_required",
         retries={"mode": "standard", "max_attempts": 5},
     )
-    client: S3Client = boto3.client("s3", endpoint_url=endpoint, region_name=region, config=config)  # pyright: ignore[reportUnknownMemberType]
+    key, secret = credentials if credentials is not None else (None, None)
+    client: S3Client = boto3.client(  # pyright: ignore[reportUnknownMemberType]
+        "s3", endpoint_url=endpoint, region_name=region, config=config, aws_access_key_id=key,
+        aws_secret_access_key=secret,
+    )  # fmt: skip
     return client
 
 

@@ -18,6 +18,7 @@ the trainer wrote them; whoever needs them reads the files it needs.
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import secrets
@@ -279,6 +280,13 @@ class Checkpoints:
         await asyncio.to_thread(_written_file, target, data)
 
     async def _read(self, reference: BlobReference) -> bytes:
+        """A blob's bytes: from the store its reference names (its URI: `s3://BUCKET/PREFIX…`) where one of those
+        known here does, else from this one, else from any run's."""
+        if _holds(self.blobs, reference) is False:
+            for store in await self._elsewhere():
+                if _holds(store, reference):
+                    with contextlib.suppress(Exception):  # (not there after all: looked for everywhere below)
+                        return await store.read(reference)
         try:
             return await self.blobs.read(reference)
         except Exception:
@@ -303,6 +311,14 @@ class Checkpoints:
                             where[json.dumps(kept, sort_keys=True)] = kept
             self._stores = [opened(each) for each in where.values()]
         return self._stores
+
+
+def _holds(store: Blobs, reference: BlobReference) -> bool | None:
+    """Whether a reference names `store` (its URI begins with the store's): None where the store cannot say."""
+    if isinstance(store, FileBlobStore):
+        return reference.uri.startswith(store.directory.absolute().as_uri())
+    holds = getattr(store, "holds", None)
+    return bool(holds(reference)) if callable(holds) else None
 
 
 def _base(first: Checkpoint | None, kind: str, base: str | None) -> str | None:

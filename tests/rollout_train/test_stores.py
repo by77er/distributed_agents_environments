@@ -70,6 +70,75 @@ async def test_blobs_on_s3(s3_bucket: str, tmp_path: Path) -> None:
     assert await stores.blobs.read(reference) == b"bytes"
 
 
+R2 = """
+[stores.r2]
+kind = "rollout_s3:S3BlobStore"
+bucket = "BUCKET"
+prefix = "blobs/"
+access_key_id_env = "R2_WRITER_ACCESS_KEY_ID"
+secret_access_key_env = "R2_WRITER_SECRET_ACCESS_KEY"
+reader = { access_key_id_env = "R2_READER_ACCESS_KEY_ID", secret_access_key_env = "R2_READER_SECRET_ACCESS_KEY" }
+"""
+KEYS = {
+    "R2_WRITER_ACCESS_KEY_ID": "writer", "R2_WRITER_SECRET_ACCESS_KEY": "writer-secret",
+    "R2_READER_ACCESS_KEY_ID": "reader", "R2_READER_SECRET_ACCESS_KEY": "reader-secret",
+}  # fmt: skip
+
+
+def test_a_named_store_beside_the_default_names_a_writing_and_a_reading_key(tmp_path: Path) -> None:
+    from rollout_train.stores import blobs_at, for_pods
+
+    cluster = cluster_of(cluster_toml(f'url = "sqlite:///{tmp_path}/ledger.db"') + R2)
+    assert (
+        set(cluster.stores) == {"r2"} and cluster.stores["r2"].reader["access_key_id_env"] == "R2_READER_ACCESS_KEY_ID"
+    )
+    assert {"stores.r2.access_key_id", "stores.r2.reader.secret_access_key"} <= set(cluster.secrets())
+    assert blobs_at(cluster, "r2")["access_key_id_env"] == "R2_WRITER_ACCESS_KEY_ID"  # (named, never the key)
+    writes, given = for_pods(cluster, "r2", writes=True, environ=KEYS)
+    assert writes["access_key_id_env"] == "R2_WRITER_ACCESS_KEY_ID" and given["R2_WRITER_ACCESS_KEY_ID"] == "writer"
+    reads, given = for_pods(cluster, "r2", writes=False, environ=KEYS)
+    assert reads["secret_access_key_env"] == "R2_READER_SECRET_ACCESS_KEY" and set(given) == {
+        "R2_READER_ACCESS_KEY_ID", "R2_READER_SECRET_ACCESS_KEY"}  # fmt: skip
+    assert "writer" not in str(reads) and "reader" not in str(reads.values()).replace("R2_READER", "")
+    with pytest.raises(ValueError, match="R2_READER_ACCESS_KEY_ID"):
+        for_pods(cluster, "r2", writes=False, environ={})
+    for broken, says in (
+        (R2.replace('secret_access_key_env = "R2_WRITER_SECRET_ACCESS_KEY"\n', ""), "names its key whole"),
+        (R2.replace("reader = {", 'reader = { other = "x",'), "reader names a read-only key"),
+        (R2.replace("rollout_s3:S3BlobStore", "s3"), "kind is files or module:name"),
+        (R2.replace('access_key_id_env = "R2_WRITER_ACCESS_KEY_ID"', 'access_key_id = "AKIA"'), "looks like a secret"),
+    ):
+        with pytest.raises(ClusterError, match=says):
+            cluster_of(cluster_toml(f'url = "sqlite:///{tmp_path}/ledger.db"') + broken)
+
+
+async def test_a_runs_checkpoints_in_another_store_are_read_from_where_its_start_says(
+    s3_bucket: str, s3_server: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import boto3
+
+    from rollout_train.checkpoints import Checkpoints, kept
+    from rollout_train.record import STARTS, table
+
+    for name, value in KEYS.items():
+        monkeypatch.setenv(name, value)
+    other = f"{s3_bucket}-r2"
+    boto3.client("s3", endpoint_url=s3_server).create_bucket(Bucket=other)  # pyright: ignore[reportUnknownMemberType]
+    text = cluster_toml(f'url = "sqlite:///{tmp_path}/ledger.db"', f'directory = "{tmp_path}/blobs"')
+    cluster = cluster_of(text + R2.replace("BUCKET", other))
+    local = Stores.open(cluster)
+    remote = local.writing_to(cluster, "r2")  # (a run on RunPod's pods writes to the store they reach)
+    assert remote.location["bucket"] == other and remote.location["access_key_id_env"] == "R2_WRITER_ACCESS_KEY_ID"
+    (tmp_path / "weights").mkdir()
+    (tmp_path / "weights" / "adapter.safetensors").write_bytes(b"trained on a pod")
+    manifest = await kept(tmp_path / "weights", remote.blobs)
+    assert all(each.uri.startswith(f"s3://{other}/") for each in manifest.files.values())
+    fence = await local.ledger.take("runs/r")
+    await local.ledger.append(table("r", STARTS), "1", {"blobs": dict(remote.location)}, fence)
+    fetched = await Checkpoints(local.ledger, local.blobs).files(manifest, tmp_path / "fetched")
+    assert (fetched / "adapter.safetensors").read_bytes() == b"trained on a pod"
+
+
 def run(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], *arguments: str) -> tuple[int, str]:
     """A command's exit status and what it printed (and exited saying)."""
     from rollout_train.cli import main
