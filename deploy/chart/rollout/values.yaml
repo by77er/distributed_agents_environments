@@ -61,7 +61,7 @@ ray:
 rayjob:
   gpus: 1
   backoffLimit: 2
-  ttlSeconds: 600
+  ttlSeconds: 30
   resources: {requests: {cpu: "8", memory: 8Gi}, limits: {memory: 14Gi, nvidia.com/gpu: 1}}
 
 gateway:
