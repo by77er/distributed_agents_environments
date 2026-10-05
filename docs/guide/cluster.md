@@ -299,7 +299,13 @@ gives (its trainer's settings and `start`, its channels' models, renderers and b
 
 - A run setting the profile keeps is applied to it: `start` and `bookmark` as `[trainer] start` and `bookmark`,
   `max_lag` as the trained channel's, `evals.suite = null` as no evals, a budget of `null` (or `none`) as none.
-- A run setting it has no place for (`trainer.provider`, `channels.NAME.provider`, `limits.spend`, `share`, slots,
+- The slots' bindings (`slots.SLOT`, `self_judging`) and the channels' modes (`channels.NAME.mode`, `.follows`,
+  `.lag`, `.checkpoint`) are taken as they are and recorded in the run's start. A slot names one of the profile's
+  channels; the bindings are refused as validation refuses them (`rollout_train.slots`), and so is a mode on the
+  trained channel. Each slot's key routes to its channel, and every channel of the profile but the trained one
+  follows what the start says it serves (a following channel loads the followed channel's checkpoints, a pinned one
+  its checkpoint, resolved to an id when the run starts).
+- A run setting it has no place for (`trainer.provider`, `channels.NAME.provider`, `limits.spend`, `share`,
   routing) is refused: it needs the cluster config.
 - A key that is no run setting is the profile's own (`memory.runs_gib`), as `--set` takes it.
 

@@ -137,6 +137,7 @@ async def _train(
         raise SystemExit(f"{profile} describes no trainer")
     channel = described.trainer.channel
     offered, published = await _environment(described, environment)
+    slots = _slots(layers, offered, described, channel)
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}  # (its `starts`)
     started["environment"] = environment
@@ -145,13 +146,14 @@ async def _train(
     async with described.open() as platform:
         assert platform.trainer is not None
         started["blobs"] = platform.blobs_at  # (where the monitor reads the run's finished episodes)
-        binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings)
+        binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings, slots)
         wanting = desired_settings_of(platform.ledger)
+        pinned = await _pinned(layers, platform.ledger, platform.registry)
 
         def bound(played: Any) -> Any:
-            """How an entry's environment's episodes are played: every slot from the trained channel, each import and
-            pool where the profile serves it."""
-            return binding_for(played, channel, platform.tool_bindings, platform.pool_bindings)
+            """How an entry's environment's episodes are played: each slot from the channel the run binds it to (the
+            trained channel unless said), each import and pool where the profile serves it."""
+            return binding_for(played, channel, platform.tool_bindings, platform.pool_bindings, slots)
 
         async def scheduled(name: str, every: int, episodes: int | None) -> Schedule | None:
             """The evals of a suite, by its name (the version it points to now) or a version's id: the ledger's, or the
@@ -185,7 +187,7 @@ async def _train(
                 evals=described.evals,
             ),
         }
-        started["run_settings"] = _recorded(layers, described)  # (beside what the profile gave, as run settings)
+        started["run_settings"] = _recorded(layers, described, pinned)  # (beside what the profile gave)
         async with ending(platform.ledger, platform.run.id):
             await train(
             offered, platform.trainer, platform.checkpoints, start=platform.origin, channel=channel,
@@ -255,6 +257,7 @@ async def _evaluate(
         trainer = dataclasses.replace(described.trainer, start=reference, bookmark=None)
         described = dataclasses.replace(described, trainer=trainer)
     channel = described.trainer.channel if described.trainer else next(iter(described.channels))
+    slots = {key.removeprefix("slots."): str(value) for key, value in layers.given.items() if key.startswith("slots.")}
     ledger = ledger_of(described)
     published: dict[str, Any] = {}
     try:  # (the suite, and its environments, before the engines)
@@ -274,19 +277,20 @@ async def _evaluate(
             closing()
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}
-    started["run_settings"] = _recorded(layers, described, {"start": reference})
     try:
         async with described.open(training=False) as platform:  # (no trainer: nothing is trained)
             try:
                 subject = await resolved(platform.ledger, platform.registry, reference) if reference else None
+                pinned = await _pinned(layers, platform.ledger, platform.registry)
             except (KeyError, ValueError) as error:
                 raise SystemExit(error.args[0]) from None
+            started["run_settings"] = _recorded(layers, described, {"start": reference, **pinned})
             started |= {"blobs": platform.blobs_at, "environment": suite.environments[0]}
             if suite.environments[0] in published:
                 started["published"] = published[suite.environments[0]]
 
             def bound(environment: Any) -> Any:
-                return binding_for(environment, channel, platform.tool_bindings, platform.pool_bindings)
+                return binding_for(environment, channel, platform.tool_bindings, platform.pool_bindings, slots)
 
             async def part(number: int) -> str:
                 return await platform.eval_run(part=number)
@@ -513,9 +517,10 @@ async def _check(
         called = cast(str | None, layers.settings["name"]) or scratch.name
         described = dataclasses.replace(loaded, trainer=None, name=called)  # (the base model, untrained)
         channel = loaded.trainer.channel if loaded.trainer else next(iter(loaded.channels))
+        slots = _slots(layers, offered, loaded, channel)
         seed = _whole(layers.settings, "seed")
         async with described.open() as platform:
-            binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings)
+            binding = binding_for(offered, channel, platform.tool_bindings, platform.pool_bindings, slots)
             started: dict[str, Any] = {"environment": environment, "profile": str(profile), "blobs": platform.blobs_at}
             started["directory"] = str(await asyncio.to_thread(scratch.absolute))
             started["run_settings"] = _recorded(layers, described, {"groups": groups})
@@ -709,6 +714,10 @@ _ALIASES = {"trainer.start": "start", "trainer.bookmark": "bookmark"}
 _COMMANDS = ("kind", "name", "environment", "groups", "groups_per_step", "seed", "eval.", "check.", "imitation.")
 """Run settings a command over a profile applies itself, not through the profile."""
 _BUDGETS = ("thinking_tokens", "answer_tokens")
+_BINDINGS = ("slots.", "self_judging")
+"""Run settings that bind a program's slots to the profile's channels (`_slots`)."""
+_MODES = ("mode", "follows", "lag", "checkpoint")
+"""A channel's run settings that say whose records it serves (`rollout_train.serving.source_of`)."""
 
 
 @dataclass(frozen=True)
@@ -738,9 +747,10 @@ async def _layered(
 ) -> _Layered:
     """A run's settings in layers over what its profile gives (`_given_by`): a preset (`NAME` or `NAME@N`, kept beside
     the profile's ledger), a settings file, `--set` flags, then the command's own flags (those not `None`), `--model`
-    and `--renderer` among them (of `--channel`, by default the trained one). A run setting the profile has no place
-    for (a provider, a spend limit) is refused; a key that is no run setting is the profile's own, as `--set` takes
-    it."""
+    and `--renderer` among them (of `--channel`, by default the trained one). The slots' bindings (`slots.SLOT`,
+    `self_judging`) and the channels' modes (`channels.NAME.mode`, `.follows`, `.lag`, `.checkpoint`) are run settings
+    only, recorded in the run's start. A run setting the profile has no place for (a provider, a spend limit) is
+    refused; a key that is no run setting is the profile's own, as `--set` takes it."""
     from rollout_train.hosting import ledger_of
     from rollout_train.presets import presets_of
     from rollout_train.profile import Profile
@@ -773,8 +783,10 @@ async def _layered(
     refused: list[str] = []
     for key, value in given.items():
         last = key.rpartition(".")[2]
-        if key.startswith(_COMMANDS):
+        if key.startswith(_COMMANDS) or key.startswith(_BINDINGS):
             continue
+        if key.startswith("channels.") and key.count(".") == 2 and last in _MODES:
+            continue  # (whose records a channel serves: read from the run's start by whatever serves it)
         if key in ("start", "bookmark"):
             profile[f"trainer.{key}"] = value
         elif key == "max_lag" and trained is not None:
@@ -834,6 +846,49 @@ def _recorded(layers: _Layered, profile: "Profile", ran: dict[str, Any] | None =
     except ImportError:  # (a trainer whose package is not installed here: its settings as given)
         specs = ()
     return recorded(layered(layers.settings.values, ran), specs, layers.preset)
+
+
+def _slots(layers: _Layered, environment: Any, profile: "Profile", trained: str) -> dict[str, str]:
+    """The channels a run over a profile binds its program's slots to by name (`slots.SLOT`; every other slot samples
+    `trained`), refusing a binding `rollout_train.slots` refuses, a channel the profile does not describe, and a mode
+    on the trained channel or one that follows a channel the profile lacks."""
+    from rollout.environment import first_program
+    from rollout.harness import instantiate
+    from rollout_train.run_settings import layered
+    from rollout_train.slots import Declared, problems
+
+    settings = layered(layers.settings.values, {"trainer.channel": trained})
+    declared = Declared.of(instantiate(first_program(environment)).model_slots())
+    refused = [f"{key}: {reason}" for key, reason in problems(settings, declared)]
+    named = {
+        key.removeprefix("slots."): str(value) for key, value in settings.values.items() if key.startswith("slots.")
+    }
+    refused += [
+        f"slots.{slot}: channel {channel} is not one of the profile's ({', '.join(profile.channels)})"
+        for slot, channel in named.items()
+        if channel not in profile.channels
+    ]
+    for channel in profile.channels:
+        mode, follows = settings.get(f"channels.{channel}.mode"), settings.get(f"channels.{channel}.follows")
+        if channel == trained and mode is not None:
+            refused.append(f"channels.{channel}.mode: {channel} is the trained channel: it serves what the run trains")
+        elif mode == "follows" and follows not in profile.channels:
+            refused.append(f"channels.{channel}.follows: channel {channel} follows another channel of the profile")
+    if refused:
+        raise SystemExit("; ".join(refused))
+    return named
+
+
+async def _pinned(layers: _Layered, ledger: "Ledger", registry: "Registry | None") -> dict[str, Any]:
+    """The checkpoints the run's fixed channels serve (`channels.NAME.checkpoint`), each resolved to its id, as the
+    run's start records them."""
+    from rollout_train.registry import resolved
+
+    return {
+        key: await resolved(ledger, registry, value)
+        for key, value in layers.settings.values.items()
+        if key.startswith("channels.") and key.endswith(".checkpoint") and isinstance(value, str)
+    }
 
 
 def _chosen(arguments: argparse.Namespace) -> dict[str, str | None]:

@@ -387,7 +387,9 @@ class Platform:
         (the engines last). With `plays`, a runner and nothing else (`rollout runner`): no run is registered in the
         directory and no trainer is made; the runner plays those runs (by id), or with none named every run whose
         channels it reaches, and the channels whose engines serve in this process follow what the one run named says
-        they should serve (`rollout_train.following`)."""
+        they should serve (`rollout_train.following`). Without, every channel of this process but the trained one
+        follows what the run says it serves: nothing, unless its start says the channel follows another or is fixed on
+        a checkpoint (`rollout_train.serving.source_of`)."""
         from rollout_train.monitor import RunFeed
 
         self = cls(profile)
@@ -478,6 +480,11 @@ class Platform:
             (followed,) = plays
             name = f"{socket.gethostname()}/{directory.name}"
             follower = Follower(name, self.checkpoints, followed, self.channels, directory / "checkpoints")
+            _background(stack, follower.serve())
+        others = {name: channel for name, channel in self.channels.items() if name != trained}
+        if plays is None and others:  # (a channel the run's start says follows another, or is pinned, loads it here)
+            name = f"{socket.gethostname()}/{directory.name}/channels"
+            follower = Follower(name, self.checkpoints, self.run.id, others, directory / "following")
             _background(stack, follower.serve())
         self.trainer = learner
         if learner is not None and described is not None and described.colocated:

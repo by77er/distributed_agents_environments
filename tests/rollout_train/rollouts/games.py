@@ -18,7 +18,7 @@ from pydantic import JsonValue
 
 from rollout.contracts import Message
 from rollout.environment import Description, Row, Start, drawn
-from rollout.harness import End, Observation, ProgramReference, RunContext, Task, agent_program
+from rollout.harness import End, ModelSlot, Observation, ProgramReference, RunContext, Task, agent_program
 
 GATES: dict[str, asyncio.Event] = {}
 """By name: a `Gated` run waits for its gate to be set."""
@@ -122,3 +122,28 @@ class Guessing:
 
 
 guessing = Guessing()
+
+
+class JudgedGuess(Guess):
+    """A guess a judge scores: the policy answers once, and the judge, not trained, says whether the answer is the word;
+    a point when its verdict ends with yes."""
+
+    models = {"policy": ModelSlot(), "judge": ModelSlot(trained=False, judge=True)}
+
+    async def respond(self, run: RunContext, reply: Message) -> Observation:
+        verdict = await run.models["judge"].sample([Message.user(f"Is {reply.text.strip()!r} the word {self.word}?")])
+        said = verdict.text.strip().endswith("yes")
+        await run.emit("result", {"solved": said, "saturated": said, "duration": 1})
+        return End(reward=1.0 if said else 0.0)
+
+
+class Judged(Words):
+    """The guessing game, scored by a judge."""
+
+    program: ProgramReference = agent_program(JudgedGuess)
+
+    def evals(self) -> Mapping[str, Sequence[Start]]:
+        return {"judged-held-out": drawn(self, seeds=[1, 2])}
+
+
+judged = Judged()
