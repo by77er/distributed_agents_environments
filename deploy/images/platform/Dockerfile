@@ -1,13 +1,14 @@
 # The platform: every workspace package with every extra (vLLM, the trainers, Tinker) in /opt/rollout/venv,
-# rollout-verifiers (a project locked apart) in /opt/rollout/verifiers, a Java runtime for Paper and Node for the
-# Minecraft harness. Ray's pods (KubeRay), the gateway, the monitor and the launchers all run it.
+# rollout-verifiers (a project locked apart) in /opt/rollout/verifiers, a C compiler for the kernels torch and Triton
+# compile at run time, a Java runtime for Paper and Node for the Minecraft harness. Ray's pods (KubeRay), the gateway,
+# the monitor and the launchers all run it.
 # Built from the repository's root:
 #   buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=deploy/images/platform ...
 FROM ghcr.io/astral-sh/uv:0.11.19 AS uv
 
 FROM node:22-trixie-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl wget git openjdk-21-jre-headless \
+    && apt-get install -y --no-install-recommends ca-certificates curl wget git gcc libc6-dev openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
 
