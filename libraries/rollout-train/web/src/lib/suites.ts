@@ -177,6 +177,21 @@ export function entryBody(fields: EntryFields): { body: Record<string, unknown>;
   return { body, errors };
 }
 
+/** What keeps a suite's form from being saved, in a few words: the name, then each entry's fields by their labels. */
+export function missingOf(name: string, entries: EntryFields[], errors: Record<string, string>[], suite: string | null): string[] {
+  const label: Record<string, string> = {
+    environment: "environment", evalData: "eval data", seeds: "seeds", starts: "starts", episodes: "episodes per start",
+    thinking: "thinking tokens", answer: "answer tokens",
+  };
+  const missing = name.trim() ? [] : ["a name"];
+  if (suite) missing.push(suite);
+  errors.forEach((each, place) => {
+    const fields = Object.keys(each).map(key => label[key] ?? key);
+    if (fields.length) missing.push(`${entries[place].environment ? entries[place].environment.split(":").pop() : `entry ${place + 1}`}: ${fields.join(", ")}`);
+  });
+  return missing;
+}
+
 /** What a suite's form asks the monitor for (`POST /api/suites/NAME`: its entries, and `base`, the version an edit was
  * made from), or why it cannot be: each entry's errors by field, and the suite's (`suite`). */
 export function suiteBody(entries: EntryFields[], base?: number): { body: Record<string, unknown>; errors: Record<string, string>[]; suite: string | null } {
@@ -198,7 +213,7 @@ export function fieldsOf(entry: SuiteEntry | undefined, version: SuiteVersion | 
     chosen,
     evalData: entry?.eval_data ?? "",
     rows: entry?.chosen === DRAWN ? entry.rows ?? [] : [],
-    seeds: entry?.chosen === DRAWN ? (entry.seeds ?? []).join(", ") : "",
+    seeds: entry?.chosen === DRAWN ? (entry.seeds ?? []).join(", ") : "0",  // (a new entry: one draw from each row)
     starts: starts.map(start => `${start.task} ${start.seed}`).join("\n"),
     episodes: String(entry?.episodes ?? 1),
     thinking: entry?.thinking_tokens != null ? String(entry.thinking_tokens) : "",

@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { useEnvironment, useSaveSuite } from "../api/queries";
 import type { SuiteVersion } from "../api/types";
 import { readable } from "../lib/environments";
-import { DRAWN, EVAL_DATA, type EntryFields, fieldsOf, GIVEN, SAME, suiteBody, versionTag } from "../lib/suites";
+import { DRAWN, EVAL_DATA, type EntryFields, fieldsOf, GIVEN, missingOf, SAME, suiteBody, versionTag } from "../lib/suites";
 import { EnvironmentPicker } from "./environments";
 import { Card } from "./ui";
 
@@ -37,7 +37,8 @@ export function SuiteForm({ title, version, name: fixedName, environment, onDone
     event.preventDefault();
     save.mutate(body, { onSuccess: made => onDone?.(made.version) });
   };
-  const ready = name.trim() && !suite && errors.every(each => !Object.keys(each).length);
+  const missing = missingOf(name, entries.map(each => each.fields), errors, suite);
+  const ready = missing.length === 0;
   return (
     <form onSubmit={submit} className="suite-form">
       <Card title={title} note={editing ? `${versionTag(version.id)} → v${version.number + 1}` : undefined}>
@@ -61,7 +62,7 @@ export function SuiteForm({ title, version, name: fixedName, environment, onDone
         <div className="launch-submit">
           <button type="submit" disabled={save.isPending || !ready}>{save.isPending ? "saving…" : editing ? "Save version" : "Make the suite"}</button>
           {onCancel ? <button type="button" className="linkish" onClick={onCancel}>cancel</button> : null}
-          {suite && entries.length ? <span className="error-text">{suite}</span> : null}
+          {missing.length ? <span className="muted small">needs {missing.join("; ")}</span> : null}
           {save.isError ? <span className="error-text">{save.error.message}</span> : null}
         </div>
       </Card>
@@ -105,6 +106,7 @@ function EntryForm({ fields, errors, version, others, onChange, onRemove }: Entr
           <span>Environment</span>
           <EnvironmentPicker value={environment} onChange={pick} without={others} also={version?.environments ?? []} />
           {unloaded && environment ? <small className="error-text">does not load here</small> : null}
+          {errors.environment ? <small className="error-text">{errors.environment}</small> : null}
         </label>
         <label className="field">
           <span>Starts</span>
@@ -137,6 +139,7 @@ function EntryForm({ fields, errors, version, others, onChange, onRemove }: Entr
           <select value={fields.evalData} onChange={event => set({ evalData: event.target.value })}>
             {evalData.map(each => <option key={each} value={each}>{each} · {described?.evals[each]} starts</option>)}
           </select>
+          {errors.evalData ? <small className="error-text">{errors.evalData}</small> : null}
         </label>
       ) : null}
       {fields.chosen === DRAWN ? (
@@ -162,7 +165,7 @@ function EntryForm({ fields, errors, version, others, onChange, onRemove }: Entr
           <label className="field">
             <span>Seeds</span>
             <input value={fields.seeds} onChange={event => set({ seeds: event.target.value })} placeholder="1, 2, 3" spellCheck={false} />
-            {errors.seeds && fields.seeds.trim() ? <small className="error-text">{errors.seeds}</small> : null}
+            {errors.seeds ? <small className="error-text">{errors.seeds}</small> : null}
           </label>
         </>
       ) : null}
@@ -170,7 +173,7 @@ function EntryForm({ fields, errors, version, others, onChange, onRemove }: Entr
         <label className="field">
           <span>Starts</span>
           <textarea rows={Math.min(10, Math.max(3, fields.starts.split("\n").length))} value={fields.starts} onChange={event => set({ starts: event.target.value })} placeholder="row seed" spellCheck={false} />
-          {errors.starts && fields.starts.trim() ? <small className="error-text">{errors.starts}</small> : null}
+          {errors.starts ? <small className="error-text">{errors.starts}</small> : null}
         </label>
       ) : null}
     </fieldset>
