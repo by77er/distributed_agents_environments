@@ -46,7 +46,9 @@ spec:
       containers:
         - name: buildkitd
           image: moby/buildkit:v0.25.1
-          args: [--addr, "tcp://0.0.0.0:1234", --oci-worker-gc, --oci-worker-gc-keepstorage, "80000"]
+          # the cache is kept to 30 GB (in MB below): each platform build adds layers, and a full disk makes the node
+          # evict pods (below 5% free)
+          args: [--addr, "tcp://0.0.0.0:1234", --oci-worker-gc, --oci-worker-gc-keepstorage, "30000"]
           securityContext: {privileged: true}
           ports: [{containerPort: 1234}]
           volumeMounts:
