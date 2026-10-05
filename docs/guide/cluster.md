@@ -128,7 +128,8 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 |---|---|---|
 | top | `name` | Required; lowercase letters, digits and `-` |
 | `[ray]` | `address` (`auto`), `jobs`, `temp_dir`, `memory_threshold`, `python` (`platform`) | `address`: the Ray cluster a run's driver joins, as its GCS's `host:port`; `auto` is the one Ray finds (in a Ray job, the cluster the job runs on). Name it where a machine runs more than one Ray cluster. `jobs`: the job server runs' jobs are submitted to. `python`: the interpreter a run's job starts in (`platform`: `python` on the job's `PATH`) |
-| `[kubernetes]` | `namespace`, `rayjob`, `api` (`https://kubernetes.default.svc`) | With it, each run's job is a RayJob made from the template `rayjob` names (relative to the config file's directory), in `namespace`, through the API server `api` with the pod's service account ([launching](../libraries/rollout-train/launching.md#a-rayjob)) |
+| `[kubernetes]` | `namespace`, `rayjob`, `api` (`https://kubernetes.default.svc`), `queue` | With it, each run's job is a RayJob made from the template `rayjob` names (relative to the config file's directory), sized from the run's demand, in `namespace`, through the API server `api` with the pod's service account ([launching](../libraries/rollout-train/launching.md#a-rayjob)). `queue`: the Kueue LocalQueue that admits each RayJob whole; it is made suspended, and starts once admitted ([Kueue](../libraries/rollout-train/launching.md#kueue)) |
+| `[capacity]` | `cpus`, `memory_gib`, `gpus` | The most the cluster schedules for one run (with Kueue, the queue's quota). A run whose Ray cluster would ask for more is refused, with the numbers ([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)); each is unbounded where it is not said |
 | `[ledger]` | `url`, or `url_env` / `url_file` | A URL holding a password is refused: name it instead |
 | `[blobs]` | `kind` (`files` or `module:name`), `directory` or the store's settings | A setting that looks like a credential is refused |
 | `[scratch]` | `directory` | Node-local |
@@ -389,7 +390,7 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | `evals` | a suite that does not exist (a name never becomes a suite by itself), a version it lacks, a suite's environment not offered |
 | `distillation` | a distillation (or a policy gradient's distillation term) with no teachers, a teacher channel without a provider, or no route for the environment the run plays (routes for some of its rows only: a note); a teacher's provider without prompt logprobs, with fewer top logprobs than `objective.distillation.top_k`, or with them only unchecked (Tinker); the trainer does not score; the teacher's renderer family differs |
 | `environment` | not offered, does not load, needs a sandbox kind with no pool or a tool set not served |
-| `capacity` | more GPUs than the cluster has, counting the run's scheduled parts (more than are free: a note, it waits) |
+| `capacity` | more CPUs, memory or GPUs than `[capacity]` gives one run, counting the run's scheduled parts and room for Ray's own processes; more GPUs than the cluster has (more than are free: a note, it waits) |
 | `spend` | `limits.spend` below one step's estimated cost on its metered parts (`spend_of`); a note where it cannot be estimated yet, or where the run uses metered parts and sets no `limits.spend` |
 | `name` | not a name, or taken |
 

@@ -17,6 +17,7 @@ job's driver builds the run from its settings and claims what it needs.
 | `rollout_train.submitting` | `submit`: records a launch and starts its job, as a Ray job or a RayJob; `followed`, `stopped` |
 | `rollout_train.launches` | The launches table: what was asked, the run it is, the job it became, its state |
 | `rollout_train.jobs` | The job's entrypoint: the run built from the cluster config and its settings (`Run`), and the loop of its kind |
+| `rollout_train.demand` | What a run's scheduled parts need (`demand`), the placement group that reserves them (`reserve`), and the pods of its Ray cluster (`pods`) |
 
 ## Asking for a run
 
@@ -50,20 +51,41 @@ environment from the version's source.
 ### A Ray job
 
 On a cluster config without `[kubernetes]`, the job is a Ray job submitted to `[ray] jobs` (`RayJobs`): its submission
-id `run-` and the launch's id in lowercase, one CPU for its driver, and the launch, kind and name as its metadata.
+id `run-` and the launch's id in lowercase, its driver's CPUs as `entrypoint_num_cpus` ([what a run
+needs](#what-a-run-needs)), and the launch, kind and name as its metadata.
 
 ### A RayJob
 
 On a cluster config with `[kubernetes]`, the job is a RayJob custom resource (`RayJobResources`), made from the
 template `[kubernetes] rayjob` names (a RayJob as YAML: its Ray cluster, image, volumes, retries) by `rendered`: its
 name (`run-…`, as above), its namespace, its labels (`app.kubernetes.io/managed-by: rollout`, `rollout/launch`,
-`rollout/kind`), its entrypoint and the driver's CPU (`entrypointNumCpus`), its job id, its runtime environment
-(`runtimeEnvYAML`) and its metadata. Everything else is the template's. It is created through the API server
+`rollout/kind`), its entrypoint and the driver's CPUs (`entrypointNumCpus`), its job id, its runtime environment
+(`runtimeEnvYAML`) and its metadata; its Ray cluster sized from the run's demand (`sized`, below); and, with
+`[kubernetes] queue`, Kueue's label (`kueue.x-k8s.io/queue-name`) and `suspend: true`. Everything else is the
+template's. It is created through the API server
 (`KubernetesApi`: `[kubernetes] api`, with the pod's service account token and CA), which the account must allow:
 create, get, list, watch and delete on `rayjobs` in `ray.io`. KubeRay starts a Ray cluster for it, runs the driver
 there, and removes the cluster when the job ends; when the driver or its pod is lost, the template's `backoffLimit`
 submits it again, and the run goes on from the ledger. The chart's template is `deploy/chart/rollout/files/rayjob.yaml`
 ([Deploying](../../guide/deploying.md#on-kubernetes)).
+
+`sized` sizes the Ray cluster from the run's demand. Its head pod asks Kubernetes for what Ray schedules on it and
+room for Ray's own processes (`HEADROOM`: 1 CPU, 2 GiB), and Ray starts with its CPUs and GPUs (`rayStartParams`
+`num-cpus`, `num-gpus`, and `resources` for custom ones); a pod that holds no GPU asks for none. The template's limits
+are the most one pod may have: a memory or CPU limit below the request is raised to it, and a GPU limit is the pod's
+whole GPUs. Where the whole run is more than one pod's worth, the head holds the driver, the trainer's bundle and the
+bridge's, and each engine host's bundle is a worker pod (`workerGroupSpecs`, `engines-0`, …, made from the head's
+template, as many replicas as hosts of that size).
+
+### Kueue
+
+With `[kubernetes] queue` (the chart's `kueue.enabled`), Kueue admits each run's RayJob whole: the RayJob is made
+suspended in that LocalQueue, and Kueue lets it start once its ClusterQueue's quota holds every pod it asks for (its
+head, its workers, and the pod KubeRay starts to submit the job), so two runs never hold half of what each needs.
+While Kueue holds it, its launch says so: `followed` reads the RayJob's `spec.suspend` and notes
+`waits for admission by Kueue (queue runs)`, followed by the reason Kueue's Workload gives (its `QuotaReserved`
+condition: the quota it waits for), which the monitor's launch tile shows. Reading the Workload needs `get` and `list`
+on `workloads` in `kueue.x-k8s.io`.
 
 ## The launches table
 
@@ -113,25 +135,28 @@ runs, which a test calls on a `Run` built directly:
    its version, in the runtime environment the job was given). One the cluster does not offer is refused, not
    imported.
 2. **The check.** The settings are checked against the cluster config with what the driver finds now: the environment
-   it imported, the ledger, and the GPUs free in the Ray cluster (a note, never a refusal: an autoscaled cluster has
-   more than its nodes now). A refusal ends the run: its start records its settings, its end says the refusals, and
-   the launch fails with them.
-3. **What it claims** (`Run.start`), asked of Ray as actors the job owns, so they go with it:
+   it imported, the ledger, and what the Ray cluster has free (a note, never a refusal: an autoscaled cluster has more
+   than its nodes now). A refusal ends the run: its start records its settings, its end says the refusals, and the
+   launch fails with them.
+3. **What it claims** (`Run.start`): first the run's placement group, reserved whole ([what a run
+   needs](#what-a-run-needs)), then in it, as actors the job owns, so they go with it:
    - each channel on a `vllm` provider: an engine host per replica (`run/RUN/engine/CHANNEL/N`,
-     [engine hosts](channels.md#engine-hosts)), bound to the run's channel, asking for the provider's GPUs per
-     replica (half of them where the trainer is colocated with them), started from the model's `options` with its
-     `context` as `max_model_len`;
+     [engine hosts](channels.md#engine-hosts)), bound to the run's channel, asking for one CPU and the provider's GPUs
+     per replica (half of them where the trainer is colocated with them) in its bundle, started from the model's
+     `options` with its `context` as `max_model_len`;
    - the trainer (a training or imitate run): an actor (`run/RUN/trainer`, `TrainerActor`) on the driver's node, since
-     a step's files are handed to it by path, asking for the trainer's GPUs (half of them where it is colocated with
-     the trained channel's engine hosts, which then sleep while it steps: `Colocated`) and one CPU. It is made by the
+     a step's files are handed to it by path; a scheduled trainer asks for its GPUs (half of them where it is colocated
+     with the trained channel's engine hosts, which then sleep while it steps: `Colocated`) and one CPU in its bundle,
+     and a metered one (Tinker's) for nothing. It is made by the
      trainer's `implementation` with the model (`trainer.model`, else the trained channel's; for a run that starts from
      full weights, or an adapter over them, those weights fetched here), the trainer settings it takes, the objective
      the settings resolve to, and Tinker's project where the config names one. `TrainerClient` is the `Trainer` the
      loop steps over the actor.
 
-   While any of these waits for Ray, the driver beats as `run/RUN` (kind `run`, with what it waits for: each actor, what
-   it asked for, and its state where Ray says) and notes it on its launch (`waits for run/RUN/engine/policy/0 (1 GPU:
-   pending creation)`), every two seconds, until each is ready.
+   While the group or any of these waits for Ray, the driver beats as `run/RUN` (kind `run`, with what it waits for:
+   each part, what it asked for, and an actor's state where Ray says) and notes it on its launch (`waits for
+   run/RUN/engine/policy/0 (1 GPU, 1 CPU), run/RUN/bridge (2 CPUs, 1 GiB)`), every two seconds, until each is
+   ready.
 4. **The channels.** Every channel the settings name is sampled through a gateway in the driver's process
    ([the gateway](gateway.md)): a channel on engine hosts, or on servers at addresses (`vllm-servers`,
    `runpod-inference`: their `via` or their addresses, reached as their auth says), is a routed channel, sampled by
@@ -158,6 +183,47 @@ bases. Its start records, beside what the loop records: the environment (and the
 the directory, the run settings, the cluster's name, the launch and the job.
 
 A run's channels on a `vllm` provider get engine hosts of the run's own (`Run.hosted`).
+
+## What a run needs
+
+`rollout_train.demand.demand(settings, cluster)` says what a run's scheduled parts need, from its settings and the
+cluster config alone. A part is metered or scheduled as its provider's or trainer's `allocation` says: a metered part
+(Tinker's trainer and sampler, a hosted API) is bounded by spend, rate limits and its concurrency, and is not in the
+demand; a metered trainer's actor asks Ray for nothing and runs on the driver's node.
+
+| Part | Asks for | Where |
+|---|---|---|
+| The driver | 1 CPU for the loop and its gateway, 1 CPU for each runner of `[runners] places` episodes (`episodes_at_once`), each sandbox pool's `size × cpus`; 2 GiB and each pool's `size × memory_gib` | the job's entrypoint (its CPUs as `entrypoint_num_cpus`) |
+| The trainer (a scheduled one) | 1 CPU and its `gpus` (half where it shares the trained channel's card) | a bundle on the driver's node |
+| Each engine host (a scheduled `vllm` provider, per replica) | 1 CPU, a replica's GPUs, `[placement.engines]` | a bundle of its own, or the trainer's where they share a card |
+| The bridge (a training run, an eval of a checkpoint) | the largest bridge of the chain the run may run: its `cpus` and `memory_gib`, or `[bridges."NAME"]`'s | a bundle of its own |
+
+Bridges run one at a time (a checkpoint is bridged before the next is served, and a chain's bridges in turn), so one
+bundle the size of the largest holds them all. Channels on servers elsewhere (`vllm-servers`, RunPod pods) and on
+Tinker ask the run's Ray cluster for nothing.
+
+The driver reserves the bundles as one placement group (`reserve`, named `run/RUN`) before it starts any part, so a
+run starts only with all of it reserved and never waits half-placed for a task Ray cannot place. The group is `PACK`:
+Ray puts its bundles on as few nodes as hold them, all on one node where one has room, and spreads engine hosts over
+nodes only where no one node holds them (`STRICT_PACK` would refuse a run larger than a node; `SPREAD` would split
+one that fits). The trainer's bundle names the driver's node (`node:IP`). Each actor and bridge task asks for exactly
+what its part counted, in its bundle (`placed`); a share of GPUs above one in a bundle is rounded up to whole GPUs, as
+Ray takes fractions of one GPU only. On one machine, the same group is reserved in the local Ray. The group is removed
+when the run ends.
+
+For the acceptance run's shape (a Tinker trainer, one engine host of `local-vllm` with one GPU, the
+`peft-from-tinker` bridge, `episodes_at_once` 6 with 8 places a runner):
+
+| Part | Asks for |
+|---|---|
+| The driver | 2 CPUs, 2 GiB |
+| `engine/policy/0` | 1 GPU, 1 CPU |
+| `bridge` | 2 CPUs, 1 GiB |
+| The run's Ray cluster | 5 CPUs, 3 GiB, 1 GPU (its pod asks Kubernetes for 6 CPUs, 5 GiB, 1 GPU) |
+
+Validation (`capacity`, [validation](../../guide/cluster.md#validation)) refuses a run whose Ray cluster would ask for
+more than the cluster config's `[capacity]` (on Kubernetes with Kueue, the queue's quota, which the chart writes
+there), with each number; one that fits but finds less free now waits, with a note.
 
 ## What a cluster offers
 

@@ -118,21 +118,54 @@ BuildKit pushes to, nor a registry at another plain-HTTP address.
 
 ## A run waits for resources
 
-**What you see.** A run stays waiting and plays no [episode](../libraries/rollout-train/episodes.md).
+**What you see.** A run stays waiting and plays no [episode](../libraries/rollout-train/episodes.md); its launch
+tile says what it waits for.
 
 **Why, and what to check:**
 
-- **No Ray worker can start.** The autoscaler starts a GPU worker for a run that asks for a GPU, up to
-  `ray.gpu.maxReplicas`. If one is already busy with another run, the new run waits for it. If the worker pod is
-  pending, see [a GPU pod stays pending](#a-gpu-pod-stays-pending). Ray's own view:
+- **Kueue has not admitted it** (`waits for admission by Kueue`). The queue's quota is held by runs already admitted;
+  the tile gives Kueue's reason (the quota it waits for). The queue and the run's Workload:
 
     ```bash
-    kubectl -n rollout exec "$(kubectl -n rollout get pod -l app=ray-head -o name)" -- ray status
-    kubectl -n rollout exec "$(kubectl -n rollout get pod -l app=ray-head -o name)" -- ray job list
+    kubectl get clusterqueue rollout
+    kubectl -n rollout get workloads
+    kubectl -n rollout describe workload WORKLOAD   # the Events and the QuotaReserved condition say why it waits
+    ```
+
+- **Its pod is pending.** The RayJob was admitted (or there is no Kueue) but its head or worker pod is `Pending`:
+  another pod holds the GPU (the long-lived Ray cluster's GPU worker, or a finished run's cluster for
+  `rayjob.ttlSeconds`). See [a GPU pod stays pending](#a-gpu-pod-stays-pending).
+- **Its placement group waits** (`waits for run/RUN/engine/policy/0 (1 GPU, 1 CPU), …`). The run's Ray cluster has not
+  got what the group asks for. Ray's view, in the run's head pod, lists the group under its pending demands:
+
+    ```bash
+    kubectl -n rollout exec "$(kubectl -n rollout get pod -l ray.io/node-type=head,app=run -o name | head -1)" \
+      -- ray status
     ```
 
 - **Not enough free memory.** The cluster config's `[guards]` say how much system memory must be free: short of
   `runs_gib`, a runner waits before it claims another episode; short of `training_gib`, a run whose trainer shares
   the engines' GPU stops before its next step, with `NotEnoughMemory`.
-- **More than the cluster has.** A run that asks for more GPUs than the cluster has is refused when its settings are
-  checked; one that asks for more than are free waits ([validation](../guide/cluster.md#validation)).
+- **More than the cluster has.** A run that asks for more than `[capacity]` gives one run (with Kueue, the queue's
+  quota), or more GPUs than the cluster has, is refused when its settings are checked, with the numbers; one that asks
+  for more than is free waits ([validation](../guide/cluster.md#validation)).
+
+## A run hangs after a step because a task cannot be placed
+
+**What you see.** A run plays its first step, then stops: no second step, no episodes, and its job runs on. Ray's
+status lists a demand it cannot place (`ray status` in the run's head pod: `Pending Demands` with "infeasible resource
+requests", for example `{'CPU': 2.0, 'memory': …}: 1+ pending tasks/actors`).
+
+**Why.** A run's driver asks Ray for its actors and for each checkpoint's bridge task. Where its Ray cluster holds the
+actors but no room beside them for the bridge, the bridge waits forever, and so does the run.
+
+**This is prevented.** Each run reserves every part it will use as one placement group before it starts (its trainer,
+its engine hosts, a bundle the size of its largest bridge), and its Ray cluster is sized from the same demand
+([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)): a run that cannot have all of it waits
+before it starts, saying what for, and a bridge always has its bundle. If a run still hangs on a task:
+
+- read the pending demands with `ray status` in the run's head pod (above), and the run's demand in its launch's
+  `waits for` while it starts;
+- check `[bridges."NAME"]` in the cluster config: the bridge asks for what it says, and its bundle is that size;
+- check that the RayJob template's limits (`rayjob.resources.limits`) are at least one engine host's and the driver's
+  needs: a pod is never sized above them, and a run larger than one pod gets worker pods only for its engine hosts.

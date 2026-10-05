@@ -26,12 +26,16 @@ By role, in the namespace it is installed into (these pages use `rollout`):
   gateway keys and Tinker ([what every pod is given](#what-every-pod-is-given)).
 
 - **Each run's job.** A RayJob made by a monitor when a run is asked for from its page (or by `rollout train
-  --cluster` with Kubernetes credentials), from `files/rayjob.yaml`: one head pod of the platform's image holding
-  `rayjob.gpus` of a card for the run's trainer and engine hosts, started again up to `rayjob.backoffLimit` times when
-  its driver is lost, and removed `rayjob.ttlSeconds` after it ends. The cluster config's `[kubernetes]` names the
-  namespace and the template ([launching runs](../libraries/rollout-train/launching.md#a-rayjob)).
+  --cluster` with Kubernetes credentials), from `files/rayjob.yaml`: a head pod of the platform's image sized from
+  what the run needs (its driver, trainer, engine hosts and bridge, and room for Ray's own processes), within
+  `rayjob.resources.limits`, with worker pods for its engine hosts where one pod cannot hold the run; started again up
+  to `rayjob.backoffLimit` times when its driver is lost, and removed `rayjob.ttlSeconds` after it ends. The cluster
+  config's `[kubernetes]` names the namespace and the template
+  ([launching runs](../libraries/rollout-train/launching.md#a-rayjob)).
+- **Kueue's queue** (with `kueue.enabled`): a ResourceFlavor, a ClusterQueue with `kueue.quota` and a LocalQueue in the
+  namespace (`templates/kueue.yaml`), [below](#kueue).
 - **The monitors' account.** A ServiceAccount `monitor` with a Role that may create, get, list, watch and delete
-  `rayjobs` (`templates/rbac.yaml`).
+  `rayjobs`, and with Kueue get, list and watch `workloads` (`templates/rbac.yaml`).
 - **The presets.** A hook Job, `presets`, saves `files/presets/*.toml` beside the ledger after every install and
   upgrade (`rollout preset load /etc/rollout/presets --cluster`), a new version only where a preset's newest says
   otherwise.
@@ -58,6 +62,9 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `ray.idleSeconds` | `300` | How long a Ray worker stays without work before the autoscaler removes it |
 | `ray.gpu.maxReplicas`, `ray.cpu.maxReplicas` | `1`, `1` | The most GPU and CPU worker pods at once |
 | `ray.gpu.resources` | 4 CPUs, 8 GiB requested, 14 GiB and one `nvidia.com/gpu` as limits | One GPU worker pod |
+| `rayjob.resources` | 1 CPU, 4 GiB requested; 14 GiB and one `nvidia.com/gpu` as limits | The most one pod of a run's Ray cluster may have (its limits, one node's worth); its requests apply only where a run's demand is not given |
+| `rayjob.ttlSeconds` | `30` | How long a finished run's Ray cluster stays (and holds what it asked for) |
+| `kueue.enabled`, `kueue.queue`, `kueue.quota` | `false`, `runs`, 12 CPUs, 16 GiB, one GPU | Kueue's admission of runs ([Kueue](#kueue)) |
 | `gateway.replicas`, `gateway.port`, `gateway.host` | `1`, `8900`, `gateway.localhost` | The gateway's replicas, port and Ingress host |
 | `monitors.NAME.host` | `monitor.localhost` | Each monitor's Ingress host |
 | `ingress.className`, `ingress.rayHost` | `traefik`, `ray.localhost` | The ingress controller, and the host of Ray's dashboard |
@@ -77,6 +84,33 @@ gateway:
 ingress:
   rayHost: ray.example.com
 ```
+
+## Kueue
+
+With `kueue.enabled`, Kueue admits each run's RayJob whole. Kueue itself is installed outside the chart
+([install the operators](kubernetes.md#install-the-operators)); the chart makes:
+
+| Object | Name (values) | What it does |
+|---|---|---|
+| ResourceFlavor | `rollout` (`kueue.flavor`) | The node's resources, with no node labels: one kind of node |
+| ClusterQueue | `rollout` (`kueue.clusterQueue`) | Takes RayJobs from the release's namespace only; its quota (`kueue.quota`: `cpus`, `memoryGib`, `gpus`) bounds the `cpu`, `memory` and `nvidia.com/gpu` every admitted run's pods ask for together |
+| LocalQueue | `runs` (`kueue.queue`), in the namespace | What each run's RayJob names (`kueue.x-k8s.io/queue-name`) |
+
+The cluster config then names the queue (`[kubernetes] queue`) and states the quota as its `[capacity]`. A run's
+RayJob is made suspended, and Kueue starts it once the quota has room for its head pod, its worker pods and the pod
+KubeRay starts to submit its job; until then the monitor's launch tile says it waits for admission, with Kueue's
+reason. A run whose pods would ask for more than the quota is refused when it is asked for. The default quota is for
+one node with one GPU, with room beside it for the platform's own pods (the stores, the Ray cluster, the gateway and
+the monitor are outside the queue); set it to what your nodes give runs:
+
+```yaml title="rollout-values.yaml"
+kueue:
+  enabled: true
+  quota: {cpus: 12, memoryGib: 16, gpus: 1}
+```
+
+The long-lived RayCluster `ray` is not in the queue: its GPU worker, when the autoscaler starts it, holds a card Kueue
+does not count, and a run admitted meanwhile waits for that card as a pending pod.
 
 ## Make the Secrets
 

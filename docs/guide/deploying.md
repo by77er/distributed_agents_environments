@@ -265,10 +265,11 @@ Ingress); and the cluster config, the RayJob template and the presets in a Confi
 `/etc/rollout`.
 
 - **Each run is a RayJob** with a Ray cluster of its own: the cluster config's `[kubernetes]` names the namespace and
-  `files/rayjob.yaml`, the template (one head pod of the platform's image, with `rayjob.gpus` of the card for the run's
-  trainer and engine hosts, `backoffLimit` retries, removed `ttlSeconds` after it ends). A monitor makes it when a run
-  is asked for from its page, with its account (`templates/rbac.yaml`: create, get, list, watch and delete on
-  `rayjobs`), reads its status, and deletes it to stop the run.
+  `files/rayjob.yaml`, the template (a head pod of the platform's image, sized from what the run needs within the
+  template's limits, `backoffLimit` retries, removed `ttlSeconds` after it ends). With `kueue.enabled`, Kueue admits
+  it whole once its queue's quota has room ([Kueue](../deploy/helm.md#kueue)). A monitor makes it when a run is asked
+  for from its page, with its account (`templates/rbac.yaml`: create, get, list, watch and delete on `rayjobs`), reads
+  its status, and deletes it to stop the run.
 - **The presets** in `files/presets` are saved beside the ledger by a hook Job at every install and upgrade (`rollout
   preset load /etc/rollout/presets --cluster`): a new version only where a preset's newest says otherwise.
 - **The gateway** runs `rollout gateway --cluster`.

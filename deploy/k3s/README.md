@@ -24,6 +24,8 @@ helm repo add kuberay https://ray-project.github.io/kuberay-helm/
 helm upgrade --install nvidia-device-plugin nvdp/nvidia-device-plugin --version 0.20.1 \
   -n nvidia-device-plugin --create-namespace -f deploy/k3s/device-plugin.yaml
 helm upgrade --install kuberay-operator kuberay/kuberay-operator --version 1.7.1 -n kuberay --create-namespace
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.19.7/manifests.yaml
+kubectl -n kueue-system wait deploy/kueue-controller-manager --for=condition=available --timeout=5m
 kubectl apply -f deploy/k3s/storage-class.yaml
 kubectl apply -f deploy/k3s/build.yaml
 ```
@@ -49,13 +51,21 @@ The chart installs into the namespace `rollout`, by role:
 |---|---|---|
 | Stores | StatefulSets `postgres` (the ledger) and `s3` (versitygw, the bucket `rollout-blobs`), each on its own volume | `postgresql://rollout@postgres.rollout:5432/rollout` (the password: `PGPASSWORD`), `http://s3.rollout:7070` |
 | Ray cluster | RayCluster `ray`, where the monitors check environments imported from git: a head that runs no tasks, a GPU group (`runtimeClassName: nvidia`, one GPU, 14 GiB) and a CPU group (4 GiB), each from zero to one pod by the autoscaler, with token auth | `http://ray-head-svc.rollout:8265`, `http://ray.localhost` |
-| Runs | A RayJob for each run asked for, made from `files/rayjob.yaml`: a Ray cluster of its own, one head pod with `rayjob.gpus` of the card, where the run's driver, trainer and engine hosts run; submitted again up to `rayjob.backoffLimit` times when its driver is lost, and removed `rayjob.ttlSeconds` after it ends | the monitor's Runs and Machines tabs |
+| Runs | A RayJob for each run asked for, made from `files/rayjob.yaml`: a Ray cluster of its own, one head pod sized from what the run needs (the card only for a run with a local trainer or engine host), where the run's driver, trainer and engine hosts run; with `kueue.enabled`, admitted by Kueue's queue `runs` once its quota has room; submitted again up to `rayjob.backoffLimit` times when its driver is lost, and removed `rayjob.ttlSeconds` after it ends | the monitor's Runs and Machines tabs |
 | Gateway | Deployment `gateway`: `rollout gateway --cluster` | `http://gateway.rollout:8900`, `http://gateway.localhost` |
 | Monitor | A Deployment `monitor-NAME` for each of `monitors` (`main`): `rollout monitor --cluster` over the cluster config's ledger, or over `monitors.NAME.where` where it names one (a run's directory on the state volume, or a ledger's URL), importing environments from git with the cluster config's blob store and Ray cluster | `http://monitor.localhost` |
 | Presets | The Job `presets`, a hook at every install and upgrade: `rollout preset load /etc/rollout/presets --cluster` saves each of `files/presets` as a preset, a new version only where its newest one holds other settings | |
 
 A monitor asks for each run from its page as a RayJob, under the ServiceAccount `monitor` (`templates/rbac.yaml`: create,
-get, list, watch and delete on `rayjobs` in the release's namespace), reads its status, and deletes it to stop the run.
+get, list, watch and delete on `rayjobs` in the release's namespace, and with Kueue get, list and watch on
+`workloads`), reads its status, and deletes it to stop the run.
+
+Kueue 0.19.7 (installed above, after KubeRay, so its RayJob integration finds KubeRay's resources) admits runs' RayJobs
+whole once the chart makes its queue: install or upgrade with `--set kueue.enabled=true`. The chart then makes the
+ResourceFlavor `rollout`, the ClusterQueue `rollout` (12 CPUs, 16 GiB and one GPU for runs, `kueue.quota`) and the
+LocalQueue `runs` in the namespace, and the cluster config names the queue and the quota
+([Kueue](../../docs/deploy/helm.md#kueue)). A run waiting for admission says so on its launch tile;
+`kubectl -n rollout get workloads` lists what Kueue holds.
 
 Every pod of the platform, a run's head pod among them, mounts the same things:
 

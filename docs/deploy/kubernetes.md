@@ -77,7 +77,25 @@ K3s.
     helm upgrade --install kuberay-operator kuberay/kuberay-operator --version 1.7.1 -n kuberay --create-namespace
     ```
 
-5. On K3s, add the storage class `local-path-retain`: K3s's local volumes, kept when their claims are deleted:
+5. Optionally, install Kueue, which admits each run's RayJob whole once its queue's quota holds all of it
+   ([Kueue](helm.md#kueue)). Kueue 0.19.7 manages KubeRay RayJobs (`ray.io/rayjob` is among the integrations its
+   default configuration enables), serves the `kueue.x-k8s.io/v1beta2` API the chart's objects use, and needs
+   Kubernetes 1.29 or newer. Install it after KubeRay, so it finds the RayJob resource as it starts (if KubeRay comes
+   later, restart `deploy/kueue-controller-manager`):
+
+    ```bash
+    kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.19.7/manifests.yaml
+    kubectl -n kueue-system wait deploy/kueue-controller-manager --for=condition=available --timeout=5m
+    ```
+
+    or with Helm:
+
+    ```bash
+    helm upgrade --install kueue oci://registry.k8s.io/kueue/charts/kueue --version 0.19.7 \
+      -n kueue-system --create-namespace --wait
+    ```
+
+6. On K3s, add the storage class `local-path-retain`: K3s's local volumes, kept when their claims are deleted:
 
     ```bash
     kubectl apply -f deploy/k3s/storage-class.yaml
@@ -90,6 +108,7 @@ Each command should list what it asks for:
 ```bash
 kubectl get nodes -o custom-columns='NODE:.metadata.name,GPUS:.status.allocatable.nvidia\.com/gpu'
 kubectl get crd rayclusters.ray.io rayjobs.ray.io
+kubectl get crd clusterqueues.kueue.x-k8s.io localqueues.kueue.x-k8s.io   # with Kueue
 kubectl get storageclass
 kubectl get ingressclass
 ```

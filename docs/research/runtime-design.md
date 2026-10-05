@@ -1,9 +1,10 @@
 # Runtime design: one cluster config, run settings, providers, roles on Ray, one gateway
 
 **Status: in progress.** The cluster config, run settings and presets, provider declarations, bridges, validation,
-engine hosts, published environments, runs submitted as Ray jobs, the New run form and the Presets page are built
-([the cluster config](../guide/cluster.md), [the monitor](../libraries/rollout-train/monitor.md#launching-a-run)); a
-run's gang placement and the environment worker are not. A design note: see [Design notes](README.md) for the others.
+engine hosts, published environments, runs submitted as Ray jobs, the New run form, the Presets page and a run's gang
+placement (a placement group, and Kueue's admission on Kubernetes) are built ([the cluster config](../guide/cluster.md),
+[the monitor](../libraries/rollout-train/monitor.md#launching-a-run),
+[launching runs](../libraries/rollout-train/launching.md)); the environment worker is not. A design note: see [Design notes](README.md) for the others.
 
 A design, to be carried out in the sequence of commits at its end. It removes profiles and every path that runs
 without Ray, and describes what replaces them: one config per cluster, a run's own settings (with presets), inference
@@ -573,8 +574,8 @@ rollout env check ENVIRONMENT --model Qwen/Qwen3.5-4B --provider local-vllm --re
 | Sandbox pool | detached actor per kind (or `pools = N`) | `pool/KIND/N` | `size × cpus` CPUs, `size × memory_gib` memory | cluster | `[sandboxes.KIND] python` |
 | Environment worker | detached actor per environment build | `environment/BUILD` | 0.5 CPU | until idle 30 minutes with no run open in it | the environment's |
 | Training loop (and eval, imitation, check) | Ray job: its entrypoint process | job `run-LAUNCH` | 1 CPU | the run | platform |
-| Trainer | actor of the job | `run/RUN/trainer` | the trainer's `gpus` and 2 CPUs, in the run's placement group | the run | platform |
-| Engine host | actor of the job, per replica of a `vllm` channel | `run/RUN/engine/CHANNEL/N` | the provider's `gpus`, in the run's placement group | the run | platform |
+| Trainer | actor of the job | `run/RUN/trainer` | the trainer's `gpus` and 1 CPU, in the run's placement group (a metered trainer: nothing, beside the driver) | the run | platform |
+| Engine host | actor of the job, per replica of a `vllm` channel | `run/RUN/engine/CHANNEL/N` | the provider's `gpus` and 1 CPU, in the run's placement group | the run | platform |
 | Follower for `vllm-servers` | actor of the job | `run/RUN/loader/CHANNEL` | 0.1 CPU and the provider's `loader.resources` | the run | platform |
 | Episode runner | actor of the job | `run/RUN/runner/N` | 1 CPU, `places` places | the run | the environment's |
 | Feed | actor of the job | `run/RUN/feed` | 0.1 CPU | the run | platform |
@@ -591,15 +592,18 @@ adds custom resources to steer a role to a group.
 
 ### A run's placement group
 
-The run job reserves one placement group for its GPU roles before it starts anything:
+The run job reserves one placement group for its scheduled parts before it starts anything
+([as built](#as-built-a-runs-gang)):
 
-- a colocated trainer (`colocate_with` names the trained channel's provider): one bundle `{GPU: 1, CPU: 3}`, `STRICT_PACK`;
-  the trainer actor and the engine host each ask for `num_gpus = 0.5` in it, so Ray gives both the same device;
-- otherwise one bundle per engine host replica and one for a local trainer, `PACK`;
-- a Tinker trainer with `tinker` inference: no GPU bundle at all.
+- a colocated trainer (`colocate_with` names the trained channel's provider): one bundle on the driver's node holding
+  the trainer actor and the first engine host, each asking for half of the replica's GPUs, so Ray gives both the same
+  device;
+- otherwise one bundle per engine host replica, and one on the driver's node for a scheduled trainer;
+- one bundle for the largest bridge the run may run;
+- a Tinker trainer with `tinker` inference: no bundle at all (both are metered).
 
-A run whose placement group cannot be reserved waits in Ray's queue; one whose demand exceeds the cluster's total is
-refused at validation (§6).
+The group is `PACK`. A run whose placement group cannot be reserved waits in Ray's queue; one whose demand exceeds the
+cluster's total is refused at validation (§6).
 
 ### Finding the ledger, the blob store and the gateway
 
@@ -1238,9 +1242,9 @@ beside the profile-era `settings`, which the monitor and resuming still read; 16
   since nothing here quantizes offline. `rollout merge` of a Tinker checkpoint folds in its bridged PEFT files.
 - **10** (engine hosts): `rollout_train.inference.hosts` ([engine hosts](../libraries/rollout-train/channels.md#engine-hosts)).
   Following the decisions after review, an `EngineHost` shares nothing with the trainer but the ledger and the blob
-  store: no placement group. It asks Ray for its own fractional `num_gpus` (`host_spec`: a replica's GPUs from the
-  provider, halved where the run's trainer is colocated, and `[placement.engines]`), which on Kubernetes is what makes
-  the autoscaler add a GPU worker; the placement groups of §4 are not used. What it serves changes while it runs
+  store. It asks Ray for one CPU and its own fractional `num_gpus` (`host_spec`: a replica's GPUs from the provider,
+  halved where the run's trainer is colocated, and `[placement.engines]`); a run's own host asks for them in its bundle
+  of the run's placement group ([a run's gang](#as-built-a-runs-gang)). What it serves changes while it runs
   (`bind`, `unbind`; the follower's `bindings`). Each `(run, channel)` is a `Channel` of its own over the engines, keeping
   `max_lag + 1` adapters from the newest serving record (the window followed as `max_lag` changes). Beats list every
   adapter each engine holds, with its run, channel, checkpoint and depth, and a follower over vLLM servers holds its
@@ -1273,11 +1277,11 @@ from the table above:
   submitted, running, stopping, stopped, ended, failed) and the job it became; there is no claim and no launcher beat.
   `rollout cluster` has `check` alone ([launching runs](../libraries/rollout-train/launching.md)).
 - **The driver claims.** The job (`python -m rollout_train.jobs LAUNCH`, the cluster config in `ROLLOUT_CLUSTER_JSON`)
-  checks the settings again (`launching.checked`) and builds the run (`rollout_train.jobs.Run`): engine hosts of the
-  run's own for each channel on a `vllm` provider (`run/RUN/engine/CHANNEL/N`, each asking Ray for its share of a
-  GPU), the trainer actor (`run/RUN/trainer`) pinned to the driver's node, and, while Ray has yet to give them, beats
-  of kind `run` saying what it waits for. A refusal fails the launch with its reasons. There are no placement groups
-  and no `RunActors`: `Run` closes what it made when the job ends.
+  checks the settings again (`launching.checked`) and builds the run (`rollout_train.jobs.Run`): it reserves the run's
+  placement group, then starts in it engine hosts of the run's own for each channel on a `vllm` provider
+  (`run/RUN/engine/CHANNEL/N`) and the trainer actor (`run/RUN/trainer`) on the driver's node, and, while Ray has yet
+  to give them, beats of kind `run` saying what it waits for. A refusal fails the launch with its reasons. There is no
+  `RunActors`: `Run` closes what it made, its placement group last, when the job ends.
 - **Each run has its own gateway.** The driver serves a gateway in its process on a free local port, with a secret of
   its own, over the run's channels: engine hosts through their actor handles, servers elsewhere at their addresses,
   Tinker's sampler in the process. Runners, sandbox pools and the feed run in the driver too; bridges are Ray tasks.
@@ -1295,8 +1299,32 @@ from the table above:
   answers what the run trains, one step's spend on its metered parts and the environment's slots. The Presets page
   (`/api/presets`) lists, shows, edits and deletes presets.
 
-What is left of the design: a run's gang placement (a placement group, Kueue's admission) and the environment worker
-(§4; runs import their environment in their own Python, which the cluster config's `[environments]` entry gives).
+What is left of the design: the environment worker (§4; runs import their environment in their own Python, which the
+cluster config's `[environments]` entry gives).
+
+### As built: a run's gang
+
+Following the decisions after review (resources are metered or scheduled; a run's engines are its own; no launcher):
+
+- **The demand.** `rollout_train.demand.demand(settings, cluster)` says what a run's scheduled parts need, from its
+  settings and the cluster config alone: the driver (1 CPU, 1 CPU for each runner of `[runners] places` episodes, each
+  sandbox pool its environment declares; 2 GiB and the pools' memory), the trainer when its `allocation` is scheduled
+  (1 CPU and its GPUs, half of them where it shares the engines' card), each engine host of a scheduled `vllm`
+  provider (1 CPU, a replica's GPUs, `[placement.engines]`), and the largest bridge of the chain the run may run
+  (bridges run one at a time). Metered parts (Tinker, hosted APIs) add nothing; a metered trainer's actor asks for
+  nothing and runs on the driver's node.
+- **One placement group.** The driver reserves the demand's bundles as one `PACK` placement group (`reserve`), the
+  trainer's pinned to its node, and starts its actors and bridge tasks in their bundles; each asks for exactly what
+  the demand counted. On one machine the same group applies. While Ray has yet to reserve it, the launch says what
+  it waits for.
+- **The RayJob sized from the demand.** `rendered` gives a run's head pod requests of the demand and room for Ray's
+  own processes (`HEADROOM`), starts Ray with those CPUs and GPUs, and keeps the template's limits as the most one pod
+  may have; a run that needs more than one pod's worth gets a worker group of engine-host pods. A run on Tinker alone
+  asks for no GPU.
+- **Kueue.** With `[kubernetes] queue`, the RayJob is made suspended with `kueue.x-k8s.io/queue-name`, and Kueue
+  starts it once the ClusterQueue's quota holds all of it; its launch says it waits for admission, with the
+  Workload's reason. The chart makes the ResourceFlavor, ClusterQueue and LocalQueue (`kueue.enabled`), and states
+  the quota as the cluster config's `[capacity]`, which validation refuses a run beyond, with the numbers.
 
 ### What the acceptance run needs from each step
 

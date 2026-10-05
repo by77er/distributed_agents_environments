@@ -376,7 +376,8 @@ monitor asks for no runs.
 
 A launch's tile on Runs (and on Evals, a suite's page and a checkpoint's or base model's page) has its run's name
 (linked to the run once it exists), its environment and its state in the run's words once the run exists (running,
-paused, finished, stopped, failed, lost), and before that asked, submitted, or waiting with what it waits for; the
+paused, finished, stopped, failed, lost), and before that asked, submitted, or waiting with what it waits for (Kueue's
+admission and its reason, its Ray cluster, the GPUs its placement group asks for); the
 settings that differ from the defaults and the preset, in words; and when it was asked, or how long it took. A failed
 launch's reason opens under it.
 

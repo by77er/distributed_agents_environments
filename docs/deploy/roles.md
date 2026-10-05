@@ -18,8 +18,10 @@ deployment.
 - **The Ray cluster.** Runs every run's work. On Kubernetes it is a RayCluster that KubeRay keeps: a head that runs no
   tasks, a GPU worker group and a CPU worker group, each started from zero by the autoscaler when work waits for it
   and removed when idle. Bridges between checkpoint formats, merges and environment builds run on it as Ray tasks.
-- **Runs.** Each training run, eval, supervised step or environment check is a Ray job. Its driver runs the loop;
-  its trainer, inference engines and episode runners run beside it, on a GPU worker when the run asks for a GPU.
+- **Runs.** Each training run, eval, supervised step or environment check is a Ray job: on Kubernetes a RayJob with a
+  Ray cluster of its own, sized from what the run needs. Its driver runs the loop and its episode runners; its
+  trainer, inference engines and bridges run beside it, reserved together as one placement group
+  ([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)).
 - **The gateway.** A stateless HTTP service that every model request goes through. It renders messages to tokens,
   samples a [channel](../libraries/rollout-train/channels.md), and records each turn in the ledger and the blob store
   ([the gateway](../libraries/rollout-train/gateway.md)). It holds no session, so it scales to any number of replicas.
@@ -67,6 +69,7 @@ Raise them for bigger models or more episodes at once.
 | Ray autoscaler | 0.1 | 256 MiB / 1 GiB | none | none |
 | Ray GPU worker (one per run that asks for a GPU) | 4 | 8 GiB / 14 GiB | 1 | the state volume |
 | Ray CPU worker (runs that use no local GPU) | 1, advertising 4 to Ray | 2 GiB / 4 GiB | none | the state volume |
+| A run's Ray cluster (one head pod, sized from the run) | the run's demand and 1 more (6 for the acceptance run) | its demand and 2 GiB (5 GiB for the acceptance run) / 14 GiB | the whole cards its engine hosts and trainer take | the state volume |
 | Gateway, per replica | 0.25 | 512 MiB / 2 GiB | none | none |
 | Monitor | 0.25 | 512 MiB / 3 GiB | none | none |
 | State volume, shared by every pod | | | | 200 GiB |

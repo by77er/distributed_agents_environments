@@ -5,17 +5,20 @@ This page is for whoever sets up GPU nodes and sizes the chart's GPU workers.
 
 **Read first:** [Prepare a Kubernetes cluster](kubernetes.md). **Next:** [Postgres and S3](stores.md).
 
-## Whole cards for Ray workers
+## Whole cards for runs
 
-By default the device plugin advertises each card as one `nvidia.com/gpu`, and each Ray GPU worker pod asks for one
-(`ray.gpu.resources.limits`). Inside that pod, Ray shares the card among the run's processes with fractional GPUs: a
-LoRA (low-rank adaptation) trainer that shares the engines' card (`colocate_with` in the cluster config) and the vLLM
-engine each take part of it, and the engines sleep while the trainer steps ([sharing a
+By default the device plugin advertises each card as one `nvidia.com/gpu`. Each run's Ray cluster asks for the whole
+cards its demand needs ([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)), and inside it
+Ray shares a card among the run's processes with fractional GPUs: a LoRA (low-rank adaptation) trainer that shares the
+engines' card (`colocate_with` in the cluster config) and the vLLM engine each take half of it in one bundle of the
+run's placement group, and the engines sleep while the trainer steps ([sharing a
 GPU](../libraries/rollout-train/channels.md#share-a-gpu-between-engines-and-the-trainer)).
 
-- One GPU worker pod holds one run that uses a local GPU. `ray.gpu.maxReplicas` is the most such runs at once, at
-  most the number of cards.
-- A run trained and sampled on Tinker uses no GPU, and runs on a CPU worker.
+- A run's engines are its own: two runs never share a card's engines. With one card, one run that uses a local GPU
+  runs at a time, and the next waits: with Kueue, in the queue ([Kueue](helm.md#kueue)); without it, as a pending pod.
+- A run trained and sampled on Tinker asks for no GPU, and runs beside one that does.
+- The long-lived RayCluster's GPU worker (`ray.gpu.maxReplicas`), which the monitors use to check imported
+  environments, holds a card while it is up.
 
 ## Time-slicing a card between pods
 

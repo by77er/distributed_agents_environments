@@ -179,9 +179,10 @@ Code: `rollout_train.inference.hosts` · See [`EngineHost`](../../guide/referenc
 
 An `EngineHost` is one replica's engines as a Ray actor (`started(name, spec, ledger_at, blobs_at, bound=…)`): its
 engine (`module:name`, made with the model and its options), and a follower that keeps it serving what the runs bound
-to it should. It shares nothing with whoever trains but the ledger and the blob store: no placement group, no Ray
-cluster. So the same actor is a run's own replica, started by the run's job, or a replica of a long-lived pool
-(`detached`) serving every run bound to it; `bind(run, channel)` and `unbind` change what it serves while it runs.
+to it should. It shares nothing with whoever trains but the ledger and the blob store. So the same actor is a run's
+own replica, started by the run's job in its bundle of the run's placement group
+([the driver](launching.md#the-driver)), or a replica of a long-lived pool (`detached`) serving every run bound to it;
+`bind(run, channel)` and `unbind` change what it serves while it runs. It asks Ray for one CPU and its spec's GPUs.
 
 | Member | Does |
 |---|---|
