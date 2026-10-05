@@ -1,0 +1,62 @@
+# The ledger service (`rollout ledger serve`): the ledger over HTTP, for whoever holds a token. Pods outside the cluster
+# (RunPod's) reach it at the cluster config's [ledger] public, each with a token of its own that reads its run's serving
+# records and checkpoints and writes its beats. Inside the cluster every role reaches Postgres itself. A Service for the
+# cluster; and, to reach it from outside, an Ingress (`ledger.ingress`) or a Service of another type (`ledger.service`).
+{{- if .Values.ledger.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.ledger.replicas }}
+  selector: {matchLabels: {app: ledger}}
+  template:
+    metadata: {labels: {app: ledger}}
+    spec:
+      containers:
+        - name: ledger
+          image: {{ include "rollout.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [rollout, ledger, serve, --cluster, --listen, "0.0.0.0:{{ .Values.ledger.port }}"]
+          env: {{- include "rollout.env" . | nindent 12 }}
+          ports: [{containerPort: {{ .Values.ledger.port }}, name: http}]
+          readinessProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 10, timeoutSeconds: 5}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 6}
+          volumeMounts: {{- include "rollout.volumeMounts" . | nindent 12 }}
+          resources: {{- toYaml .Values.ledger.resources | nindent 12 }}
+      volumes: {{- include "rollout.volumes" . | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledger
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.ledger.service.type }}
+  selector: {app: ledger}
+  ports:
+    - port: {{ .Values.ledger.port }}
+      targetPort: http
+      {{- if and .Values.ledger.service.nodePort (eq .Values.ledger.service.type "NodePort") }}
+      nodePort: {{ .Values.ledger.service.nodePort }}
+      {{- end }}
+{{- if .Values.ledger.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ledger
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ledger.ingress.tlsSecret }}
+  tls: [{hosts: ["{{ .Values.ledger.ingress.host }}"], secretName: {{ .Values.ledger.ingress.tlsSecret }}}]
+  {{- end }}
+  rules:
+    - host: {{ .Values.ledger.ingress.host }}
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: ledger, port: {number: {{ .Values.ledger.port }}}}}}
+{{- end }}
+{{- end }}

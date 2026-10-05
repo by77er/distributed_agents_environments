@@ -915,6 +915,11 @@ def main() -> None:
     copying.add_argument("source", help="a run's directory, a directory of files, or a database's URL")
     copying.add_argument("target", help="a database's URL: sqlite:///path or postgresql://…")
     copying.add_argument("--point", action="store_true", help="make the source run's directory name the copy")
+    ledger_serving = ledger_commands.add_parser(
+        "serve", help="serve the cluster config's ledger over HTTP, to whoever holds a token (the ledger service)"
+    )
+    ledger_serving.add_argument("--cluster", **_cluster_option("the cluster config whose ledger and token it serves"))
+    ledger_serving.add_argument("--listen", default="127.0.0.1:8840", help="host:port (127.0.0.1:8840)")
     renaming = commands.add_parser("rename", help="call a run something else (its id stays)")
     renaming.add_argument("who", help="the run, by its name or its id")
     renaming.add_argument("name", help="what it is called from now on")
@@ -1078,6 +1083,15 @@ def main() -> None:
         work = _pool(arguments.factory, arguments.directory, arguments.ledger, arguments.name, arguments.host,
                      arguments.port)  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
+    if arguments.command == "ledger" and arguments.ledger_command == "serve":
+        import uvicorn
+
+        from rollout_train.ledger_service.service import for_cluster
+
+        host, _, port = arguments.listen.rpartition(":")
+        uvicorn.run(for_cluster(_cluster_of(arguments.cluster)), host=host or "127.0.0.1", port=int(port),
+                    log_level="warning")  # fmt: skip
+        return
     if arguments.command == "ledger":
         asyncio.run(_copy_ledger(arguments.source, arguments.target, arguments.point))
         return

@@ -269,7 +269,10 @@ def _row(row: tuple[Any, ...]) -> Preset:
 
 def presets_of(ledger: object) -> Presets | None:
     """The presets beside a ledger: a table in a database ledger's database, a directory beside a ledger of files
-    (`presets`, in its directory); none beside any other."""
+    (`presets`, in its directory), the service's for a ledger reached through it (`HttpLedger.presets`); none beside
+    any other."""
+    if (found := getattr(ledger, "presets", None)) is not None:
+        return found
     database = getattr(ledger, "database", None)
     if database is not None and hasattr(database, "write"):
         return DatabasePresets(database)

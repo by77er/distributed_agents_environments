@@ -3,8 +3,8 @@
 # evals and judges, the Minecraft worlds, the gridworld, and GSM8K in rollout-verifiers' Python.
 # Every pod finds it at /etc/rollout/cluster.toml (ROLLOUT_CLUSTER). Secrets are named, never written: PGPASSWORD,
 # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY come from the Secret `stores`, TINKER_API_KEY (or credentials.json)
-# from `tinker`, OPENAI_API_KEY and ANTHROPIC_API_KEY from `providers` (the gateway's and runs' pods), the gateway's
-# keys from `gateway-keys`.
+# from `tinker`, OPENAI_API_KEY and ANTHROPIC_API_KEY from `providers` (the gateway's and runs' pods),
+# ROLLOUT_LEDGER_TOKEN from `ledger`, the gateway's keys from `gateway-keys`.
 name = "k3s"
 
 [ray]
@@ -26,6 +26,10 @@ gpus = {{ .Values.kueue.quota.gpus }}
 
 [ledger]
 url = "{{ include "rollout.ledgerUrl" . }}"  # the password is PGPASSWORD's
+token_env = "ROLLOUT_LEDGER_TOKEN"            # the platform's token for the ledger service, and what pods' are signed with
+{{- if .Values.ledger.public }}
+public = "{{ .Values.ledger.public }}"        # where pods outside the cluster reach the ledger service
+{{- end }}
 
 [blobs]
 kind = "rollout_s3:S3BlobStore"               # the endpoint and the credentials come from the environment

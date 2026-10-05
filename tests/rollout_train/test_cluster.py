@@ -153,6 +153,22 @@ def test_a_ledger_url_with_a_password_is_refused() -> None:
     assert SECRET not in str(raised.value)
 
 
+def test_the_ledger_service_is_reached_with_the_platforms_token_named() -> None:
+    service = SMALL.replace('url = "sqlite:///~/ledger.db"', 'url = "https://ledger.example.com"')
+    with pytest.raises(ClusterError, match="token_env or token_file"):
+        cluster_of(service)
+    cluster = cluster_of(service.replace("[inference.local]", 'token_env = "LEDGER_TOKEN"\n[inference.local]'))
+    assert (
+        cluster.ledger.token == Secret(env="LEDGER_TOKEN") and cluster.secrets()["ledger.token"] == cluster.ledger.token
+    )
+    public = SMALL.replace("[inference.local]", 'public = "https://ledger.example.com"\n[inference.local]')
+    assert cluster_of(public).ledger.public == "https://ledger.example.com"
+    with pytest.raises(ClusterError, match="public is the ledger service's address"):
+        cluster_of(public.replace("https://ledger.example.com", "ledger.example.com"))
+    with pytest.raises(ClusterError, match="looks like a secret"):
+        cluster_of(SMALL.replace("[inference.local]", 'token = "written-down"\n[inference.local]'))
+
+
 def every_value(value: Any) -> list[str]:
     """Every string anywhere in a dataclass, mapping or sequence."""
     if dataclasses.is_dataclass(value) and not isinstance(value, type):

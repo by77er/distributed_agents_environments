@@ -41,7 +41,7 @@ def test_a_ledger_url_named_is_read_on_this_node_and_never_said(tmp_path: Path) 
     assert ledger_url(cluster, {"LEDGER_URL": url}) == url
     with pytest.raises(ClusterError, match=r"names its URL as \$LEDGER_URL, which is not set on this node"):
         ledger_url(cluster, {})
-    with pytest.raises(ClusterError, match=r"the URL \$LEDGER_URL holds is not") as refused:
+    with pytest.raises(ClusterError, match=r"the URL \$LEDGER_URL holds is neither") as refused:
         ledger_url(cluster, {"LEDGER_URL": "mysql://user:hunter2@db/rollout"})
     assert "hunter2" not in str(refused.value)
     (tmp_path / "url").write_text(url + "\n")

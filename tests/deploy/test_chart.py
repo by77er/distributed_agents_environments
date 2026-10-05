@@ -136,7 +136,7 @@ def test_every_container_asks_for_what_it_needs_and_is_held_to_a_memory_limit(re
         return []
 
     containers = [container for each in rendered for pod in pods(each) for container in pod["containers"]]
-    assert len(containers) == 9  # the stores, the bucket job, the presets job, Ray (3), the gateway, the monitor
+    assert len(containers) == 10  # the stores, the bucket job, the presets job, Ray (3), the ledger, gateway, monitor
     for container in containers:
         assert container["resources"]["requests"]["memory"] and container["resources"]["limits"]["memory"], container[
             "name"
@@ -176,6 +176,28 @@ def containers_of(rendered: list[dict[str, Any]], app: str) -> list[dict[str, An
 def test_the_gateway_serves_the_cluster_configs_channels(rendered: list[dict[str, Any]]) -> None:
     (gateway,) = containers_of(rendered, "gateway")
     assert gateway["command"][:3] == ["rollout", "gateway", "--cluster"]
+
+
+def test_the_ledger_service_serves_the_cluster_configs_ledger_reachable_from_outside_when_asked(
+    rendered: list[dict[str, Any]],
+) -> None:
+    (ledger,) = containers_of(rendered, "ledger")
+    assert ledger["command"][:4] == ["rollout", "ledger", "serve", "--cluster"]
+    assert {"PGPASSWORD", "ROLLOUT_LEDGER_TOKEN"} <= {each["name"] for each in ledger["env"]}
+    cluster = parsed(tomllib.loads(config_of(rendered)["cluster.toml"]))
+    assert cluster.ledger.token is not None and cluster.ledger.token.env == "ROLLOUT_LEDGER_TOKEN"
+    assert cluster.ledger.public is None and not [each for each in rendered if each["kind"] == "Ingress"
+                                                  and each["metadata"]["name"] == "ledger"]  # fmt: skip
+    (service,) = [each for each in rendered if each["kind"] == "Service" and each["metadata"]["name"] == "ledger"]
+    assert service["spec"]["type"] == "ClusterIP"
+    exposed = render("--set", "ledger.public=https://ledger.example.com", "--set", "ledger.ingress.enabled=true",
+                     "--set", "ledger.ingress.tlsSecret=ledger-tls")  # fmt: skip
+    assert parsed(tomllib.loads(config_of(exposed)["cluster.toml"])).ledger.public == "https://ledger.example.com"
+    (ingress,) = [each for each in exposed if each["kind"] == "Ingress" and each["metadata"]["name"] == "ledger"]
+    assert ingress["spec"]["tls"][0]["secretName"] == "ledger-tls"
+    noded = render("--set", "ledger.service.type=NodePort", "--set", "ledger.service.nodePort=30840")
+    (service,) = [each for each in noded if each["kind"] == "Service" and each["metadata"]["name"] == "ledger"]
+    assert service["spec"]["type"] == "NodePort" and service["spec"]["ports"][0]["nodePort"] == 30840
 
 
 def test_every_monitor_asks_for_runs_and_imports_with_the_cluster_config_and_reaches_ray_with_its_token(

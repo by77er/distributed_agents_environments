@@ -26,6 +26,7 @@ secrets:
   gatewayKeys: gateway-keys   # gateway.keys: one `KID SECRET` line
   tinker: tinker              # TINKER_API_KEY, or credentials.json (what `tinker auth login` writes); optional
   providers: providers        # OPENAI_API_KEY, ANTHROPIC_API_KEY: the hosted APIs' keys, for the gateway and runs; optional
+  ledger: ledger              # ROLLOUT_LEDGER_TOKEN: the platform's token for the ledger service; optional
 
 # The ledger and the blob store.
 stores:
@@ -79,6 +80,24 @@ kueue:
   clusterQueue: rollout
   flavor: rollout
   quota: {cpus: 12, memoryGib: 16, gpus: 1}
+
+# The ledger service (`rollout ledger serve`): the ledger over HTTP for pods outside the cluster (RunPod's), each with a
+# token of its own; it checks tokens against ROLLOUT_LEDGER_TOKEN (the Secret `secrets.ledger`). `public` is where those
+# pods reach it (the cluster config's [ledger] public, https://…): through the Ingress (`ingress`, with a TLS Secret), a
+# Service of type LoadBalancer or NodePort (`service`), or a tunnel set up outside the chart.
+ledger:
+  enabled: true
+  replicas: 1
+  port: 8840
+  public: ""
+  service:
+    type: ClusterIP           # LoadBalancer or NodePort to reach it from outside the cluster
+    nodePort: null
+  ingress:
+    enabled: false
+    host: ledger.example.com
+    tlsSecret: ""
+  resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
 
 gateway:
   replicas: 1

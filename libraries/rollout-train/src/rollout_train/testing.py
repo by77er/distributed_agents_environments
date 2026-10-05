@@ -29,6 +29,7 @@ from rollout_train.recorder import Renderer
 from rollout_train.recorder.renderers import Tokenizer
 
 __all__ = [
+    "LEDGER_TOKEN",
     "SECRETS",
     "Characters",
     "PlainRenderer",
@@ -43,6 +44,7 @@ __all__ = [
     "sample_request",
     "scripted_engine",
     "scripted_top",
+    "served_ledger",
 ]
 
 SECRETS = [("k2", "a-newer-secret-of-thirty-two-bytes!!"), ("k1", "an-older-secret-of-thirty-two-bytes!")]
@@ -324,3 +326,20 @@ class ScriptedTrainer:
 
 def plain_renderer(model: str) -> Renderer:
     return cast(Renderer, PlainRenderer())
+
+
+LEDGER_TOKEN = "the-platform-token-of-a-test-ledger"
+"""The platform's token of a test's ledger service (`served_ledger`)."""
+
+
+def served_ledger(ledger: Ledger, *, token: str = LEDGER_TOKEN, secret: str = LEDGER_TOKEN, **service: Any) -> Any:
+    """`ledger` through the ledger service, served in this process (no socket): an `HttpLedger` that sends `token`
+    to a service whose platform token is `secret`. `service` goes to the service
+    (`rollout_train.ledger_service.app`)."""
+    import httpx
+
+    from rollout_train.ledger_service import HttpLedger, app
+
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app(ledger, lambda: secret, **service)),
+                               base_url="http://ledger.test")  # fmt: skip
+    return HttpLedger("http://ledger.test", token=token, client=client)

@@ -42,15 +42,17 @@ def watched(
     cluster: "Cluster | None" = None,
     backends: "Mapping[str, Backend] | None" = None,
 ) -> System:
-    """What a monitor over `where` reads: a database's URL (`sqlite:///…`, `postgresql://…`) or a ledger's directory of
-    files, every run in it; or a run's directory (`rollout_train.layout`), its ledger and every run that shares it,
-    with the directory's own logs and feed. `importer`: where environments imported from git go. `cluster`: the
+    """What a monitor over `where` reads: a database's URL (`sqlite:///…`, `postgresql://…`), the ledger service's
+    (`https://…`, with the cluster config's token), or a ledger's directory of files, every run in it; or a run's
+    directory (`rollout_train.layout`), its ledger and every run that shares it, with the directory's own logs and
+    feed. `importer`: where environments imported from git go. `cluster`: the
     cluster config runs are asked for on (none: this monitor asks for none), and `backends` where their jobs go in
     place of its own (a test's)."""
     if "://" in str(where):
-        from rollout_train.database import DatabaseLedger
+        from rollout_train.stores import opened_ledger
 
-        return System(ledger=DatabaseLedger(str(where)), importer=importer, cluster=cluster, backends=backends)
+        ledger = opened_ledger(str(where), cluster.ledger.token if cluster is not None else None)
+        return System(ledger=ledger, importer=importer, cluster=cluster, backends=backends)
     path = Path(where).expanduser()
     if (path / FENCES).exists() and not (path / LOCATION).exists() and not (path / LEDGER).is_dir():
         return System(ledger=FileLedger(path), importer=importer, cluster=cluster, backends=backends)

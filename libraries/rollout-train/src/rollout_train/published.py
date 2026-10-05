@@ -286,7 +286,10 @@ def _row(row: tuple[Any, ...]) -> EnvironmentVersion:
 
 def environment_versions_of(ledger: object) -> EnvironmentVersions | None:
     """The published versions beside a ledger: a table in a database ledger's database, a directory beside a ledger
-    of files (`environment_versions`, in its directory); none beside any other."""
+    of files (`environment_versions`, in its directory), the service's for a ledger reached through it
+    (`HttpLedger.environment_versions`); none beside any other."""
+    if (found := getattr(ledger, "environment_versions", None)) is not None:
+        return found
     database = getattr(ledger, "database", None)
     if database is not None and hasattr(database, "write"):
         return DatabaseEnvironmentVersions(database)

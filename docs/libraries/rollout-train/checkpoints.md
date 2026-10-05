@@ -215,6 +215,25 @@ A ledger also lists its tables and its scopes' fences: `runs_in` reads from the 
 `checkpoints_in` reads every checkpoint; the [monitor](monitor.md) shows them. The training loop's tables are described
 under [dying and starting again](training.md#dying-and-starting-again).
 
+### The ledger over HTTP
+
+The ledger service (`rollout ledger serve --cluster`, `rollout_train.ledger_service`) serves the cluster config's
+database ledger, and the stores beside it, over HTTP. `HttpLedger(url, token_env=…)` is a `Ledger` with the same
+stores beside it (registry, launches, heartbeats, desired settings, sandbox leases, presets, environment versions),
+each a client of the service. Every role can use it by its URL: a cluster config whose `[ledger] url` is
+`https://…` with `token_env`, or a pod's `ROLLOUT_LEDGER`
+(`{"kind": "rollout_train.ledger_service:HttpLedger", "url": …, "token_env": …}`).
+
+| | |
+|---|---|
+| Tokens | The service holds one secret, the platform's token (`[ledger] token_env`). A request with it may do everything: the platform's own roles hold it. A pod's token (`pod_token`) is signed with it and names the pod and the run it serves. It may read the run's serving records, its starts, and the checkpoints the run made, serves, is fixed on, and those they were trained over; write the pod's own beat; and read the pod's own lease. While a lease names the pod, the token reads only if the lease names its run. Anything else is refused (403) |
+| Retries | Each operation goes with a request id, sent again with the same id while the service does not answer, for 30 seconds at most. A take that comes again is answered with the number the first took (kept in the take's transaction). An append that comes again and finds its own record wrote it. A timeout is never read as a refusal |
+| Errors | `Fenced` comes back as itself (409), never retried; a name taken, a row missing, a request it cannot read, a token that may not and a compare-and-set that lost each have a code of their own |
+
+The chart serves it as the Deployment `ledger`. Its Service is reachable from outside the cluster through an Ingress
+or a Service of another type, when the values ask for one; `ledger.public` is then where pods reach it
+([GPU pods on RunPod](../../deploy/providers.md#gpu-pods-on-runpod)).
+
 ## The registry
 
 What runs, checkpoints, datasets and suites are called is kept beside the ledger, in the registry

@@ -130,7 +130,7 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 | `[ray]` | `address` (`auto`), `jobs`, `temp_dir`, `memory_threshold`, `python` (`platform`) | `address`: the Ray cluster a run's driver joins, as its GCS's `host:port`; `auto` is the one Ray finds (in a Ray job, the cluster the job runs on). Name it where a machine runs more than one Ray cluster. `jobs`: the job server runs' jobs are submitted to. `python`: the interpreter a run's job starts in (`platform`: `python` on the job's `PATH`) |
 | `[kubernetes]` | `namespace`, `rayjob`, `api` (`https://kubernetes.default.svc`), `queue` | With it, each run's job is a RayJob made from the template `rayjob` names (relative to the config file's directory), sized from the run's demand, in `namespace`, through the API server `api` with the pod's service account ([launching](../libraries/rollout-train/launching.md#a-rayjob)). `queue`: the Kueue LocalQueue that admits each RayJob whole; it is made suspended, and starts once admitted ([Kueue](../libraries/rollout-train/launching.md#kueue)) |
 | `[capacity]` | `cpus`, `memory_gib`, `gpus` | The most the cluster schedules for one run (with Kueue, the queue's quota). A run whose Ray cluster would ask for more is refused, with the numbers ([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)); each is unbounded where it is not said |
-| `[ledger]` | `url`, or `url_env` / `url_file` | A URL holding a password is refused: name it instead |
+| `[ledger]` | `url`, or `url_env` / `url_file`; `token_env` / `token_file`; `public` | A URL holding a password is refused: name it instead. `url` is a database's, or the ledger service's (`https://…`), which needs the platform's token (`token_env`). The ledger service checks tokens against the same token. `public`: where pods outside the cluster reach the ledger service ([the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http)) |
 | `[blobs]` | `kind` (`files` or `module:name`), `directory` or the store's settings | A setting that looks like a credential is refused |
 | `[scratch]` | `directory` | Node-local |
 | `[tls]` | `ca`, `certificate`, `key`, `identity` (`spiffe://rollout/gateway`) | The cluster's CA, and the client certificate it presents; paths |
@@ -186,8 +186,9 @@ references do not resolve (by name, never by value) and which environment projec
 `Stores.open(cluster)` opens, on this node:
 
 - **the ledger** `[ledger]` names, a database (`DatabaseLedger`): `sqlite:///…` (`~` is the home directory) or
-  `postgresql://…`. Where the config names the URL (`url_env`, `url_file`), it is read there and then; a name that is
-  not set here is an error that says the name, and the URL itself is never printed;
+  `postgresql://…`; or the ledger service (`HttpLedger`), `https://…`, with the platform's token. Where the config
+  names the URL (`url_env`, `url_file`), it is read there and then; a name that is not set here is an error that says
+  the name, and the URL itself is never printed;
 - **the blob store** `[blobs]` names: files in `directory`, or `kind = "module:name"` called with the table's other
   settings. An S3 store (or any S3-compatible service, such as versitygw) is
   `kind = "rollout_s3:S3BlobStore"` with `bucket`, and optionally `prefix`, `endpoint_url` and `region`; its

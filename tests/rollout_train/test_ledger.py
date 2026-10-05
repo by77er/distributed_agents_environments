@@ -6,6 +6,7 @@ import json
 import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -22,7 +23,15 @@ def in_a_database(directory: Path) -> Ledger:
     return DatabaseLedger(f"sqlite:///{directory / 'ledger.db'}")
 
 
-KINDS = pytest.mark.parametrize("opened", [in_files, in_a_database], ids=["files", "database"])
+def over_http(directory: Path) -> Ledger:
+    """A database ledger through the ledger service (each call another client, as another process is)."""
+    from rollout_train.database import DatabaseLedger
+    from rollout_train.testing import served_ledger
+
+    return cast(Ledger, served_ledger(DatabaseLedger(f"sqlite:///{directory / 'ledger.db'}")))
+
+
+KINDS = pytest.mark.parametrize("opened", [in_files, in_a_database, over_http], ids=["files", "database", "http"])
 
 
 @KINDS
@@ -197,14 +206,18 @@ async def test_every_table_is_read_at_once_in_the_order_its_records_were_appende
     assert set(await ledger.read_all(leaving_out="_with%")) == {"runs/a/groups", "runs/a/turns/r_1"}
 
 
+@pytest.mark.parametrize("http", [False, True], ids=["database", "http"])
 async def test_the_stores_beside_a_database_ledger_change_their_rows_in_place(
-    tmp_path: Path, database: str | None
+    tmp_path: Path, database: str | None, http: bool
 ) -> None:
     from rollout.harness.sandboxes import Lease
     from rollout_train.database import DatabaseLedger
     from rollout_train.registry import Taken
+    from rollout_train.testing import served_ledger
 
-    ledger = DatabaseLedger(database or f"sqlite:///{tmp_path / 'ledger.db'}")
+    ledger: Any = DatabaseLedger(database or f"sqlite:///{tmp_path / 'ledger.db'}")
+    if http:
+        ledger = served_ledger(ledger)
     registry = ledger.registry
     await registry.bookmark("best", "aaaa")
     await registry.bookmark("best", "bbbb")  # (moved)

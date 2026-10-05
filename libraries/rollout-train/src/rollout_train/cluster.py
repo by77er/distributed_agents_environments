@@ -120,9 +120,15 @@ class KubernetesSection:
 @dataclass(frozen=True)
 class LedgerSection:
     url: str | None = None
-    """`sqlite:///…` on one machine, `postgresql://…` for several (with no password: that is `url_env`'s)."""
+    """`sqlite:///…` on one machine, `postgresql://…` for several (with no password: that is `url_env`'s), or the
+    ledger service's `http(s)://…` (`rollout_train.ledger_service.HttpLedger`, with `token`)."""
     url_secret: Secret | None = None
     """The URL, named, where it holds a password (`url_env`, `url_file`)."""
+    token: Secret | None = None
+    """The platform's token for the ledger service (`token_env`, `token_file`): what its roles send when `url` is the
+    service's, what the service takes as the platform's, and what pods' tokens are signed with."""
+    public: str | None = None
+    """Where processes outside the cluster (RunPod's pods) reach the ledger service: `https://…`."""
 
 
 @dataclass(frozen=True)
@@ -276,6 +282,7 @@ class Cluster:
                 found[where] = secret
 
         note("ledger.url", self.ledger.url_secret)
+        note("ledger.token", self.ledger.token)
         note("gateway.keys", self.gateway.keys)
         for kind, providers in (("inference", self.inference), ("trainers", self.trainers)):
             for name, provider in providers.items():
@@ -351,6 +358,12 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
         raise ClusterError("[ledger] has url or url_env (or url_file): one of them")
     if url is not None and urlsplit(str(url)).password:
         raise ClusterError("[ledger] url holds a password: put the URL in an environment variable and name it url_env")
+    ledger_token, public = ledger.secret("token"), ledger.text("public", None)
+    if url is not None and str(url).startswith(("http://", "https://")) and ledger_token is None:
+        raise ClusterError("[ledger] url is the ledger service's: name the platform's token, token_env or token_file")
+    if public is not None and not str(public).startswith(("http://", "https://")):
+        raise ClusterError(f"[ledger] public is the ledger service's address outside the cluster, http(s)://… (not "
+                           f"{public!r})")  # fmt: skip
     ledger.done()
     blobs = table.section("blobs")
     blob_kind = blobs.text("kind", "files")
@@ -474,7 +487,7 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
     table.done()
     return Cluster(
         name=name,
-        ledger=LedgerSection(url, url_secret),
+        ledger=LedgerSection(url, url_secret, ledger_token, public),
         blobs=BlobsSection(blob_kind, blob_settings),
         scratch=scratch_directory,
         ray=ray_said,

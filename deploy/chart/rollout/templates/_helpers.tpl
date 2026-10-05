@@ -28,6 +28,8 @@ ledger's URL (in the cluster config) holds no password: PGPASSWORD does. */}}
   valueFrom: {secretKeyRef: {name: {{ .Values.secrets.stores }}, key: ROOT_SECRET_ACCESS_KEY}}
 - name: TINKER_API_KEY
   valueFrom: {secretKeyRef: {name: {{ .Values.secrets.tinker }}, key: TINKER_API_KEY, optional: true}}
+- name: ROLLOUT_LEDGER_TOKEN
+  valueFrom: {secretKeyRef: {name: {{ .Values.secrets.ledger }}, key: ROLLOUT_LEDGER_TOKEN, optional: true}}
 - name: HF_HOME
   value: {{ .Values.state.path }}/huggingface
 {{- end }}

@@ -3,7 +3,8 @@
 
 Two tables hold it: `ledger_records` (a row per record: its table's name, its key, the order it was appended in, the
 fence it was written under, and the record as JSON; a table has each key once) and `ledger_fences` (the newest fence
-of every scope). Taking a fence and appending run in transactions that hold the scope's lock, so a writer that was
+of every scope); `ledger_takes` keeps the number each take that came with a request id took, so a retry of it is
+answered alike. Taking a fence and appending run in transactions that hold the scope's lock, so a writer that was
 replaced is refused (`Fenced`) whichever process it is in. An append holds its table's lock too, while it numbers its
 record after the table's last, so records are numbered one each, in the order they commit, whichever scopes append to
 the table. SQLite serves one machine; Postgres serves several.
@@ -66,6 +67,13 @@ FENCES = sa.Table(
     "ledger_fences",
     METADATA,
     sa.Column("scope", sa.Text, primary_key=True),
+    sa.Column("number", sa.BigInteger, nullable=False),
+)
+TAKES = sa.Table(
+    "ledger_takes",
+    METADATA,
+    sa.Column("scope", sa.Text, primary_key=True),
+    sa.Column("request", sa.Text, primary_key=True),
     sa.Column("number", sa.BigInteger, nullable=False),
 )
 RUNS = sa.Table(
@@ -143,14 +151,25 @@ class DatabaseLedger:
         self.database.create(METADATA)
         self.database.write(_ordered, exclusive="schema")
 
-    async def take(self, scope: str) -> Fence:
+    async def take(self, scope: str, *, request: str | None = None) -> Fence:
+        """Take a scope's fence. With `request` (the caller's id for this take, sent again with each retry), a take
+        asked for again is answered with the number the first one took, in the same transaction that took it
+        (`ledger_takes`), so a retry after a lost answer takes no second fence."""
+
         def taken(connection: Connection) -> int:
+            if request is not None:
+                query = "SELECT number FROM ledger_takes WHERE scope = :scope AND request = :request"
+                if (found := fetch_one(connection, query, {"scope": scope, "request": request})) is not None:
+                    return int(found[0])
             row = sql(
                 connection,
                 "INSERT INTO ledger_fences (scope, number) VALUES (:scope, 1) "
                 "ON CONFLICT (scope) DO UPDATE SET number = ledger_fences.number + 1 RETURNING number",
                 {"scope": scope},
             ).one()
+            if request is not None:
+                sql(connection, "INSERT INTO ledger_takes (scope, request, number) VALUES (:scope, :request, :number)",
+                    {"scope": scope, "request": request, "number": int(row[0])})  # fmt: skip
             return int(row[0])
 
         return Fence(scope, await asyncio.to_thread(self.database.write, taken, exclusive=f"ledger:{scope}"))

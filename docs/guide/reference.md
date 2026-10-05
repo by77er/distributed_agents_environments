@@ -10,7 +10,7 @@ do not edit by hand.
 ## Contents
 
 - **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`Capacity`](#capacity), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`InvalidObservation`](#invalidobservation), [`Lease`](#lease), [`LeaseRefused`](#leaserefused), [`Leases`](#leases), [`Memory`](#memory), [`MemoryLeases`](#memoryleases), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Mount`](#mount), [`Network`](#network), [`NoCapacity`](#nocapacity), [`Observation`](#observation), [`Pool`](#pool), [`PoolBinding`](#poolbinding), [`Process`](#process), [`Program`](#program), [`ProgramReference`](#programreference), [`Provider`](#provider), [`Reach`](#reach), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Sandbox`](#sandbox), [`SandboxLimits`](#sandboxlimits), [`SandboxLost`](#sandboxlost), [`SandboxPool`](#sandboxpool), [`SandboxSpec`](#sandboxspec), [`Scratch`](#scratch), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`with_row`](#with_row)
-- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleLink`](#samplelink), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
+- **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#rolloutcontractsconflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleLink`](#samplelink), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.environment`](#rolloutenvironment)** — What a run trains on and an eval measures: rows, starts, eval data, what results say. [`binding_for`](#binding_for), [`Description`](#description), [`drawn`](#drawn), [`Environment`](#environment), [`first_program`](#first_program), [`held_out`](#held_out), [`Row`](#row), [`Start`](#start), [`start_key`](#start_key), [`train_start`](#train_start)
 - **[`rollout.curriculum`](#rolloutcurriculum)** — Which row to train on next, and gates on evals. [`Curriculum`](#curriculum), [`curriculum_of`](#curriculum_of), [`GroupResult`](#groupresult), [`solved_share`](#solved_share)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
@@ -35,13 +35,14 @@ do not edit by hand.
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Distillation`](#distillation), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`objective_in`](#objective_in), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts), [`WEIGHTS`](#weights)
-- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`FILES`](#files), [`ledger_at`](#ledger_at), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
+- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`FILES`](#files), [`ledger_at`](#ledger_at), [`ledger_of`](#ledger_of), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`opened_ledger`](#opened_ledger), [`Stores`](#stores)
+- **[`rollout_train.ledger_service`](#rollout_trainledger_service)** — The ledger over HTTP: the service, the client every role can use, pods' tokens. [`app`](#app), [`Conflict`](#rollout_trainledger_serviceconflict), [`Forbidden`](#forbidden), [`HttpLedger`](#httpledger), [`LedgerUnreachable`](#ledgerunreachable), [`PLATFORM`](#platform), [`pod_token`](#pod_token), [`Scope`](#scope), [`scope_of`](#scope_of)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteEntryFacts`](#suiteentryfacts), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
-- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets)
+- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`LEDGER_TOKEN`](#ledger_token), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets), [`served_ledger`](#served_ledger)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
 - **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
@@ -1246,7 +1247,7 @@ What a model slot guarantees. It must not weaken during a run.
 | `context_limit` | `int` | required | Minimum guaranteed. |
 | `max_output_tokens` | `int` | required |  |
 
-### `Conflict`
+### `Conflict` {#rolloutcontractsconflict}
 
 *class* · `libraries/rollout/src/rollout/contracts/effects.py`
 
@@ -6451,8 +6452,10 @@ class LedgerSection
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `url` | `str \| None` | `None` | `sqlite:///…` on one machine, `postgresql://…` for several (with no password: that is `url_env`'s). |
+| `url` | `str \| None` | `None` | `sqlite:///…` on one machine, `postgresql://…` for several (with no password: that is `url_env`'s), or the ledger service's `http(s)://…` (`rollout_train.ledger_service.HttpLedger`, with `token`). |
 | `url_secret` | `Secret \| None` | `None` | The URL, named, where it holds a password (`url_env`, `url_file`). |
+| `token` | `Secret \| None` | `None` | The platform's token for the ledger service (`token_env`, `token_file`): what its roles send when `url` is the service's, what the service takes as the platform's, and what pods' tokens are signed with. |
+| `public` | `str \| None` | `None` | Where processes outside the cluster (RunPod's pods) reach the ledger service: `https://…`. |
 
 ### `load`
 
@@ -7759,6 +7762,16 @@ def ledger_at(cluster: 'Cluster') -> dict[str, JsonValue]
 Where a cluster's ledger is, as a ledger's location (`rollout_train.ledger.opened`) that names the cluster
 config: whoever opens it reads the URL, and any secret it is behind, on its own node.
 
+### `ledger_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def ledger_of(cluster: 'Cluster', environ: Mapping[str, str] | None = None) -> 'Ledger'
+```
+
+The ledger a cluster's config names, opened on this node (`ledger_url`, `opened_ledger`).
+
 ### `ledger_url`
 
 *function* · `libraries/rollout-train/src/rollout_train/stores.py`
@@ -7792,6 +7805,17 @@ def opened(where: Mapping[str, Any]) -> Blobs
 
 The blob store a location names.
 
+### `opened_ledger`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def opened_ledger(url: str, token: 'Secret | None' = None) -> 'Ledger'
+```
+
+The ledger at `url`: a database (`sqlite:///…`, `postgresql://…`), or the ledger service (`http(s)://…`) with
+the token `token` names.
+
 ### `Stores`
 
 *class* · `libraries/rollout-train/src/rollout_train/stores.py`
@@ -7813,10 +7837,141 @@ run's `starts` record).
 
 - `@classmethod def open(cls, cluster: 'Cluster', environ: Mapping[str, str] | None = None) -> 'Stores'` — The stores a cluster's config names, opened on this node: the ledger from `[ledger]` (its URL read from the
   secret it names, where it names one), the blob store from `[blobs]`. Raises `ClusterError` where the ledger's
-  URL is not set here or is not a database's.
+  URL is not set here or is neither a database's nor the ledger service's.
 - `@property def checkpoints(self) -> 'Checkpoints'`
 - `@property def registry(self) -> 'Registry'` — Run names, bookmarks, and dataset and suite names, beside the ledger.
 - `@property def presets(self) -> 'Presets'`
+
+## `rollout_train.ledger_service`
+
+The ledger over HTTP: the service, the client every role can use, pods' tokens.
+
+### `app`
+
+*function* · `libraries/rollout-train/src/rollout_train/ledger_service/service.py`
+
+```python
+def app(ledger: Ledger, secret: Callable[[], str | None], *, more: Mapping[str, tuple[Handler, Handler | None]] | None = None, honoured: Callable[[Ledger, Scope], Awaitable[bool]] | None = None) -> 'Starlette'
+```
+
+The service over `ledger`, its tokens checked against the platform's token, which `secret` reads (at each
+request: a token rotated where it is kept is honoured at once). `more` adds operations. `honoured` says whether a
+pod's token is honoured now (whether the pod's lease names its run).
+
+### `Conflict` {#rollout_trainledger_serviceconflict}
+
+*class* · `libraries/rollout-train/src/rollout_train/ledger_service/wire.py`
+
+```python
+class Conflict(Exception)
+```
+
+A compare-and-set that found the row changed since it was read.
+
+### `Forbidden`
+
+*class* · `libraries/rollout-train/src/rollout_train/ledger_service/scopes.py`
+
+```python
+class Forbidden(Exception)
+```
+
+The token may not do what was asked.
+
+### `HttpLedger`
+
+*class* · `libraries/rollout-train/src/rollout_train/ledger_service/client.py`
+
+```python
+class HttpLedger
+```
+
+The ledger at the service `url`, with the token read (at each request, never kept) from the environment
+variable `token_env` or the file `token_file`, or given as `token`.
+
+**Methods**
+
+- `def __init__(self, url: str, *, token_env: str | None = None, token_file: str | None = None, token: str | None = None, client: httpx.AsyncClient | None = None, deadline: float = DEADLINE, attempt: float = ATTEMPT) -> None`
+- `def token(self) -> str | None`
+- `async def call(self, operation: str, args: Mapping[str, Any] | None = None) -> tuple[Any, bool]` — Do `operation` (`STORE/OPERATION`) with `args`: its result, and whether an attempt before the one answered
+  may have been done (its answer lost).
+- `async def result(self, operation: str, args: Mapping[str, Any] | None = None) -> Any`
+- `async def take(self, scope: str) -> Fence`
+- `async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool`
+- `async def append_returning(self, table: str, key: str, record: JsonValue, fence: Fence) -> Appended`
+- `async def read(self, table: str) -> dict[str, JsonValue]`
+- `async def tables(self) -> list[str]`
+- `async def read_all(self, *, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]`
+- `async def fences(self) -> dict[str, int]`
+- `async def now(self) -> float` — The service's clock, in seconds since the epoch.
+- `@property def registry(self) -> 'HttpRegistry'`
+- `@property def launches(self) -> 'HttpLaunches'`
+- `@property def presence(self) -> 'HttpPresence'`
+- `@property def desired_settings(self) -> 'HttpDesiredSettings'`
+- `@property def sandboxes(self) -> 'HttpLeases'`
+- `@property def presets(self) -> 'HttpPresets'`
+- `@property def environment_versions(self) -> 'HttpEnvironmentVersions'`
+- `async def aclose(self) -> None`
+- `def close(self) -> None`
+
+### `LedgerUnreachable`
+
+*class* · `libraries/rollout-train/src/rollout_train/ledger_service/client.py`
+
+```python
+class LedgerUnreachable(Exception)
+```
+
+The ledger service did not answer within the deadline: what was asked may or may not have been done.
+
+### `PLATFORM`
+
+*constant* · `libraries/rollout-train/src/rollout_train/ledger_service/scopes.py`
+
+```python
+PLATFORM = Scope()
+```
+
+### `pod_token`
+
+*function* · `libraries/rollout-train/src/rollout_train/ledger_service/scopes.py`
+
+```python
+def pod_token(secret: str, pod: str, run: str) -> str
+```
+
+A token for pod `pod` serving run `run`, signed with the platform's token `secret`.
+
+### `Scope`
+
+*class* · `libraries/rollout-train/src/rollout_train/ledger_service/scopes.py`
+
+```python
+class Scope
+```
+
+Whose a token is: the platform's (`pod` None), or a pod's, for the run it serves.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `pod` | `str \| None` | `None` |  |
+| `run` | `str \| None` | `None` |  |
+
+**Methods**
+
+- `@property def platform(self) -> bool`
+- `@property def key(self) -> str` — Who it is, as the service keeps answers to retried requests by.
+
+### `scope_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/ledger_service/scopes.py`
+
+```python
+def scope_of(token: str | None, secret: str) -> Scope | None
+```
+
+Whose `token` is, checked against the platform's token `secret`; None for a token that is neither the platform's
+nor a pod's signed with it.
 
 ## `rollout_train.presets`
 
@@ -7919,7 +8074,8 @@ def presets_of(ledger: object) -> Presets | None
 ```
 
 The presets beside a ledger: a table in a database ledger's database, a directory beside a ledger of files
-(`presets`, in its directory); none beside any other.
+(`presets`, in its directory), the service's for a ledger reached through it (`HttpLedger.presets`); none beside
+any other.
 
 ## `rollout_train.published`
 
@@ -7956,7 +8112,8 @@ def environment_versions_of(ledger: object) -> EnvironmentVersions | None
 ```
 
 The published versions beside a ledger: a table in a database ledger's database, a directory beside a ledger
-of files (`environment_versions`, in its directory); none beside any other.
+of files (`environment_versions`, in its directory), the service's for a ledger reached through it
+(`HttpLedger.environment_versions`); none beside any other.
 
 ### `EnvironmentVersion`
 
@@ -8703,6 +8860,16 @@ def keyring() -> Keyring
 
 The keys of `SECRETS`.
 
+### `LEDGER_TOKEN`
+
+*constant* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+LEDGER_TOKEN = 'the-platform-token-of-a-test-ledger'
+```
+
+The platform's token of a test's ledger service (`served_ledger`).
+
 ### `plain_channel`
 
 *function* · `libraries/rollout-train/src/rollout_train/testing.py`
@@ -8856,6 +9023,18 @@ SECRETS = [('k2', 'a-newer-secret-of-thirty-two-bytes!!'), ('k1', 'an-older-secr
 ```
 
 What a test's gateway (`gateway_endpoints`) signs keys with (the first) and takes keys signed with (each).
+
+### `served_ledger`
+
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+def served_ledger(ledger: Ledger, *, token: str = LEDGER_TOKEN, secret: str = LEDGER_TOKEN, **service: Any) -> Any
+```
+
+`ledger` through the ledger service, served in this process (no socket): an `HttpLedger` that sends `token`
+to a service whose platform token is `secret`. `service` goes to the service
+(`rollout_train.ledger_service.app`).
 
 ## `rollout_vllm`
 
