@@ -191,7 +191,7 @@ def _step_ca(table: PodTable) -> "StepCa | None":
 
     said = table.step_ca
     return StepCa.from_files(said["url"], provisioner=said["provisioner"], key=Path(said["key_file"]).expanduser(),
-                             root=Path(said["root"]).expanduser())  # fmt: skip
+                             root=Path(said["root"]).expanduser(), system=said.get("trust") == "system")  # fmt: skip
 
 
 def _beat_of(beats: Sequence[Beat], pod: str) -> Mapping[str, Any] | None:

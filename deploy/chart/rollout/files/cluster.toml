@@ -49,6 +49,39 @@ prefix = "{{ .Values.stores.prefix }}"
 # secret_access_key_env = "R2_WRITER_SECRET_ACCESS_KEY"
 # reader = { access_key_id_env = "R2_READER_ACCESS_KEY_ID", secret_access_key_env = "R2_READER_SECRET_ACCESS_KEY" }
 
+# GPU pods on RunPod (docs/deploy/providers.md#gpu-pods-on-runpod): a run leases them when it starts and releases them
+# when it ends; a released pod stays warm for idle_stop seconds for the next run with its image and model, and the
+# reaper (runpod.reaper) deletes what no run holds. Runs' drivers and the gateway reach pods with the gateway's
+# certificate (the Secret gateway-tls) and mint pods' one-time tokens with step-ca's provisioner key (the Secret
+# step-ca); pods reach the ledger service at [ledger] public (ledger.public), and step-ca at step_ca's url.
+# [tls]
+# ca = "/etc/rollout-secrets/tls/ca.crt"
+# certificate = "/etc/rollout-secrets/tls/tls.crt"
+# key = "/etc/rollout-secrets/tls/tls.key"
+#
+# [inference.h100]                            # one H100 SXM that trains and samples: a host pod
+# kind = "runpod-host"
+# image = "ghcr.io/by77er/rollout-host@sha256:DIGEST"
+# gpu_types = ["NVIDIA H100 80GB HBM3"]
+# cloud = "secure"
+# price = 2.69                                # dollars an hour, until RunPod says its own price for the pod
+# max_pods = 1
+# idle_stop = 600
+# memory_fraction = 0.42                      # vLLM's share of the GPU's memory; the trainer has the rest
+# store = "r2"
+# volume_gb = 100
+# step_ca = { url = "https://ca.example.com", provisioner = "launcher", trust = "system", key_file = "/etc/rollout-secrets/step-ca/provisioner.jwk", root = "/etc/rollout-secrets/step-ca/root_ca.crt" }
+# [inference.h100.models."Qwen/Qwen3.5-9B"]
+# context = 8192
+# options = { max_lora_rank = 32, args = "--max-model-len 8192" }
+#
+# [trainers.h100-lora]                        # its steps on the host's pod
+# kind = "runpod-trainer"
+# colocate_with = "h100"
+# trainer = "lora"
+# models = ["Qwen/Qwen3.5-9B"]
+# segment_tokens = 8000
+
 [scratch]
 directory = "{{ .Values.state.path }}/scratch"
 

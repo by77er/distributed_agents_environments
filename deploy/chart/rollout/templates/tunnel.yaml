@@ -1,0 +1,48 @@
+# A Cloudflare Tunnel: cloudflared carries public hostnames to Services of the cluster (the ledger service, step-ca),
+# with Cloudflare ending TLS at its edge with a publicly trusted certificate. Its token (the Secret `tunnel.secret`, key
+# `token`) is a locally managed tunnel's (`cloudflared tunnel create`, then `cloudflared tunnel token NAME`), whose
+# hostnames are routed to it in DNS (`cloudflared tunnel route dns NAME HOST`); the rules below say where each goes.
+{{- if .Values.tunnel.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tunnel
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    ingress:
+      {{- with .Values.tunnel.hostnames.ledger }}
+      - hostname: {{ . }}
+        service: http://ledger.{{ $.Release.Namespace }}:{{ $.Values.ledger.port }}
+      {{- end }}
+      {{- with .Values.tunnel.hostnames.stepCa }}
+      - hostname: {{ . }}
+        service: https://step-ca.{{ $.Release.Namespace }}:9000
+        originRequest: {noTLSVerify: true}  # (step-ca's own certificate is the cluster's root's: inside the cluster)
+      {{- end }}
+      - service: http_status:404
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tunnel
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: tunnel}}
+  template:
+    metadata: {labels: {app: tunnel}}
+    spec:
+      containers:
+        - name: cloudflared
+          image: {{ .Values.tunnel.image }}
+          args: [tunnel, --no-autoupdate, --config, /etc/cloudflared/config.yaml, run]
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom: {secretKeyRef: {name: {{ .Values.tunnel.secret }}, key: token}}
+          volumeMounts: [{name: config, mountPath: /etc/cloudflared, readOnly: true}]
+          resources: {{- toYaml .Values.tunnel.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap: {name: tunnel}
+{{- end }}

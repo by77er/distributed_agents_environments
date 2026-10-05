@@ -13,6 +13,11 @@ when a pod is stopped or deleted, or is no longer counted as the cluster's, the 
 (`revoke`). Revocation in step-ca is passive: the certificate is not renewed, and
 lapses within a day. A pod that is gone cannot renew anyway, so its certificate lapses all the same.
 
+A certificate for a client of the platform's own (the gateway's, `spiffe://rollout/gateway`) is issued here the same
+way (`certificate`): a key made here, a request for the identity, a one-time token. `decrypted_key` reads a JWK
+provisioner's private key from the `encryptedKey` step-ca keeps in its configuration, with the password it was made
+with (what `step crypto jwe decrypt` does).
+
 The token is what `step ca token` makes: a JWT (`ES256`, the provisioner's key id as `kid`) whose claims are the
 provisioner's name (`iss`), the CA's sign or revoke endpoint (`aud`), the subject (`sub`), the SANs (`sans`), the root
 certificate's SHA-256 fingerprint (`sha`), a random id (`jti`) and its times. The provisioner's private key is a JWK
@@ -47,7 +52,8 @@ def fingerprint(root: bytes) -> str:
 
 class StepCa:
     """step-ca at `url`, whose root certificate is `root` (PEM), with the JWK provisioner `provisioner` whose private
-    key is `key` (a JWK, EC P-256)."""
+    key is `key` (a JWK, EC P-256). Its own TLS is checked by the root; with `system`, by the system's roots (behind a
+    proxy that ends TLS with a public certificate, such as a Cloudflare Tunnel)."""
 
     def __init__(
         self,
@@ -57,6 +63,7 @@ class StepCa:
         key: Mapping[str, Any],
         root: bytes,
         client: httpx.AsyncClient | None = None,
+        system: bool = False,
     ) -> None:
         if key.get("kty") != "EC" or key.get("crv") != "P-256" or "d" not in key:
             raise ValueError("the provisioner's key must be a private EC P-256 JWK")
@@ -68,14 +75,15 @@ class StepCa:
         self._kid = str(key.get("kid") or _thumbprint(key))
         self._http = client
         self._owned = client is None
+        self.system = system
 
     def __repr__(self) -> str:
         return f"StepCa(url={self.url!r}, provisioner={self.provisioner!r})"
 
     @classmethod
-    def from_files(cls, url: str, *, provisioner: str, key: Path, root: Path) -> "StepCa":
+    def from_files(cls, url: str, *, provisioner: str, key: Path, root: Path, system: bool = False) -> "StepCa":
         """With the provisioner's key and the root certificate read from files."""
-        return cls(url, provisioner=provisioner, key=json.loads(key.read_text()), root=root.read_bytes())
+        return cls(url, provisioner=provisioner, key=json.loads(key.read_text()), root=root.read_bytes(), system=system)
 
     def token(
         self, subject: str, sans: Sequence[str] | None = None, *, audience: str = "sign",
@@ -99,6 +107,33 @@ class StepCa:
         """The one-time token a pod gets its first certificate with: its identity as the subject and the only SAN."""
         return self.token(identity, [identity], lifetime=lifetime)
 
+    async def certificate(self, identity: str, *, lifetime: float | None = None) -> tuple[bytes, bytes]:
+        """A certificate for `identity` (its subject and its only URI SAN), from a key made here: the certificate with
+        its chain, and the key (both PEM). `lifetime` asks for fewer seconds than the provisioner's default."""
+        from cryptography.x509.oid import NameOID
+
+        key = ec.generate_private_key(ec.SECP256R1())
+        request = (
+            x509.CertificateSigningRequestBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, identity)]))
+            .add_extension(x509.SubjectAlternativeName([x509.UniformResourceIdentifier(identity)]), critical=False)
+            .sign(key, hashes.SHA256())
+        )
+        body: dict[str, Any] = {"csr": request.public_bytes(serialization.Encoding.PEM).decode(),
+                                "ott": self.token(identity, [identity])}  # fmt: skip
+        if lifetime is not None:
+            body["notAfter"] = f"{int(lifetime)}s"
+        response = await self._client().post(f"{self.url}/1.0/sign", json=body)
+        if response.status_code >= 400:
+            raise RuntimeError(f"step-ca refused a certificate for {identity}: {response.status_code} "
+                               f"{_message(response)}")  # fmt: skip
+        said: Any = response.json()
+        chain = cast(list[str], said.get("certChain") or [said["crt"], said.get("ca") or ""])
+        pem = "".join(each if each.endswith("\n") else f"{each}\n" for each in chain if each)
+        private = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                    serialization.NoEncryption())  # fmt: skip
+        return pem.encode(), private
+
     async def revoke(self, serial: str, *, reason: str = "") -> None:
         """Revoke the certificate whose serial is `serial` (decimal), so that it is not renewed (passive revocation)."""
         body = {"serial": serial, "ott": self.token(serial, audience="revoke"), "passive": True, "reason": reason}
@@ -114,9 +149,38 @@ class StepCa:
         if self._http is None:
             import ssl
 
-            context = ssl.create_default_context(cadata=self.root.decode())
+            context = ssl.create_default_context(cadata=None if self.system else self.root.decode())
             self._http = httpx.AsyncClient(timeout=30.0, verify=context)
         return self._http
+
+
+def decrypted_key(encrypted: str, password: str) -> dict[str, Any]:
+    """A JWK provisioner's private key from its `encryptedKey` (a JWE, compact, encrypted with a password: PBES2 key
+    wrapping and AES-GCM content, as step makes it) and the password. Raises `ValueError` for a wrong password or a
+    JWE it does not read."""
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from cryptography.hazmat.primitives.keywrap import InvalidUnwrap, aes_key_unwrap
+
+    try:
+        protected, wrapped, iv, ciphertext, tag = encrypted.strip().split(".")
+    except ValueError:
+        raise ValueError("an encrypted key is a JWE in five parts") from None
+    header: Any = json.loads(_unpadded(protected))
+    sizes = {"PBES2-HS256+A128KW": (hashes.SHA256(), 16), "PBES2-HS384+A192KW": (hashes.SHA384(), 24),
+             "PBES2-HS512+A256KW": (hashes.SHA512(), 32)}  # fmt: skip
+    if header.get("alg") not in sizes or not str(header.get("enc", "")).endswith("GCM"):
+        raise ValueError(f"an encrypted key is PBES2 and AES-GCM, not {header.get('alg')} and {header.get('enc')}")
+    digest, length = sizes[str(header["alg"])]
+    salt = str(header["alg"]).encode() + b"\x00" + _unpadded(str(header["p2s"]))
+    derived = PBKDF2HMAC(digest, length, salt, int(header["p2c"])).derive(password.encode())
+    try:
+        content = aes_key_unwrap(derived, _unpadded(wrapped))
+        plain = AESGCM(content).decrypt(_unpadded(iv), _unpadded(ciphertext) + _unpadded(tag), protected.encode())
+    except (InvalidUnwrap, ValueError, KeyError, TypeError, InvalidTag) as error:
+        raise ValueError(f"the password does not open the key ({type(error).__name__})") from None
+    return cast(dict[str, Any], json.loads(plain))
 
 
 def _encoded(data: bytes) -> str:

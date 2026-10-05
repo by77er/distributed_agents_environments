@@ -40,6 +40,30 @@ ledger's URL (in the cluster config) holds no password: PGPASSWORD does. */}}
 
 {{/* The hosted APIs' keys, for what samples them (the gateway, each run's job): from the Secret `secrets.providers`,
 each key optional, so a provider whose key is missing is refused when it is asked, and the rest go on. */}}
+{{/* The pod that publishes the root, the provisioner's key and the gateway's certificate (templates/step-ca.yaml), as a
+Job's or a CronJob's template: given Values, Release and step-ca's in-cluster url. */}}
+{{- define "rollout.pkiPod" -}}
+metadata: {labels: {app: pki}}
+spec:
+  serviceAccountName: pki
+  restartPolicy: OnFailure
+  containers:
+    - name: publish
+      image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command: [rollout, pki, publish, --ca-directory, /home/step, --url, {{ .url | quote }}, --namespace,
+                {{ .Release.Namespace | quote }}, --secret, {{ .Values.secrets.stepCa | quote }}, --tls-secret,
+                {{ .Values.secrets.gatewayTls | quote }}, --provisioner, {{ .Values.stepCa.provisioner | quote }}]
+      env:
+        - name: STEP_CA_PASSWORD
+          valueFrom: {secretKeyRef: {name: {{ .Values.stepCa.passwordSecret }}, key: password}}
+      volumeMounts: [{name: ca, mountPath: /home/step, readOnly: true}]
+      resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 256Mi}}
+  volumes:
+    - name: ca
+      persistentVolumeClaim: {claimName: data-step-ca-0, readOnly: true}
+{{- end }}
+
 {{/* What reaches RunPod: its API key (runs' drivers, which lease pods, and the reaper). */}}
 {{- define "rollout.podEnv" -}}
 - name: RUNPOD_API_KEY

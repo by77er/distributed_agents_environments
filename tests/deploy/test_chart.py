@@ -312,3 +312,42 @@ def test_the_pods_reaper_runs_every_minute_when_asked_with_runpods_key(rendered:
     assert "RUNPOD_API_KEY" in {each["name"] for each in head["env"]}  # (a run's driver leases its pods)
     mounted = {each["mountPath"] for each in head["volumeMounts"]}
     assert {"/etc/rollout-secrets/step-ca", "/etc/rollout-secrets/tls"} <= mounted
+
+
+def test_step_ca_and_the_publishing_of_its_root_key_and_the_gateways_certificate_when_asked(
+    rendered: list[dict[str, Any]],
+) -> None:
+    assert not [each for each in rendered if each["metadata"]["name"] in ("step-ca", "pki-publish", "tunnel")]
+    on = render("--set", "stepCa.enabled=true", "--set", "stepCa.dnsNames={ca.example.com}")
+    (ca,) = [each for each in on if each["kind"] == "StatefulSet" and each["metadata"]["name"] == "step-ca"]
+    (container,) = ca["spec"]["template"]["spec"]["containers"]
+    env = {each["name"]: each for each in container["env"]}
+    assert env["DOCKER_STEPCA_INIT_PROVISIONER_NAME"]["value"] == "launcher"
+    assert "ca.example.com" in env["DOCKER_STEPCA_INIT_DNS_NAMES"]["value"].split(",")
+    assert env["DOCKER_STEPCA_INIT_PASSWORD"]["valueFrom"]["secretKeyRef"] == {
+        "name": "step-ca-password",
+        "key": "password",
+    }
+    (cron,) = [each for each in on if each["kind"] == "CronJob" and each["metadata"]["name"] == "pki-publish"]
+    (now,) = [each for each in on if each["kind"] == "Job" and each["metadata"]["name"] == "pki-publish-now"]
+    for pod in (cron["spec"]["jobTemplate"]["spec"]["template"]["spec"], now["spec"]["template"]["spec"]):
+        (publish,) = pod["containers"]
+        assert (
+            publish["command"][:3] == ["rollout", "pki", "publish"]
+            and "https://step-ca.rollout:9000" in publish["command"]
+        )
+        assert pod["serviceAccountName"] == "pki" and pod["volumes"][0]["persistentVolumeClaim"]["readOnly"] is True
+    (role,) = [each for each in on if each["kind"] == "Role" and each["metadata"]["name"] == "pki"]
+    assert role["rules"][0]["resourceNames"] == ["step-ca", "gateway-tls"]
+
+
+def test_a_tunnel_carries_the_ledger_and_step_ca_hostnames_when_asked() -> None:
+    on = render("--set", "tunnel.enabled=true", "--set", "tunnel.hostnames.ledger=ledger.example.com",
+                "--set", "tunnel.hostnames.stepCa=ca.example.com")  # fmt: skip
+    (config,) = [each for each in on if each["kind"] == "ConfigMap" and each["metadata"]["name"] == "tunnel"]
+    rules = yaml.safe_load(config["data"]["config.yaml"])["ingress"]
+    assert rules[0] == {"hostname": "ledger.example.com", "service": "http://ledger.rollout:8840"}
+    assert rules[1]["service"] == "https://step-ca.rollout:9000" and rules[-1] == {"service": "http_status:404"}
+    (tunnel,) = [each for each in on if each["kind"] == "Deployment" and each["metadata"]["name"] == "tunnel"]
+    (container,) = tunnel["spec"]["template"]["spec"]["containers"]
+    assert container["env"][0]["valueFrom"]["secretKeyRef"] == {"name": "tunnel", "key": "token"}

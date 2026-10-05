@@ -107,6 +107,32 @@ ledger:
     tlsSecret: ""
   resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
 
+# The cluster's certificate authority for pods rented elsewhere (templates/step-ca.yaml): step-ca, made on its first
+# start with a JWK provisioner whose certificates last 24 hours, and a CronJob that publishes its root and the
+# provisioner's key (secrets.stepCa) and a new gateway certificate (secrets.gatewayTls) every six hours and at each
+# install. Its password is the Secret `passwordSecret` (key `password`); `dnsNames` are more names for its own
+# certificate (its public host).
+stepCa:
+  enabled: false
+  image: smallstep/step-ca:0.28.4
+  provisioner: launcher
+  passwordSecret: step-ca-password
+  dnsNames: []
+  storage: 1Gi
+  publishSchedule: "0 */6 * * *"
+  resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 512Mi}}
+
+# A Cloudflare Tunnel (templates/tunnel.yaml): cloudflared in the cluster carries public hostnames to the ledger service
+# and step-ca, with Cloudflare ending TLS at its edge. The tunnel's token is the Secret `secret` (key `token`); the
+# hostnames are this deployment's. Pods reach the ledger at https://LEDGER and step-ca at https://STEPCA (with the
+# provider's step_ca trust = "system"); the gateway reaches pods at their own public addresses, not through it.
+tunnel:
+  enabled: false
+  image: cloudflare/cloudflared:2025.9.1
+  secret: tunnel
+  hostnames: {ledger: "", stepCa: ""}
+  resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 256Mi}}
+
 # GPU pods on RunPod: the reaper, a CronJob that deletes the pods no run holds (idle past their provider's idle_stop,
 # stale leases', and those RunPod lists with the cluster's tag that no lease names), so no runs means no pods. On when
 # the cluster config offers RunPod providers (files/cluster.toml has a commented example).

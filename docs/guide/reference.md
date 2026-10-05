@@ -29,7 +29,8 @@ do not edit by hand.
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
 - **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
-- **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`HELD`](#held), [`IDLE`](#idle), [`LeaseLost`](#leaselost), [`live`](#live), [`needs_of`](#needs_of), [`pod_identity`](#pod_identity), [`pod_leases_of`](#pod_leases_of), [`PodAddress`](#podaddress), [`PodLease`](#podlease), [`PodLeases`](#podleases), [`PodNeed`](#podneed), [`Pods`](#pods), [`PodsDidNotStart`](#podsdidnotstart), [`PodTime`](#podtime), [`reap`](#reap), [`RemoteTrainer`](#remotetrainer), [`STARTING`](#starting), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
+- **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: identities, leases, a run's pods, the reaper, the trainer's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`HELD`](#held), [`IDLE`](#idle), [`LeaseLost`](#leaselost), [`live`](#live), [`needs_of`](#needs_of), [`pod_identity`](#pod_identity), [`pod_leases_of`](#pod_leases_of), [`PodAddress`](#podaddress), [`PodLease`](#podlease), [`PodLeases`](#podleases), [`PodNeed`](#podneed), [`Pods`](#pods), [`PodsDidNotStart`](#podsdidnotstart), [`PodTime`](#podtime), [`reap`](#reap), [`RemoteTrainer`](#remotetrainer), [`STARTING`](#starting), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
+- **[`rollout_train.pki`](#rollout_trainpki)** — The certificates the platform holds, from the cluster's step-ca, published as Secrets. [`provisioner_key`](#provisioner_key), [`publish`](#rollout_trainpkipublish)
 - **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`CapacitySection`](#capacitysection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`KubernetesSection`](#kubernetessection), [`LedgerSection`](#ledgersection), [`load`](#load), [`located`](#located), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, allocation, routing. [`ALLOCATIONS`](#allocations), [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`POD_FIELDS`](#pod_fields), [`pod_table`](#pod_table), [`PodTable`](#podtable), [`ROUTING`](#routing), [`Routing`](#routing), [`RUNPOD`](#runpod), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
@@ -39,7 +40,7 @@ do not edit by hand.
 - **[`rollout_train.ledger_service`](#rollout_trainledger_service)** — The ledger over HTTP: the service, the client every role can use, pods' tokens. [`app`](#app), [`Conflict`](#rollout_trainledger_serviceconflict), [`Forbidden`](#forbidden), [`HttpLedger`](#httpledger), [`LedgerUnreachable`](#ledgerunreachable), [`PLATFORM`](#platform), [`pod_token`](#pod_token), [`Scope`](#scope), [`scope_of`](#scope_of)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
-- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
+- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#rollout_trainpublishingpublish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteEntryFacts`](#suiteentryfacts), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`LEDGER_TOKEN`](#ledger_token), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets), [`served_ledger`](#served_ledger)
@@ -53,7 +54,7 @@ do not edit by hand.
 - **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`hosted`](#rollout_openaihosted), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
 - **[`rollout_anthropic`](#rollout_anthropic)** — A model endpoint for Anthropic's Messages API. [`hosted`](#rollout_anthropichosted), [`MessagesEndpoint`](#messagesendpoint), [`MessagesOptions`](#messagesoptions)
 - **[`rollout_s3`](#rollout_s3)** — Blobs in S3 or any S3-compatible object store. [`S3BlobStore`](#s3blobstore)
-- **[`rollout_runpod`](#rollout_runpod)** — GPU pods on RunPod, and certificates for them from step-ca. [`fingerprint`](#fingerprint), [`Pod`](#rollout_runpodpod), [`PodSpec`](#podspec), [`RunPod`](#runpod), [`RunPodError`](#runpoderror), [`StepCa`](#stepca)
+- **[`rollout_runpod`](#rollout_runpod)** — GPU pods on RunPod, and certificates for them from step-ca. [`decrypted_key`](#decrypted_key), [`fingerprint`](#fingerprint), [`Pod`](#rollout_runpodpod), [`PodSpec`](#podspec), [`RunPod`](#runpod), [`RunPodError`](#runpoderror), [`StepCa`](#stepca)
 - **[`rollout_tinker`](#rollout_tinker)** — A trainer and an engine at Thinking Machines (Tinker). [`TinkerEngine`](#tinkerengine), [`TinkerSettings`](#tinkersettings), [`TinkerTrainer`](#tinkertrainer)
 
 ## `rollout.harness`
@@ -5678,6 +5679,7 @@ account's token and CA (by default the pod's own), over `transport` where given 
 - `async def create(self, namespace: str, resource: Mapping[str, Any]) -> dict[str, Any]`
 - `async def get(self, namespace: str, name: str) -> dict[str, Any] | None`
 - `async def workloads(self, namespace: str, uid: str) -> list[dict[str, Any]]` — Kueue's Workloads of a job, by the job's uid (none where Kueue is not installed).
+- `async def put_secret(self, namespace: str, name: str, data: Mapping[str, bytes]) -> None` — Make the Secret `name` hold `data` (its keys and their bytes), in place of what it held, or made anew.
 - `async def read(self, path: str) -> dict[str, Any] | None` — What the API server answers at `path` (`/apis/GROUP/VERSION/...`): none where it is not found. Raises
   `RuntimeError` for any other refusal (a resource the account may not read, an API that is not served).
 - `async def delete(self, namespace: str, name: str) -> None`
@@ -6143,7 +6145,7 @@ class System
 
 ## `rollout_train.pods`
 
-GPU pods elsewhere: their identities, the training service's client.
+GPU pods elsewhere: identities, leases, a run's pods, the reaper, the trainer's client.
 
 ### `GATEWAY_IDENTITY`
 
@@ -6471,6 +6473,33 @@ class TrainerUnreachable(StepFailed)
 ```
 
 The training pod did not answer for as long as a step waits for it.
+
+## `rollout_train.pki`
+
+The certificates the platform holds, from the cluster's step-ca, published as Secrets.
+
+### `provisioner_key`
+
+*function* · `libraries/rollout-train/src/rollout_train/pki.py`
+
+```python
+def provisioner_key(configuration: Mapping[str, Any], password: str, name: str | None = None) -> tuple[str, dict[str, Any]]
+```
+
+The name and private key (a JWK) of step-ca's JWK provisioner `name` (by default its first), from its
+configuration (`ca.json`) and the provisioner's password. Raises `ValueError` where there is none, or the password
+does not open its key.
+
+### `publish` {#rollout_trainpkipublish}
+
+*function* · `libraries/rollout-train/src/rollout_train/pki.py`
+
+```python
+async def publish(directory: Path, password: str, url: str, namespace: str, *, secret: str = 'step-ca', tls_secret: str = 'gateway-tls', provisioner: str | None = None, api: Any = None) -> str
+```
+
+Write the root and the provisioner's key (`secret`), and a new gateway certificate (`tls_secret`), from the
+step-ca whose state is in `directory` and which answers at `url`; what it did, in words.
 
 ## `rollout_train.cluster`
 
@@ -8692,7 +8721,7 @@ The project in a clone's `subdirectory` (empty: its root), with its environment'
 the one it declares: `entry_point_of`). Raises `Refused` for a directory that is not in the clone or holds no
 `pyproject.toml`, a project with no entry point, or an entry point whose module is not in it.
 
-### `publish`
+### `publish` {#rollout_trainpublishingpublish}
 
 *function* · `libraries/rollout-train/src/rollout_train/publishing.py`
 
@@ -10135,6 +10164,18 @@ Implements `Blobs` in an S3 bucket.
 
 GPU pods on RunPod, and certificates for them from step-ca.
 
+### `decrypted_key`
+
+*function* · `implementations/rollout-runpod/src/rollout_runpod/certificates.py`
+
+```python
+def decrypted_key(encrypted: str, password: str) -> dict[str, Any]
+```
+
+A JWK provisioner's private key from its `encryptedKey` (a JWE, compact, encrypted with a password: PBES2 key
+wrapping and AES-GCM content, as step makes it) and the password. Raises `ValueError` for a wrong password or a
+JWE it does not read.
+
 ### `fingerprint`
 
 *function* · `implementations/rollout-runpod/src/rollout_runpod/certificates.py`
@@ -10248,15 +10289,18 @@ class StepCa
 ```
 
 step-ca at `url`, whose root certificate is `root` (PEM), with the JWK provisioner `provisioner` whose private
-key is `key` (a JWK, EC P-256).
+key is `key` (a JWK, EC P-256). Its own TLS is checked by the root; with `system`, by the system's roots (behind a
+proxy that ends TLS with a public certificate, such as a Cloudflare Tunnel).
 
 **Methods**
 
-- `def __init__(self, url: str, *, provisioner: str, key: Mapping[str, Any], root: bytes, client: httpx.AsyncClient | None = None) -> None`
-- `@classmethod def from_files(cls, url: str, *, provisioner: str, key: Path, root: Path) -> 'StepCa'` — With the provisioner's key and the root certificate read from files.
+- `def __init__(self, url: str, *, provisioner: str, key: Mapping[str, Any], root: bytes, client: httpx.AsyncClient | None = None, system: bool = False) -> None`
+- `@classmethod def from_files(cls, url: str, *, provisioner: str, key: Path, root: Path, system: bool = False) -> 'StepCa'` — With the provisioner's key and the root certificate read from files.
 - `def token(self, subject: str, sans: Sequence[str] | None = None, *, audience: str = 'sign', lifetime: float = TOKEN_LIFETIME, now: float | None = None) -> str` — A one-time token for a certificate of `subject` (with `sans`, by default the subject alone), good for
   `lifetime` seconds; with `audience = "revoke"`, for revoking the certificate whose serial `subject` is.
 - `def pod_token(self, identity: str, *, lifetime: float = TOKEN_LIFETIME) -> str` — The one-time token a pod gets its first certificate with: its identity as the subject and the only SAN.
+- `async def certificate(self, identity: str, *, lifetime: float | None = None) -> tuple[bytes, bytes]` — A certificate for `identity` (its subject and its only URI SAN), from a key made here: the certificate with
+  its chain, and the key (both PEM). `lifetime` asks for fewer seconds than the provisioner's default.
 - `async def revoke(self, serial: str, *, reason: str = '') -> None` — Revoke the certificate whose serial is `serial` (decimal), so that it is not renewed (passive revocation).
 - `async def aclose(self) -> None`
 

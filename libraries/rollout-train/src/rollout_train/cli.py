@@ -1052,6 +1052,17 @@ def main() -> None:
         "check", help="read the cluster config, and say which of its secrets and projects do not resolve on this node"
     )
     cluster_checking.add_argument("--cluster", **_cluster_option("the cluster config"))
+    pki = commands.add_parser("pki", help="the certificates the platform holds, from the cluster's step-ca")
+    pki_commands = pki.add_subparsers(dest="pki_command", required=True)
+    pki_publishing = pki_commands.add_parser(
+        "publish", help="write step-ca's root and provisioner key, and a new gateway certificate, as Secrets"
+    )
+    pki_publishing.add_argument("--ca-directory", type=Path, default=Path("/home/step"), help="step-ca's state")
+    pki_publishing.add_argument("--url", required=True, help="where step-ca answers (https://step-ca.NAMESPACE:9000)")
+    pki_publishing.add_argument("--namespace", required=True, help="where the Secrets are written")
+    pki_publishing.add_argument("--secret", default="step-ca", help="the root and the provisioner's key (step-ca)")
+    pki_publishing.add_argument("--tls-secret", default="gateway-tls", help="the gateway's certificate (gateway-tls)")
+    pki_publishing.add_argument("--provisioner", help="the JWK provisioner, by name (its first)")
     pods = commands.add_parser("pods", help="the GPU pods runs rent on RunPod: their leases, and the reaper")
     pod_commands = pods.add_subparsers(dest="pod_command", required=True)
     pod_listing = pod_commands.add_parser("list", help="every pod's lease: who holds it, since when, at what price")
@@ -1065,6 +1076,16 @@ def main() -> None:
         sys.exit(_check_cluster(arguments.cluster))
     if arguments.command == "pods":
         sys.exit(asyncio.run(_pods(arguments.pod_command, _cluster_of(arguments.cluster))))
+    if arguments.command == "pki":
+        from rollout_train.pki import publish
+
+        password = os.environ.get("STEP_CA_PASSWORD", "")
+        if not password:
+            raise SystemExit("STEP_CA_PASSWORD is not set: it opens the provisioner's key")
+        print(asyncio.run(publish(arguments.ca_directory, password, arguments.url, arguments.namespace,
+                                  secret=arguments.secret, tls_secret=arguments.tls_secret,
+                                  provisioner=arguments.provisioner)), flush=True)  # fmt: skip
+        return
     asking = {"train": _train, "eval": _evaluate, "imitate": _imitate}
     if arguments.command in asking:
         sys.exit(asyncio.run(until_signalled(asking[arguments.command](arguments))))

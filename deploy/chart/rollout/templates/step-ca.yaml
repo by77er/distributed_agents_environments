@@ -1,0 +1,112 @@
+# The cluster's certificate authority (step-ca), for pods rented elsewhere: a StatefulSet that makes itself on its first
+# start (a root, and a JWK provisioner whose certificates last 24 hours), and a CronJob that publishes, every six hours
+# and once at each install, its root and the provisioner's key (the Secret `secrets.stepCa`: what runs' drivers mint
+# pods' one-time tokens with) and a new certificate for spiffe://rollout/gateway (the Secret `secrets.gatewayTls`: what
+# the gateway and runs' drivers reach pods with). Its password is the Secret `stepCa.passwordSecret` (key `password`).
+{{- if .Values.stepCa.enabled }}
+{{- $url := printf "https://step-ca.%s:9000" .Release.Namespace }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: step-ca
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  serviceName: step-ca
+  replicas: 1
+  selector: {matchLabels: {app: step-ca}}
+  template:
+    metadata: {labels: {app: step-ca}}
+    spec:
+      securityContext: {fsGroup: 1000}
+      containers:
+        - name: step-ca
+          image: {{ .Values.stepCa.image }}
+          env:
+            - {name: DOCKER_STEPCA_INIT_NAME, value: rollout}
+            - {name: DOCKER_STEPCA_INIT_PROVISIONER_NAME, value: {{ .Values.stepCa.provisioner }}}
+            - name: DOCKER_STEPCA_INIT_DNS_NAMES
+              value: {{ join "," (concat (list "step-ca" (printf "step-ca.%s" .Release.Namespace) (printf "step-ca.%s.svc" .Release.Namespace) "localhost") .Values.stepCa.dnsNames) | quote }}
+            - name: DOCKER_STEPCA_INIT_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.stepCa.passwordSecret }}, key: password}}
+          ports: [{containerPort: 9000, name: https}]
+          readinessProbe: {httpGet: {path: /health, port: https, scheme: HTTPS}, periodSeconds: 10}
+          volumeMounts: [{name: data, mountPath: /home/step}]
+          resources: {{- toYaml .Values.stepCa.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storageClass }}
+        resources: {requests: {storage: {{ .Values.stepCa.storage }}}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: step-ca
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  selector: {app: step-ca}
+  ports: [{port: 9000, targetPort: https}]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pki
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pki
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ .Values.secrets.stepCa }}, {{ .Values.secrets.gatewayTls }}]
+    verbs: [get, update]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pki
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: pki}
+subjects: [{kind: ServiceAccount, name: pki, namespace: {{ .Release.Namespace }}}]
+{{- range $name, $hooked := dict "pki-publish" false "pki-publish-now" true }}
+---
+{{- if $hooked }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels: {{- include "rollout.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  template:
+{{- else }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  labels: {{- include "rollout.labels" $ | nindent 4 }}
+spec:
+  schedule: {{ $.Values.stepCa.publishSchedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+{{- end }}
+    {{- $indent := ternary 4 8 $hooked }}
+    {{- $pod := dict "Values" $.Values "Release" $.Release "url" $url }}
+{{ include "rollout.pkiPod" $pod | indent (int $indent) }}
+{{- end }}
+{{- end }}

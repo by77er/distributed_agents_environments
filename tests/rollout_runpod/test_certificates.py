@@ -202,3 +202,48 @@ def test_a_provisioner_s_key_must_be_a_private_p256_key() -> None:
     for wrong in ({**jwk, "crv": "P-384"}, {key: value for key, value in jwk.items() if key != "d"}, {"kty": "RSA"}):
         with pytest.raises(ValueError, match="P-256"):
             StepCa("https://ca", provisioner=PROVISIONER, key=wrong, root=b"")
+
+
+def encrypted(key: dict[str, Any], password: str) -> str:
+    """A JWK encrypted with a password as step encrypts a provisioner's key (PBES2-HS256+A128KW, A256GCM)."""
+    import os
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from cryptography.hazmat.primitives.keywrap import aes_key_wrap
+
+    salt, iterations = os.urandom(16), 1000
+    header = {"alg": "PBES2-HS256+A128KW", "enc": "A256GCM", "p2s": _b64(salt), "p2c": iterations, "cty": "jwk+json"}
+    protected = _b64(json.dumps(header).encode())
+    derived = PBKDF2HMAC(hashes.SHA256(), 16, b"PBES2-HS256+A128KW\x00" + salt, iterations).derive(password.encode())
+    content, iv = os.urandom(32), os.urandom(12)
+    sealed = AESGCM(content).encrypt(iv, json.dumps(key).encode(), protected.encode())
+    return ".".join([protected, _b64(aes_key_wrap(derived, content)), _b64(iv), _b64(sealed[:-16]), _b64(sealed[-16:])])
+
+
+def test_a_provisioner_s_key_is_read_from_step_ca_s_configuration_with_its_password() -> None:
+    from rollout_runpod import decrypted_key
+
+    jwk, _ = provisioner_key()
+    said = encrypted(jwk, "the CA's password")
+    assert decrypted_key(said, "the CA's password") == jwk
+    with pytest.raises(ValueError, match="does not open"):
+        decrypted_key(said, "another password")
+    with pytest.raises(ValueError, match="five parts"):
+        decrypted_key("not.a.jwe", "the CA's password")
+
+
+async def test_the_gateway_s_certificate_is_issued_for_its_identity(tmp_path: Path) -> None:
+    authority = Authority(tmp_path / "ca")
+    jwk, public = provisioner_key()
+    fake = FakeStepCa(authority, public, jwk["kid"])
+    tls = authority.issue("step-ca", None, ips=["127.0.0.1"])
+    async with served_tls(fake.app(), server_context(authority, tls, client=None)) as url:
+        fake.url = url
+        ca = StepCa(url, provisioner=PROVISIONER, key=jwk, root=authority.pem)
+        chain, key = await ca.certificate(GATEWAY_IDENTITY)
+        issued = x509.load_pem_x509_certificates(chain)[0]
+        sans = issued.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        assert sans.get_values_for_type(x509.UniformResourceIdentifier) == [GATEWAY_IDENTITY]
+        assert serialization.load_pem_private_key(key, None).public_key() == issued.public_key()
+        await ca.aclose()

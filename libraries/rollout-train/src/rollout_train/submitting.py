@@ -242,6 +242,23 @@ class KubernetesApi:
         response.raise_for_status()
         return cast(list[dict[str, Any]], response.json().get("items") or [])
 
+    async def put_secret(self, namespace: str, name: str, data: Mapping[str, bytes]) -> None:
+        """Make the Secret `name` hold `data` (its keys and their bytes), in place of what it held, or made anew."""
+        import base64
+
+        labels = {"app.kubernetes.io/part-of": "rollout"}
+        resource = {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+                    "metadata": {"name": name, "namespace": namespace, "labels": labels},
+                    "data": {key: base64.b64encode(value).decode() for key, value in data.items()}}  # fmt: skip
+        path = f"/api/v1/namespaces/{namespace}/secrets"
+        async with self._client() as client:
+            response = await client.put(f"{path}/{name}", json=resource)
+            if response.status_code == 404:
+                response = await client.post(path, json=resource)
+        if response.status_code >= 300:
+            raise RuntimeError(f"the API server refused the Secret {name} ({response.status_code}): "
+                               f"{response.text[:TAIL]}")  # fmt: skip
+
     async def read(self, path: str) -> dict[str, Any] | None:
         """What the API server answers at `path` (`/apis/GROUP/VERSION/...`): none where it is not found. Raises
         `RuntimeError` for any other refusal (a resource the account may not read, an API that is not served)."""
