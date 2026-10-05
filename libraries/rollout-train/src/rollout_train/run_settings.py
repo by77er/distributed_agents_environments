@@ -15,6 +15,9 @@ fixed, a number changeable. The trainer settings that can name the objective (`t
 `trainer.clip_low`, …: `rollout_train.objectives.LEGACY`) are taken as the `objective.*` keys they say, unless those
 are given (`RunSettings` holds them so).
 
+A training run says whether it trains a LoRA or full weights (`weights`); unsaid, it is what its trainer makes
+(`rollout_train.validation.weights_of`), and a run's start records it so.
+
 Settings are given in layers, each over the last (`layered`): the schema's defaults, then a preset
 (`rollout_train.presets`), then a file (`from_file`: TOML or JSON, dotted keys or tables), then the command line
 (`from_flags`: `--set KEY=VALUE`, and `shortcuts` for `--model`, `--provider`, `--renderer`, `--trainer`). `RunSettings`
@@ -38,6 +41,7 @@ from rollout_train.providers import ROUTING, SettingSpec
 __all__ = [
     "KEYS",
     "KINDS",
+    "WEIGHTS",
     "Change",
     "Key",
     "RunSettings",
@@ -54,6 +58,8 @@ __all__ = [
 ]
 
 KINDS = ("train", "eval", "imitate", "check")
+WEIGHTS = ("lora", "full")
+"""What a run trains: a LoRA (low-rank adapter) over its model, or every weight."""
 """The kinds of run: training, an eval of one subject, supervised steps on a dataset, an environment's check."""
 TRAINED = frozenset({"train"})
 TRAINING = frozenset({"train", "imitate"})
@@ -141,6 +147,15 @@ KEYS: tuple[Key, ...] = (
     Key("trainer.provider", _S + _N, None, False, TRAINING, "The trainer, a `[trainers.NAME]` of the cluster"),
     Key("trainer.channel", _S, "policy", False, TRAINED, "The trained channel"),
     Key("trainer.model", _S + _N, None, False, TRAINING, "What the trainer trains over; none: the trained channel's"),
+    Key(
+        "weights",
+        _S + _N,
+        None,
+        False,
+        TRAINING,
+        "What it trains: `lora` (an adapter) or `full` weights; none: what its trainer makes",
+        choices=WEIGHTS,
+    ),
     Key("channels.*.provider", _S + _N, None, False, SAMPLING, "What samples the channel, an `[inference.NAME]`"),
     Key("channels.*.providers", ("list", "null"), None, False, SAMPLING, "Several providers serving it, in order"),
     Key("channels.*.routing", _S, "spill", False, SAMPLING, "How turns are shared among them", choices=ROUTING),

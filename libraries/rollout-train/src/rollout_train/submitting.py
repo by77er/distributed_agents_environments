@@ -390,8 +390,11 @@ async def submit(
     resumes: str | None = None,
     backend: Backend | None = None,
 ) -> Launch:
-    """Record a launch of a run with these settings and start its job (`ask`, then `start`)."""
-    launch = await ask(settings, ledger, preset=preset, resumes=resumes)
+    """Record a launch of a run with these settings and start its job (`ask`, then `start`): a training run's with
+    what it trains said (`rollout_train.validation.with_weights`)."""
+    from rollout_train.validation import with_weights
+
+    launch = await ask(with_weights(settings, cluster), ledger, preset=preset, resumes=resumes)
     return await start(launch, cluster, ledger, backend)
 
 

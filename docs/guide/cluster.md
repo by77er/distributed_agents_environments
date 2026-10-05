@@ -292,6 +292,7 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `groups`, `seed`, `episodes_at_once` | 100, 0, 6 | |
 | `start`, `bookmark` | | The checkpoint it starts from; a bookmark it carries |
 | `trainer.provider`, `trainer.channel`, `trainer.model` | , `policy`, the trained channel's model | The trainer, the trained channel, what it trains over |
+| `weights` | what the trainer makes | `lora` or `full`: whether it trains a LoRA or full weights. It decides which trainers (Tinker trains LoRAs only), which providers (a LoRA needs adapters at the run's rank; full weights need full-weight reload, never Tinker's sampler) and which bridges fit |
 | `trainer.FIELD` | the trainer's | Its own settings: `rank`, `segment_tokens`, `learning_rate`, `max_kl`, … |
 | `objective.preset` | `default` | The objective's preset: `default`, `reinforce`, `rloo`, `ppo_clip`, `grpo`, `dr_grpo`, `dapo`, `gspo`, `cispo`, `sft`, `dpo`, `ipo`, `simpo`, `kto`, `orpo`, `on_policy_distillation`, `distillation`, `mopd`, `mopd_top_k` |
 | `objective.COMPONENT` | the preset's | Each component ([objectives](../libraries/rollout-train/training.md#objectives)): `objective.clip.kind`, `objective.kl.target`, `objective.preference.loss`, …; its numbers (`objective.clip.low`, `objective.kl.coefficient`, `objective.preference.beta`, …) changeable. A distillation's teachers are `objective.distillation.teachers`, a table of channels by route (`{"*" = "teacher"}`), and the top-k it reads `objective.distillation.top_k` |
@@ -339,7 +340,8 @@ for, the CLI before it submits it, and the run's driver again before it claims a
 ([launching](../libraries/rollout-train/launching.md)).
 
 The run's start records its settings as it runs (`run_settings`: `recorded`, with the settings its trainer declares
-and the preset it came from).
+and the preset it came from). A training run that does not say `weights` is asked for with its trainer's
+(`with_weights`), so its start says what it trains; the monitor reads a start that does not say it as its trainer's.
 
 ## Presets
 
@@ -373,12 +375,12 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 
 | Rule | Refuses when |
 |---|---|
-| `settings` | a key the kind does not take; a wrong type or a value out of range; a required key missing; a channel that contradicts itself (`provider` and `providers`, `weights` without `weighted`, a mode on the trained channel, following nothing); a slot naming no channel; a slot the program declares and the run does not bind (one that is not trained has no default); a channel a slot samples without a provider or a model; a judge bound to the trained channel, or one following it, without `self_judging` (`rollout_train.slots`) |
+| `settings` | a key the kind does not take; a wrong type or a value out of range; a required key missing; a channel that contradicts itself (`provider` and `providers`, `channels.NAME.weights` without `weighted`, a mode on the trained channel, following nothing); a slot naming no channel; a slot the program declares and the run does not bind (one that is not trained has no default); a channel a slot samples without a provider or a model; a judge bound to the trained channel, or one following it, without `self_judging` (`rollout_train.slots`) |
 | `providers` | the trainer or a channel's provider is not offered |
 | `auth` | a provider is reached with no auth away from this machine |
 | `capabilities` | a provider of the trained channel is not token-exact, for a policy gradient; or returns no sampled-token logprobs or does not honour sampling, for one with an importance correction. A preference loss and a likelihood read neither |
 | `bridge` | no bridge from the trainer's format (or a checkpoint's) to what a provider of the channel loads |
-| `weights` | adapters for a provider without adapters; full weights for one without full-weight reload |
+| `weights` | a trainer that makes the other kind than the run's `weights`; a provider serving the run's checkpoints that cannot serve them (a LoRA without adapters; full weights, or a LoRA merged by `merge-quantize`, without full-weight reload); a checkpoint a fixed channel serves on a provider that cannot |
 | `models` | `trainer.model` not among the trainer's; a channel's model not among its provider's; a channel serving the run's checkpoints with a model that is neither `trainer.model` nor quantized from it; a start trained over another model |
 | `rank` | `trainer.rank` times the bridge's rank factor above the provider model's `max_lora_rank` |
 | `segment` | `trainer.segment_tokens` above the trainer's here, or above the trained channel's context |

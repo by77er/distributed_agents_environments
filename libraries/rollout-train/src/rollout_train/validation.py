@@ -42,7 +42,10 @@ __all__ = [
     "check",
     "estimated_spend",
     "refusals",
+    "serves",
     "spend_of",
+    "weights_of",
+    "with_weights",
 ]
 
 
@@ -74,7 +77,11 @@ RULES: tuple[Rule, ...] = (
         "sampling (an importance correction)",
     ),
     Rule("bridge", "no bridge from the checkpoint's format to what the provider loads"),
-    Rule("weights", "adapters for a provider without adapters, full weights for one without full reload"),
+    Rule(
+        "weights",
+        "a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, "
+        "full weights on one without full reload",
+    ),
     Rule("models", "a model not offered, or not the one trained"),
     Rule("rank", "the adapter's rank, as the provider sees it, above its highest"),
     Rule("segment", "segments longer than the trainer or the context takes"),
@@ -197,6 +204,11 @@ class _Run:
             return self.settings.values[key]
         spec = next((each for each in self.specs or () if each.key == key), None)
         return spec.default if spec is not None else None
+
+    @property
+    def weights(self) -> str | None:
+        """What the run trains (`weights_of`)."""
+        return weights_of(self.settings, self.cluster) if self.kind in TRAINING else None
 
     def serving(self) -> list[str]:
         """The channels that serve the run's own checkpoints: the trained one, and those that follow it."""
@@ -471,8 +483,62 @@ def _bridge(run: _Run) -> None:
                 run.chains[(channel, name)] = found
 
 
+_WEIGHTS = {"lora": "a LoRA", "full": "full weights"}
+
+
+def weights_of(settings: RunSettings, cluster: Cluster) -> str | None:
+    """What a run trains: its `weights`, else what its trainer makes (`lora` or `full`); none where neither is known."""
+    said = settings["weights"]
+    if isinstance(said, str):
+        return said
+    trainer = cluster.trainers.get(str(settings["trainer.provider"]))
+    return trainer.capabilities.produces if trainer is not None else None
+
+
+def with_weights(settings: RunSettings, cluster: Cluster) -> RunSettings:
+    """A training run's settings with what it trains said (`weights_of`), as its start records them."""
+    said = weights_of(settings, cluster)
+    if settings.kind not in TRAINING or settings["weights"] is not None or said is None:
+        return settings
+    return RunSettings({**settings.values, "weights": said})
+
+
+def serves(provider: InferenceProvider, weights: str) -> str | None:
+    """Why `provider` cannot serve a run's checkpoints of `weights` (`lora`: adapters by name; `full`: full weights
+    reloaded in place), if it cannot."""
+    offered = provider.capabilities
+    if weights == "lora" and not offered.adapters:
+        return f"provider {provider.name} ({provider.kind}) serves no adapters, and the run trains a LoRA"
+    if weights == "full" and not offered.full_reload:
+        sampler = ": Tinker's sampler serves only checkpoints Tinker trained" if provider.kind == "tinker" else ""
+        return (
+            f"provider {provider.name} ({provider.kind}) cannot reload full weights in place, and the run trains full "
+            f"weights{sampler}"
+        )
+    return None
+
+
 def _weights(run: _Run) -> None:
+    said, trainer = run.settings["weights"], run.trainer
+    if run.kind in TRAINING and trainer is not None and isinstance(said, str) and said in _WEIGHTS:
+        makes = trainer.capabilities.produces
+        if makes != said:
+            run.refuse("weights", "trainer.provider", f"the {trainer.name} trainer trains {_WEIGHTS[makes]} only, and "
+                       f"the run trains {_WEIGHTS[said]}")  # fmt: skip
+    weights, serving = run.weights, run.serving()
+    for channel in serving if weights is not None else ():
+        merged = run.settings[f"channels.{channel}.bridge"] == "merge-quantize"  # (a LoRA served as full weights)
+        for name, provider in run.providers(channel):
+            reason = serves(provider, "full" if merged else str(weights))
+            if reason is None:
+                continue
+            if merged and weights == "lora":
+                reason = f"provider {name} ({provider.kind}) cannot reload full weights in place, and channel "
+                reason += f"{channel} serves the run's LoRA merged into them (bridge = merge-quantize)"
+            run.refuse("weights", f"channels.{channel}.provider", reason)
     for (channel, name), chain in run.chains.items():
+        if weights is not None and channel in serving:
+            continue
         provider = run.cluster.inference[name]
         target = chain[-1].target
         if target in ("peft", "tinker") and not provider.capabilities.adapters:

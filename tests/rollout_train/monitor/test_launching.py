@@ -126,6 +126,7 @@ async def test_the_page_is_offered_what_the_cluster_config_and_the_ledger_hold(t
     assert provider["name"] == "local" and provider["capabilities"]["token_exact"]
     assert [each["model"] for each in provider["models"]] == ["tiny"]
     assert (provider["allocation"], provider["concurrency"], trainer["allocation"]) == ("scheduled", None, "scheduled")
+    assert (trainer["weights"], provider["weights"]) == (["lora"], ["lora", "full"])
     assert offers["pairs"] == [{"trainer": "steps", "inference": "local", "bridge": ["verbatim"]}]
     (preset,) = offers["presets"]
     assert preset["id"] == "small@1" and preset["settings"]["trainer.provider"] == "steps"
@@ -156,6 +157,7 @@ async def test_a_run_is_checked_asked_for_from_the_page_and_stopped(tmp_path: Pa
         assert made["state"] == SUBMITTED and made["asked"]["preset"] == "small@1" and made["run"]
         assert made["job"] == jobs.submitted[0]["submission_id"]
         assert made["asked"]["settings"]["trainer.learning_rate"] == 3e-5
+        assert made["asked"]["settings"]["weights"] == "lora"  # (unsaid: what its trainer makes, recorded so)
         refused = await client.post("/api/launches", json=wrong)
         assert refused.status_code == 422
         assert {each["key"] for each in refused.json()["refusals"]} >= {"channels.policy.provider", "trainer.rank"}
@@ -179,8 +181,12 @@ async def test_a_run_is_paused_resumed_in_place_and_once_stopped_submitted_again
     ledger = stores.ledger
     entry = await stores.registry.create("words")
     fixed: dict[str, JsonValue] = {**POLICY, "kind": TRAIN, "name": "words", "environment": WORDS, "groups": 10}
-    recorded: dict[str, JsonValue] = {"fixed": {**fixed, "seed": 3}, "changeable": {"groups_per_step": 2},
-                                      "preset": "small@1"}  # fmt: skip
+    # (a start from before runs said what they train, with a setting that is no run setting now)
+    recorded: dict[str, JsonValue] = {
+        "fixed": {**fixed, "seed": 3},
+        "changeable": {"groups_per_step": 2, "share": 1.0},
+        "preset": "small@1",
+    }
     begun: dict[str, JsonValue] = {"environment": WORDS, "run_settings": recorded}
     await a_run(ledger, entry.id, **begun)
     await a_run(ledger, f"{entry.id}-eval-2", kind="eval", by=entry.id, step=2)  # (an eval its schedule asked for)
@@ -194,6 +200,8 @@ async def test_a_run_is_paused_resumed_in_place_and_once_stopped_submitted_again
 
     async with client:
         assert (await states())[entry.id] == ("running", False)
+        settings = (await client.get(f"/api/runs/{entry.id}/settings")).json()
+        assert settings["fixed"]["weights"] == "lora"  # (read as its trainer's)
         paused = (await client.post(f"/api/runs/{entry.id}/pause")).json()
         assert paused["desired"]["settings"] == {"paused": True}
         resumed = (await client.post(f"/api/runs/{entry.id}/resume")).json()["resumed"]
@@ -209,6 +217,7 @@ async def test_a_run_is_paused_resumed_in_place_and_once_stopped_submitted_again
         assert asked["preset"] == "small@1" and launch["state"] == SUBMITTED and len(jobs.submitted) == 1
         given = asked["settings"]
         assert (given["groups"], given["groups_per_step"], given["seed"]) == (10, 2, 3)
+        assert "share" not in given and given["weights"] == "lora"  # (no run setting now; said as it trains)
         assert (await client.post(f"/api/runs/{entry.id}/resume")).status_code == 409  # (being launched already)
         eval_refused = await client.post(f"/api/runs/{entry.id}-eval-2/resume")
         assert eval_refused.status_code == 409 and "resume that run" in eval_refused.json()["error"]

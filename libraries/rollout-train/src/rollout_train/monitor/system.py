@@ -101,6 +101,7 @@ from rollout_train.settings import PAUSED as PAUSE
 from rollout_train.settings import checked as checked_setting
 from rollout_train.stores import opened
 from rollout_train.submitting import backend_of, followed, stopped, submit
+from rollout_train.validation import with_weights
 
 if TYPE_CHECKING:
     from rollout_train.cluster import Cluster
@@ -576,11 +577,16 @@ class System:
             before = used
         store = desired_settings_of(self._ledger)
         desired = await store.desired(run) if store is not None else None
+        fixed: dict[str, Any] = dict(said.get("fixed") or {})
+        if fixed.get("weights") is None and self._cluster is not None and "trainer.provider" in fixed:
+            known = with_weights(RunSettings({"kind": str(latest.get("kind") or TRAIN), **fixed}), self._cluster)
+            if known["weights"] is not None:  # (a start from before runs said what they train: its trainer's)
+                fixed["weights"] = known["weights"]
         return {
             "run": run,
             "kind": str(latest.get("kind") or "run"),
             "environment": latest.get("environment"),
-            "fixed": dict(said.get("fixed") or {}),
+            "fixed": fixed,
             "changeable": changeable,
             "now": dict(before),
             "desired": dict(desired.settings) if desired else {},

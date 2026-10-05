@@ -11,8 +11,9 @@ that does not is a note (the run waits for something).
 
 `offers` is what the New run form chooses from: the cluster config's environments (built-in, and every published
 version beside the ledger), trainers with their settings, inference providers with their capabilities and models (each
-with the renderer families that render it, among those named so far), each trainer and provider pair's bridge or why
-there is none, sandbox pools, presets, and the GPUs the heartbeats say are free.
+with the renderer families that render it, among those named so far), each trainer's and provider's allocation and the
+weights it takes (`lora`, `full`), each trainer and provider pair's bridge or why there is none, sandbox pools, presets,
+and the GPUs the heartbeats say are free.
 """
 
 import asyncio
@@ -32,8 +33,8 @@ from rollout_train.presets import Presets
 from rollout_train.providers import settings_of
 from rollout_train.published import environment_versions_of, is_published
 from rollout_train.registry import registry_of, resolved
-from rollout_train.run_settings import RunSettings, layered
-from rollout_train.validation import CheckpointFacts, EnvironmentFacts, Finding, LedgerFacts, SuiteFacts, check
+from rollout_train.run_settings import WEIGHTS, RunSettings, layered
+from rollout_train.validation import CheckpointFacts, EnvironmentFacts, Finding, LedgerFacts, SuiteFacts, check, serves
 
 if TYPE_CHECKING:
     from rollout.environment import Environment
@@ -304,6 +305,7 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
             "colocate_with": trainer.colocate_with, "segment_tokens": trainer.segment_tokens,
             "cost": dict(trainer.cost), "families": sorted(trainer.capabilities.families), "settings": specs,
             "allocation": trainer.allocation, "concurrency": trainer.concurrency,
+            "weights": [trainer.capabilities.produces],
         })  # fmt: skip
     inference: list[dict[str, Any]] = []
     for name, provider in cluster.inference.items():
@@ -319,14 +321,17 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
         inference.append({
             "name": name, "kind": provider.kind, "gpus": provider.gpus, "replicas": provider.replicas,
             "allocation": provider.allocation, "concurrency": provider.concurrency, "capabilities": capabilities,
-            "models": models,
+            "models": models, "weights": [each for each in WEIGHTS if serves(provider, each) is None],
         })  # fmt: skip
     pairs: list[dict[str, Any]] = []
     for trainer_name, trainer in cluster.trainers.items():
         for name, provider in cluster.inference.items():
             found = path(trainer.capabilities.format, provider.capabilities.loads)
+            unserved = serves(provider, trainer.capabilities.produces)
             if isinstance(found, NoBridge):
                 pairs.append({"trainer": trainer_name, "inference": name, "bridge": None, "refused": found.reason})
+            elif unserved is not None:
+                pairs.append({"trainer": trainer_name, "inference": name, "bridge": None, "refused": unserved})
             else:
                 pairs.append({"trainer": trainer_name, "inference": name, "bridge": [each.name for each in found]})
     presets = presets_of(ledger)

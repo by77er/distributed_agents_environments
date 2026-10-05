@@ -132,7 +132,8 @@ async def played_out(ledger: Ledger, run: str, newest: Mapping[str, Any]) -> boo
 
 
 def recorded_of(newest: Mapping[str, Any]) -> dict[str, JsonValue]:
-    """The run settings a start records (`run_settings`, fixed and changeable as one mapping), less its name."""
+    """The run settings a start records (`run_settings`, fixed and changeable as one mapping), less its name and any
+    key that is no run setting now."""
     said = newest.get("run_settings")
     if not isinstance(said, dict):
         return {}
@@ -140,7 +141,7 @@ def recorded_of(newest: Mapping[str, Any]) -> dict[str, JsonValue]:
     fixed = cast(dict[str, JsonValue], said.get("fixed") or {})
     values = {**fixed, **cast(dict[str, JsonValue], said.get("changeable") or {})}
     values.pop("name", None)
-    return values
+    return {key: value for key, value in values.items() if key_of(key) is not None or is_trainers(key)}
 
 
 def provided(values: Mapping[str, JsonValue]) -> bool:

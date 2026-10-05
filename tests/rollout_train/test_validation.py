@@ -24,7 +24,10 @@ from rollout_train.validation import (
     check,
     estimated_spend,
     refusals,
+    serves,
     spend_of,
+    weights_of,
+    with_weights,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -359,7 +362,7 @@ def test_adapters_need_a_provider_that_serves_them() -> None:
     capabilities = dataclasses.replace(CLUSTER.inference["lab"].capabilities, adapters=False)
     cluster = with_provider(CLUSTER, "lab", capabilities=capabilities)
     reasons = refused("weights", findings({**LOCAL_LORA, "channels.policy.provider": "lab"}, cluster=cluster))
-    assert reasons == ["provider lab serves no adapters, and policy serves adapters"]
+    assert reasons == ["provider lab (vllm-servers) serves no adapters, and the run trains a LoRA"]
     assert refused("weights", findings({**LOCAL_LORA, "channels.policy.provider": "lab"})) == []
 
 
@@ -367,8 +370,58 @@ def test_full_weights_need_a_provider_that_reloads_them() -> None:
     capabilities = dataclasses.replace(CLUSTER.inference["local-vllm"].capabilities, full_reload=False)
     cluster = with_provider(CLUSTER, "local-vllm", capabilities=capabilities)
     reasons = refused("weights", findings(FULL, cluster=cluster))
-    assert reasons == ["provider local-vllm cannot reload full weights, and policy serves full weights"]
+    assert reasons == [
+        "provider local-vllm (vllm) cannot reload full weights in place, and the run trains full weights"
+    ]
     assert refused("weights", findings(FULL)) == []
+
+
+def test_a_run_says_what_it_trains_and_its_trainer_must_make_it() -> None:
+    assert refusals(findings({"weights": "lora"})) == []
+    assert refused("weights", findings({"weights": "full"})) == [
+        "the tinker-lora trainer trains a LoRA only, and the run trains full weights"
+    ]
+    assert refused("weights", findings({**FULL, "weights": "lora"})) == [
+        "the local-full trainer trains full weights only, and the run trains a LoRA"
+    ]
+    assert refused("settings", findings({"weights": "both"})) == ["weights is one of lora, full, not 'both'"]
+    evaluation: dict[str, JsonValue] = {"kind": "eval", "environment": GSM8K, "eval.suite": "math", "weights": "lora"}
+    assert refused("settings", check(RunSettings(evaluation), CLUSTER, ENVIRONMENT, LEDGER)) == [
+        "weights is not a setting a eval run takes"
+    ]
+
+
+def test_unsaid_a_run_trains_what_its_trainer_makes_and_its_start_records_it() -> None:
+    assert weights_of(RunSettings(ACCEPTANCE), CLUSTER) == "lora"
+    assert weights_of(RunSettings({**ACCEPTANCE, **FULL}), CLUSTER) == "full"
+    assert weights_of(RunSettings({"kind": "train"}), CLUSTER) is None
+    said = with_weights(RunSettings({**ACCEPTANCE, **FULL}), CLUSTER)
+    assert said["weights"] == "full" and said.split()[0]["weights"] == "full"
+    assert with_weights(RunSettings({**ACCEPTANCE, "weights": "full"}), CLUSTER)["weights"] == "full"  # (as said)
+    assert "weights" not in with_weights(RunSettings({"kind": "eval"}), CLUSTER).values
+
+
+def test_full_weights_are_never_served_by_tinkers_sampler() -> None:
+    on_tinker = {**FULL, "channels.policy.provider": "tinker", "channels.policy.model": "Qwen/Qwen3.5-4B"}
+    assert (
+        "provider tinker (tinker) cannot reload full weights in place, and the run trains full weights: Tinker's "
+        "sampler serves only checkpoints Tinker trained" in refused("weights", findings(on_tinker))
+    )
+    assert serves(CLUSTER.inference["tinker"], "lora") is None
+    assert (
+        serves(CLUSTER.inference["openai"], "lora") == "provider openai (api) serves no adapters, and the run "
+        "trains a LoRA"
+    )
+
+
+def test_a_lora_merged_for_its_provider_needs_full_reload() -> None:
+    capabilities = dataclasses.replace(CLUSTER.inference["local-vllm"].capabilities, full_reload=False)
+    cluster = with_provider(CLUSTER, "local-vllm", capabilities=capabilities)
+    merged = {**LOCAL_LORA, "channels.policy.bridge": "merge-quantize"}
+    assert (
+        "provider local-vllm (vllm) cannot reload full weights in place, and channel policy serves the run's LoRA "
+        "merged into them (bridge = merge-quantize)" in refused("weights", findings(merged, cluster=cluster))
+    )
 
 
 # models
