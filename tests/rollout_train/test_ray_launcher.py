@@ -1,16 +1,18 @@
 """A launcher whose runs are Ray jobs: each asks for a GPU, is followed until it ends, and is stopped by a launcher
-started again."""
+started again; a run on a published environment is a job in its version's runtime environment."""
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from rollout_train.launcher import OUTPUT, Launcher
-from rollout_train.launches import CLAIMED, ENDED, FAILED, RUNNING, STOPPED, STOPPING, Asked, launches_of
+from rollout_train.launches import ASKED, CLAIMED, ENDED, FAILED, RUNNING, STOPPED, STOPPING, Asked, launches_of
 from rollout_train.ledger import FileLedger
 from rollout_train.presence import presence_of
+from rollout_train.published import FileEnvironmentVersions
+from tests.rollout_train.sources import a_version
 from tests.rollout_train.support import profiles
 
 
@@ -99,3 +101,32 @@ async def test_a_ray_job_is_stopped_and_followed_again_by_a_launcher_started_aga
     await again._step()  # pyright: ignore[reportPrivateUsage]
     assert jobs.stopped == [f"run-{asked.id}"]
     assert (await until_state(launches, asked.id, STOPPED)).detail == f"stopped (Ray job run-{asked.id})"
+
+
+async def test_a_run_on_a_published_environment_is_a_job_in_its_versions_runtime_environment(tmp_path: Path) -> None:
+    jobs = Jobs(steps=10_000)
+    found, launches = await ray_launcher(tmp_path, jobs)
+    versions = FileEnvironmentVersions(tmp_path / "ledger" / "environment_versions")
+    version, other = await versions.record(a_version()), await versions.record(a_version("two"))
+    found.versions, found.at_once = versions, 3
+    unknown = await launches.ask(Asked(profile="small", environment=f"words@{'0' * 64}", name="unknown"))
+    both = [version.reference, other.reference]
+    mixed = await launches.ask(Asked(profile="small", environment=both[0], name="mixed", environments=both[1:]))
+    asked = await launches.ask(Asked(profile="small", environment=version.reference, name="published"))
+    await found._step()  # pyright: ignore[reportPrivateUsage]
+    submitted = {each["metadata"]["name"]: each for each in jobs.submitted}
+    assert set(submitted) == {"published"}  # (the unknown version is not claimed; the mixed launch fails)
+    assert submitted["published"]["runtime_env"] == version.runtime_env
+    entrypoint = submitted["published"]["entrypoint"]
+    assert entrypoint.startswith("exec python -m rollout_train.cli train ") and version.reference in entrypoint
+    states = {each.id: each for each in await launches.all()}
+    assert (states[unknown.id].state, states[asked.id].state, states[mixed.id].state) == (ASKED, CLAIMED, FAILED)
+    assert "several versions" in str(states[mixed.id].detail)
+    await found._beat()  # pyright: ignore[reportPrivateUsage]
+    heartbeats = presence_of(FileLedger(tmp_path / "ledger"))
+    assert heartbeats is not None
+    (beat,) = await heartbeats.beats()
+    assert set(cast(list[str], beat.about["environments"])) == set(both)
+    assert {each["environment"] for each in cast(list[dict[str, Any]], beat.about["published"])} == set(both)
+    found.ray = None  # (without Ray, no published environment is offered or played)
+    assert not await found._plays(states[asked.id])  # pyright: ignore[reportPrivateUsage]

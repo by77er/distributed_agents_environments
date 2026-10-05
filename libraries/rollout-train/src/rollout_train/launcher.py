@@ -16,6 +16,12 @@ Without `--ray`, it starts each run as a process of its own, on its own machine.
 cluster's job server), it submits each run as a Ray job asking for `--gpus` accelerators: Ray places it on a node
 with room and supervises it, and the launcher follows the job until it ends (started again, it follows its jobs
 again). `rollout launcher … --ray ADDRESS --as-job` submits the launcher itself as a Ray job.
+
+A launcher on Ray offers the published environments too (`rollout_train.published`: each `NAME@VERSION` the ledger
+keeps), beside those it names. A run on one is submitted with that version's Ray runtime environment: the run's process
+starts in the version's source and imports the environment from it, in the Python Ray built for it (`python` there:
+the platform's, or a copy of it with the version's dependencies). A launch plays the published environments of one
+version at most.
 """
 
 import asyncio
@@ -47,6 +53,7 @@ from rollout_train.launches import (
 )
 from rollout_train.machine import alive, measured
 from rollout_train.presence import Presence
+from rollout_train.published import EnvironmentVersion, EnvironmentVersions, is_published, offered_json
 from rollout_train.ray_cluster import prepare
 from rollout_train.settings import EVALS_SUITE
 
@@ -152,6 +159,8 @@ class Launcher:
     gpus: float = 1.0
     cluster: "Cluster | None" = None
     """The cluster config whose inference providers' models it offers to evals (`offered`)."""
+    versions: EnvironmentVersions | None = None
+    """The published environments' versions, beside the ledger: offered where runs are Ray jobs."""
     every: float = 2.0
     beating: float = 15.0
     _playing: dict[str, asyncio.subprocess.Process] = field(default_factory=dict[str, asyncio.subprocess.Process])
@@ -183,22 +192,46 @@ class Launcher:
                 with contextlib.suppress(Exception):  # (a job that already ended)
                     await asyncio.to_thread(self._client().stop_job, self._jobs[launch.id])
         mine = {each["profile"]: each for each in self._offered}
-        asked = sorted(
-            (
-                each for each in launches
-                if each.state == ASKED and each.asked.profile in mine and self._plays(each)
-                and (not each.asked.model or offers(mine[each.asked.profile], each.asked.model))
-            ),
-            key=lambda each: each.at,
-        )  # fmt: skip
+        waiting = [
+            each for each in launches
+            if each.state == ASKED and each.asked.profile in mine
+            and (not each.asked.model or offers(mine[each.asked.profile], each.asked.model))
+        ]  # fmt: skip
+        asked = sorted([each for each in waiting if await self._plays(each)], key=lambda each: each.at)
         for launch in asked[: max(0, self.at_once - len(self._playing) - len(self._jobs))]:
             claimed = await self.launches.claim(launch.id, self.name)
             if claimed is not None:
                 await self._start(claimed)
 
-    def _plays(self, launch: Launch) -> bool:
-        """Whether it offers every environment a launch plays (one that names no environments offers any)."""
-        return not self.environments or launch.asked.plays() <= set(self.environments)
+    async def _plays(self, launch: Launch) -> bool:
+        """Whether it offers every environment a launch plays: each built-in one it names (one that names none offers
+        any), and each published one the ledger keeps, where its runs are Ray jobs."""
+        played = launch.asked.plays()
+        published = {each for each in played if is_published(each)}
+        if self.environments and not played - published <= set(self.environments):
+            return False
+        if not published:
+            return True
+        if self.ray is None or self.versions is None:
+            return False
+        return all([await self.versions.get(each) is not None for each in published])
+
+    async def _runtime_env(self, launch: Launch) -> dict[str, Any] | None:
+        """The Ray runtime environment of the published version a launch plays (none for one that plays only built-in
+        environments). Raises `ValueError` for a launch that plays published environments of several versions, or one
+        the ledger does not keep."""
+        played = sorted(each for each in launch.asked.plays() if is_published(each))
+        if not played or self.versions is None:
+            return None
+        found: list[EnvironmentVersion] = []
+        for each in played:
+            version = await self.versions.get(each)
+            if version is None:
+                raise ValueError(f"there is no published environment {each}")
+            found.append(version)
+        if len({each.version for each in found}) > 1:
+            raise ValueError(f"it plays published environments of several versions ({', '.join(played)}): one at most")
+        return dict(found[0].runtime_env)
 
     async def _start(self, launch: Launch) -> None:
         asked = launch.asked
@@ -232,7 +265,14 @@ class Launcher:
                 "--groups-per-step", str(asked.groups_per_step), "--seed", str(asked.seed), *changed,
             ]  # fmt: skip
         if self.ray is not None:
-            await self._submit(launch, command, directory)
+            try:
+                runtime_env = await self._runtime_env(launch)
+            except ValueError as error:
+                await self.launches.note(launch.id, state=FAILED, directory=str(directory), detail=str(error))
+                return
+            if runtime_env is not None:  # (the runtime environment's Python, started in its source: paths absolute)
+                command = ["python", *command[1:]]
+            await self._submit(launch, command, directory, runtime_env)
             return
         try:
             await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
@@ -273,10 +313,16 @@ class Launcher:
         assert self.ray is not None
         return JobSubmissionClient(self.ray)
 
-    async def _submit(self, launch: Launch, command: list[str], directory: Path) -> None:
+    async def _submit(
+        self, launch: Launch, command: list[str], directory: Path, runtime_env: dict[str, Any] | None = None
+    ) -> None:
         """Submit a launch's run as a Ray job: it waits in Ray's queue until a node has `gpus` free, and runs there
-        from this launcher's working directory (every node sees the same checkout and run directories)."""
+        from this launcher's working directory (every node sees the same checkout and run directories); with a
+        published version's `runtime_env`, in that, from the version's source."""
         entrypoint = f"cd {shlex.quote(os.getcwd())} && exec {shlex.join(command)}"
+        given: dict[str, Any] = {}
+        if runtime_env is not None:
+            entrypoint, given = f"exec {shlex.join(command)}", {"runtime_env": runtime_env}
         try:
             await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
             job: str = await asyncio.to_thread(
@@ -286,6 +332,7 @@ class Launcher:
                 entrypoint_num_gpus=self.gpus,
                 entrypoint_num_cpus=1,
                 metadata={"kind": launch.asked.kind, "launch": launch.id, "name": launch.asked.name},
+                **given,
             )
         except Exception as error:  # a run Ray refuses is a failed launch
             detail = f"{type(error).__name__}: {error}"
@@ -349,12 +396,14 @@ class Launcher:
     async def _beat(self) -> None:
         # (a profile added or changed is offered)
         self._offered = await asyncio.to_thread(offered, self.profiles, self.cluster)
+        published = await self.versions.all() if self.versions is not None and self.ray is not None else []
         about: dict[str, Any] = {
             "kind": LAUNCHER,
             "host": socket.gethostname(),
             "machine": await asyncio.to_thread(measured, self.runs),
             "profiles": self._offered,
-            "environments": list(self.environments),
+            "environments": [*self.environments, *(each.reference for each in published)],
+            "published": offered_json(published),
             "at_once": self.at_once,
             "playing": len(self._playing) + len(self._jobs),
             "backend": "ray" if self.ray else "process",

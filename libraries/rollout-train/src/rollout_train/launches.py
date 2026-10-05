@@ -60,7 +60,7 @@ class Asked:
     profile: str
     """The profile, by the name a launcher offers it under."""
     environment: str
-    """The environment, as `module:name`."""
+    """The environment, as `module:name` (a published one as `NAME@VERSION`, `rollout_train.published`)."""
     name: str
     """What the run is called."""
     start: str | None = None
@@ -85,8 +85,9 @@ class Asked:
     profile's channel's model, or a model the cluster's inference providers of its engine's kind serve); none: the
     profile's."""
     environments: Sequence[str] = ()
-    """Every environment it plays, as `module:name`, where they are more than `environment`: an eval's suite's entries'
-    environments, a training run's and its evals' suite's. A launcher claims it only where it offers each."""
+    """Every environment it plays, as `module:name` or `NAME@VERSION`, where they are more than `environment`: an
+    eval's suite's entries' environments, a training run's and its evals' suite's. A launcher claims it only where it
+    offers each."""
     resumes: str | None = None
     """The run it starts again (by id), for a launch that resumes one (`rollout_train.resuming`)."""
     directory: str | None = None

@@ -54,6 +54,8 @@ from typing import TYPE_CHECKING, Any, cast
 from rollout.names import named
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+
     from rollout_train.cluster import Cluster
     from rollout_train.ledger import Ledger
     from rollout_train.profile import Profile
@@ -133,10 +135,13 @@ async def _train(
     described = dataclasses.replace(Profile.load(profile, directory=directory, settings=layers.profile), name=called)
     if described.trainer is None:
         raise SystemExit(f"{profile} describes no trainer")
-    channel, offered = described.trainer.channel, named(environment)
+    channel = described.trainer.channel
+    offered, published = await _environment(described, environment)
     where, profiled = await asyncio.to_thread(described.directory.absolute), await asyncio.to_thread(profile.absolute)
     started: dict[str, Any] = {"directory": str(where), "profile": str(profiled), "address": monitor}  # (its `starts`)
     started["environment"] = environment
+    if published is not None:
+        started["published"] = published
     async with described.open() as platform:
         assert platform.trainer is not None
         started["blobs"] = platform.blobs_at  # (where the monitor reads the run's finished episodes)
@@ -194,6 +199,27 @@ async def _train(
         )  # fmt: skip
 
 
+async def _environment(described: "Profile", environment: str) -> tuple[Any, "dict[str, JsonValue] | None"]:
+    """An environment a run plays, imported here, and what its start records of the published version it is (none
+    for a built-in one): a published one by its version beside the profile's ledger (`rollout_train.published`). Exits
+    saying why it does not load."""
+    from rollout_train.hosting import ledger_of
+    from rollout_train.published import is_published, loaded, provenance
+
+    if not is_published(environment):
+        return named(environment), None
+    ledger = ledger_of(described)
+    try:
+        found, version = await loaded(environment, ledger)
+    except KeyError as error:
+        raise SystemExit(error.args[0]) from None
+    finally:
+        if (closing := getattr(ledger, "close", None)) is not None:
+            closing()
+    assert version is not None
+    return found, provenance(version)
+
+
 async def _evaluate(
     profile: Path,
     suite_name: str,
@@ -215,6 +241,7 @@ async def _evaluate(
     from rollout_train.evals import Suite, environments_of, evaluate, suite_for, suite_of
     from rollout_train.hosting import ledger_of
     from rollout_train.profile import Profile
+    from rollout_train.published import is_published, loaded, provenance
     from rollout_train.record import ending
     from rollout_train.registry import resolved
 
@@ -229,14 +256,17 @@ async def _evaluate(
         described = dataclasses.replace(described, trainer=trainer)
     channel = described.trainer.channel if described.trainer else next(iter(described.channels))
     ledger = ledger_of(described)
+    published: dict[str, Any] = {}
     try:  # (the suite, and its environments, before the engines)
         found: Suite | None
         if environment is not None:  # (its eval data of that name is frozen as the suite, if it is not yet)
-            found = await suite_for(ledger, suite_name, environment, named(environment))
+            found = await suite_for(ledger, suite_name, environment, (await loaded(environment, ledger))[0])
         elif (found := await suite_of(ledger, suite_name)) is None:
             raise KeyError(f"there is no suite {suite_name!r}: name its environment (--environment), or make one")
         suite: Suite = found
-        played = environments_of(suite)
+        imported = {each: await loaded(each, ledger) for each in suite.environments if is_published(each)}
+        published = {each: provenance(version) for each, (_, version) in imported.items() if version is not None}
+        played = environments_of(suite, {each: environment for each, (environment, _) in imported.items()})
     except (KeyError, ValueError) as error:
         raise SystemExit(error.args[0]) from None
     finally:
@@ -252,6 +282,8 @@ async def _evaluate(
             except (KeyError, ValueError) as error:
                 raise SystemExit(error.args[0]) from None
             started |= {"blobs": platform.blobs_at, "environment": suite.environments[0]}
+            if suite.environments[0] in published:
+                started["published"] = published[suite.environments[0]]
 
             def bound(environment: Any) -> Any:
                 return binding_for(environment, channel, platform.tool_bindings, platform.pool_bindings)
@@ -887,10 +919,15 @@ async def _launcher(
     launches, presence = launches_of(ledger), presence_of(ledger)
     if launches is None or presence is None:
         raise SystemExit(f"the ledger at {where} keeps no launches or heartbeats beside it")
-    profiles, runs = await asyncio.to_thread(profiles.expanduser), await asyncio.to_thread(runs.expanduser)
+    from rollout_train.published import environment_versions_of
+
+    def absolute(path: Path) -> Path:  # (a run started in a published environment's source names its paths in full)
+        return path.expanduser().absolute()
+
+    profiles, runs = await asyncio.to_thread(absolute, profiles), await asyncio.to_thread(absolute, runs)
     found = Launcher(
         name_of(name), launches, presence, profiles, environments, runs, at_once=at_once, ray=ray, gpus=gpus,
-        cluster=_cluster_of(cluster) if cluster is not None else None,
+        cluster=_cluster_of(cluster) if cluster is not None else None, versions=environment_versions_of(ledger),
     )  # fmt: skip
     await found.serve()
 
