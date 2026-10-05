@@ -14,8 +14,18 @@ episode. It needs no sandbox, no tool set and no GPU of its own.
 ```bash
 uv run rollout env check gridworld.environment:environment                       # without a model
 uv run rollout env check gridworld.environment:environment --profile PROFILE    # groups played by the profile's model
-uv run rollout train PROFILE gridworld.environment:environment --directory RUN
+uv run rollout train environments/gridworld/profiles/one-gpu.toml gridworld.environment:environment
 ```
+
+## Where it runs
+
+`environments/gridworld/profiles/one-gpu.toml` trains it on one 16 GB GPU: Qwen/Qwen3-0.6B on one vLLM engine, with
+the budgets its check played it with (thinking 384 tokens, answers 128, prompts within 4,096), and a LoRA trainer of
+rank 16 that shares the card. It needs no sandbox pool and no tool set.
+
+In the K3s cluster (deploy/chart/rollout), the launcher `gridworld` offers it with the same profile over the cluster's
+stores (`files/profiles/gridworld/qwen3-0.6b.toml`), submitting each run as a Ray job that asks for the GPU; the
+cluster config lists it under `[environments]`, in the platform's Python.
 
 ## The game
 
@@ -172,4 +182,5 @@ Paths are under `environments/gridworld/`.
 | Episode | `gridworld/episode.py` | The program: a model slot for each agent (`agent-1` to `agent-4`, of which a start uses the first as many as it has agents), all agents sampled at once each turn (`run.gather`), the team's reward to each |
 | Environment | `gridworld/environment.py` | The six rows, a start of one (its parameters and a seed), the eval data `gridworld-eval`, and what its results say |
 | Scripted team | `gridworld/scripted.py` | The policy above, and `ScriptedTeam`, which serves it as a model endpoint |
+| Profile | `profiles/one-gpu.toml` | Qwen/Qwen3-0.6B on one vLLM engine and a LoRA trainer sharing its card ([where it runs](#where-it-runs)) |
 | Tests | `tests/` | Levels (same seed, same level; every level sound; each step needed; the check catches unsound levels), the game (walls, ties, swaps, doors, gates, levers, chat, winning, the budget), observations from each agent's side, replies read as actions, whole episodes through the runner, and `rollout env check` |

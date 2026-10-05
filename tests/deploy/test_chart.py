@@ -58,6 +58,7 @@ def test_the_cluster_config_reads_and_names_the_stores(rendered: list[dict[str, 
     )
     assert set(cluster.environments) == {
         "minecraft_team.environment:environment",
+        "gridworld.environment:environment",
         "rollout_verifiers.environments:gsm8k",
     }
 
@@ -68,6 +69,7 @@ def test_every_profile_reads_and_names_the_stores(rendered: list[dict[str, Any]]
         "profiles_gsm8k_gsm8k_tinker.toml",
         "profiles_minecraft_one-gpu.toml",
         "profiles_minecraft_tinker.toml",
+        "profiles_gridworld_qwen3-0.6b.toml",
     }
     for key, text in profiles.items():
         path = tmp_path / key
@@ -91,7 +93,7 @@ def test_every_container_asks_for_what_it_needs_and_is_held_to_a_memory_limit(re
         return []
 
     containers = [container for each in rendered for pod in pods(each) for container in pod["containers"]]
-    assert len(containers) == 11  # the stores, the bucket job, Ray (3), the launchers, the gateway, the monitors
+    assert len(containers) == 12  # the stores, the bucket job, Ray (3), the launchers, the gateway, the monitors
     for container in containers:
         assert container["resources"]["requests"]["memory"] and container["resources"]["limits"]["memory"], container[
             "name"
@@ -117,3 +119,20 @@ def test_every_volume_is_of_the_class_storage_class_names(rendered: list[dict[st
     retain = yaml.safe_load((ROOT / "deploy" / "k3s" / "storage-class.yaml").read_text())
     assert (retain["provisioner"], retain["reclaimPolicy"]) == ("rancher.io/local-path", "Retain")
     assert classes(render("--set", f"storageClass={retain['metadata']['name']}")) == ["local-path-retain"] * 3
+
+
+def containers_of(rendered: list[dict[str, Any]], app: str) -> list[dict[str, Any]]:
+    return [
+        container
+        for each in rendered
+        if each["kind"] == "Deployment" and each["spec"]["template"]["metadata"]["labels"].get("app") == app
+        for container in each["spec"]["template"]["spec"]["containers"]
+    ]
+
+
+def test_a_launcher_offers_the_gridworld_with_its_profile_on_the_gpu(rendered: list[dict[str, Any]]) -> None:
+    (gridworld,) = [each for each in containers_of(rendered, "launcher") if "gridworld" in each["command"]]
+    command = gridworld["command"]
+    assert command[command.index("--profiles") + 1] == "/etc/rollout/profiles/gridworld"
+    assert command[command.index("--environment") + 1] == "gridworld.environment:environment"
+    assert command[command.index("--gpus") + 1] == "1" and "--ray" in command

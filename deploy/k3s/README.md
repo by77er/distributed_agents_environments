@@ -49,7 +49,7 @@ The chart installs into the namespace `rollout`, by role:
 |---|---|---|
 | Stores | StatefulSets `postgres` (the ledger) and `s3` (versitygw, the bucket `rollout-blobs`), each on its own volume | `postgresql://rollout@postgres.rollout:5432/rollout` (the password: `PGPASSWORD`), `http://s3.rollout:7070` |
 | Ray cluster | RayCluster `ray`: a head that runs no tasks, a GPU group (`runtimeClassName: nvidia`, one GPU, 14 GiB) and a CPU group (4 GiB), each from zero to one pod by the autoscaler, with token auth | `http://ray-head-svc.rollout:8265`, `http://ray.localhost` |
-| Launchers | Deployments `launcher-minecraft` (the workspace's Python, the GPU) and `launcher-gsm8k` (rollout-verifiers' Python, no GPU): each submits the runs it claims to the Ray cluster | their beats, in the monitor's Machines tab |
+| Launchers | Deployments `launcher-minecraft` and `launcher-gridworld` (the workspace's Python, the GPU) and `launcher-gsm8k` (rollout-verifiers' Python, no GPU): each submits the runs it claims to the Ray cluster | their beats, in the monitor's Machines tab |
 | Gateway | Deployment `gateway`, over the profile `gsm8k/gsm8k_tinker.toml` | `http://gateway.rollout:8900`, `http://gateway.localhost` |
 | Monitor | Deployments `monitor-main` (over curriculum-9's directory, so its ledger and every run in it) and `monitor-astra` (over `evaluations/astra-t054u`) | `http://monitor.localhost`, `http://astra.monitor.localhost` |
 

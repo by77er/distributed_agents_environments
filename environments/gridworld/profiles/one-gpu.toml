@@ -1,0 +1,32 @@
+# One machine with one 16 GB GPU: Qwen/Qwen3-0.6B on a single vLLM engine, with the budgets its check played it with,
+# and a LoRA trainer that shares its card (the engine sleeps while it steps). No sandbox and no tool set.
+# `rollout train environments/gridworld/profiles/one-gpu.toml gridworld.environment:environment`
+directory = "~/.cache/rollout/runs/gridworld"
+episodes_at_once = 8             # a group's episodes at once, each two to four agents sampled together every turn
+ray = "auto"                     # bridges run as Ray tasks on this machine's Ray cluster (`ray start --head`)
+
+[ledger]                         # one database for every run on this machine; `rollout ledger copy` moves it to Postgres
+kind = "rollout_train.database:DatabaseLedger"
+url = "sqlite:///~/.cache/rollout/ledger.db"
+
+[channels.policy]
+model = "Qwen/Qwen3-0.6B"
+renderer = "rollout_qwen:qwen3"
+engine = "rollout_vllm:VllmEngine"
+reshard = "verbatim"             # vLLM loads the trainer's LoRA files as they are
+thinking_tokens = 384
+answer_tokens = 128              # a tool call with a short message
+engines = [{ gpu_memory_utilization = 0.45, max_model_len = 4096, max_num_seqs = 32, max_lora_rank = 16 }]
+
+[trainer]
+kind = "rollout_lora:LoraTrainer"
+channel = "policy"
+colocated = true
+rank = 16
+learning_rate = 1e-4
+segment_tokens = 4096            # one agent's turn: the system prompt, its observation and its reply
+segments_per_step = 64
+
+[memory]
+runs_gib = 2
+training_gib = 4

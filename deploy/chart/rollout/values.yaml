@@ -67,6 +67,14 @@ launchers:
     atOnce: 1
     gpus: 1
     resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
+  gridworld:
+    python: /opt/rollout/venv/bin/python
+    workingDir: /opt/rollout/source
+    profiles: gridworld
+    environments: [gridworld.environment:environment]
+    atOnce: 1
+    gpus: 1
+    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
   gsm8k:
     python: /opt/rollout/verifiers/bin/python
     workingDir: /opt/rollout/source/implementations/rollout-verifiers

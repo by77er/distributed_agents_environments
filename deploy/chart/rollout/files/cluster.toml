@@ -1,5 +1,6 @@
 # The K3s cluster on this machine, in docs/guide/cluster.md's format: the ledger in Postgres, blobs in versitygw's S3,
-# the Ray cluster KubeRay keeps, one 16 GB GPU, Tinker, the Minecraft worlds and GSM8K in rollout-verifiers' Python.
+# the Ray cluster KubeRay keeps, one 16 GB GPU, Tinker, the Minecraft worlds, the gridworld, and GSM8K in
+# rollout-verifiers' Python.
 # Every pod finds it at /etc/rollout/cluster.toml (ROLLOUT_CLUSTER). Secrets are named, never written: PGPASSWORD,
 # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY come from the Secret `stores`, TINKER_API_KEY (or credentials.json)
 # from `tinker`, the gateway's keys from `gateway-keys`.
@@ -53,6 +54,9 @@ options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 96
 [inference.local-vllm.models."Qwen/Qwen3.5-4B"]
 context = 8192
 options = { gpu_memory_utilization = 0.78, max_num_seqs = 20, max_lora_rank = 64 }
+[inference.local-vllm.models."Qwen/Qwen3-0.6B"]
+context = 4096
+options = { gpu_memory_utilization = 0.45, max_num_seqs = 32, max_lora_rank = 16 }
 
 [inference.tinker]
 kind = "tinker"                               # auth vendor: Tinker's SDK reads TINKER_API_KEY or ~/.tinker
@@ -67,7 +71,7 @@ cost = { input = 0.0, output = 0.0 }
 kind = "lora"
 gpus = 1
 colocate_with = "local-vllm"                  # the engines sleep while it steps
-models = ["cyankiwi/Qwen3.5-9B-AWQ-4bit", "Qwen/Qwen3.5-4B"]
+models = ["cyankiwi/Qwen3.5-9B-AWQ-4bit", "Qwen/Qwen3.5-4B", "Qwen/Qwen3-0.6B"]
 segment_tokens = 8000
 
 [trainers.tinker-lora]
@@ -83,6 +87,9 @@ cpus = 1
 memory_gib = 1.5
 
 [environments."minecraft_team.environment:environment"]
+python = "platform"
+
+[environments."gridworld.environment:environment"]
 python = "platform"
 
 [environments."rollout_verifiers.environments:gsm8k"]
