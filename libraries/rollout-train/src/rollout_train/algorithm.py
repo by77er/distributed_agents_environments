@@ -7,9 +7,9 @@
   then divided by the standard deviation of the group's scores (`group_std`, GRPO) or not. Every token the policy
   sampled in the episode gets it: with several model slots, every slot's, so a team is rewarded together.
 - **Dynamic sampling** (DAPO, `equal_scores`): a group whose scores are all equal is skipped.
-- **The fastest of the saturated.** Episodes that reached everything their task has to give earned the same; the
-  one that took the least (`Episode.duration`, in the task's own units) played better, and scores a point more.
-  The task says what saturated means and how long it took; comparing across the group is done here.
+- **A tiebreak** (`advantage.tiebreak`, none by default): in a group whose every episode reached everything its
+  task has to give, the shortest (`Episode.duration`, in the task's own units) scores the tiebreak more. The task
+  says what saturated means and how long it took; comparing across the group is done here.
 - **What is trained on**: every segment of the episodes whose advantage is not zero, up to what the trainer can
   afford in a step; beyond that, segments are taken at even steps through the group, so that each episode and
   slot keeps its share, spread over its whole game.
@@ -108,7 +108,7 @@ BASELINES = {"group_mean": group_mean, "leave_one_out": leave_one_out, "none": n
 
 
 DEFAULT_ADVANTAGE = Advantage()
-"""The `default` preset's: each score less the group's mean, groups of equal scores skipped."""
+"""The `default` preset's: each score less the group's mean, groups of equal scores skipped, no tiebreak."""
 
 
 def advantages_of(scores: Sequence[float], advantage: Advantage = DEFAULT_ADVANTAGE) -> list[float] | None:
@@ -125,18 +125,18 @@ def group_advantages(scores: Sequence[float]) -> list[float] | None:
     return advantages_of(scores)
 
 
-def fastest_of_the_saturated(group: Sequence[Episode]) -> list[float]:
-    """A point for the fastest of the episodes that saturated their task, when more than one did; episodes that tie
-    for fastest all get it. An episode that does not say how long it took is not compared."""
-    took = {
-        index: episode.duration
-        for index, episode in enumerate(group)
-        if episode.saturated and episode.duration is not None
-    }
-    if len(took) < 2:
+def tiebreak(group: Sequence[Episode], size: float) -> list[float]:
+    """`size` for the shortest episodes of a group (`Episode.duration`) whose every episode saturated its task and said
+    how long it took; episodes that tie for shortest all get it, and nothing is given where every one ties. A group
+    in which any episode fell short of saturating its task gets nothing: its rewards already differ, or none did."""
+    took = [episode.duration for episode in group if episode.saturated]
+    if not size or len(group) < 2 or len(took) < len(group) or None in took:
         return [0.0] * len(group)
-    fastest = min(took.values())
-    return [1.0 if took.get(index) == fastest else 0.0 for index in range(len(group))]
+    durations = [float(each) for each in took if each is not None]
+    shortest = min(durations)
+    if max(durations) == shortest:
+        return [0.0] * len(group)
+    return [size if each == shortest else 0.0 for each in durations]
 
 
 _LACKING = {"token_exact": "their exact tokens", "sampled_logprobs": "behaviour logprobs"}
@@ -184,11 +184,10 @@ def within[Kind: Item](items: Sequence[Kind], segments: int | None, rng: random.
     return spread(items, max(1, segments * len(items) // held), rng)
 
 
-def scores_of(good: Sequence[Episode], tie_break: bool) -> tuple[list[float], dict[str, JsonValue]]:
-    """A group's scores (each reward, and with `tie_break` a point for the fastest of the saturated), and what to log
-    of the bonus."""
-    bonus = fastest_of_the_saturated(good) if tie_break else [0.0] * len(good)
-    notes: dict[str, JsonValue] = {"speed_bonus": list(bonus)} if any(bonus) else {}
+def scores_of(good: Sequence[Episode], size: float = 0.0) -> tuple[list[float], dict[str, JsonValue]]:
+    """A group's scores (each reward, and the tiebreak of `size`: `tiebreak`), and what to log of the tiebreak."""
+    bonus = tiebreak(good, size)
+    notes: dict[str, JsonValue] = {"tiebreak": list(bonus)} if any(bonus) else {}
     return [episode.reward + extra for episode, extra in zip(good, bonus, strict=True)], notes
 
 
@@ -232,8 +231,6 @@ class Grpo:
     a distillation term)."""
 
     group_size: int = 4
-    tie_break: bool = True
-    """Whether the fastest of a group's saturated episodes scores a point more."""
     advantage: Advantage = DEFAULT_ADVANTAGE
     needs: tuple[str, ...] = tuple(_LACKING)
     """What every segment's turns must have been sampled with (`needs_of`)."""
@@ -250,7 +247,7 @@ class Grpo:
         good = [episode for episode in group if episode.trainable]
         if len(good) < 2:
             return Batch(skipped=f"{len(good)} of {len(group)} episodes completed")
-        scores, notes = scores_of(good, self.tie_break)
+        scores, notes = scores_of(good, self.advantage.tiebreak)
         advantages = advantages_of(scores, self.advantage)
         if advantages is None and not self.distills:
             return Batch(skipped="every episode scored the same", notes=notes)
@@ -305,7 +302,6 @@ class Preferences:
     mean desirable and each below it undesirable (for the preference family)."""
 
     group_size: int = 4
-    tie_break: bool = True
     labelled: bool = False
 
     def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Pair | Labelled]:
@@ -314,7 +310,7 @@ class Preferences:
         good = [episode for episode in group if episode.trainable]
         if len(good) < 2:
             return Batch(skipped=f"{len(good)} of {len(group)} episodes completed")
-        scores, notes = scores_of(good, self.tie_break)
+        scores, notes = scores_of(good)
         if equal_scores(scores):
             return Batch(skipped="every episode scored the same", notes=notes)
         items: list[Pair | Labelled]

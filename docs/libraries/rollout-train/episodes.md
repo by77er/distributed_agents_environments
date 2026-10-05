@@ -62,6 +62,6 @@ typed accessors:
 |---|---|---|
 | `Episode.solved` | `solved` is `true` | The players did what the row is about. It decides what a curriculum unlocks. |
 | `Episode.saturated` | `saturated` is `true` | Nothing was left to earn: the episode ended because the goal was reached in full. |
-| `Episode.duration` | `duration` is a number | How long it took, in the world's own units. It breaks ties among saturated episodes. An episode that does not say is `None`, and is not compared for speed. |
+| `Episode.duration` | `duration` is a number | How long it took, in the world's own units. With a tiebreak (`advantage.tiebreak`), it breaks the tie in a group whose every episode saturated its task. An episode that does not say is `None`, and is not compared. |
 
 Everything else in `info` is the environment's own and is carried through unread.

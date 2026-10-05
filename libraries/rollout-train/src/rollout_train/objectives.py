@@ -85,6 +85,9 @@ class Advantage:
     """`none`, or `group_std`: divided by the standard deviation of the group's scores (GRPO)."""
     filter: str = "equal_scores"
     """`equal_scores`: a group whose scores are all equal is skipped (DAPO's dynamic sampling). `none`: kept."""
+    tiebreak: float = 0.0
+    """What the shortest episodes (`Episode.duration`) of a group whose every episode saturated its task score more,
+    before the baseline. 0, every preset's: nothing, so how long an episode took never changes its score."""
 
 
 @dataclass(frozen=True)
@@ -327,6 +330,8 @@ COMPONENTS: tuple[Component, ...] = (
               ("group_mean", "leave_one_out", "none")),
     Component("advantage.scale", _S, _ADVANTAGED, False, "What an advantage is divided by", ("none", "group_std")),
     Component("advantage.filter", _S, _ADVANTAGED, False, "Which groups are skipped", ("none", "equal_scores")),
+    Component("advantage.tiebreak", _F, _ADVANTAGED, False, "What the shortest of a saturated group scores more; 0: "
+              "nothing", least=0),
     Component("ratio", _S, _PG, False, "The ratio to the step's start", ("token", "segment", "none")),
     Component("clip.kind", _S, _PG, False, "How the ratio is clipped", ("none", "ratio", "weight", "dual")),
     Component("clip.low", _F, _PG, True, "The ratio's lower bound, below 1", least=0),

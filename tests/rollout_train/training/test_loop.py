@@ -117,8 +117,7 @@ async def test_the_loop_records_each_group_and_steps_on_what_it_played(
         assert listed == [[weighted.source, weighted.advantage] for weighted in batch]
         (line,) = [line for line in played if covered[line.group].checkpoint == checkpoint.id]
         assert line.segments_recorded == 4 and line.segments == len(batch) == 3  # the trainer's budget
-        if sum(line.rewards) >= 2:  # those that said it were as fast as each other
-            assert line.notes["speed_bonus"] == [1.0 if reward else 0.0 for reward in line.rewards]
+        assert "tiebreak" not in line.notes  # by default, how long an episode took changes no score
         word = line.task.removeprefix("say-")
         for weighted in batch:  # whoever said the word is above the group's mean, and the others below it
             said = "".join(chr(token) for token in weighted.segment.tokens[weighted.segment.spans[0].start :]).strip()

@@ -51,8 +51,8 @@ def test_a_family_accepts_its_components_and_refuses_the_rest() -> None:
     accepted = {family: {each.key for each in COMPONENTS if family in each.families} for family in FAMILIES}
     assert "clip.low" in accepted["policy_gradient"] and "clip.low" not in accepted["preference"]
     assert "preference.beta" in accepted["preference"] and "advantage.baseline" in accepted["likelihood"]
-    assert accepted["likelihood"] == {"advantage.baseline", "advantage.scale", "advantage.filter", "aggregate",
-                                      "constant_tokens"}  # fmt: skip
+    assert accepted["likelihood"] == {"advantage.baseline", "advantage.scale", "advantage.filter",
+                                      "advantage.tiebreak", "aggregate", "constant_tokens"}  # fmt: skip
     assert problems(PRESETS["dpo"].objective, {"clip.low": 0.1}) == [
         ("clip.low", "objective.clip.low is not a component of a preference objective (it is of policy_gradient)")
     ]

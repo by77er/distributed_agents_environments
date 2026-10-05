@@ -46,6 +46,7 @@ validation refuses the rest. Every component below is built but those marked pro
 | `advantage.baseline` | `group_mean`, `leave_one_out`, `none` | policy_gradient, likelihood |
 | `advantage.scale` | `none`, `group_std` (the sample's standard deviation); `batch_std` proposed | policy_gradient, likelihood |
 | `advantage.filter` | `none`, `equal_scores` (DAPO's dynamic sampling) | policy_gradient, likelihood |
+| `advantage.tiebreak` | a number, 0 in every preset: what the shortest episodes of a group whose every episode saturated its task score more ([Minecraft rewards](minecraft-rewards.md)) | policy_gradient, likelihood |
 | `ratio` | `token`, `segment` (the geometric mean of its tokens' ratios, as GSPO), `none` (the logprob itself, as REINFORCE) | policy_gradient |
 | `clip.kind` | `none`, `ratio` (PPO), `weight` (clip the importance weight and stop its gradient, as CISPO), `dual` (with a lower bound for negative advantages) | policy_gradient |
 | `clip.low`, `clip.high`, `clip.dual` | numbers; asymmetric for clip-higher; `dual` in times a negative advantage | policy_gradient |

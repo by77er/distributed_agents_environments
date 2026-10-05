@@ -1,4 +1,4 @@
-"""The group algorithm on made-up episodes: advantages, the tie-break and what a step trains on."""
+"""The group algorithm on made-up episodes: advantages, the tiebreak and what a step trains on."""
 
 import random
 import statistics
@@ -9,16 +9,17 @@ import pytest
 
 from rollout_train import Budget, Grpo, group_advantages
 from rollout_train.algorithm import (
+    DEFAULT_ADVANTAGE,
     Distillations,
     Preferences,
     advantages_of,
     algorithm_for,
     equal_scores,
-    fastest_of_the_saturated,
     group_mean,
     group_std,
     leave_one_out,
     spread,
+    tiebreak,
     within,
 )
 from rollout_train.objectives import PRESETS, Advantage, resolved
@@ -42,23 +43,27 @@ def test_advantages_are_centered_but_not_scaled() -> None:
     assert group_advantages([5]) is None
 
 
-def test_the_fastest_of_the_episodes_that_saturated_the_task_scores_a_point_more() -> None:
+def test_a_tiebreak_favours_the_shortest_only_where_every_episode_saturated_its_task() -> None:
     def full(duration: float) -> Episode:
-        return episode(5.0, saturated=True, duration=duration)
+        return episode(1.0, saturated=True, duration=duration)
 
-    assert fastest_of_the_saturated([full(0.4), full(0.1), full(0.3)]) == [0.0, 1.0, 0.0]
-    assert fastest_of_the_saturated([full(0.2), episode(5.0, duration=0.1), full(0.2)]) == [1.0, 0.0, 1.0]
-    # One episode alone at the top already scores more than the rest; and an unfinished game is not a fast one.
-    assert fastest_of_the_saturated([full(0.2), episode(1.0, duration=3.0)]) == [0.0, 0.0]
-    assert fastest_of_the_saturated([]) == []
-    # An episode that does not say how long it took is not compared (it is not the fastest for saying nothing).
-    assert fastest_of_the_saturated([full(0.2), episode(5.0, saturated=True), full(0.3)]) == [1.0, 0.0, 0.0]
-    group = [full(0.4), full(0.1), full(0.3)]
-    tied = Grpo().batch(group, Budget(), random.Random(0))
-    assert tied.notes == {"speed_bonus": [0.0, 1.0, 0.0]} and len(tied.items) == 12
-    assert sorted({round(weighted.advantage, 3) for weighted in tied.items}) == [-0.333, 0.667]
-    untied = Grpo(tie_break=False).batch(group, Budget(), random.Random(0))  # nothing to compare them by
-    assert not untied.items and untied.skipped == "every episode scored the same"
+    assert tiebreak([full(40), full(12), full(30)], 0.05) == [0.0, 0.05, 0.0]
+    assert tiebreak([full(12), full(20), full(12)], 0.05) == [0.05, 0.0, 0.05]  # a tie for shortest: both get it
+    assert tiebreak([full(12), full(12)], 0.05) == [0.0, 0.0]  # nothing to break
+    # One episode short of saturating: the rewards already differ, and the shortest is not compared with it.
+    assert tiebreak([full(12), episode(0.5, duration=8), full(30)], 0.05) == [0.0, 0.0, 0.0]
+    # An episode that does not say how long it took leaves nothing to compare; and none is given by default.
+    assert tiebreak([full(12), episode(1.0, saturated=True), full(30)], 0.05) == [0.0, 0.0, 0.0]
+    assert tiebreak([full(40), full(12)], 0.0) == [0.0, 0.0] and tiebreak([], 0.05) == []
+    group = [full(40), full(12), full(30)]
+    untied = Grpo().batch(group, Budget(), random.Random(0))  # the default: how long an episode took counts for nothing
+    assert not untied.items and untied.skipped == "every episode scored the same" and untied.notes == {}
+    assert DEFAULT_ADVANTAGE.tiebreak == 0.0 and PRESETS["default"].objective.advantage.tiebreak == 0.0
+    tied = Grpo(advantage=Advantage(tiebreak=0.06)).batch(group, Budget(), random.Random(0))
+    assert tied.notes == {"tiebreak": [0.0, 0.06, 0.0]} and len(tied.items) == 12
+    assert sorted({round(weighted.advantage, 3) for weighted in tied.items}) == [-0.02, 0.04]
+    made = algorithm_for(resolved("default", {"advantage.tiebreak": 0.06}))
+    assert isinstance(made, Grpo) and made.advantage == Advantage(tiebreak=0.06)
 
 
 def test_a_step_trains_on_every_slots_sequences_of_the_episodes_that_differ_from_the_mean() -> None:

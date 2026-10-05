@@ -144,6 +144,7 @@ accept it; validation refuses the rest. The numbers can change between steps; wh
 | `advantage.baseline` | `group_mean`, `leave_one_out`, `none` | policy_gradient, likelihood |
 | `advantage.scale` | `none`, `group_std` | policy_gradient, likelihood |
 | `advantage.filter` | `none`, `equal_scores` (DAPO's dynamic sampling) | policy_gradient, likelihood |
+| `advantage.tiebreak` | a number, 0 in every preset: what the shortest episodes of a group whose every episode saturated its task score more | policy_gradient, likelihood |
 | `ratio` | `token`, `segment` (the geometric mean of its tokens' ratios, GSPO), `none` (the logprob itself, REINFORCE) | policy_gradient |
 | `clip.kind` | `none`, `ratio` (PPO), `weight` (the clipped ratio as a weight with no gradient, CISPO), `dual` (and no less than `clip.dual` times a negative advantage) | policy_gradient |
 | `clip.low`, `clip.high`, `clip.dual` | numbers: the ratio within 1 - low .. 1 + high | policy_gradient |
@@ -205,12 +206,12 @@ passed as `train(..., algorithm=...)`.
 | Advantages | An episode's score less a baseline: the group's mean (`group_mean`, Dr. GRPO), the mean of the others' (`leave_one_out`, RLOO), or none; then divided by the standard deviation of the group's scores (`group_std`, the sample's, as GRPO's implementations take it) or not. Every token the policy sampled in the episode gets it; with several model slots, every slot's, so a team is rewarded together. |
 | Dynamic sampling | A group whose scores are all equal has nothing to teach and is skipped (`equal_scores`, DAPO; the default). So is a group with fewer than two episodes fit to train on, and one whose every advantage is zero. |
 | Behaviour logprobs | A policy gradient does not train on a group with a segment whose turns were sampled without their exact tokens, nor, with an importance correction, without their behaviour logprobs; `skipped` says which channel's turns lacked what. A likelihood reads neither. |
-| The fastest of the saturated | Episodes that reached everything their task has to give earned the same; the one that took the least scores a point more, and episodes that tie for fastest all do. The task says what saturated means and how long it took ([result conventions](episodes.md#result-conventions)); comparing across the group is done here. An episode that does not say its duration is not compared. `tie_break` turns this off. |
+| Tiebreak | None by default: how long an episode took changes no score. With `advantage.tiebreak` above 0, in a group whose every episode reached everything its task has to give (and so scored the same), the shortest by `Episode.duration` scores that much more, and episodes that tie for shortest all do. A group in which an episode fell short, or one did not say its duration, gets nothing. The task says what saturated means and how long it took ([result conventions](episodes.md#result-conventions)); comparing across the group is done here. |
 | Untrained slots | A segment of a slot that is not trained (a judge's, a fixed opponent's: `Segment.trained` is false) is never trained on. |
 | What is trained on | Every segment of the episodes whose advantage is not zero, up to what the trainer can afford in a step (`Budget.segments`). Beyond that, segments are taken at even steps through the group, so that each episode and slot keeps its share, spread over its whole game. |
 
 [`Preferences`](../../guide/reference.md#preferences) makes a group's pairs: its best episode (the first of the best,
-by score with the bonus) preferred to its worst. Both sides start from the group's start, so their shared context is
+by score) preferred to its worst. Both sides start from the group's start, so their shared context is
 the start's first observation; a side is every turn of its episode, and only the tokens the policy sampled count. With
 `labelled` (KTO) each episode above the group's mean is desirable and each below it undesirable. A group whose scores
 are all equal gives none. A preference loss reads no behaviour logprobs, so turns sampled without them (a provider
