@@ -26,8 +26,9 @@ uv run minecraft-team server --seed 12345                   # a temporary server
 ```
 
 The cluster config needs a pool of its worlds (`[sandboxes.minecraft]`, `provider = "minecraft_team.worlds:worlds"`,
-`size = 6`, `memory_gib = 1.75`) and the environment among its `[environments]` (`deploy/clusters/example.toml` has
-both). The presets are `deploy/chart/rollout/files/presets/minecraft-one-gpu.toml` (the 4-bit Qwen3.5-9B on the
+`size = 6`) and the environment among its `[environments]` (`deploy/clusters/example.toml` has both). On one machine
+the pool is made in the run's driver; on Kubernetes the chart serves it from a pod of its own, which runs reach at its
+`url` ([Where sandboxes run](../research/sandbox-placement.md)). The presets are `deploy/chart/rollout/files/presets/minecraft-one-gpu.toml` (the 4-bit Qwen3.5-9B on the
 cluster's vLLM engines and a LoRA trainer sharing their card) and `minecraft-tinker.toml` (the full Qwen3.5-9B trained and sampled at Tinker), each
 commented with why its numbers are what they are. The run's driver writes the monitor's feed into its directory, and
 `rollout monitor` serves the page over the ledger (every run in it) and that feed. The page shows the run's steps and the groups that went into each, every episode of every group and, for each agent, what
@@ -88,8 +89,8 @@ builds the task and waits until every bot holds the chunks around it; the lease'
 the world to watch it (`game`) and the plugin's control API (`control`). It holds at most `size` worlds at once (6),
 each a Paper server of its own and a Node process for its bots, and an episode runner claims an episode only while one
 more fits. `worlds(directory, size=6, heap="1536M")` makes it for a run's driver (the run's directory, and the pool's
-`size` and `heap`, the cluster config's `[sandboxes.minecraft]` settings), keeping the bots' logs under
-`directory/logs`.
+`size` and `heap`, the cluster config's `[sandboxes.minecraft]` settings), or for a pool served on its own (`rollout
+pool --kind minecraft`, with `[scratch]/sandboxes/minecraft`), keeping the bots' logs under `directory/logs`.
 
 A world takes 1.1 GiB on a staged task, 1.25 to 1.45 GiB in the nether and 1.75 to 1.85 GiB with four bots walking
 apart on the surface; bots that roam for long through terrain the template does not hold take up to 2.4 GiB (the
@@ -353,7 +354,7 @@ page.
 | Policy | The channel `policy`: `cyankiwi/Qwen3.5-9B-AWQ-4bit` on the provider `local-vllm`, rendered by `rollout_qwen:qwen35`; thinking 1,024 tokens, answers 400 | [Qwen renderers](../implementations/rollout-qwen.md) |
 | Engine | One engine host of `local-vllm` (`rollout_vllm:VllmEngine`), its options the model's in the cluster config: 0.78 of the card, `max_num_seqs` 20: the `episodes_at_once` (6) episodes of one to four agents ask for fifteen requests on average, and the engine queues the rest | [vLLM engine](../implementations/rollout-vllm.md) |
 | Trainer | `local-lora` (`rollout_lora:LoraTrainer`) on the same checkpoint, rank 32, learning rate 5e-5, segments of up to 8,000 tokens (a peak of 12.4 GiB), 384 a step; `colocate_with = "local-vllm"`: the engine sleeps while it steps | [LoRA trainer](../implementations/rollout-lora.md) |
-| Worlds | `[sandboxes.minecraft]`: `minecraft_team.worlds:worlds`, at most six at once, in the run's driver | [The worlds](#the-worlds) |
+| Worlds | `[sandboxes.minecraft]`: `minecraft_team.worlds:worlds`, at most six at once, in the run's driver (on the chart's cluster, four, in the pod `sandboxes-minecraft`) | [The worlds](#the-worlds), [Where sandboxes run](../research/sandbox-placement.md) |
 | Memory | `[guards]` `runs_gib` and `training_gib`: each episode runs a Paper server and its bots | [Deploying](../guide/deploying.md), [Minecraft memory](../research/minecraft-memory.md) |
 | Bridge | The LoRA trainer's files are PEFT's, which vLLM loads as they are: each checkpoint is bridged (`verbatim`) as a Ray task on the run's Ray cluster | [Bridges](../libraries/rollout-train/checkpoints.md#bridges), [Ray](../guide/deploying.md#ray) |
 
@@ -402,11 +403,12 @@ dependencies (`rollout`, `httpx`, `pyyaml`) are the platform's, so a version run
 nothing built. The import's checks build its rows, starts and eval data; its episode is not played there, as its
 program declares a `minecraft` sandbox: that finding passes, flagged.
 
-A run on a version plays in the cluster's `[sandboxes.minecraft]` pool. Its job starts in the version's files, which
-come first on its path, so the provider the pool names (`minecraft_team.worlds:worlds`) is the version's own, with its
-plugin, configuration and harness. What those need beyond the version's files is made where the run runs, the first
-time an episode needs it, under `~/.cache/rollout` (the state volume, on the chart's cluster), each under a file lock
-so that episodes starting together make it once:
+A run on a version plays in the cluster's `[sandboxes.minecraft]` pool. Where the pool is made in the run's driver,
+the job starts in the version's files, which come first on its path, so the provider the pool names
+(`minecraft_team.worlds:worlds`) is the version's own, with its plugin, configuration and harness; a pool served from
+a pod of its own (the chart's) runs the provider of its pod's image. What a provider needs beyond its files is made
+where it runs, the first time an episode needs it, under `~/.cache/rollout` (the state volume, on the chart's cluster),
+each under a file lock so that episodes starting together make it once:
 
 | What | Where | Made |
 |---|---|---|

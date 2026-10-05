@@ -216,6 +216,12 @@ Without, it cannot tell
 whether a claim holds: it admits every key, keeps its leases in the process, and a lease ends only when released (a
 run's own release, when it ends). A pool that serves training runs is served with `--ledger`.
 
+`rollout pool --kind KIND --cluster [PATH or NAME]` serves the pool the cluster config's `[sandboxes.KIND]` describes:
+its provider made with `--directory` (by default `[scratch]/sandboxes/KIND`), its `size` and its settings, named `KIND`,
+its leases beside the cluster's ledger. Where the section also says `url`, runs reach the pool there and make none of
+their own ([the cluster config](../../guide/cluster.md#every-section)); the chart runs it in a pod of its own for each
+kind ([Where sandboxes run](../../research/sandbox-placement.md)).
+
 ## In training: a lease ends with its claim
 
 An [episode runner](../rollout-train/rollouts.md#a-runner) starts each episode's run with the claim's key as its
@@ -226,13 +232,13 @@ own.
   them, asking each pool's `capacity()` once a look, and counting what it claims as it goes. Runners that share a
   pool can still claim more than it holds at once; their runs then wait for room ([the runner](#the-runner)). A
   runner says in each beat how full its pools are (`pools`: each one's `size`, `leased` and `free`).
-- **Leases beside the ledger.** A pool a run's driver opens keeps its leases beside the ledger, as ordinary state
-  changed in place: `sandboxes.json` beside a ledger of files (`FileLeases`), the `sandboxes` table of a database
-  ledger's database (`DatabaseLeases`); `leases_of(ledger)` finds them.
+- **Leases beside the ledger.** A pool a run's driver opens, or one served with `--ledger`, keeps its leases beside
+  the ledger, as ordinary state changed in place: `sandboxes.json` beside a ledger of files (`FileLeases`), the
+  `sandboxes` table of a database ledger's database (`DatabaseLeases`); `leases_of(ledger)` finds them.
 - **A lapsed claim gets no sandbox.** A claim holds as the scheduler says
   ([claims](../rollout-train/rollouts.md#what-runners-write)): it lapses when a newer attempt of its episode is
   claimed, when its runner takes its fence anew without adopting it, notes the attempt cut short, or stops beating for
-  90 seconds, and its lease ends with the episode's record too. A pool a run's driver opens admits a key only while its
+  90 seconds, and its lease ends with the episode's record too. Such a pool admits a key only while its
   claim holds (`admits(ledger, presence)`), so a run recovered after its claim lapsed is refused its sandboxes, and
   the lease it had is released at once. A key of a run the ledger does not know (a run started by hand) is admitted.
 - **Expiry.** A pool's keeper (`keep(pool, ledger, presence)`) sweeps every 15 seconds, and releases a lease whose

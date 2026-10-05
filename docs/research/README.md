@@ -18,6 +18,9 @@ pages are the reference; a design note never overrides them.
   claims, retries), each promise with the test that holds it. Its last section is what the HTTP ledger service keeps.
 - [Minecraft memory](minecraft-memory.md), **built**: the memory of the Minecraft team's worlds measured on real
   servers and episodes, the Java and Node settings chosen from it, and why several worlds do not share one server.
+- [Where sandboxes run](sandbox-placement.md), **built**: sandboxes as a system of their own, reached only through
+  the claiming interface; the options for where a pool's worlds run, and the choice: a pool served from a pod of its
+  own on Kubernetes, which a run's demand does not count.
 - [Cleanup inventory](cleanup-inventory.md), **in progress**: what to remove and what to factor out, ranked, and the
   order of the removal commits.
 - [Scaling models and topologies](scaling-models-and-topologies.md), **proposed**: many more model families and

@@ -1,6 +1,6 @@
 """Small tasks for the tests of everything above a run: a guessing game on the task loop, and a gate that holds a run
-open until the test lets it through; an environment of the guessing game (`words`); and a guessing game a real model
-plays (`guessing`).
+open until the test lets it through; an environment of the guessing game (`words`), and of it beside a sandbox of
+each episode's own (`boxed`, its sandboxes' provider `boxes`); and a guessing game a real model plays (`guessing`).
 
 `guessing` is an example environment for a small model: of three words, the model names the one the start says, and
 only what it says after thinking counts. Qwen3-0.6B names the right one about a third of the time, so a group's rewards
@@ -12,13 +12,24 @@ differ, and a group-relative update has something to learn from:
 import asyncio
 import random
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from pydantic import JsonValue
 
 from rollout.contracts import Message
 from rollout.environment import Description, Row, Start, drawn
-from rollout.harness import End, ModelSlot, Observation, ProgramReference, RunContext, Task, agent_program
+from rollout.harness import (
+    End,
+    ModelSlot,
+    Observation,
+    ProgramReference,
+    RunContext,
+    SandboxSpec,
+    Task,
+    agent_program,
+)
+from rollout.testing import FakeSandboxes
 
 GATES: dict[str, asyncio.Event] = {}
 """By name: a `Gated` run waits for its gate to be set."""
@@ -147,3 +158,36 @@ class Judged(Words):
 
 
 judged = Judged()
+
+BOXES: list[FakeSandboxes] = []
+"""Every provider `boxes` made, in order."""
+
+
+def boxes(directory: Path, size: int = 4) -> FakeSandboxes:
+    """A provider of `fake` sandboxes (the cluster config's `[sandboxes.fake] provider`), at most `size` at once."""
+    made = FakeSandboxes(size=size)
+    BOXES.append(made)
+    return made
+
+
+class BoxedGuess(Guess):
+    """A guess played beside a sandbox: it asks its box who it is, and says so in its result."""
+
+    sandboxes = {"box": SandboxSpec(kind="fake")}
+
+    async def respond(self, run: RunContext, reply: Message) -> Observation:
+        described: Any = (await run.sandbox("box").call("describe")).structured
+        said = reply.text.strip() == self.word
+        await run.emit("result", {"solved": said, "duration": 1, "handle": described["handle"],
+                                  "key": run.sandbox("box").lease.key})  # fmt: skip
+        return End(reward=1.0 if said else 0.0)
+
+
+class Boxed(Words):
+    """The guessing game, each episode with a sandbox of its own."""
+
+    program: ProgramReference = agent_program(BoxedGuess)
+    description = Description(duration="turns")
+
+
+boxed = Boxed()

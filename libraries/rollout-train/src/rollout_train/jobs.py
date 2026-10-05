@@ -692,13 +692,18 @@ class Run:
         _background(stack, self.runner.serve())
 
     async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
-        """A pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes]`, with
-        its keeper; its leases are kept beside the ledger."""
+        """A pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes]`: one
+        served elsewhere (`url`) is reached there; any other is made here, with its keeper, its leases kept beside the
+        ledger."""
         pools: dict[str, Pool] = {}
         for kind in sorted(self.sandboxes):
             section = self.cluster.sandboxes.get(kind)
             if section is None:
                 continue  # (validation refused a run whose environment needs it)
+            if section.url is not None:
+                self.pool_bindings[kind] = PoolBinding(url=section.url)
+                continue
+            assert section.provider is not None
             provider = named(section.provider)(self.directory, size=section.size, **dict(section.settings))
             beats = presence_of(self.ledger)
             pool = SandboxPool(

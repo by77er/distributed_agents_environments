@@ -145,6 +145,21 @@ runpod:
   schedule: "* * * * *"
   resources: {requests: {cpu: 50m, memory: 256Mi}, limits: {memory: 512Mi}}
 
+# Each kind of sandbox is served from a pod of its own, outside the runs' RayJobs (templates/sandboxes.yaml): a
+# Deployment of one pod running `rollout pool --kind KIND`, which holds at most `size` sandboxes, behind the Service
+# `sandboxes-KIND` that runs acquire from (the cluster config's [sandboxes.KIND] url). Kubernetes accounts what the
+# sandboxes hold in that pod, by its requests. A Minecraft world (a Paper server and its bots' Node process) holds 1.1
+# to 1.85 GiB, up to 2.4 GiB when the bots roam far (docs/research/minecraft-memory.md): four ask for 1.75 GiB each and
+# the pool's process 0.5 GiB, and are held to about 2.4 GiB each; each asks for a CPU, about what its server and bots
+# use during play.
+sandboxes:
+  minecraft:
+    enabled: true
+    provider: minecraft_team.worlds:worlds
+    size: 4
+    port: 8710
+    resources: {requests: {cpu: "4", memory: 7680Mi}, limits: {memory: 10Gi}}
+
 gateway:
   replicas: 1
   port: 8900

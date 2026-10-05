@@ -1,0 +1,44 @@
+# Each kind of sandbox `sandboxes` enables, served from a pod of its own: `rollout pool --kind KIND` makes the pool of
+# the cluster config's [sandboxes.KIND] (its provider and size), keeps its leases beside the ledger, ending with the
+# claims of the episodes they were acquired for, and serves it over HTTP behind the Service `sandboxes-KIND`, where runs
+# acquire from it. Its sandboxes live and die with the pod: one started again finds its old leases lost, and their
+# episodes are played again.
+{{- range $kind, $pool := .Values.sandboxes }}
+{{- if $pool.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandboxes-{{ $kind }}
+  labels: {{- include "rollout.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}  # (two pods of one pool would each delete the other's sandboxes)
+  selector: {matchLabels: {app: sandboxes, sandboxes: {{ $kind }}}}
+  template:
+    metadata: {labels: {app: sandboxes, sandboxes: {{ $kind }}}}
+    spec:
+      containers:
+        - name: pool
+          image: {{ include "rollout.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          workingDir: /opt/rollout/source
+          command: [rollout, pool, --kind, {{ $kind }}, --cluster, --host, 0.0.0.0, --port, {{ $pool.port | quote }}]
+          env:
+            {{- include "rollout.env" $ | nindent 12 }}
+          ports: [{containerPort: {{ $pool.port }}, name: http}]
+          readinessProbe: {httpGet: {path: /capacity, port: http}, periodSeconds: 10, timeoutSeconds: 5}
+          volumeMounts: {{- include "rollout.volumeMounts" $ | nindent 12 }}
+          resources: {{- toYaml $pool.resources | nindent 12 }}
+      volumes: {{- include "rollout.volumes" $ | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandboxes-{{ $kind }}
+  labels: {{- include "rollout.labels" $ | nindent 4 }}
+spec:
+  selector: {app: sandboxes, sandboxes: {{ $kind }}}
+  ports: [{port: {{ $pool.port }}, targetPort: http}]
+{{- end }}
+{{- end }}

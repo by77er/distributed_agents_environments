@@ -733,6 +733,21 @@ def test_the_environment_must_be_offered_load_and_find_what_it_needs() -> None:
     ]
 
 
+def test_on_kubernetes_a_sandbox_pool_is_served_from_pods_of_its_own() -> None:
+    from rollout_train.cluster import KubernetesSection
+
+    worlds = dataclasses.replace(ENVIRONMENT, sandboxes=frozenset({"minecraft"}))
+    assert refused("environment", findings(environment=worlds)) == []  # (one machine: the pool in the run's driver)
+    kubernetes = dataclasses.replace(CLUSTER, kubernetes=KubernetesSection("rollout", "rayjob.yaml"))
+    assert refused("environment", findings(environment=worlds, cluster=kubernetes)) == [
+        f"{GSM8K} needs sandboxes of kind minecraft, whose pool this cluster makes in each run's pod, where Kubernetes "
+        "accounts nothing of what they hold: serve it from pods of its own ([sandboxes.minecraft] url)"
+    ]
+    pool = dataclasses.replace(CLUSTER.sandboxes["minecraft"], url="http://sandboxes-minecraft.rollout:8710")
+    served = dataclasses.replace(kubernetes, sandboxes={"minecraft": pool})
+    assert refused("environment", findings(environment=worlds, cluster=served)) == []
+
+
 # capacity
 
 

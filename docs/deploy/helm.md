@@ -30,6 +30,11 @@ By role, in the namespace it is installed into (these pages use `rollout`):
   provisioner key (the Secret `step-ca`) and a gateway certificate (`gateway-tls`), under a ServiceAccount `pki` that
   may write those two Secrets; with `tunnel.enabled`, a Deployment `tunnel` running cloudflared, which carries
   `tunnel.hostnames` to the ledger service and step-ca.
+- **The sandbox pools.** For each kind `sandboxes` enables (`minecraft`), a Deployment of one pod running `rollout pool
+  --kind KIND --cluster`, which holds at most `size` sandboxes and keeps their leases beside the ledger, behind the
+  Service `sandboxes-KIND` (`sandboxes-minecraft.rollout:8710`); the cluster config's `[sandboxes.KIND]` names it as
+  its `url`, and runs acquire from it there. Its requests are its sandboxes' memory, which runs' pods do not hold
+  ([Where sandboxes run](../research/sandbox-placement.md)).
 - **The monitor.** One Deployment per entry of `monitors`, each behind a Service and an Ingress, and an Ingress for
   Ray's dashboard.
 - **What every pod mounts.** The state volume, the ConfigMap `rollout` with the cluster config, and the Secrets for
@@ -84,6 +89,7 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `rayjob.resources` | 1 CPU, 4 GiB requested; 14 GiB and one `nvidia.com/gpu` as limits | The most one pod of a run's Ray cluster may have (its limits, one node's worth); its requests apply only where a run's demand is not given |
 | `rayjob.ttlSeconds` | `30` | How long a finished run's Ray cluster stays (and holds what it asked for) |
 | `kueue.enabled`, `kueue.queue`, `kueue.quota` | `false`, `runs`, 12 CPUs, 16 GiB, one GPU | Kueue's admission of runs ([Kueue](#kueue)) |
+| `sandboxes.minecraft.enabled`, `.size`, `.resources` | `true`, `4`, 4 CPUs and 7.5 GiB requested, 10 GiB as the limit | The Minecraft worlds' pool: at most `size` worlds at once, each asking for 1.75 GiB and a CPU |
 | `gateway.replicas`, `gateway.port`, `gateway.host` | `1`, `8900`, `gateway.localhost` | The gateway's replicas, port and Ingress host |
 | `monitors.NAME.host` | `monitor.localhost` | Each monitor's Ingress host |
 | `ingress.className`, `ingress.rayHost` | `traefik`, `ray.localhost` | The ingress controller, and the host of Ray's dashboard |

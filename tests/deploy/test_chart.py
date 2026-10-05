@@ -136,7 +136,7 @@ def test_every_container_asks_for_what_it_needs_and_is_held_to_a_memory_limit(re
         return []
 
     containers = [container for each in rendered for pod in pods(each) for container in pod["containers"]]
-    assert len(containers) == 10  # the stores, the bucket job, the presets job, Ray (3), the ledger, gateway, monitor
+    assert len(containers) == 11  # the stores, the two jobs, Ray (3), the ledger, gateway, monitor, a pool
     for container in containers:
         assert container["resources"]["requests"]["memory"] and container["resources"]["limits"]["memory"], container[
             "name"
@@ -171,6 +171,32 @@ def containers_of(rendered: list[dict[str, Any]], app: str) -> list[dict[str, An
         if each["kind"] == "Deployment" and each["spec"]["template"]["metadata"]["labels"].get("app") == app
         for container in each["spec"]["template"]["spec"]["containers"]
     ]
+
+
+def test_the_minecraft_worlds_are_served_from_a_pod_of_their_own_that_runs_reach_at_its_url(
+    rendered: list[dict[str, Any]],
+) -> None:
+    cluster = parsed(tomllib.loads(config_of(rendered)["cluster.toml"]))
+    pool = cluster.sandboxes["minecraft"]
+    assert (pool.provider, pool.size, pool.url) == (
+        "minecraft_team.worlds:worlds",
+        4,
+        "http://sandboxes-minecraft.rollout:8710",
+    )
+    (deployment,) = [each for each in rendered if each["kind"] == "Deployment"
+                     and each["metadata"]["name"] == "sandboxes-minecraft"]  # fmt: skip
+    assert deployment["spec"]["replicas"] == 1 and deployment["spec"]["strategy"] == {"type": "Recreate"}
+    (container,) = deployment["spec"]["template"]["spec"]["containers"]
+    assert container["command"] == ["rollout", "pool", "--kind", "minecraft", "--cluster", "--host", "0.0.0.0",
+                                    "--port", "8710"]  # fmt: skip
+    resources = container["resources"]
+    assert (resources["requests"]["memory"], resources["limits"]["memory"]) == ("7680Mi", "10Gi")  # (1.75 GiB a world)
+    (service,) = [each for each in rendered if each["kind"] == "Service"
+                  and each["metadata"]["name"] == "sandboxes-minecraft"]  # fmt: skip
+    assert service["spec"]["selector"] == deployment["spec"]["selector"]["matchLabels"]
+    off = render("--set", "sandboxes.minecraft.enabled=false")
+    assert "minecraft" not in parsed(tomllib.loads(config_of(off)["cluster.toml"])).sandboxes
+    assert not [each for each in off if each["metadata"]["name"] == "sandboxes-minecraft"]
 
 
 def test_the_gateway_serves_the_cluster_configs_channels(rendered: list[dict[str, Any]]) -> None:

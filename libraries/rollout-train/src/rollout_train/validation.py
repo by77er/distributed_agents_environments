@@ -108,7 +108,11 @@ RULES: tuple[Rule, ...] = (
         "no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or "
         "whose logprobs are unchecked, or of another renderer family",
     ),
-    Rule("environment", "not offered, does not load, or needs sandboxes or tool sets the cluster lacks"),
+    Rule(
+        "environment",
+        "not offered, does not load, needs sandboxes or tool sets the cluster lacks, or, on Kubernetes, sandboxes "
+        "whose pool is not served from pods of its own",
+    ),
     Rule(
         "capacity",
         "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting "
@@ -933,14 +937,19 @@ def _environment(run: _Run) -> None:
     for kind in sorted(facts.sandboxes - set(run.cluster.sandboxes)):
         run.refuse("environment", "environment", f"{environment} needs sandboxes of kind {kind}, and this cluster has "
                    "no pool of them")  # fmt: skip
+    if run.cluster.kubernetes is not None:
+        for kind in sorted(facts.sandboxes & set(run.cluster.sandboxes)):
+            if run.cluster.sandboxes[kind].url is None:
+                run.refuse("environment", "environment", f"{environment} needs sandboxes of kind {kind}, whose pool "
+                           "this cluster makes in each run's pod, where Kubernetes accounts nothing of what they hold: "
+                           f"serve it from pods of its own ([sandboxes.{kind}] url)")  # fmt: skip
     for name in sorted(facts.tool_sets - set(run.cluster.tools)):
         run.refuse("environment", "environment", f"{environment} imports the tool set {name}, which this cluster does "
                    "not serve ([tools])")  # fmt: skip
 
 
 def _capacity(run: _Run) -> None:
-    sandboxes = run.environment.sandboxes if run.environment is not None else ()
-    asked = demand(run.settings, run.cluster, sandboxes=sandboxes)
+    asked = demand(run.settings, run.cluster)
     needs = asked.total
     key = "trainer.provider" if run.kind in TRAINING else f"channels.{played_channel(run.settings)}.provider"
     capacity = run.cluster.capacity

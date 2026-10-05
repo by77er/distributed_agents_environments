@@ -88,7 +88,7 @@ uv run rollout preset save faster --from-run first --set trainer.learning_rate=1
 uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --cluster   # an eval configuration
 uv run rollout suite edit words-v1 --seeds 1,2,3,4 --cluster                          # its next version
 uv run rollout report RUN_DIRECTORY ENVIRONMENT --watch                 # charts; posted to DISCORD_WEBHOOK_URL if set
-uv run rollout pool minecraft_team.worlds:worlds --directory DATA --ledger URL --port 8710   # worlds on a machine of their own
+uv run rollout pool --kind minecraft --cluster --host 0.0.0.0 --port 8710   # [sandboxes.minecraft], served on a machine of its own
 uv run rollout tools FACTORY --directory DATA --port 8700               # a tool set on a machine of its own
 uv run rollout gateway --cluster --listen 0.0.0.0:8900                  # a replica of the cluster's gateway
 uv run rollout cluster check                                            # what of the cluster config does not resolve here
@@ -113,7 +113,8 @@ Its driver, from the cluster config and the run's settings:
 - samples every channel through a gateway in its own process: engine hosts and servers elsewhere by checkpoint name,
   Tinker through engines in its process;
 - plays the run's episodes with a runner in its own process, with the sandbox pools the environment's programs declare
-  (from `[sandboxes]`), the tool sets of `[tools]` and the memory guards of `[guards]`;
+  (from `[sandboxes]`: made in its process, or reached at their `url`), the tool sets of `[tools]` and the memory
+  guards of `[guards]`;
 - runs the loop of the run's kind, its bridges as Ray tasks.
 
 While Ray has not given it what it asked for, the run waits: the driver beats as `run/RUN` saying what it waits for,

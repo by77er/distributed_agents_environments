@@ -184,16 +184,19 @@ class GuardsSection:
 
 @dataclass(frozen=True)
 class SandboxesSection:
-    """A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`)."""
+    """A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`): made in each run's
+    driver from its provider, or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it."""
 
     kind: str
-    provider: str
+    provider: str | None = None
     """`module:name` of what makes them."""
     python: str = "platform"
     """`platform`, or the name of an environment whose Python the provider is in."""
     size: int = 1
     cpus: float = 1
     memory_gib: float = 1
+    url: str | None = None
+    """Where the pool is served (`rollout.harness.remote.serve_pool`): runs acquire from it there."""
     pools: int = 1
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """The provider's own settings."""
@@ -732,14 +735,21 @@ def _blobs(said: "_Table", where: str, *, named: bool = False) -> BlobsSection:
 
 
 def _sandboxes(kind: str, described: dict[str, Any]) -> SandboxesSection:
-    said = _Table(described, f"[sandboxes.{kind}]")
+    where = f"[sandboxes.{kind}]"
+    said = _Table(described, where)
+    provider, url = said.text("provider", None), said.text("url", None)
+    if provider is None and url is None:
+        raise ClusterError(f"{where} names its provider (made in each run), or the url it is served at, or both")
+    if url is not None and not url.startswith(("http://", "https://")):
+        raise ClusterError(f"{where} url is an http:// or https:// URL")
     return SandboxesSection(
         kind=kind,
-        provider=said.text("provider"),
+        provider=provider,
         python=said.text("python", "platform"),
         size=said.whole("size", 1, least=1),
         cpus=said.number("cpus", 1.0),
         memory_gib=said.number("memory_gib", 1.0),
+        url=url,
         pools=said.whole("pools", 1, least=1),
         settings=said.rest(),
     )

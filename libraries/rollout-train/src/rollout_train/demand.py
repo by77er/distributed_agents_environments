@@ -10,8 +10,8 @@ engines load, and its driver. `demand(settings, cluster)` says what they need, f
 config alone:
 
 - **The driver** (the job's entrypoint): 1 CPU for the loop and its gateway, 1 CPU for each runner of `[runners]
-  places` episodes (`episodes_at_once`), and each sandbox pool's `size` times its `cpus`; 2 GiB of memory, and each
-  pool's `size` times its `memory_gib`.
+  places` episodes (`episodes_at_once`), and each sandbox pool it makes (none served elsewhere, `url`) `size` times
+  its `cpus`; 2 GiB of memory, and each such pool's `size` times its `memory_gib`.
 - **The trainer** (training and imitate runs on a scheduled trainer), in a bundle on the driver's node: 1 CPU and the
   trainer's `gpus` (half of them where it shares the trained channel's card, `colocate_with`).
 - **Each engine host** (per replica of a channel on a scheduled `vllm` provider), in a bundle of its own, or in the
@@ -332,7 +332,7 @@ def demand(settings: "RunSettings", cluster: Cluster, *, sandboxes: Collection[s
         driver = driver + Resources(cpus=runners * RUNNER_CPUS)
         for each in sorted(set(sandboxes)):
             pool = cluster.sandboxes.get(each)
-            if pool is not None:
+            if pool is not None and pool.url is None:  # (one served elsewhere is not the run's)
                 driver = driver + Resources(cpus=pool.size * pool.cpus, memory_gib=pool.size * pool.memory_gib)
     return Demand(driver, tuple(bundles))
 

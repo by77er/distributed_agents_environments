@@ -271,7 +271,10 @@ async def _imitate(arguments: argparse.Namespace) -> int:
     return await _asked(arguments, "imitate", flags, named_as=lambda said: f"imitate {said['imitation.dataset']}")
 
 
-async def _pool(factory: str, directory: Path, where: str | None, name: str | None, host: str, port: int) -> None:
+async def _pool(arguments: argparse.Namespace) -> None:
+    """Serve a pool over HTTP: of the provider `factory` names, made with `--directory`; or, with `--kind`, the
+    cluster config's `[sandboxes.KIND]` (its provider, `size` and settings, made with `--directory` or the cluster's
+    `[scratch]/sandboxes/KIND`), its leases beside the cluster's ledger."""
     import socket
 
     import uvicorn
@@ -280,8 +283,25 @@ async def _pool(factory: str, directory: Path, where: str | None, name: str | No
     from rollout.harness.sandboxes import MemoryLeases, SandboxPool
     from rollout_train.presence import presence_of
     from rollout_train.sandboxes import admits, keep, leases_of
+    from rollout_train.stores import Stores
 
-    provider = named(factory)(directory)
+    where: str | Stores | None = arguments.ledger
+    name: str | None = arguments.name
+    if arguments.kind is not None:
+        cluster = _cluster_of(arguments.cluster)
+        section = cluster.sandboxes.get(arguments.kind)
+        if section is None or section.provider is None:
+            raise SystemExit(f"the cluster config names no provider of {arguments.kind} sandboxes ([sandboxes])")
+        scratch = Path(cluster.scratch).expanduser()  # noqa: ASYNC240 (before it serves)
+        directory = arguments.directory or scratch / "sandboxes" / arguments.kind
+        directory.mkdir(parents=True, exist_ok=True)
+        provider = named(section.provider)(directory, size=section.size, **dict(section.settings))
+        where = where or Stores.open(cluster)
+        name = name or arguments.kind
+    elif arguments.factory is not None:
+        provider = named(arguments.factory)(arguments.directory or Path("."))
+    else:
+        raise SystemExit("say what makes the sandboxes: a factory (module:name), or --kind with --cluster")
     ledger = _ledger_at(where) if where else None
     leases = (leases_of(ledger) if ledger is not None else None) or MemoryLeases()
     admitted = admits(ledger, presence_of(ledger)) if ledger is not None else None
@@ -291,7 +311,8 @@ async def _pool(factory: str, directory: Path, where: str | None, name: str | No
         if ledger is not None
         else None
     )
-    server = uvicorn.Server(uvicorn.Config(serve_pool(pool), host=host, port=port, log_level="warning"))
+    config = uvicorn.Config(serve_pool(pool), host=arguments.host, port=arguments.port, log_level="warning")
+    server = uvicorn.Server(config)
     try:
         await server.serve()
     finally:
@@ -1025,14 +1046,24 @@ def main() -> None:
     serving.add_argument("--host", default="127.0.0.1")
     serving.add_argument("--port", type=int, default=8700)
     pooling = commands.add_parser("pool", help="serve a pool of sandboxes over HTTP")
-    pooling.add_argument("factory", help="`module:name` of what makes the sandboxes' provider, called with --directory")
-    pooling.add_argument("--directory", type=Path, default=Path("."))
+    pooling.add_argument(
+        "factory", nargs="?", help="`module:name` of what makes the sandboxes' provider, called with --directory"
+    )
+    pooling.add_argument(
+        "--kind", help="serve the cluster config's [sandboxes.KIND] (its provider, size and settings) in place of a "
+        "factory, its leases beside the cluster's ledger",
+    )  # fmt: skip
+    pooling.add_argument("--cluster", **_cluster_option("the cluster config whose [sandboxes.KIND] it serves"))
+    pooling.add_argument(
+        "--directory", type=Path,
+        help="where the provider keeps its state (by default this directory, or with --kind [scratch]/sandboxes/KIND)",
+    )  # fmt: skip
     pooling.add_argument(
         "--ledger",
         help="keep the leases beside this ledger, ending with their claims: a run's directory, a ledger's "
         "directory, or a database's URL (without it, they are kept in the process, and end only when released)",
     )
-    pooling.add_argument("--name", help="what the pool is called among those sharing the ledger (KIND@HOST)")
+    pooling.add_argument("--name", help="what the pool is called among those sharing the ledger (KIND@HOST, or KIND)")
     pooling.add_argument("--host", default="127.0.0.1")
     pooling.add_argument("--port", type=int, default=8710)
     gateway = commands.add_parser("gateway", help="serve a replica of the gateway, which records every turn")
@@ -1133,9 +1164,7 @@ def main() -> None:
                         arguments.proxied)  # fmt: skip
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "pool":
-        work = _pool(arguments.factory, arguments.directory, arguments.ledger, arguments.name, arguments.host,
-                     arguments.port)  # fmt: skip
-        sys.exit(asyncio.run(until_signalled(work)))
+        sys.exit(asyncio.run(until_signalled(_pool(arguments))))
     if arguments.command == "ledger" and arguments.ledger_command == "serve":
         import uvicorn
 
