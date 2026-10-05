@@ -19,9 +19,11 @@ rollout = "rollout_train.cli:main"
 [project.optional-dependencies]
 http = ["starlette>=0.48", "uvicorn>=0.37"]  # the endpoint for harnesses, the monitor
 report = ["matplotlib>=3.9"]
+runpod = ["rollout-runpod"]  # leasing RunPod's pods for runs, and the certificates the platform holds
 
 [tool.uv.sources]
 rollout = { workspace = true }
+rollout-runpod = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

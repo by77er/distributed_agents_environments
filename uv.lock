@@ -5016,6 +5016,9 @@ http = [
 report = [
     { name = "matplotlib" },
 ]
+runpod = [
+    { name = "rollout-runpod" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -5025,12 +5028,13 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "ray", extras = ["default"], specifier = ">=2.59" },
     { name = "rollout", editable = "libraries/rollout" },
+    { name = "rollout-runpod", marker = "extra == 'runpod'", editable = "implementations/rollout-runpod" },
     { name = "sqlalchemy", specifier = ">=2" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.48" },
     { name = "uv", specifier = ">=0.11" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.37" },
 ]
-provides-extras = ["http", "report"]
+provides-extras = ["http", "report", "runpod"]
 
 [[package]]
 name = "rollout-vllm"
