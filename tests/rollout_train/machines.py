@@ -62,6 +62,7 @@ class Saying(ScriptedEngine):
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        top: int = 0,
     ) -> Generation:
         word = f" {self.words[self.said % len(self.words)]}" if self.words else ""
         self.said += 1
@@ -73,6 +74,7 @@ class Saying(ScriptedEngine):
             top_p=top_p,
             stop_token_ids=stop_token_ids,
             adapter=adapter,
+            top=top,
         )
 
 
@@ -108,11 +110,15 @@ class Yes:
 yes = Yes()
 
 
-def fake_vllm(engine: ScriptedEngine, *, model: str = MODEL, token: str | None = None) -> Any:
+def fake_vllm(
+    engine: ScriptedEngine, *, model: str = MODEL, token: str | None = None, bodies: list[dict[str, Any]] | None = None
+) -> Any:
     """A fake of vLLM's OpenAI-compatible server over `engine`, serving `model` under its name and the adapters loaded
     under theirs (as `VLLM_ALLOW_RUNTIME_LORA_UPDATING` allows): `/v1/models`, `/v1/completions` of token ids with
-    `return_token_ids` and logprobs (404 for a model it does not have), `/v1/load_lora_adapter` and
-    `/v1/unload_lora_adapter`. With `token`, a request without it as a bearer token is refused (401)."""
+    `return_token_ids` and logprobs, the most likely tokens at each (`logprobs` above 0, by id with
+    `return_tokens_as_token_ids`), and prompt logprobs (`prompt_logprobs`), answered in vLLM's shapes (404 for a model
+    it does not have), `/v1/load_lora_adapter` and `/v1/unload_lora_adapter`. With `token`, a request without it as a
+    bearer token is refused (401). Each completion's body is kept in `bodies`, if given."""
     from starlette.applications import Starlette
     from starlette.requests import Request
     from starlette.responses import JSONResponse, PlainTextResponse, Response
@@ -136,10 +142,15 @@ def fake_vllm(engine: ScriptedEngine, *, model: str = MODEL, token: str | None =
         if (refusal := refused(request)) is not None:
             return refusal
         body = await request.json()
+        if bodies is not None:
+            bodies.append(body)
         asked = body["model"]
         if asked != model and asked not in loaded:
             error = {"message": f"The model `{asked}` does not exist.", "type": "NotFoundError", "code": 404}
             return JSONResponse({"error": error}, status_code=404)
+        if body.get("prompt_logprobs") is not None:
+            return JSONResponse(await scored(body, None if asked == model else asked))
+        top = int(body.get("logprobs") or 0)
         generation = await engine.generate(
             body["prompt"],
             max_tokens=body["max_tokens"],
@@ -147,11 +158,21 @@ def fake_vllm(engine: ScriptedEngine, *, model: str = MODEL, token: str | None =
             top_p=body["top_p"],
             stop_token_ids=body["stop_token_ids"],
             adapter=None if asked == model else asked,
+            top=top,
         )
+        tops: list[Any] = [None] * len(generation.tokens)
+        if top:  # (the sampled token, and the most likely ones beside it)
+            tops = [
+                {f"token_id:{each}": value for each, value in zip(ids, values, strict=True)}
+                | {f"token_id:{token}": logprob}
+                for ids, values, token, logprob in zip(
+                    generation.top_tokens, generation.top_logprobs, generation.tokens, generation.logprobs, strict=True
+                )
+            ]
         logprobs = {
             "tokens": [f"token_id:{each}" for each in generation.tokens],
             "token_logprobs": generation.logprobs,
-            "top_logprobs": [None] * len(generation.tokens),
+            "top_logprobs": tops,
             "text_offset": [0] * len(generation.tokens),
         }
         choice = {
@@ -163,6 +184,24 @@ def fake_vllm(engine: ScriptedEngine, *, model: str = MODEL, token: str | None =
         }
         usage = {"prompt_tokens": len(body["prompt"]), "completion_tokens": len(generation.tokens)}
         return JSONResponse({"object": "text_completion", "model": asked, "choices": [choice], "usage": usage})
+
+    async def scored(body: dict[str, Any], adapter: str | None) -> dict[str, Any]:
+        """A completion with prompt logprobs, as vLLM answers it: a logprob of each prompt token but the first, by its
+        id, beside the most likely tokens there, ranked; and one token generated."""
+        prompt: list[int] = body["prompt"]
+        scores = await engine.score(prompt, start=1, top=body["prompt_logprobs"], adapter=adapter)
+        listed: list[Any] = [None]
+        for at, logprob in enumerate(scores.logprobs, start=1):
+            entry = {str(prompt[at]): {"logprob": logprob, "rank": 1, "decoded_token": chr(prompt[at])}}
+            ranked = (
+                zip(scores.top_tokens[at - 1], scores.top_logprobs[at - 1], strict=True) if scores.top_tokens else ()
+            )
+            for rank, (each, value) in enumerate(ranked, start=1):
+                entry[str(each)] = {"logprob": value, "rank": rank, "decoded_token": chr(each)}
+            listed.append(entry)
+        choice = {"index": 0, "text": "", "logprobs": None, "finish_reason": "length", "prompt_logprobs": listed}
+        usage = {"prompt_tokens": len(prompt), "completion_tokens": 1}
+        return {"object": "text_completion", "model": body["model"], "choices": [choice], "usage": usage}
 
     async def load(request: Request) -> Response:
         if (refusal := refused(request)) is not None:

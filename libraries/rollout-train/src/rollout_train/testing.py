@@ -21,7 +21,8 @@ from rollout.contracts import (
 from rollout.harness.blobs import Blobs
 from rollout.harness.hooks import RunHooks
 from rollout_train.gateway import Attempt, Gateway, GatewayEndpoints, Keyring, TurnStore
-from rollout_train.inference import Channel, Generation, Limits, Routes
+from rollout_train.inference import Channel, Generation, Limits, Routes, Scores
+from rollout_train.inference.channel import scored_range
 from rollout_train.ledger import Ledger
 from rollout_train.recorder import Renderer
 from rollout_train.recorder.renderers import Tokenizer
@@ -37,6 +38,7 @@ __all__ = [
     "recording",
     "sample_request",
     "scripted_engine",
+    "scripted_top",
 ]
 
 SECRETS = [("tests", "a-secret-that-only-tests-sign-with")]
@@ -45,8 +47,8 @@ SECRETS = [("tests", "a-secret-that-only-tests-sign-with")]
 
 class ScriptedEngine:
     """Answers each generate with the next scripted (text, finish reason), or with `always` once the script is
-    spent; logprobs are -0.5 per token. Keeps what it was asked and told. Full weights take `loading` seconds to
-    load."""
+    spent; logprobs are -0.5 per token. Scores each token at -0.25. Keeps what it was asked and told. Full weights take
+    `loading` seconds to load."""
 
     max_model_len = 32_768
     processes: Sequence[int] = ()
@@ -69,6 +71,8 @@ class ScriptedEngine:
         """The adapter each request named."""
         self.told: list[str] = []
         """`load X`, `remove X`, `sleep`, `wake`, `close`, in order."""
+        self.scored: list[tuple[list[int], int, int]] = []
+        """What each scoring request asked for: the tokens up to its end, its start, and its `top`."""
 
     async def generate(
         self,
@@ -79,6 +83,7 @@ class ScriptedEngine:
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        top: int = 0,
     ) -> Generation:
         self.prompts.append(list(prompt))
         self.budgets.append(max_tokens)
@@ -87,7 +92,18 @@ class ScriptedEngine:
             self.script = list(self.always)
         text, finish = self.script.pop(0)
         tokens = self.tokenizer.encode(text, add_special_tokens=False)[:max_tokens]
-        return Generation(tokens=tokens, logprobs=[-0.5] * len(tokens), finish_reason=finish)
+        top_tokens, top_logprobs = scripted_top(tokens, top, -0.5)
+        return Generation(tokens, [-0.5] * len(tokens), finish, top_tokens=top_tokens, top_logprobs=top_logprobs)
+
+    async def score(
+        self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None
+    ) -> Scores:
+        """Each token scored at -0.25, its `top` most likely being itself and the tokens after it (`scripted_top`)."""
+        end = scored_range(len(tokens), start, end)
+        self.scored.append((list(tokens[:end]), start, top))
+        self.adapters.append(adapter)
+        top_tokens, top_logprobs = scripted_top(tokens[start:end], top)
+        return Scores(start, [-0.25] * (end - start), top_tokens=top_tokens, top_logprobs=top_logprobs)
 
     async def load_adapter(self, name: str, path: str) -> None:
         self.told.append(f"load {name}")
@@ -107,6 +123,15 @@ class ScriptedEngine:
 
     def close(self) -> None:
         self.told.append("close")
+
+
+def scripted_top(tokens: Sequence[int], top: int, logprob: float = -0.25) -> tuple[list[list[int]], list[list[float]]]:
+    """The `top` most likely tokens a scripted engine gives at each position of `tokens`: the token there (at
+    `logprob`) and those after it, each a nat less likely than the one before (none when `top` is 0)."""
+    if not top:
+        return [], []
+    ranks = range(top)
+    return [[token + rank for rank in ranks] for token in tokens], [[logprob - rank for rank in ranks] for _ in tokens]
 
 
 class Characters:

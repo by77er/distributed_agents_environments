@@ -16,7 +16,7 @@ from rollout.testing import until
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.following import Follower
 from rollout_train.gateway import GatewayEndpoints
-from rollout_train.inference import Channel, Connection, RemoteEngine, Route, Routes
+from rollout_train.inference import Channel, Connection, Limits, RemoteChannel, RemoteEngine, Route, Routes
 from rollout_train.inference.remote import ENGINES, NotLoaded
 from rollout_train.ledger import Fence, FileLedger
 from rollout_train.presence import FilePresence
@@ -120,6 +120,56 @@ async def test_a_remote_engine_samples_on_a_vllm_server_by_the_name_of_the_check
         with pytest.raises(NotImplementedError, match="full weights"):
             await remote.load_weights("/checkpoints/full")
         remote.close()
+
+
+async def test_a_remote_engine_scores_tokens_with_prompt_logprobs_and_drops_the_token_it_generates() -> None:
+    engine = Saying()
+    bodies: list[dict[str, Any]] = []
+    async with served(fake_vllm(engine, bodies=bodies)) as (address, _):
+        remote = RemoteEngine(MODEL, address=address)
+        tokens = [65, 66, 67, 68, 69]
+        scores = await remote.score(tokens, start=2, end=4, top=2, adapter=None, session="r_1/teacher", request="s/1")
+        assert bodies[-1] == {
+            "model": MODEL, "prompt": [65, 66, 67, 68], "max_tokens": 1, "temperature": 0.0, "prompt_logprobs": 2,
+            "skip_special_tokens": False, "session_id": "r_1/teacher", "request_id": "s/1",
+        }  # fmt: skip
+        assert (scores.start, scores.logprobs, scores.model) == (2, [-0.25, -0.25], MODEL)
+        assert (scores.top_tokens, scores.top_logprobs) == ([[67, 68], [68, 69]], [[-0.25, -1.25], [-0.25, -1.25]])
+        alone = await remote.score(tokens, start=1, adapter=None)  # (no top: each token's own logprob)
+        assert bodies[-1]["prompt_logprobs"] == 0 and alone.logprobs == [-0.25] * 4 and alone.top_tokens == []
+        with pytest.raises(NotLoaded, match="does not exist"):
+            await remote.score(tokens, start=1, adapter="kpqxwlmrtsnvoyzu")
+        await remote.load_adapter("kpqxwlmrtsnvoyzu", "/checkpoints/kpqxwlmrtsnvoyzu/weights")
+        assert (await remote.score(tokens, start=1, adapter="kpqxwlmrtsnvoyzu")).model == "kpqxwlmrtsnvoyzu"
+        assert engine.adapters[-1] == "kpqxwlmrtsnvoyzu"
+
+        reply = await remote.generate([65], adapter=None, top=3, **OPTIONS)  # (the teacher's own samples)
+        assert bodies[-1]["logprobs"] == 3 and bodies[-1]["return_tokens_as_token_ids"] is True
+        assert reply.top_tokens == [[token, token + 1, token + 2] for token in reply.tokens]
+        assert all(values == [-0.5, -1.5, -2.5] for values in reply.top_logprobs)
+        plain = await remote.generate([65], adapter=None, **OPTIONS)
+        assert bodies[-1]["logprobs"] == 0 and "return_tokens_as_token_ids" not in bodies[-1] and not plain.top_tokens
+        remote.close()
+
+
+async def test_a_routed_channel_scores_on_the_sessions_server_and_counts_tokens_in() -> None:
+    async with served(fake_vllm(Saying())) as (address, _):
+
+        async def wanted() -> list[Serving]:
+            return []  # (the run says nothing: the base model)
+
+        channel = RemoteChannel(
+            "teacher", cast(Renderer, PlainRenderer()), Limits(), model=MODEL, servers=[address], wanted=wanted
+        )
+        adapter, depth = await channel.weights("r_1/teacher")
+        assert (adapter, depth) == (None, 0)
+        scores = await channel.score([65, 66, 67], start=1, top=1, adapter=adapter, session="r_1/teacher")
+        assert scores.model == MODEL and scores.top_tokens == [[66], [67]]
+        counted = channel.take()
+        assert (counted["requests"], counted["prompt_tokens"], counted["generated_tokens"]) == (1, 3, 0)
+        with pytest.raises(NotLoaded):  # (its server does not have it: the next look asks for the one before)
+            await channel.score([65, 66], start=1, adapter="kpqxwlmrtsnvoyzu", session="r_1/teacher")
+        channel.close()
 
 
 async def test_a_follower_loads_what_the_run_says_into_its_server_and_beats(tmp_path: Path) -> None:

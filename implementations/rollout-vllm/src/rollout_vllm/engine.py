@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from rollout.processes import children
-from rollout_train.inference.channel import Generation
+from rollout_train.inference.channel import Generation, Scores, most_likely, scored_range
 
 
 class VllmEngine:
@@ -32,6 +32,7 @@ class VllmEngine:
         speculative: Mapping[str, Any] | None = None,
         quantization: str | None = None,
         seed: int = 0,
+        max_logprobs: int = 20,
     ) -> None:
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
         from vllm import AsyncEngineArgs
@@ -53,8 +54,11 @@ class VllmEngine:
             speculative_config=dict(speculative) if speculative else None,
             quantization=quantization,  # (`fp8`: a bfloat16 checkpoint's weights quantized as they load)
             seed=seed,
+            max_logprobs=max_logprobs,
         )
         self.model = model
+        self.max_logprobs = max_logprobs
+        """The most tokens a request may ask for at each position, with their logprobs (`top`)."""
         self.max_model_len = max_model_len
         """The longest sequence (prompt and completion) the engine accepts; a channel reads it."""
         self._engine: Any = AsyncLLM.from_engine_args(arguments)
@@ -73,26 +77,20 @@ class VllmEngine:
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        top: int = 0,
     ) -> Generation:
         from vllm import SamplingParams
-        from vllm.inputs import TokensPrompt
 
         params = SamplingParams(
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
             stop_token_ids=list(stop_token_ids),
-            logprobs=0,
+            logprobs=self._top(top),
             detokenize=False,
             skip_special_tokens=False,
         )
-        lora = self._adapters[adapter] if adapter is not None else None
-        final: Any = None
-        async for output in self._engine.generate(
-            TokensPrompt(prompt_token_ids=list(prompt)), params, f"r{next(self._requests)}", lora_request=lora
-        ):
-            final = output
-        completion = final.outputs[0]
+        completion = (await self._final(prompt, params, adapter)).outputs[0]
         tokens = list(completion.token_ids)
         entries: list[Any] = list(completion.logprobs or [])
         missing = len(entries) != len(tokens) or any(
@@ -102,7 +100,50 @@ class VllmEngine:
             raise RuntimeError("the engine returned a sampled token without its logprob")
         logprobs = [float(entry[token].logprob) for token, entry in zip(tokens, entries, strict=True)]
         finish = "length" if completion.finish_reason == "length" else "stop"
-        return Generation(tokens=tokens, logprobs=logprobs, finish_reason=finish)
+        top_tokens, top_logprobs = tops(entries, tokens, top) if top else ([], [])
+        return Generation(tokens, logprobs, finish, top_tokens=top_tokens, top_logprobs=top_logprobs)
+
+    async def score(
+        self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None
+    ) -> Scores:
+        """The logprobs the model (or `adapter`) gives the tokens at positions `start` to `end` of `tokens`, each given
+        those before it, and the `top` most likely tokens at each: vLLM's prompt logprobs of `tokens` up to `end`, with
+        one token generated (vLLM generates at least one) and dropped. The scores are of the model's own distribution
+        (prompt logprobs skip temperature). The sequence must leave room for that token (`max_model_len`). vLLM
+        computes the logits of every position before `end`, 1,024 positions at a time, so scoring a long sequence takes
+        about 0.6 GiB of the GPU beyond the engine's own share (Qwen3's vocabulary of 152K), however long it is."""
+        from vllm import SamplingParams
+
+        end = scored_range(len(tokens), start, end)
+        params = SamplingParams(
+            max_tokens=1, temperature=0.0, prompt_logprobs=self._top(top), detokenize=False, skip_special_tokens=False
+        )
+        prompt = list(tokens[:end])
+        entries: list[Any] = list((await self._final(prompt, params, adapter)).prompt_logprobs or [])
+        if len(entries) != end or any(entries[at] is None or prompt[at] not in entries[at] for at in range(start, end)):
+            raise RuntimeError("the engine returned a scored token without its logprob")
+        logprobs = [float(entries[at][prompt[at]].logprob) for at in range(start, end)]
+        top_tokens, top_logprobs = tops(entries[start:end], prompt[start:end], top) if top else ([], [])
+        return Scores(start, logprobs, top_tokens=top_tokens, top_logprobs=top_logprobs)
+
+    def _top(self, top: int) -> int:
+        """How many logprobs vLLM is asked for at each position, beside the token's own: `top`, which vLLM caps at
+        `max_logprobs`."""
+        if not 0 <= top <= self.max_logprobs:
+            raise ValueError(f"top is 0 to {self.max_logprobs} (max_logprobs), not {top}")
+        return top
+
+    async def _final(self, prompt: Sequence[int], params: Any, adapter: str | None) -> Any:
+        """vLLM's final output for a request of `prompt`'s tokens, sampled from `adapter` (None: the weights held)."""
+        from vllm.inputs import TokensPrompt
+
+        lora = self._adapters[adapter] if adapter is not None else None
+        final: Any = None
+        async for output in self._engine.generate(
+            TokensPrompt(prompt_token_ids=list(prompt)), params, f"r{next(self._requests)}", lora_request=lora
+        ):
+            final = output
+        return final
 
     async def load_adapter(self, name: str, path: str) -> None:
         """Register a LoRA adapter (a PEFT directory) under `name`; samples name it to use it."""
@@ -143,6 +184,18 @@ class VllmEngine:
 
     def close(self) -> None:
         self._engine.shutdown()
+
+
+def tops(
+    entries: Sequence[Mapping[int, Any]], tokens: Sequence[int], top: int
+) -> tuple[list[list[int]], list[list[float]]]:
+    """The `top` most likely tokens at each position and their logprobs, from vLLM's logprobs there (each position's
+    own token among them, or one more)."""
+    found = [
+        most_likely({int(each): float(value.logprob) for each, value in entry.items()}, token, top)
+        for entry, token in zip(entries, tokens, strict=True)
+    ]
+    return [ids for ids, _ in found], [values for _, values in found]
 
 
 ENGINE_PROCESS = "VLLM::Engine"

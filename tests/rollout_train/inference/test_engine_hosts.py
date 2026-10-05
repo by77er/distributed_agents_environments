@@ -138,6 +138,15 @@ async def test_a_host_follows_its_runs_and_keeps_what_their_lag_lets_a_turn_samp
         assert (await server.generate([65], adapter=None, **OPTIONS)).model == MODEL
         with pytest.raises(NotLoaded, match=f"does not hold {made[0].id}"):
             await server.generate([65], adapter=made[0].id, **OPTIONS)
+        assert (await server.generate([65], adapter=None, top=2, **OPTIONS)).top_tokens  # (a teacher's own samples)
+        scores = await server.score([65, 66, 67], start=1, top=2, adapter=other.id, session="r_1/teacher")
+        assert (scores.model, scores.start, scores.logprobs) == (other.id, 1, [-0.25, -0.25])
+        assert scores.top_tokens == [[66, 67], [67, 68]] and scores.top_logprobs == [[-0.25, -1.25]] * 2
+        assert (await server.score([65, 66], start=1, adapter=None)).model == MODEL
+        with pytest.raises(NotLoaded, match=f"does not hold {made[0].id}"):
+            await server.score([65, 66], start=1, adapter=made[0].id)
+        with pytest.raises(ValueError, match="not a range"):  # (raised in the host, as the gateway refuses it)
+            await server.score([65, 66], start=2, end=1, adapter=None)
 
         beats = [beat for beat in await stores.presence().beats() if beat.about.get("kind") == ENGINES]
         (beat,) = beats

@@ -1,10 +1,14 @@
-"""A channel: which engine serves a session, pausing, publishing weights, and what it counts."""
+"""A channel: which engine serves a session, pausing, publishing weights, scoring tokens, and what it counts."""
 
 import asyncio
 from collections.abc import Sequence
 from typing import Any
 
-from rollout_train.inference import Channel, Generation, Limits
+import pytest
+
+from rollout_train.inference import Channel, Generation, Limits, NotLoaded
+from rollout_train.inference.channel import most_likely
+from rollout_train.testing import scripted_engine
 
 OPTIONS: dict[str, Any] = {"max_tokens": 50, "temperature": 1.0, "top_p": 1.0, "stop_token_ids": [], "adapter": None}
 
@@ -108,3 +112,38 @@ def test_a_channel_takes_the_shortest_limit_among_its_engines_and_the_trainer() 
     small.max_model_len = 4096
     assert channel(small, large).context_limit == 4096
     assert channel(large, limits=Limits(sequence=8000)).context_limit == 8000
+
+
+async def test_a_channel_scores_on_the_sessions_engine_under_what_it_serves_and_counts_tokens_in() -> None:
+    engines = [scripted_engine("m"), scripted_engine("m")]
+    served = Channel("policy", engines, renderer=None, model="m")  # type: ignore[arg-type]
+    tokens = [65, 66, 67, 68, 69]
+    scores = await served.score(tokens, start=2, end=4, top=2, adapter=None, session="s")
+    assert (scores.start, scores.end, scores.logprobs) == (2, 4, [-0.25, -0.25])
+    assert (scores.top_tokens, scores.top_logprobs) == ([[67, 68], [68, 69]], [[-0.25, -1.25], [-0.25, -1.25]])
+    asked = [engine for engine in engines if engine.scored]
+    assert len(asked) == 1 and asked[0].scored == [([65, 66, 67, 68], 2, 2)]  # (the tokens up to the end, no more)
+    counted = served.take()
+    assert (counted["requests"], counted["prompt_tokens"], counted["generated_tokens"]) == (1, 4, 0)
+    named = await served.scored(tokens, start=1, name=None, session="s")
+    assert named.model == "m" and named.top_tokens == [] and len(named.logprobs) == 4
+    with pytest.raises(NotLoaded):
+        await served.scored(tokens, start=1, name="not-loaded")
+    with pytest.raises(ValueError, match="not a range"):
+        await served.score(tokens, start=0, adapter=None)  # (the first token has nothing before it)
+
+
+async def test_a_generation_carries_the_most_likely_tokens_when_asked() -> None:
+    served = Channel("policy", [scripted_engine("m")], renderer=None)  # type: ignore[arg-type]
+    plain = await served.generate([65], **OPTIONS)
+    assert plain.tokens and plain.top_tokens == [] and plain.top_logprobs == []
+    asked = await served.generate([65], top=3, **OPTIONS)
+    assert asked.top_tokens == [[token, token + 1, token + 2] for token in asked.tokens]
+    assert all(values == [-0.5, -1.5, -2.5] for values in asked.top_logprobs)
+
+
+def test_the_most_likely_tokens_leave_out_the_positions_own_token_when_it_is_one_more() -> None:
+    entry = {5: -0.1, 9: -0.7, 2: -3.0}  # (top 2, and the position's own token, 2, outside them)
+    assert most_likely(entry, 2, 2) == ([5, 9], [-0.1, -0.7])
+    assert most_likely({5: -0.1, 9: -0.7}, 9, 2) == ([5, 9], [-0.1, -0.7])  # (its own token among them)
+    assert most_likely({4: -0.2}, 4, 0) == ([], [])

@@ -5,6 +5,9 @@ renderer is the only token format. An adapter is a version's weights directory, 
 (`rollout_tinker.weights`) names the sampler checkpoint to sample from: publishing makes a sampling client for it, at
 once, and requests that name the adapter use it. Nothing runs on this machine, so sleeping and waking do nothing.
 
+It neither scores given tokens nor returns the most likely tokens at each position: Tinker's SDK takes both, and the
+engine leaves them until a live test confirms them (`rollout_train.providers.Capabilities.unchecked`).
+
 A call Tinker refuses for billing (402) is fatal: the engine raises `Unpaid` (a `ModelEndpointError`, which the gateway
 answers as the endpoint failing) for that turn and every later one, without calling Tinker again.
 """
@@ -16,9 +19,14 @@ from tinker import ModelInput, SamplingParams
 
 from rollout_tinker.service import Sampler, Service, Unpaid, said, service_of, unpaid
 from rollout_tinker.weights import pointer
-from rollout_train.inference import Generation
+from rollout_train.inference import Generation, Scores
 
 __all__ = ["TinkerEngine"]
+
+UNCHECKED = (
+    "Tinker's SDK returns prompt and top-k logprobs, but they are not confirmed by a live test yet: the engine neither "
+    "scores tokens nor returns the most likely tokens"
+)
 
 
 class TinkerEngine:
@@ -53,7 +61,10 @@ class TinkerEngine:
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        top: int = 0,
     ) -> Generation:
+        if top:
+            raise NotImplementedError(UNCHECKED)
         self._paid()
         parameters = SamplingParams(
             max_tokens=max_tokens,
@@ -74,6 +85,11 @@ class TinkerEngine:
         return Generation(
             tokens, [float(each) for each in logprobs], "length" if sequence.stop_reason == "length" else "stop"
         )
+
+    async def score(
+        self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None
+    ) -> Scores:
+        raise NotImplementedError(UNCHECKED)
 
     async def load_adapter(self, name: str, path: str) -> None:
         """Sample from the sampler checkpoint that the pointer in `path` (a version's weights) names."""

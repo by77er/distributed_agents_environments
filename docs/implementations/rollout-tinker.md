@@ -225,7 +225,9 @@ end of text still stops it) and returns the sampled ids, a logprob for each, and
 path)` reads the pointer in `path` (a checkpoint's weights) and makes a sampling client for its sampler checkpoint;
 requests that name the adapter sample from it at once. The channel keeps the one before for turns in flight, as with
 vLLM's adapters. `sleep` and `wake` do nothing, `processes` is empty, and `load_weights` refuses full weights: Tinker
-serves adapters over its own models.
+serves adapters over its own models. `score` and a `generate` that asks for the most likely tokens (`top`) are refused
+(`NotImplementedError`): the SDK takes prompt logprobs and a top k (`include_prompt_logprobs`,
+`topk_prompt_logprobs`, `topk_sample_logprobs`), and they wait for a live test.
 
 Tinker's sampling is tuned for throughput, and a turn there may take longer than on the local engine while a world
 keeps running. The run's turn latency (the monitor's turn timings) is worth comparing with a local run's first.

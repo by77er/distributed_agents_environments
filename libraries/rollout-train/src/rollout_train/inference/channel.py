@@ -7,7 +7,7 @@ trains publishes new weights to it; whoever deploys decides which engines stand 
 import asyncio
 import time
 import zlib
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
@@ -25,6 +25,53 @@ class Generation:
     model: str | None = None
     """The model that sampled it, where a server elsewhere says (`rollout_train.inference.remote`): the checkpoint, by
     the name it is served as. The gateway checks that it is the checkpoint it stamps the tokens with."""
+    top_tokens: list[list[int]] = field(default_factory=list[list[int]])
+    """Where a request asked for the `top` most likely tokens at each position: at each sampled token, those tokens,
+    most likely first, under the distribution it was sampled from (empty where none were asked for)."""
+    top_logprobs: list[list[float]] = field(default_factory=list[list[float]])
+    """Their logprobs, beside `top_tokens`."""
+
+
+@dataclass(frozen=True)
+class Scores:
+    """A model's logprobs of given tokens: of each position from `start` on, the logprob of the token there given the
+    tokens before it, and the `top` most likely tokens there with their logprobs, most likely first. Scores are of the
+    model's own distribution (temperature 1)."""
+
+    start: int
+    """The first position scored (at least 1: the first token has nothing before it)."""
+    logprobs: list[float]
+    """Of the token at each position scored, in order."""
+    top_tokens: list[list[int]] = field(default_factory=list[list[int]])
+    """At each position scored, the most likely tokens, most likely first (empty where none were asked for)."""
+    top_logprobs: list[list[float]] = field(default_factory=list[list[float]])
+    """Their logprobs, beside `top_tokens`."""
+    model: str | None = None
+    """The model that scored them, where a server elsewhere says, as `Generation.model`."""
+
+    @property
+    def end(self) -> int:
+        """The position after the last one scored."""
+        return self.start + len(self.logprobs)
+
+
+def scored_range(length: int, start: int, end: int | None) -> int:
+    """The end of the positions `start` to `end` of a sequence of `length` tokens (`end` None: its end), checked:
+    `ValueError` for a range that does not lie within it, or that begins at the first token, which has nothing before
+    it to be scored by."""
+    end = length if end is None else end
+    if not 1 <= start <= end <= length:
+        raise ValueError(f"positions {start} to {end} are not a range to score in a sequence of {length} tokens")
+    return end
+
+
+def most_likely(entry: Mapping[int, float], token: int, top: int) -> tuple[list[int], list[float]]:
+    """The `top` most likely tokens at a position, most likely first, and their logprobs, from the logprobs by token
+    that vLLM returns there: those tokens and the position's own `token`, which is among them or one more."""
+    ranked = sorted(entry.items(), key=lambda item: -item[1])
+    if len(ranked) > top:
+        ranked = [(each, value) for each, value in ranked if each != token][:top]
+    return [each for each, _ in ranked], [value for _, value in ranked]
 
 
 class Engine(Protocol):
@@ -42,7 +89,18 @@ class Engine(Protocol):
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
-    ) -> Generation: ...
+        top: int = 0,
+    ) -> Generation:
+        """Sample a completion of `prompt` from `adapter` (None: the weights it holds). With `top`, each sampled
+        token comes with the `top` most likely tokens there and their logprobs."""
+        ...
+
+    async def score(
+        self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None
+    ) -> Scores:
+        """The logprobs `adapter` gives the tokens at positions `start` to `end` (None: to the end) of `tokens`, each
+        given those before it, with the `top` most likely tokens at each. Nothing is sampled."""
+        ...
 
     async def load_adapter(self, name: str, path: str) -> None:
         """Register a LoRA adapter under `name`; requests name it to sample from it."""
@@ -131,9 +189,27 @@ class Sampler(Protocol):
         session: str = "",
         version: int | None = None,
         request: str | None = None,
+        top: int = 0,
     ) -> Generation:
         """Sample from the checkpoint `adapter` names, stamped `version`; `Unserved` where it is not served (or the
-        server is gone). `request` names the request, for whatever logs it."""
+        server is gone). `request` names the request, for whatever logs it. With `top`, each sampled token comes with
+        the `top` most likely tokens there (`Engine.generate`)."""
+        ...
+
+    async def score(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None = None,
+        top: int = 0,
+        adapter: str | None,
+        session: str = "",
+        version: int | None = None,
+        request: str | None = None,
+    ) -> Scores:
+        """Score the tokens at positions `start` to `end` of `tokens` with the checkpoint `adapter` names
+        (`Engine.score`), as `generate` samples from it."""
         ...
 
 
@@ -188,13 +264,14 @@ class Channel:
         session: str = "",
         version: int | None = None,
         request: str | None = None,
+        top: int = 0,
     ) -> Generation:
         """Sample from one of the engines: the same one for a session every time, where its prompts' shared
         beginnings are cached. `version` and `request` (the version the caller stamps the tokens with, and a name for
         the request) are for samplers elsewhere: this process's own callers read what it publishes."""
         return await self._sampled(
             prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
-            adapter=lambda: adapter, session=session,
+            adapter=lambda: adapter, session=session, top=top,
         )  # fmt: skip
 
     async def sample(
@@ -207,6 +284,7 @@ class Channel:
         stop_token_ids: Sequence[int],
         name: str | None,
         session: str = "",
+        top: int = 0,
     ) -> Generation:
         """Sample what is served under `name` (a checkpoint's id, or the model's name; None: the model), as a server
         elsewhere is asked (`rollout_train.inference.remote.CheckpointServer`): `NotLoaded` where it is not served here
@@ -214,9 +292,40 @@ class Channel:
         names what sampled it."""
         generation = await self._sampled(
             prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
-            adapter=lambda: self.resolved(name), session=session,
+            adapter=lambda: self.resolved(name), session=session, top=top,
         )  # fmt: skip
         return replace(generation, model=name or self.model)
+
+    async def score(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None = None,
+        top: int = 0,
+        adapter: str | None,
+        session: str = "",
+        version: int | None = None,
+        request: str | None = None,
+    ) -> Scores:
+        """Score tokens on the session's engine (`Engine.score`), as `generate` samples there."""
+        return await self._scored(tokens, start=start, end=end, top=top, adapter=lambda: adapter, session=session)
+
+    async def scored(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None = None,
+        top: int = 0,
+        name: str | None,
+        session: str = "",
+    ) -> Scores:
+        """Score tokens with what is served under `name`, as `sample` samples it. The answer names what scored them."""
+        scores = await self._scored(
+            tokens, start=start, end=end, top=top, adapter=lambda: self.resolved(name), session=session
+        )
+        return replace(scores, model=name or self.model)
 
     def resolved(self, name: str | None) -> str | None:
         """The adapter the engines are asked for to sample what is served under `name`: the adapter itself, or None
@@ -239,9 +348,46 @@ class Channel:
         stop_token_ids: Sequence[int],
         adapter: Callable[[], str | None],
         session: str,
+        top: int,
     ) -> Generation:
         """Sample on the session's engine from the adapter `adapter` says, asked once the gate is open (what a load in
         progress left)."""
+
+        async def asked(engine: Engine, chosen: str | None) -> Generation:
+            return await engine.generate(
+                prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
+                adapter=chosen, top=top,
+            )  # fmt: skip
+
+        generation = await self._asked(asked, adapter, session)
+        self._throughput.counted(len(prompt), len(generation.tokens))
+        return generation
+
+    async def _scored(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None,
+        top: int,
+        adapter: Callable[[], str | None],
+        session: str,
+    ) -> Scores:
+        """Score on the session's engine with the adapter `adapter` says, as `_sampled` samples: every token scored
+        is a token in, and none comes out."""
+
+        async def asked(engine: Engine, chosen: str | None) -> Scores:
+            return await engine.score(tokens, start=start, end=end, top=top, adapter=chosen)
+
+        scores = await self._asked(asked, adapter, session)
+        self._throughput.counted(scored_range(len(tokens), start, end), 0)
+        return scores
+
+    async def _asked[T](
+        self, asked: Callable[[Engine, str | None], Awaitable[T]], adapter: Callable[[], str | None], session: str
+    ) -> T:
+        """What `asked` gets of the session's engine and the adapter `adapter` says, once the gate is open (what a
+        load in progress left), counted as a request in flight."""
         while not self._open.is_set():  # (again after waking: the gate may have closed before this task ran)
             await self._open.wait()
         chosen = adapter()
@@ -252,21 +398,12 @@ class Channel:
         self._in_flight += 1
         self._idle.clear()
         try:
-            generation = await engine.generate(
-                prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                stop_token_ids=stop_token_ids,
-                adapter=chosen,
-            )
+            return await asked(engine, chosen)
         finally:
             self._in_flight -= 1
             self._throughput.ended(started, idle=self._in_flight == 0)
             if self._in_flight == 0:
                 self._idle.set()
-        self._throughput.counted(len(prompt), len(generation.tokens))
-        return generation
 
     async def weights(self, session: str) -> tuple[str | None, int]:
         """The adapter a session's next turn samples from (None: the weights the engines hold), and the version its

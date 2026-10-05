@@ -11,13 +11,18 @@ import httpx
 
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.gateway import Gateway, Grant, Keyring, TurnStore, create_app
-from rollout_train.inference import Channel, Generation, Limits, Routes
+from rollout_train.inference import Channel, Generation, Limits, Routes, Scores
+from rollout_train.inference.channel import scored_range
 from rollout_train.ledger import Fence, FileLedger, Ledger
 from rollout_train.recorder import Renderer
-from rollout_train.testing import PlainRenderer
+from rollout_train.testing import PlainRenderer, scripted_top
 
 SECRETS = [("k2", "a-newer-secret-of-thirty-two-bytes!!"), ("k1", "an-older-secret-of-thirty-two-bytes!")]
 """The signing secret first."""
+
+
+MAX_LOGPROBS = 5
+"""The most tokens an echo engine gives at each position it scores."""
 
 
 def keyring() -> Keyring:
@@ -35,6 +40,7 @@ class EchoEngine:
     def __init__(self, delay: float = 0.0) -> None:
         self.delay = delay
         self.prompts: list[list[int]] = []
+        self.scored: list[list[int]] = []
 
     async def generate(
         self,
@@ -45,6 +51,7 @@ class EchoEngine:
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        top: int = 0,
     ) -> Generation:
         self.prompts.append(list(prompt))
         if self.delay:
@@ -53,7 +60,21 @@ class EchoEngine:
         offered = [ord(character) for character in "tools: "] == list(prompt[:7])
         text = f'call move {{"steps": {size % 9}}}\n' if offered and size % 3 == 0 else f"I saw {size} tokens.\n"
         tokens = [ord(character) for character in text][:max_tokens]
-        return Generation(tokens, [-((token % 7) + 1) / 8 for token in tokens], "stop")
+        return Generation(tokens, [echoed(token) for token in tokens], "stop")
+
+    async def score(
+        self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None
+    ) -> Scores:
+        """Each token scored as it would be sampled (`echoed`), the most likely tokens being it and those after it."""
+        end = scored_range(len(tokens), start, end)
+        if top > MAX_LOGPROBS:  # (as vLLM caps it)
+            raise ValueError(f"top is 0 to {MAX_LOGPROBS} (max_logprobs), not {top}")
+        self.scored.append(list(tokens[:end]))
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        top_tokens, _ = scripted_top(tokens[start:end], top)
+        top_logprobs = [[echoed(each) for each in ids] for ids in top_tokens]
+        return Scores(start, [echoed(token) for token in tokens[start:end]], top_tokens, top_logprobs)
 
     async def load_adapter(self, name: str, path: str) -> None: ...
     async def remove_adapter(self, name: str) -> None: ...
@@ -61,6 +82,11 @@ class EchoEngine:
     async def sleep(self) -> None: ...
     async def wake(self) -> None: ...
     def close(self) -> None: ...
+
+
+def echoed(token: int) -> float:
+    """The logprob an echo engine gives a token, sampled or scored (exact in 32 bits)."""
+    return -((token % 7) + 1) / 8
 
 
 def echo_engine(model: str, **options: Any) -> EchoEngine:

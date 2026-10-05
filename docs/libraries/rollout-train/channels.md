@@ -38,6 +38,12 @@ engine runs in this process's care, or is a client of a server elsewhere.
 - **A stop token is part of what was sampled.** A generation that ends on one has the finish reason `stop` and
   holds the token; one that ran out of room has `length`.
 - **Adapters are named.** `load_adapter` registers one, and a request names the one it samples from.
+- **The most likely tokens, when asked.** `generate(…, top=K)` gives, at each sampled token, the K most likely tokens
+  there and their logprobs (`Generation.top_tokens`, `top_logprobs`), of the same distribution.
+- **Scoring.** `score(tokens, start=, end=, top=, adapter=)` samples nothing: it gives the logprob of each token at
+  positions `start` to `end` of `tokens` given the tokens before it, and the `top` most likely tokens at each, under
+  the adapter named (`Scores`: `start`, `logprobs`, `top_tokens`, `top_logprobs`). Scores are of the model's own
+  distribution, at temperature 1. It is how a teacher scores a student's tokens.
 - **`max_model_len`** is the most tokens, prompt and completion together, that the engine accepts.
 - **`sleep` and `wake`** free the accelerator and take it back, for a trainer that shares it.
 - **`processes`** are the processes the engine started on this machine. A deployment writes them down so that the
@@ -46,7 +52,12 @@ engine runs in this process's care, or is a client of a server elsewhere.
 `VllmEngine` is the engine this repository gives: [vLLM engine](../../implementations/rollout-vllm.md).
 `RemoteEngine` is a vLLM server on another machine, over its OpenAI-compatible API
 ([engines elsewhere](#engines-elsewhere)).
-`ScriptedEngine` stands for one in tests ([training](training.md#trying-it-without-a-gpu)).
+`ScriptedEngine` stands for one in tests ([training](training.md#trying-it-without-a-gpu)). `TinkerEngine` neither
+scores nor gives the most likely tokens: Tinker's SDK takes both, and they wait for a live test.
+
+A channel scores as it samples: `Channel.score` on the session's engine, once a load in progress has ended, counted
+in its throughput with the tokens scored as tokens in and none out; `Channel.scored(…, name=)` scores what is served
+under a name, as a server elsewhere is asked.
 
 ## Limits
 
@@ -184,7 +195,8 @@ an adapter of that name.
 
 | Member | Request |
 |---|---|
-| `generate` | `POST /v1/completions`: the prompt's token ids, `model` the adapter (or `model`), `max_tokens`, `temperature`, `top_p`, `stop_token_ids`, `logprobs: 0`, `return_token_ids`, `skip_special_tokens: false`, `session_id`, `request_id`. The answer's `token_ids` are the tokens and its `token_logprobs` their logprobs, the stop token among them; an answer that names another model is refused (`Unserved`), and a model the server does not have is `NotLoaded` |
+| `generate` | `POST /v1/completions`: the prompt's token ids, `model` the adapter (or `model`), `max_tokens`, `temperature`, `top_p`, `stop_token_ids`, `logprobs` (`top`, 0 unless asked), `return_token_ids`, `skip_special_tokens: false`, `session_id`, `request_id`, and `return_tokens_as_token_ids` with a `top`. The answer's `token_ids` are the tokens and its `token_logprobs` their logprobs, the stop token among them, and its `top_logprobs` the most likely tokens at each, by id (`token_id:ID`); an answer that names another model is refused (`Unserved`), and a model the server does not have is `NotLoaded` |
+| `score` | `POST /v1/completions`: the token ids up to `end`, `model` as for `generate`, `max_tokens: 1`, `temperature: 0`, `prompt_logprobs` (`top`), `skip_special_tokens: false`, `session_id`, `request_id`. The answer's `prompt_logprobs` hold each position's tokens by id with their logprobs (none at the first); the one token generated is dropped. Refused as `generate` is. The server caps `top` at its `--max-logprobs` |
 | `models()` | `GET /v1/models`: the models it has, by name, and the longest sequence it accepts (`max_model_len`) |
 | `load_adapter`, `remove_adapter` | `POST /v1/load_lora_adapter`, `/v1/unload_lora_adapter`, by name, from a path on the server's machine (the server must allow it: `VLLM_ALLOW_RUNTIME_LORA_UPDATING=True`) |
 | `load_weights` | refused: a vLLM server serves full weights only under the name it was started with |
@@ -195,9 +207,10 @@ down), a CA bundle, a client certificate. A server must give logprobs of the dis
 (`--logprobs-mode processed_logprobs`), as `VllmEngine` does.
 
 A `RemoteChannel` is one run's channel as the gateway samples it, in place of a `Channel`
-(`Sampler`: a name, a renderer, limits, a context limit, `weights(session)` and `generate`). Its servers are one URL
-(a router, a proxy, a server) or a list, of URLs or of any `CheckpointServer` (`models()` and `generate` by
-checkpoint name: `RemoteEngine`, or an engine host's `HostServer`). Every `every` seconds (2) it reads every checkpoint the run has said the
+(`Sampler`: a name, a renderer, limits, a context limit, `weights(session)`, `generate` and `score`). Its servers are
+one URL (a router, a proxy, a server) or a list, of URLs or of any `CheckpointServer` (`models()`, `generate` and
+`score` by checkpoint name: `RemoteEngine`, or an engine host's `HostServer`). It scores as it samples: on the
+session's server, under the checkpoint named, with the same refusals. Every `every` seconds (2) it reads every checkpoint the run has said the
 channel serves (`serving_of`) and asks each server which models it has; then:
 
 - **Each turn asks for the checkpoint the run says**, by name: `weights(session)` gives it and its depth, the version

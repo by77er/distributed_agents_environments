@@ -5,7 +5,8 @@ router, a proxy, a tunnel). The model a request names is the checkpoint it sampl
 as an adapter named by the checkpoint's id (`/v1/load_lora_adapter`, which the server allows with
 `VLLM_ALLOW_RUNTIME_LORA_UPDATING`), and the base model is served under its own name. A sample is a completion of
 the prompt's token ids (`/v1/completions` with `return_token_ids` and `logprobs`), whose answer names the model that
-sampled it. `RemoteEngine` is an `Engine` over that API, beside `VllmEngine` and the scripted engines.
+sampled it; scoring given tokens is a completion of them with `prompt_logprobs`, its one generated token dropped.
+`RemoteEngine` is an `Engine` over that API, beside `VllmEngine` and the scripted engines.
 
 The gateway records what was sampled, exactly as it was sampled. A `RemoteChannel` is one run's channel as the gateway
 samples it: it reads what the run says the channel should serve
@@ -36,7 +37,17 @@ import httpx
 from pydantic import JsonValue
 
 from rollout_train.http import error_of
-from rollout_train.inference.channel import MAX_LAG, Generation, Limits, NotLoaded, Throughput, Unserved
+from rollout_train.inference.channel import (
+    MAX_LAG,
+    Generation,
+    Limits,
+    NotLoaded,
+    Scores,
+    Throughput,
+    Unserved,
+    most_likely,
+    scored_range,
+)
 from rollout_train.ledger import Ledger
 from rollout_train.serving import Serving, qualified, serving_of
 
@@ -84,9 +95,26 @@ class CheckpointServer(Protocol):
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        top: int = 0,
     ) -> Generation:
         """Sample from the checkpoint `adapter` names (None: the model it started with); `NotLoaded` where it does not
-        hold it, `Unreachable` where it does not answer. The answer names what sampled it (`Generation.model`)."""
+        hold it, `Unreachable` where it does not answer. The answer names what sampled it (`Generation.model`). With
+        `top`, each sampled token comes with the `top` most likely tokens there (`Engine.generate`)."""
+        ...
+
+    async def score(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None = None,
+        top: int = 0,
+        adapter: str | None,
+        session: str = "",
+        request: str | None = None,
+    ) -> Scores:
+        """Score tokens with the checkpoint `adapter` names (`Engine.score`), refused as `generate` refuses. The answer
+        names what scored them (`Scores.model`)."""
         ...
 
     def close(self) -> None: ...
@@ -199,9 +227,11 @@ class RemoteEngine:
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        top: int = 0,
     ) -> Generation:
         """Complete the prompt's tokens with the model `adapter` names (the base model for none): the tokens sampled,
-        the logprob of each, how it ended, and the model the server says sampled it."""
+        the logprob of each, how it ended, and the model the server says sampled it. With `top`, the `top` most likely
+        tokens at each, by id (`return_tokens_as_token_ids`)."""
         model = adapter or self.model
         body: dict[str, JsonValue] = {
             "model": model,
@@ -210,27 +240,88 @@ class RemoteEngine:
             "temperature": temperature,
             "top_p": top_p,
             "stop_token_ids": list(stop_token_ids),
-            "logprobs": 0,
+            "logprobs": top,
             "return_token_ids": True,
             "skip_special_tokens": False,
             "include_stop_str_in_output": True,
         }
+        if top:
+            body["return_tokens_as_token_ids"] = True
+        choice = await self._completed(body, session, request)
+        listed: list[Any] = choice.get("token_ids") or []
+        tokens = [int(token) for token in listed]
+        said = _object(choice.get("logprobs"))
+        logprobs: list[Any] = said.get("token_logprobs") or []
+        if len(logprobs) != len(tokens) or any(each is None for each in logprobs):
+            raise RuntimeError(f"{self.address} returned a sampled token without its logprob")
+        finish = "length" if choice.get("finish_reason") == "length" else "stop"
+        tops: list[tuple[list[int], list[float]]] = []
+        if top:
+            entries: list[Any] = said.get("top_logprobs") or []
+            if len(entries) != len(tokens):
+                raise RuntimeError(f"{self.address} returned a sampled token without its most likely tokens")
+            tops = [most_likely(_by_id(entry), token, top) for token, entry in zip(tokens, entries, strict=True)]
+        return Generation(
+            tokens=tokens, logprobs=[float(each) for each in logprobs], finish_reason=finish, model=model,
+            top_tokens=[ids for ids, _ in tops], top_logprobs=[values for _, values in tops],
+        )  # fmt: skip
+
+    async def score(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None = None,
+        top: int = 0,
+        adapter: str | None,
+        session: str = "",
+        request: str | None = None,
+    ) -> Scores:
+        """The logprobs the model `adapter` names (the base model for none) gives the tokens at positions `start` to
+        `end` of `tokens`, with the `top` most likely tokens at each, and the model the server says scored them: a
+        completion of the tokens up to `end` with `prompt_logprobs`, whose one generated token (vLLM generates at least
+        one) is dropped. The server caps `top` at its `--max-logprobs`."""
+        end = scored_range(len(tokens), start, end)
+        prompt = [int(token) for token in tokens[:end]]
+        body: dict[str, JsonValue] = {
+            "model": adapter or self.model,
+            "prompt": list(prompt),
+            "max_tokens": 1,
+            "temperature": 0.0,
+            "prompt_logprobs": top,
+            "skip_special_tokens": False,
+        }
+        choice = await self._completed(body, session, request)
+        listed: list[Any] = choice.get("prompt_logprobs") or []
+        if len(listed) != end:
+            raise RuntimeError(f"{self.address} returned {len(listed)} prompt logprobs for {end} tokens")
+        logprobs: list[float] = []
+        tops: list[tuple[list[int], list[float]]] = []
+        for at in range(start, end):
+            entry = _by_id(listed[at])
+            if prompt[at] not in entry:
+                raise RuntimeError(f"{self.address} returned a scored token without its logprob")
+            logprobs.append(entry[prompt[at]])
+            if top:
+                tops.append(most_likely(entry, prompt[at], top))
+        return Scores(
+            start, logprobs, top_tokens=[ids for ids, _ in tops], top_logprobs=[values for _, values in tops],
+            model=str(body["model"]),
+        )  # fmt: skip
+
+    async def _completed(self, body: dict[str, JsonValue], session: str, request: str | None) -> dict[str, Any]:
+        """The one choice of a completion of `body`, refused (`Unserved`) where another model answered than the one it
+        names."""
         if session:
             body["session_id"] = session
         if request:
             body["request_id"] = request
         said = await self._call("POST", "/v1/completions", body)
-        if said.get("model") != model:  # (whatever passed the request on sent it to another model)
-            raise Unserved(f"{model} was asked for, and {said.get('model')} answered")
+        if said.get("model") != body["model"]:  # (whatever passed the request on sent it to another model)
+            raise Unserved(f"{body['model']} was asked for, and {said.get('model')} answered")
         choices: list[Any] = said["choices"]
         (choice,) = map(_object, choices)
-        listed: list[Any] = choice.get("token_ids") or []
-        tokens = [int(token) for token in listed]
-        logprobs: list[Any] = _object(choice.get("logprobs")).get("token_logprobs") or []
-        if len(logprobs) != len(tokens) or any(each is None for each in logprobs):
-            raise RuntimeError(f"{self.address} returned a sampled token without its logprob")
-        finish = "length" if choice.get("finish_reason") == "length" else "stop"
-        return Generation(tokens=tokens, logprobs=[float(each) for each in logprobs], finish_reason=finish, model=model)
+        return choice
 
     async def load_adapter(self, name: str, path: str) -> None:
         """Load the adapter at `path` (read on the server's machine) under `name`. One the server holds under that name
@@ -275,6 +366,15 @@ class RemoteEngine:
             said = error_of(response).get("message") or response.text[:300]
             raise RuntimeError(f"{self.address}: {response.status_code} {said}")
         return _answer(response) if answer else {}
+
+
+def _by_id(entry: Any) -> dict[int, float]:
+    """Logprobs by token id, from what vLLM's API returns at a position: a prompt position's `{"ID": {"logprob": …}}`,
+    or a sampled token's `{"token_id:ID": LOGPROB}` (`return_tokens_as_token_ids`)."""
+    found: dict[int, float] = {}
+    for key, value in _object(entry).items():
+        found[int(str(key).removeprefix("token_id:"))] = float(_object(value).get("logprob", value))
+    return found
 
 
 def _accepted(listing: Mapping[str, Any], model: str) -> int:
@@ -450,9 +550,50 @@ class RemoteChannel:
         session: str = "",
         version: int | None = None,
         request: str | None = None,
+        top: int = 0,
     ) -> Generation:
         """Sample on the session's server, from the checkpoint `adapter` names. `Unserved` if the server does not have
         it any more (`NotLoaded`), answers for another, or does not answer (`Unreachable`)."""
+
+        async def asked(server: CheckpointServer) -> Generation:
+            return await server.generate(
+                prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
+                adapter=adapter, session=session, request=request, top=top,
+            )  # fmt: skip
+
+        generation = await self._asked(asked, adapter, session)
+        self._throughput.counted(len(prompt), len(generation.tokens))
+        return generation
+
+    async def score(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None = None,
+        top: int = 0,
+        adapter: str | None,
+        session: str = "",
+        version: int | None = None,
+        request: str | None = None,
+    ) -> Scores:
+        """Score tokens on the session's server with the checkpoint `adapter` names, refused as `generate` is: every
+        token scored is counted as a token in, and none as a token out."""
+
+        async def asked(server: CheckpointServer) -> Scores:
+            return await server.score(
+                tokens, start=start, end=end, top=top, adapter=adapter, session=session, request=request
+            )
+
+        scores = await self._asked(asked, adapter, session)
+        self._throughput.counted(scored_range(len(tokens), start, end), 0)
+        return scores
+
+    async def _asked[T](
+        self, asked: Callable[[CheckpointServer], Awaitable[T]], adapter: str | None, session: str
+    ) -> T:
+        """What `asked` gets of the session's server, counted as a request in flight. A server that does not answer
+        takes no turn until the next look; one that no longer has the checkpoint is asked for the one before."""
         address = self.server_of(session)
         if address is None:
             raise Unserved(f"no server of {self.name} would take a turn of session {session}")
@@ -461,16 +602,7 @@ class RemoteChannel:
             self._throughput.busy(started)
         self._in_flight += 1
         try:
-            generation = await self._engines[address].generate(
-                prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                stop_token_ids=stop_token_ids,
-                adapter=adapter,
-                session=session,
-                request=request,
-            )
+            return await asked(self._engines[address])
         except Unreachable:
             self._has.pop(address, None)
             raise
@@ -480,8 +612,6 @@ class RemoteChannel:
         finally:
             self._in_flight -= 1
             self._throughput.ended(started, idle=self._in_flight == 0)
-        self._throughput.counted(len(prompt), len(generation.tokens))
-        return generation
 
     def servers(self) -> list[dict[str, JsonValue]]:
         """The servers it samples on, as last asked: each one's address, the checkpoint it would sample from now and its

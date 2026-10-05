@@ -11,11 +11,11 @@ to it; the runs it serves may change while it runs (`bind`, `unbind`). Several r
 engines, and full weights are loaded under the checkpoint's id, replica by replica (`rollout_train.following`).
 
 It is asked as a server elsewhere is (`rollout_train.inference.remote.CheckpointServer`): `models` lists what it holds
-(as vLLM's `/v1/models` does), and `generate` samples the checkpoint a request names, refusing one it does not hold
-(`NotLoaded`). A turn caught by a full checkpoint's load waits for it, and is then refused unless what it named is still
-held, so it is sampled again from the start. `HostServer` is that server over an actor handle, for a `RemoteChannel` in
-the same Ray cluster; `HostPausable` holds its requests back and puts its engines to sleep for a colocated trainer
-(`rollout_train.colocated`).
+(as vLLM's `/v1/models` does), `generate` samples the checkpoint a request names and `score` scores given tokens with
+it, each refusing one it does not hold (`NotLoaded`). A turn caught by a full checkpoint's load waits for it, and is
+then refused unless what it named is still held, so it is sampled again from the start. `HostServer` is that server
+over an actor handle, for a `RemoteChannel` in the same Ray cluster; `HostPausable` holds its requests back and puts
+its engines to sleep for a colocated trainer (`rollout_train.colocated`).
 
 It asks Ray for GPUs (`host_spec`): a replica's share of its provider's, half of it where the run's trainer shares the
 card. On Kubernetes, a share no node has free makes KubeRay's autoscaler start a GPU worker for it. Ray starts it again
@@ -26,7 +26,7 @@ import asyncio
 import contextlib
 import socket
 import time
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Awaitable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -37,7 +37,7 @@ from rollout.names import named
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.cluster import SCRATCH, Cluster
 from rollout_train.following import Binding, Follower
-from rollout_train.inference.channel import Channel, Engine, Generation, NotLoaded
+from rollout_train.inference.channel import Channel, Engine, Generation, NotLoaded, Scores
 from rollout_train.inference.remote import Unreachable
 from rollout_train.presence import presence_of
 from rollout_train.providers import INFERENCE_KINDS
@@ -148,14 +148,31 @@ class EngineHost:
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        top: int = 0,
     ) -> Generation:
         """Sample the checkpoint `adapter` names (None: the model), as a `CheckpointServer`; `NotLoaded` where it does
         not hold it (once a load in progress has ended)."""
         channel = self._holding(adapter)
         return await channel.sample(
             prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
-            name=adapter, session=session,
+            name=adapter, session=session, top=top,
         )  # fmt: skip
+
+    async def score(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None = None,
+        top: int = 0,
+        adapter: str | None,
+        session: str = "",
+        request: str | None = None,
+    ) -> Scores:
+        """Score tokens with the checkpoint `adapter` names (None: the model), as a `CheckpointServer`, refused as
+        `generate` is."""
+        channel = self._holding(adapter)
+        return await channel.scored(tokens, start=start, end=end, top=top, name=adapter, session=session)
 
     def _holding(self, name: str | None) -> Channel:
         """The channel that holds what `name` names: the run's channel it was published on, or the model's own."""
@@ -295,12 +312,36 @@ class HostServer:
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        top: int = 0,
     ) -> Generation:
-        try:
-            return await self.handle.generate.remote(
+        return await self._called(
+            self.handle.generate.remote(
                 list(prompt), max_tokens=max_tokens, temperature=temperature, top_p=top_p,
-                stop_token_ids=list(stop_token_ids), adapter=adapter, session=session, request=request,
-            )  # fmt: skip
+                stop_token_ids=list(stop_token_ids), adapter=adapter, session=session, request=request, top=top,
+            )
+        )  # fmt: skip
+
+    async def score(
+        self,
+        tokens: Sequence[int],
+        *,
+        start: int,
+        end: int | None = None,
+        top: int = 0,
+        adapter: str | None,
+        session: str = "",
+        request: str | None = None,
+    ) -> Scores:
+        return await self._called(
+            self.handle.score.remote(
+                list(tokens), start=start, end=end, top=top, adapter=adapter, session=session, request=request
+            )
+        )
+
+    async def _called[T](self, call: Awaitable[T]) -> T:
+        """What an actor call answers: the host's `NotLoaded` as one, and a host that is not there as `Unreachable`."""
+        try:
+            return await call
         except NotLoaded as error:  # (Ray raises the host's own error, as an instance of its class)
             raise NotLoaded(str(error).splitlines()[-1]) from error
         except _gone() as error:
