@@ -13,3 +13,5 @@ site/
 
 # node
 node_modules/
+# Machine-specific scripts and notes, kept out of the repository
+local/

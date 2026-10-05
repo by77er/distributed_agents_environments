@@ -10,8 +10,6 @@ processes outside the cluster keep using it.
 | `device-plugin.yaml` | Values for NVIDIA's device plugin chart: the node advertises its card as one `nvidia.com/gpu`, for one Ray worker pod, and Ray shares it among its actors with fractional `num_gpus` |
 | `storage-class.yaml` | The StorageClass `local-path-retain`: K3s's local-path volumes, kept when their claims are deleted |
 | `build.yaml` | Building images in the cluster: a registry the node pulls from at `localhost:30500`, and BuildKit |
-| `migrate.sh` | Copies the platform's state on this machine into the chart's stores and volume, reading the host's files only; `--dry-run` says what it would do |
-| `cutover.md` | Moving from the services on the host to the cluster, step by step, and back |
 
 ## Setup
 
@@ -102,23 +100,6 @@ install that makes a new one:
 ```sh
 for pv in $(kubectl get pv -o name); do kubectl patch $pv -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'; done
 ```
-
-### Moving the host's state in
-
-`deploy/k3s/migrate.sh` copies what the host's services kept, through a pod that mounts `~/.cache/rollout` read-only:
-
-- the run directories, the evaluations' directories, `datasets/`, `gsm8k-tinker/`, Minecraft's files and the JDK onto
-  the volume `state`; each run's `ledger.json` then names the cluster's ledger;
-- the stores of files that the ledger's records point into, into the bucket (`python -m rollout_s3.copying`): those
-  named by a location in a record (`gsm8k-tinker/blobs` by the GSM8K eval's start, `datasets/blobs` by the dataset),
-  and each run's own `RUN/blobs` (curriculum-9's episodes and checkpoints, named by their blobs' URIs). Blobs are named
-  by their SHA-256, so the stores merge into `s3://rollout-blobs/blobs` without a clash;
-- the ledger: a consistent copy of `ledger.db`, rewritten so that the stores that moved are named as the bucket and
-  their blobs by the bucket's URIs, and paths under `~/.cache/rollout` are under `/root/.cache/rollout`
-  (`python -m rollout_train.relocating`), then copied into a new, empty database with `rollout ledger copy`. A run
-  whose start names no store (curriculum-9) is read from its directory, as on the host.
-
-The Hugging Face cache is not copied: pods download what they load into `HF_HOME` on the volume, once.
 
 ## Undo
 

@@ -76,7 +76,7 @@ Read-only queries of `~/.cache/rollout/ledger.db` decide which compatibility rea
 - **Empty tables:** `launches`, `run_settings`, `sandboxes` and `suite_names`.
 - **Index:** `ledger_records_order` exists.
 - **Presence:** three live roles.
-  - `launcher/DESKTOP-TRLNC1U/gsm8k` uses **the process backend**. It runs `rollout_verifiers.environments:gsm8k` from
+  - `launcher/HOST/gsm8k` uses **the process backend**. It runs `rollout_verifiers.environments:gsm8k` from
     rollout-verifiers' own project, which has no Ray.
   - A Ray launcher offers the profiles `one-gpu` and `tinker`.
   - A gateway replica runs as `rollout gateway gsm8k_tinker.toml`.

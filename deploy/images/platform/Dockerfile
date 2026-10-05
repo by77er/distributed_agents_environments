@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && cd environments/minecraft/harness && npm ci --omit=dev \
     && ray --version && java -version 2>&1 | head -1 && node --version
 # rollout-verifiers in a Python environment of its own, from its own lock: GSM8K's launcher and the evals it starts;
-# rsync, which deploy/k3s/migrate.sh copies run directories with.
+# rsync, for copying run directories onto the state volume.
 RUN apt-get update && apt-get install -y --no-install-recommends rsync && rm -rf /var/lib/apt/lists/*
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_PROJECT_ENVIRONMENT=/opt/rollout/verifiers uv sync --frozen --project implementations/rollout-verifiers \
