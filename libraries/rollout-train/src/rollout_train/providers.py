@@ -93,8 +93,9 @@ type AuthKind = Literal["mtls", "bearer", "vendor", "none"]
 AUTHS: tuple[AuthKind, ...] = ("mtls", "bearer", "vendor", "none")
 """How a provider is reached: mutual TLS with the cluster's CA, a bearer token, the vendor's SDK, or nothing (only on
 this machine)."""
-BEATS = "beats"
-"""An `Auth.identity` that says each server's SPIFFE identity is the one its heartbeat names (a RunPod pod's)."""
+LEASED = "leased"
+"""An `Auth.identity` that says each server's SPIFFE identity is the one named for the pod its lease names (a RunPod
+pod's: `spiffe://rollout/pod/NAME`)."""
 RUNPOD = ("runpod-inference", "runpod-host", "runpod-trainer")
 """The kinds whose servers are RunPod's pods, leased by the runs that use them."""
 POD_FIELDS = (
@@ -152,7 +153,8 @@ class Auth:
     """How a provider is reached. `token` for `bearer`; `key` for `vendor` (what the vendor's SDK reads, named so that
     `rollout cluster check` can say whether it resolves); `trust` says whose CAs verify the server (`system` or
     `cluster`; by default the cluster's for `mtls`, the system's otherwise); `identity` is the SPIFFE identity the
-    server's certificate must carry (`beats`: each server's own, from its heartbeat), in place of its host name."""
+    server's certificate must carry (`leased`: each server's own, named for the pod its lease names), in place of its
+    host name."""
 
     kind: AuthKind = "none"
     token: Secret | None = None
@@ -182,16 +184,16 @@ class Auth:
     def connection(self, tls: Tls | None = None, *, identity: str | None = None) -> Connection:
         """The settings a client reaches the provider's servers with: the cluster's CA or the system's; a client
         certificate only for `mtls`; the server's SPIFFE identity checked in place of its host name where one is said
-        (`identity`, the server's own from its heartbeat when `self.identity` is `beats`); else its host name. Raises
+        (`identity`, the pod's own, named for it, when `self.identity` is `leased`); else its host name. Raises
         `ValueError` where the cluster has no `[tls]` it needs."""
         if self.kind in ("none", "vendor"):
             return Connection()
         if self.trusts == "cluster" and (tls is None or tls.ca is None):
             raise ValueError("the cluster's CA is needed ([tls] ca) to verify this provider's servers")
         ca = tls.ca if self.trusts == "cluster" and tls is not None else None
-        checked = identity if self.identity == BEATS else self.identity
-        if self.identity == BEATS and identity is None:
-            raise ValueError("each server's identity comes from its heartbeat: pass the one it names")
+        checked = identity if self.identity == LEASED else self.identity
+        if self.identity == LEASED and identity is None:
+            raise ValueError("each server's identity is its pod's own: pass the one named for it")
         if self.kind == "bearer":
             assert self.token is not None
             return Connection(token_env=self.token.env, token_file=self.token.file, ca=ca, identity=checked)
@@ -397,7 +399,7 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
                 bills="hours",
             ),
             auths=("mtls",),
-            auth=Auth("mtls", identity=BEATS),
+            auth=Auth("mtls", identity=LEASED),
             fields=(*POD_FIELDS, "max_logprobs", "memory_fraction"),
             secrets=("api_key",),
             implementation="rollout_train.pods.inference:InferencePod",
@@ -413,7 +415,7 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
                 bills="hours",
             ),
             auths=("mtls",),
-            auth=Auth("mtls", identity=BEATS),
+            auth=Auth("mtls", identity=LEASED),
             fields=(*POD_FIELDS, "max_logprobs", "memory_fraction", "sleep"),
             secrets=("api_key",),
             implementation="rollout_train.pods.inference:InferencePod",
@@ -559,7 +561,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_train.pods:RemoteTrainer",
             "rollout_lora.settings:LoraSettings",
             auths=("mtls",),
-            auth=Auth("mtls", identity=BEATS),
+            auth=Auth("mtls", identity=LEASED),
             fields=("trainer", *POD_FIELDS),
             secrets=("api_key",),
             not_settings=_OBJECTIVE,

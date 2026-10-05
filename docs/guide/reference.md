@@ -29,7 +29,7 @@ do not edit by hand.
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
 - **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
-- **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: identities, leases, a run's pods, the reaper, the trainer's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`HELD`](#held), [`IDLE`](#idle), [`LeaseLost`](#leaselost), [`live`](#live), [`needs_of`](#needs_of), [`pod_identity`](#pod_identity), [`pod_leases_of`](#pod_leases_of), [`PodAddress`](#podaddress), [`PodLease`](#podlease), [`PodLeases`](#podleases), [`PodNeed`](#podneed), [`Pods`](#pods), [`PodsDidNotStart`](#podsdidnotstart), [`PodTime`](#podtime), [`reap`](#reap), [`RemoteTrainer`](#remotetrainer), [`STARTING`](#starting), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
+- **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: identities, leases, a run's pods, the reaper, the trainer's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`HELD`](#held), [`IDLE`](#idle), [`LeaseLost`](#leaselost), [`live`](#live), [`LivePod`](#livepod), [`needs_of`](#needs_of), [`pod_identity`](#pod_identity), [`pod_leases_of`](#pod_leases_of), [`PodLease`](#podlease), [`PodLeases`](#podleases), [`PodNeed`](#podneed), [`Pods`](#pods), [`PodsDidNotStart`](#podsdidnotstart), [`PodTime`](#podtime), [`reap`](#reap), [`RemoteTrainer`](#remotetrainer), [`STARTING`](#starting), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
 - **[`rollout_train.pki`](#rollout_trainpki)** — The certificates the platform holds, from the cluster's step-ca, published as Secrets. [`provisioner_key`](#provisioner_key), [`publish`](#rollout_trainpkipublish)
 - **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`CapacitySection`](#capacitysection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`KubernetesSection`](#kubernetessection), [`LedgerSection`](#ledgersection), [`load`](#load), [`located`](#located), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, allocation, routing. [`ALLOCATIONS`](#allocations), [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`POD_FIELDS`](#pod_fields), [`pod_table`](#pod_table), [`PodTable`](#podtable), [`ROUTING`](#routing), [`Routing`](#routing), [`RUNPOD`](#runpod), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
@@ -3792,7 +3792,7 @@ How servers are reached: a bearer token read from an environment variable (`toke
 | `ca` | `str \| None` | `None` |  |
 | `certificate` | `str \| None` | `None` |  |
 | `key` | `str \| None` | `None` |  |
-| `identity` | `str \| None` | `None` | The URI SAN the server's certificate must carry (`spiffe://rollout/pod/NAME`), checked in the TLS handshake in place of the host name: a server whose certificate names another identity, or none, is refused before anything is sent to it. None: the host name is checked, as TLS does. |
+| `identity` | `str \| None` | `None` | The URI SAN the server's certificate must carry (`spiffe://rollout/pod/NAME`), checked in the TLS handshake in place of the host name: a server whose certificate names another identity, or none, is refused before anything is sent to it. A connection with an identity reaches only `https://` addresses: a request to any other is refused before it is sent (`httpx.UnsupportedProtocol`). None: the host name is checked, as TLS does. |
 
 **Methods**
 
@@ -6214,11 +6214,32 @@ A lease the run held was taken from it (a reaper found it stale).
 *function* · `libraries/rollout-train/src/rollout_train/pods/identity.py`
 
 ```python
-def live(beats: Iterable[Beat], role: str | None = None) -> list[PodAddress]
+def live(beats: Iterable[Beat], role: str | None = None) -> list[LivePod]
 ```
 
-The pods whose newest beat is fresh, says an address, and names the identity named for the pod (of `role`, if
-given), by name. A beat that says another identity than its pod's name is left out: nothing reaches it.
+The pods whose newest beat is fresh and names the identity named for the pod (of `role`, if given), by name. A
+beat that says another identity than its pod's name is left out: nothing reaches it. Whatever else a beat says (an
+address, say) is not read.
+
+### `LivePod`
+
+*class* · `libraries/rollout-train/src/rollout_train/pods/identity.py`
+
+```python
+class LivePod
+```
+
+A pod that is alive, as its newest beat says: its name, the identity its certificate must carry, its role
+(`inference` or `trainer`), whether it is ready, and its certificate's serial (for whoever started the pod, which
+has the certificate of a pod it no longer counts as its own revoked). Where it is reached is its lease's.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required |  |
+| `identity` | `str` | required |  |
+| `role` | `str` | required |  |
+| `ready` | `bool` | required |  |
+| `serial` | `str \| None` | `None` |  |
 
 ### `needs_of`
 
@@ -6254,27 +6275,6 @@ def pod_leases_of(ledger: Ledger) -> PodLeases | None
 The pods' leases beside a ledger: a file beside a ledger of files, tables in a database ledger's database, the
 service's for a ledger reached through it.
 
-### `PodAddress`
-
-*class* · `libraries/rollout-train/src/rollout_train/pods/identity.py`
-
-```python
-class PodAddress
-```
-
-A pod that is alive, as its newest beat says: its name, the identity its certificate must carry, the address it
-is reached at (`https://IP:PORT`), its role (`inference` or `trainer`), whether it is ready, and its certificate's
-serial (for whoever started the pod, which has the certificate of a pod it no longer counts as its own revoked).
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `name` | `str` | required |  |
-| `identity` | `str` | required |  |
-| `address` | `str` | required |  |
-| `role` | `str` | required |  |
-| `ready` | `bool` | required |  |
-| `serial` | `str \| None` | `None` |  |
-
 ### `PodLease`
 
 *class* · `libraries/rollout-train/src/rollout_train/pods/leases.py`
@@ -6295,6 +6295,7 @@ class PodLease
 | `price` | `float` | required | Dollars an hour: RunPod's `costPerHr` for it, else the provider's `price`. |
 | `cloud` | `str` | `'SECURE'` |  |
 | `id` | `str \| None` | `None` | RunPod's id for it, once asked for. |
+| `address` | `str \| None` | `None` | Where the pod is reached, `https://IP:PORT`: its public IP and the public port its 8443/tcp is mapped to, as RunPod's API says (`rollout_runpod.Pod.address`), read by whoever leased it; none until RunPod has said. The only address the pod is reached at: nothing the pod says of itself is. |
 | `run` | `str \| None` | `None` | The run that holds it (none: idle). |
 | `channel` | `str \| None` | `None` | The run's channel it serves (an inference or host pod). |
 | `token` | `str \| None` | `None` | The ledger service's token for the pod and the run that holds it: read by the pod itself and the platform. |
@@ -6881,7 +6882,8 @@ class Auth
 How a provider is reached. `token` for `bearer`; `key` for `vendor` (what the vendor's SDK reads, named so that
 `rollout cluster check` can say whether it resolves); `trust` says whose CAs verify the server (`system` or
 `cluster`; by default the cluster's for `mtls`, the system's otherwise); `identity` is the SPIFFE identity the
-server's certificate must carry (`beats`: each server's own, from its heartbeat), in place of its host name.
+server's certificate must carry (`leased`: each server's own, named for the pod its lease names), in place of its
+host name.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -6896,7 +6898,7 @@ server's certificate must carry (`beats`: each server's own, from its heartbeat)
 - `@property def trusts(self) -> Literal['system', 'cluster']` — Whose CAs verify the server.
 - `def connection(self, tls: Tls | None = None, *, identity: str | None = None) -> Connection` — The settings a client reaches the provider's servers with: the cluster's CA or the system's; a client
   certificate only for `mtls`; the server's SPIFFE identity checked in place of its host name where one is said
-  (`identity`, the server's own from its heartbeat when `self.identity` is `beats`); else its host name. Raises
+  (`identity`, the pod's own, named for it, when `self.identity` is `leased`); else its host name. Raises
   `ValueError` where the cluster has no `[tls]` it needs.
 
 ### `AUTHS`
@@ -6943,7 +6945,7 @@ What an inference provider's kind can do.
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-INFERENCE_KINDS: Mapping[str, InferenceKind] = {each.name: each for each in (InferenceKind('vllm', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=True, loads=frozenset({'peft', 'full'})), auths=('none', 'bearer', 'mtls'), auth=Auth('none'), fields=('engine', 'listen', 'max_logprobs'), implementation='rollout_vllm:VllmEngine'), InferenceKind('vllm-servers', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'})), auths=('none', 'bearer', 'mtls'), auth=None, fields=('addresses', 'via', 'loader', 'max_logprobs'), implementation='rollout_train.inference:RemoteEngine', remote=True), InferenceKind('tinker', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'tinker'}), bills='tokens', unchecked=frozenset({'prompt_logprobs', 'top_logprobs'})), auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), implementation='rollout_tinker:TinkerEngine', allocation='metered'), InferenceKind('api', Capabilities(token_exact=False, sampled_logprobs=False, prompt_logprobs=False, top_logprobs=0, honours_sampling=False, adapters=False, full_reload=False, streaming=True, loads=frozenset(), bills='tokens'), auths=('vendor', 'bearer'), auth=Auth('vendor'), fields=('endpoint', 'base_url'), secrets=('api_key',), allocation='metered'), InferenceKind('runpod-inference', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=(*POD_FIELDS, 'max_logprobs', 'memory_fraction'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True), InferenceKind('runpod-host', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=(*POD_FIELDS, 'max_logprobs', 'memory_fraction', 'sleep'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True))}
+INFERENCE_KINDS: Mapping[str, InferenceKind] = {each.name: each for each in (InferenceKind('vllm', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=True, loads=frozenset({'peft', 'full'})), auths=('none', 'bearer', 'mtls'), auth=Auth('none'), fields=('engine', 'listen', 'max_logprobs'), implementation='rollout_vllm:VllmEngine'), InferenceKind('vllm-servers', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'})), auths=('none', 'bearer', 'mtls'), auth=None, fields=('addresses', 'via', 'loader', 'max_logprobs'), implementation='rollout_train.inference:RemoteEngine', remote=True), InferenceKind('tinker', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'tinker'}), bills='tokens', unchecked=frozenset({'prompt_logprobs', 'top_logprobs'})), auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), implementation='rollout_tinker:TinkerEngine', allocation='metered'), InferenceKind('api', Capabilities(token_exact=False, sampled_logprobs=False, prompt_logprobs=False, top_logprobs=0, honours_sampling=False, adapters=False, full_reload=False, streaming=True, loads=frozenset(), bills='tokens'), auths=('vendor', 'bearer'), auth=Auth('vendor'), fields=('endpoint', 'base_url'), secrets=('api_key',), allocation='metered'), InferenceKind('runpod-inference', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=LEASED), fields=(*POD_FIELDS, 'max_logprobs', 'memory_fraction'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True), InferenceKind('runpod-host', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=LEASED), fields=(*POD_FIELDS, 'max_logprobs', 'memory_fraction', 'sleep'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True))}
 ```
 
 Every kind of inference provider, by name.
@@ -7190,7 +7192,7 @@ The cluster's own certificate authority and the client certificate its gateway a
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation',), not_settings={**_OBJECTIVE, 'frozen_reference': "an adapter's reference is the model with the adapter switched off"}), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation',), not_settings={**_OBJECTIVE, 'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_FAMILY, True, frozenset({'tinker'}), reference='no', entropy=False, distribution=False), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project', 'implementation'), secrets=('project',), not_settings={**_OBJECTIVE, 'project': 'the cluster config says it ([trainers.NAME] project)'}, allocation='metered'), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', *POD_FIELDS), secrets=('api_key',), not_settings=_OBJECTIVE))}
+TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation',), not_settings={**_OBJECTIVE, 'frozen_reference': "an adapter's reference is the model with the adapter switched off"}), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation',), not_settings={**_OBJECTIVE, 'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_FAMILY, True, frozenset({'tinker'}), reference='no', entropy=False, distribution=False), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project', 'implementation'), secrets=('project',), not_settings={**_OBJECTIVE, 'project': 'the cluster config says it ([trainers.NAME] project)'}, allocation='metered'), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=LEASED), fields=('trainer', *POD_FIELDS), secrets=('api_key',), not_settings=_OBJECTIVE))}
 ```
 
 Every kind of trainer, by name.

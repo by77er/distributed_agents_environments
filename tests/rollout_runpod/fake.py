@@ -2,9 +2,10 @@
 start, stop, delete), pods kept in memory, nothing rented and nothing spent.
 
 Like RunPod's front, it refuses a request whose User-Agent it does not accept (403: Python's default one, or none) and
-one without the key (401). A pod is created `RUNNING` with a public address and its price; `gpu` is the GPU type it is
-given (the first asked for). `created` is called with each pod made (and its body), so a test can start a process that
-stands in for what runs on it; `deleted` with each pod's id as it is deleted.
+one without the key (401). A pod is created `RUNNING` with a public address and its price (or, with `addressed` false,
+with none until a test says it with `address`, as RunPod says a pod's address only once it runs); `gpu` is the GPU type
+it is given (the first asked for). `created` is called with each pod made (and its body), so a test can start a process
+that stands in for what runs on it; `deleted` with each pod's id as it is deleted.
 """
 
 import itertools
@@ -30,8 +31,10 @@ class FakeRunPod:
         cost: float = 1.89,
         created: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
         deleted: Callable[[str], None] | None = None,
+        addressed: bool = True,
     ) -> None:
         self.key = key
+        self.addressed = addressed
         self.cost = cost
         self.pods: dict[str, dict[str, Any]] = {}
         self.asked: list[tuple[str, str, Any]] = []
@@ -70,7 +73,8 @@ class FakeRunPod:
         gpus: list[str] = body.get("gpuTypeIds") or ["NVIDIA GeForce RTX 4090"]
         self.pods[id] = {
             "id": id, "name": body["name"], "image": body["imageName"], "desiredStatus": "RUNNING",
-            "publicIp": ADDRESS, "portMappings": {"8443": next(self._ports)}, "costPerHr": self.cost,
+            "publicIp": ADDRESS if self.addressed else "",
+            "portMappings": {"8443": next(self._ports)} if self.addressed else {}, "costPerHr": self.cost,
             "env": body["env"], "gpu": {"id": gpus[0], "count": body.get("gpuCount", 1)},
             "cloudType": body.get("cloudType"), "dataCenterIds": body.get("dataCenterIds"),
         }  # fmt: skip
@@ -103,6 +107,14 @@ class FakeRunPod:
         if verb == "stop":
             self.pods[id]["publicIp"], self.pods[id]["portMappings"] = "", {}
         return JSONResponse(self.pods[id])
+
+    def address(self, id: str, url: str) -> None:
+        """Say that pod `id` is reached at `url` (`https://IP:PORT`): its public IP, and the public port its 8443/tcp
+        is mapped to."""
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(url)
+        self.pods[id]["publicIp"], self.pods[id]["portMappings"] = parts.hostname, {"8443": parts.port}
 
     def client(self) -> Any:
         """A `RunPod` client of this fake, in this process (no socket)."""

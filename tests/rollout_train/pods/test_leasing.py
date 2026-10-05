@@ -7,6 +7,7 @@ import asyncio
 import json
 import tomllib
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -58,9 +59,11 @@ class StandIns:
     """Processes standing in for what runs on each pod the fake starts: each beats as its pod, ready for the run its
     lease names (unless `ready` says it never is)."""
 
-    def __init__(self, ledger: DatabaseLedger, *, ready: bool = True) -> None:
+    def __init__(self, ledger: DatabaseLedger, *, ready: bool = True, says: dict[str, JsonValue] | None = None) -> None:
         self.ledger = ledger
         self.ready = ready
+        self.says = says or {}
+        """More that each beat says of its pod (where it claims to be reached, say)."""
         self.tasks: dict[str, asyncio.Task[None]] = {}
 
     def created(self, pod: dict[str, Any], body: dict[str, Any]) -> None:
@@ -79,11 +82,11 @@ class StandIns:
             pod: dict[str, JsonValue] = {
                 "name": name,
                 "identity": pod_identity(name),
-                "address": "https://203.0.113.7:40123",
                 "role": "inference",
                 "ready": self.ready and run is not None,
                 "run": run,
                 "serial": f"s-{name}",
+                **self.says,
             }
             await presence.beat(name, {POD: pod})
             await asyncio.sleep(0.05)
@@ -119,6 +122,7 @@ async def test_a_run_starts_a_pod_renews_it_and_releases_it_warm(
     (lease,) = await pods.claim([NEED])
     assert lease.state == HELD and lease.run == "run_1" and lease.channel == "policy" and lease.id in fake.pods
     assert lease.pod.startswith(tag_of(cluster) + "pods-0-") and lease.price == 0.79  # (RunPod's price for it)
+    assert lease.address == "https://203.0.113.7:40123"  # (where RunPod says it is reached)
     assert (lease.gpu, lease.cloud) == ("NVIDIA GeForce RTX 4090", "COMMUNITY")
     (body,) = fake.created_bodies()
     env = body["env"]
@@ -134,9 +138,13 @@ async def test_a_run_starts_a_pod_renews_it_and_releases_it_warm(
     assert env["ROLLOUT_MODEL"] == "m" and env["ROLLOUT_ROLE"] == "inference"
     store = pod_leases_of(ledger)
     assert store is not None
+    there = await store.get(lease.pod)
+    assert there is not None
+    await store.put(replace(there, address=None), expect=there.version)  # (as a lease from before addresses were kept)
     before = (await store.get(lease.pod)).renewed  # type: ignore[union-attr]
     await asyncio.sleep(0.1)
     added = await pods.renewed()
+    assert (await store.get(lease.pod)).address == "https://203.0.113.7:40123"  # type: ignore[union-attr]
     assert (await store.get(lease.pod)).renewed > before and added > 0  # type: ignore[union-attr,operator]
     await pods.release()
     released = await store.get(lease.pod)

@@ -1,10 +1,11 @@
 """An inference pod's follower: it keeps the pod's vLLM server serving what the run says its channel should, says when
-the pod is ready, and beats with the pod's name, identity and address. The server is a fake of vLLM's; the ledger a
+the pod is ready, and beats with the pod's name and identity. The server is a fake of vLLM's; the ledger a
 scratch SQLite one; the blob store files."""
 
 import contextlib
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -20,8 +21,6 @@ from rollout_train.record import scope
 from rollout_train.serving import Serving, record_serving
 from tests.rollout_train.machines import MODEL, Saying, fake_vllm
 from tests.rollout_train.pods.authority import served_tls
-
-ADDRESS = "https://203.0.113.7:40123"
 
 
 def stores(tmp_path: Path) -> Checkpoints:
@@ -51,7 +50,7 @@ async def pod(checkpoints: Checkpoints, tmp_path: Path, vllm: str | None = None)
     async with served_tls(fake_vllm(engine)) as address:
         yield InferencePod(
             "inference-1", checkpoints, "r", "policy", MODEL, tmp_path / "checkpoints", vllm=vllm or address,
-            address=ADDRESS, presence=presence_of(checkpoints.ledger), serial_file=serial,
+            presence=presence_of(checkpoints.ledger), serial_file=serial,
         )  # fmt: skip
 
 
@@ -90,7 +89,7 @@ async def test_a_pod_whose_server_does_not_answer_is_alive_and_not_ready(tmp_pat
             assert (await http.get("/healthz")).status_code == 503
 
 
-async def test_a_pod_beats_with_its_identity_address_readiness_and_serial(tmp_path: Path) -> None:
+async def test_a_pod_beats_with_its_identity_readiness_and_serial_and_never_says_where_it_is(tmp_path: Path) -> None:
     checkpoints = stores(tmp_path)
     fence = await checkpoints.ledger.take(scope("r"))
     async with pod(checkpoints, tmp_path) as following:
@@ -103,11 +102,9 @@ async def test_a_pod_beats_with_its_identity_address_readiness_and_serial(tmp_pa
         (beat,) = await presence.beats()
         assert beat.about["kind"] == ENGINES and beat.about["follows"] == "r"  # (what every follower says)
         (reached,) = live(await presence.beats(), "inference")
-        assert (reached.name, reached.identity, reached.address) == (
-            "inference-1",
-            pod_identity("inference-1"),
-            ADDRESS,
-        )
+        assert (reached.name, reached.identity) == ("inference-1", pod_identity("inference-1"))
+        said: Any = beat.about["pod"]
+        assert "address" not in said  # (where it is reached is its lease's, from RunPod's API)
         assert reached.ready and reached.serial == "98765"
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=health(following)), base_url="http://pod"

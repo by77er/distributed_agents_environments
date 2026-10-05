@@ -274,7 +274,7 @@ options = { max_lora_rank = 96 }
     tls = '\n[tls]\nca = "~/ca.pem"\ncertificate = "~/gateway.crt"\nkey = "~/gateway.key"\n'
     cluster = cluster_of(SMALL + tls + pods)
     provider = cluster.inference["pods"]
-    assert provider.auth.kind == "mtls" and provider.auth.identity == "beats"
+    assert provider.auth.kind == "mtls" and provider.auth.identity == "leased"
     assert provider.capabilities.bills == "hours" and provider.capabilities.loads == {"peft"}
     assert provider.secrets == {"api_key": Secret(env="RUNPOD_API_KEY")}
     assert provider.settings["secrets"] == {"AWS_ACCESS_KEY_ID": "r2_key_id"}  # (console secrets, by name)

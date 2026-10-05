@@ -1,13 +1,11 @@
-"""What a pod's processes read from their environment: the stores, the pod's name and public address, and where to
-serve on the pod's loopback interface.
+"""What a pod's processes read from their environment: the stores, the pod's name, and where to serve on the pod's
+loopback interface.
 
 - `ROLLOUT_POD_NAME`: the pod's name, as its starter gave it; its certificate's identity is
   `spiffe://rollout/pod/NAME`.
 - `ROLLOUT_LEDGER`: where the ledger is, as JSON (`{"kind": "rollout_train.database:DatabaseLedger", "url": "…"}`).
 - `ROLLOUT_BLOBS`: where the blob store is, as JSON (`{"kind": "rollout_s3:S3BlobStore", "bucket": "…"}`); its
   credentials come from its own variables (`AWS_*`).
-- `ROLLOUT_ADDRESS`: the pod's public address (`https://IP:PORT`); by default from RunPod's `RUNPOD_PUBLIC_IP` and
-  `RUNPOD_TCP_PORT_8443`.
 - `ROLLOUT_CERT_SERIAL_FILE`: a file holding the serial of the pod's certificate now (default
   `/certs/current/serial`), said in its beats.
 - `ROLLOUT_BLOB_CACHE`: a directory on the pod's disk that keeps a copy of every blob the pod's processes put or read
@@ -75,15 +73,6 @@ class CachedBlobs:
 
     async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None:
         await self.store.delete(reference, unused_for=unused_for)
-
-
-def public_address(environ: Mapping[str, str]) -> str | None:
-    """Where the pod is reached from outside: `ROLLOUT_ADDRESS`, or what RunPod says of its public IP and the port
-    the proxy's is mapped to; None where neither says."""
-    if said := environ.get("ROLLOUT_ADDRESS"):
-        return said
-    ip, port = environ.get("RUNPOD_PUBLIC_IP"), environ.get(f"RUNPOD_TCP_PORT_{PORT}")
-    return f"https://{ip}:{port}" if ip and port else None
 
 
 def serial(path: Path | None) -> str | None:

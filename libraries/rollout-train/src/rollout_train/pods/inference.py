@@ -7,8 +7,8 @@ over one channel whose one engine is that server: it reads what the run says the
 checkpoint's files from the blob store into the pod's volume, and loads them as an adapter named by the checkpoint's id.
 After each look it asks the server what it has: the pod is ready once the server answers and has what the channel should
 serve now (its base model, while the run says nothing else). Its beats say, beside what every follower says, the pod's
-name, identity, public address, readiness, certificate serial, and the run and channel it serves
-(`rollout_train.pods.identity`).
+name, identity, readiness, certificate serial, and the run and channel it serves (`rollout_train.pods.identity`); where
+the pod is reached is its lease's, from RunPod's API.
 
 Which run and channel it serves is its lease's (`rollout_train.pods.leases`): it reads its lease at each look, and
 serves the channel of the run that holds the pod, with the ledger token the lease gives for that run. A pod released by
@@ -45,7 +45,7 @@ from pydantic import JsonValue
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.following import Binding, Follower
 from rollout_train.inference import Channel, RemoteEngine
-from rollout_train.pods.environment import listening, public_address, required, serial, serial_file, served, stores
+from rollout_train.pods.environment import listening, required, serial, serial_file, served, stores
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.pods.leases import IDLE, pod_leases_of
 from rollout_train.presence import Presence, presence_of
@@ -64,10 +64,9 @@ STALE = 60.0
 
 
 class InferencePod(Follower):
-    """Keeps the vLLM server at `vllm` (serving `model`) serving what `run` says its channel `channel` should (none:
-    the run and channel its lease names now), with the checkpoints' files under `directory`, as pod `name` reached at
-    `address`. `ready` says whether the server has what the channel should serve now, and `why` what it lacks when it
-    does not."""
+    """Keeps the vLLM server at `vllm` (serving `model`) serving what `run` says its channel `channel` should (none: the
+    run and channel its lease names now), with the checkpoints' files under `directory`, as pod `name`. `ready` says
+    whether the server has what the channel should serve now, and `why` what it lacks when it does not."""
 
     def __init__(
         self,
@@ -79,7 +78,6 @@ class InferencePod(Follower):
         directory: Path,
         *,
         vllm: str = VLLM,
-        address: str | None = None,
         presence: Presence | None = None,
         serial_file: Path | None = None,
         every: float = 2.0,
@@ -103,7 +101,6 @@ class InferencePod(Follower):
         """The run and channel it serves now."""
         self.model = model
         self.identity = pod_identity(name)
-        self.address = address
         self.serial_file = serial_file
         self.ready = False
         self.why = "not looked at yet"
@@ -180,7 +177,7 @@ class InferencePod(Follower):
         """What its beats say of the pod, beside what every follower says."""
         run, channel = self.held if self.held is not None else (None, None)
         pod: dict[str, JsonValue] = {
-            "name": self.name, "identity": self.identity, "address": self.address, "role": self.role,
+            "name": self.name, "identity": self.identity, "role": self.role,
             "ready": self.ready, "why": self.why, "model": self.model, "serial": serial(self.serial_file),
             "run": run, "channel": channel,
         }  # fmt: skip
@@ -213,7 +210,7 @@ async def main(environ: Mapping[str, str]) -> None:
         required(environ, "ROLLOUT_POD_NAME"), Checkpoints(ledger, blobs), environ.get("ROLLOUT_RUN") or None,
         environ.get("ROLLOUT_CHANNEL") or None, required(environ, "ROLLOUT_MODEL"),
         Path(environ.get("ROLLOUT_CHECKPOINTS", "/workspace/checkpoints")), vllm=environ.get("ROLLOUT_VLLM", VLLM),
-        address=public_address(environ), presence=presence_of(ledger), serial_file=serial_file(environ),
+        presence=presence_of(ledger), serial_file=serial_file(environ),
         trainer=environ.get("ROLLOUT_TRAINER_URL") or None, role=environ.get("ROLLOUT_ROLE") or INFERENCE,
     )  # fmt: skip
     host, port = listening(environ, "ROLLOUT_HEALTH", "127.0.0.1:8081")

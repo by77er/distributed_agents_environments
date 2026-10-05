@@ -134,7 +134,8 @@ class Connection:
     identity: str | None = None
     """The URI SAN the server's certificate must carry (`spiffe://rollout/pod/NAME`), checked in the TLS handshake in
     place of the host name: a server whose certificate names another identity, or none, is refused before anything is
-    sent to it. None: the host name is checked, as TLS does."""
+    sent to it. A connection with an identity reaches only `https://` addresses: a request to any other is refused
+    before it is sent (`httpx.UnsupportedProtocol`). None: the host name is checked, as TLS does."""
 
     def token(self) -> str | None:
         if self.token_env is not None:
@@ -155,7 +156,30 @@ class Connection:
                 verify.load_cert_chain(str(Path(self.certificate).expanduser()), key)
             if self.identity is not None:
                 verify = requiring(verify, self.identity)
-        return httpx.AsyncClient(timeout=timeout, headers=headers, verify=verify)
+        hooks: dict[str, list[Callable[[httpx.Request], Awaitable[None]]]] = {}
+        if self.identity is not None:
+            hooks["request"] = [_https_only(self.identity)]
+        return httpx.AsyncClient(timeout=timeout, headers=headers, verify=verify, event_hooks=hooks)
+
+
+def https_only(address: str, connection: Connection | None) -> None:
+    """Refuse (`ValueError`) to reach `address` with a connection that checks an identity unless it is `https://`."""
+    if connection is not None and connection.identity is not None and not address.startswith("https://"):
+        raise ValueError(f"{connection.identity} is reached over https only, not at {address}")
+
+
+def _https_only(identity: str) -> Callable[[httpx.Request], Awaitable[None]]:
+    """A request hook that refuses, before anything is sent, a request that is not over `https`: the identity a
+    connection checks is checked only in a TLS handshake."""
+
+    async def refused(request: httpx.Request) -> None:
+        if request.url.scheme != "https":
+            raise httpx.UnsupportedProtocol(
+                f"{identity} is reached over https only, not at {request.url.scheme}://{request.url.netloc.decode()}",
+                request=request,
+            )
+
+    return refused
 
 
 def requiring(context: ssl.SSLContext, identity: str) -> ssl.SSLContext:
@@ -202,6 +226,7 @@ class RemoteEngine:
     ) -> None:
         self.model = model
         self.address = address.rstrip("/")
+        https_only(self.address, connection)
         self._http = client or (connection or Connection()).client()
         self._owned = client is None
         self.max_model_len = max_model_len or 0

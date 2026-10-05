@@ -61,7 +61,6 @@ and a `step ca renew --daemon` beside the gateway.
 | `STEP_CA_TRUST` | `root` (default): step-ca is reached directly, its TLS checked by the cluster's root; `system`: behind a proxy that ends TLS with a public certificate (a Cloudflare Tunnel), checked by the system's roots, and renewals use a token signed by the certificate's key (`--mtls=false`) |
 | `STEP_TOKEN` | The one-time token for the pod's first certificate; unset before any other process starts |
 | `ROLLOUT_CERTS` | Where the certificates are kept (default `/workspace/certs`, on the volume) |
-| `ROLLOUT_ADDRESS` | The pod's public address, `https://IP:PORT`; by default from RunPod's `RUNPOD_PUBLIC_IP` and `RUNPOD_TCP_PORT_8443` |
 | `ROLLOUT_CERT_SERIAL_FILE` | The file the certificate's serial is read from for the pod's beats (default `/certs/current/serial`) |
 | `ROLLOUT_BLOB_CACHE` | A directory on the pod's disk that keeps a copy of every blob the pod's processes put or read (a host pod's, `/workspace/blobs`): none by default |
 | `SYSTEM_ROOTS` | The system's root certificates, which step-ca's TLS is checked by with `STEP_CA_TRUST=system` (default `/etc/ssl/certs/ca-certificates.crt`) |

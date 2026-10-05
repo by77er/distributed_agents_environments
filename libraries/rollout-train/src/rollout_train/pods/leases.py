@@ -1,11 +1,11 @@
 """Pods' leases and the time each run held a pod: ordinary state kept beside the ledger, changed by compare-and-set.
 
 A **lease** (`PodLease`) is a pod the platform rents: its name (the key, and its certificate's identity), RunPod's id
-for it, its provider, slot, GPU type, hourly price, image and model, and which run holds it now. A pod is held by one
-run at a time. Its state is `starting` (asked for, not yet ready for its run), `held` (its run has it), or `idle`
-(released: no run holds it, and it stays warm for the next run with the same image, model and GPU until its
-provider's `idle_stop` passes). The run renews its lease on a heartbeat (`renewed`); a lease not renewed for long is
-stale, and the reaper deletes its pod (`rollout_train.pods.leasing.reap`).
+for it and where RunPod says it is reached (`address`), its provider, slot, GPU type, hourly price, image and model, and
+which run holds it now. A pod is held by one run at a time. Its state is `starting` (asked for, not yet ready for its
+run), `held` (its run has it), or `idle` (released: no run holds it, and it stays warm for the next run with the same
+image, model and GPU until its provider's `idle_stop` passes). The run renews its lease on a heartbeat (`renewed`); a
+lease not renewed for long is stale, and the reaper deletes its pod (`rollout_train.pods.leasing.reap`).
 
 Every change is a compare-and-set on the lease's `version`: a run takes an idle pod only if no one changed the lease
 since it read it, so two runs never take one pod (`Conflict` to the one that lost). A provider's pods have slots, 0 to
@@ -76,6 +76,10 @@ class PodLease:
     cloud: str = "SECURE"
     id: str | None = None
     """RunPod's id for it, once asked for."""
+    address: str | None = None
+    """Where the pod is reached, `https://IP:PORT`: its public IP and the public port its 8443/tcp is mapped to, as
+    RunPod's API says (`rollout_runpod.Pod.address`), read by whoever leased it; none until RunPod has said. The only
+    address the pod is reached at: nothing the pod says of itself is."""
     run: str | None = None
     """The run that holds it (none: idle)."""
     channel: str | None = None

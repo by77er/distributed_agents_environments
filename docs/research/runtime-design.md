@@ -1438,7 +1438,8 @@ The user settled the design's open questions on 2026-10-04:
   pod outside the cluster gets them as environment variables from the run that starts it, with step-ca's one-time
   token. So the cluster config declares, for the ledger and the blob store, a public address beside the internal one,
   and each provider gets the address for where it runs. Outside the cluster the ledger is the HTTP ledger service,
-  never the database itself. The gateway finds followers by their beats (address and certificate identity).
+  never the database itself. The gateway finds followers by their leases (the address RunPod gives) and beats (readiness and certificate
+  identity).
 - **Every role reaches the ledger through the ledger API.** In a cluster, the launcher, monitor, gateway, run jobs,
   runners, followers and sandbox pools all use `HttpLedger(url, token)` against the ledger service, which alone holds
   the database's credentials and connections; on one machine and in tests the same interfaces are a database ledger

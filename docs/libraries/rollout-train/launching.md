@@ -160,7 +160,7 @@ runs, which a test calls on a `Run` built directly:
      full weights, or an adapter over them, those weights fetched here), the trainer settings it takes, the objective
      the settings resolve to, and Tinker's project where the config names one. `TrainerClient` is the `Trainer` the
      loop steps over the actor. A `runpod-trainer`'s steps go to the training service of the pod the run holds for
-     them (`RemoteTrainer`, reached at the address its beat says, checked by its identity), and it asks Ray for
+     them (`RemoteTrainer`, reached at the address its lease says, checked by its identity), and it asks Ray for
      nothing.
 
    While the group or any of these waits for Ray, the driver beats as `run/RUN` (kind `run`, with what it waits for:

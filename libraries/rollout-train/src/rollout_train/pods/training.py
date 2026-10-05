@@ -31,7 +31,7 @@ meanwhile is refused (409), and the asker tries it again later.
 - `ROLLOUT_LISTEN`: where the service listens (default `127.0.0.1:8001`);
 
 and those every pod reads (`rollout_train.pods.environment`). It beats every 15 seconds with the pod's name, identity,
-address, the run it takes steps for, whether it is ready for that run, and whether a step is running.
+the run it takes steps for, whether it is ready for that run, and whether a step is running.
 
 Which run it takes steps for is its lease's (`rollout_train.pods.leases`): when a run takes the pod, the service makes
 its trainer anew with the run's settings (the trainer's implementation, model and settings the lease says), and reads
@@ -56,7 +56,7 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from rollout.contracts import BlobReference
 from rollout.names import named
 from rollout_train.checkpoints import Checkpoints, Manifest, kept
-from rollout_train.pods.environment import listening, public_address, required, serial, serial_file, served, stores
+from rollout_train.pods.environment import listening, required, serial, serial_file, served, stores
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.presence import beating, presence_of
 from rollout_train.trainer import STATE, WEIGHTS, Changeable, Distilled, Files, Item, Labelled, Pair, Trainer, Weighted
@@ -380,12 +380,12 @@ async def main(environ: Mapping[str, str]) -> None:
     work = Path(environ.get("ROLLOUT_WORK", "/workspace/rollout"))
     service = TrainerService(make({}), Checkpoints(ledger, blobs), work, model=model)
     name = required(environ, "ROLLOUT_POD_NAME")
-    address, serials = public_address(environ), serial_file(environ)
+    serials = serial_file(environ)
     identity = pod_identity(name)
     role = environ.get("ROLLOUT_ROLE") or TRAINER
 
     def about() -> Mapping[str, JsonValue]:
-        pod: dict[str, JsonValue] = {"name": name, "identity": identity, "address": address, "role": TRAINER,
+        pod: dict[str, JsonValue] = {"name": name, "identity": identity, "role": TRAINER,
                                      "ready": service.run is not None, "run": service.run, "running": service.running,
                                      "serial": serial(serials), "steps": True}  # fmt: skip
         return {"host": socket.gethostname(), "kind": TRAINER, POD: pod}

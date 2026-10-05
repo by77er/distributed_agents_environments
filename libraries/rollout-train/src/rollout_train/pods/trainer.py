@@ -27,7 +27,7 @@ from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoints, kept
 from rollout_train.http import answer_of
-from rollout_train.inference.remote import Connection
+from rollout_train.inference.remote import Connection, https_only
 from rollout_train.objectives import DEFAULT, Objective
 from rollout_train.pods.training import FAILED, MADE, Parent, StepAsked, StepState, asked_json, batch_bytes, state_of
 from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Item, Step, StepFailed
@@ -68,6 +68,7 @@ class RemoteTrainer:
         patience: float = 300.0,
     ) -> None:
         self.address = address.rstrip("/")
+        https_only(self.address, connection)
         self.checkpoints = checkpoints
         self.weights = weights
         self.budget = budget or Budget()

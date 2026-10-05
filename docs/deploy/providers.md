@@ -54,8 +54,9 @@ released pod stays warm for a few minutes for the next run, and a reaper deletes
 - **Claimed when it starts.** After its placement group is reserved, the run's driver claims its pods. It first takes a
   warm pod: one no run holds, of the same provider, image and model, taken by compare-and-set so that two runs never
   take one pod. Else it starts one in a free slot of the provider's `max_pods`; with every slot taken, the run waits and
-  its launch says so. A pod is ready once its beat says it is ready for the run; a pod not ready within the provider's
-  `start_timeout` (1200 seconds unless said) is deleted, and the run fails saying which pod and why.
+  its launch says so. A pod is ready once RunPod's API has said its public address, which its lease keeps, and its beat
+  says it is ready for the run; a pod not ready within the provider's `start_timeout` (1200 seconds unless said) is
+  deleted, and the run fails saying which pod and why.
 - **Renewed while it runs.** Every 30 seconds the run renews each lease and the time it is charged for each pod. A lease
   not renewed for 5 minutes is stale: its run is taken to be gone (its driver died, or its cluster went away).
 - **Released when it ends,** whether it finished, was stopped, failed or reached a limit. The pod stays up, warm, for
@@ -68,9 +69,12 @@ released pod stays warm for a few minutes for the next run, and a reaper deletes
   (`rollout-CLUSTER-`) that no lease names. Deleting a pod revokes its certificate. `rollout pods list` shows every
   lease: who holds it, since when, at what price.
 
-The gateway reaches a pod at its public IP and raw TCP port over mutual TLS: the run's channel finds its pods by their
-leases and beats (`rollout_train.pods.routing.LeasedServers`), each checked by the identity its certificate carries. A
-pod reaches the cluster only through the ledger service, step-ca and the bucket.
+The gateway reaches a pod at its public IP and raw TCP port over mutual TLS, and only over `https`: the run's channel
+finds its pods by their leases and beats (`rollout_train.pods.routing.LeasedServers`), at the address the lease holds,
+each checked by the identity named for the pod. The lease's address is what RunPod's API says (the pod's public IP and
+the public port 8443/tcp is mapped to), read by the run that leased the pod; a beat says only whether the pod is ready,
+never where it is reached, so a pod's ledger token cannot send its traffic elsewhere. A pod reaches the cluster only
+through the ledger service, step-ca and the bucket.
 
 **Spend.** A pod's time is charged at its hourly price (RunPod's `costPerHr` for it, else the table's `price`), from
 when the run asked for it or took it until the run released it, and then its warm time until another run takes it or

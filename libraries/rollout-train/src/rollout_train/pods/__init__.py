@@ -1,12 +1,14 @@
 """Pods: GPU machines elsewhere, rented by the hour, that serve a run's channel or take its training steps.
 
-A pod is reached at a public address over mutual TLS. Its certificate names it (`spiffe://rollout/pod/NAME`), and it
-takes requests only from a client whose certificate names the gateway (`spiffe://rollout/gateway`). Both come from the
-cluster's certificate authority (step-ca). A proxy in front of the pod's own servers (Envoy) checks the client and lets
-through only the requests the pod's role needs; the servers behind it listen on the pod's loopback interface.
+A pod is reached over mutual TLS at the public address RunPod's API gives for it, which its lease keeps. Its certificate
+names it (`spiffe://rollout/pod/NAME`), and it takes requests only from a client whose certificate names the gateway
+(`spiffe://rollout/gateway`). Both come from the cluster's certificate authority (step-ca). A proxy in front of the
+pod's own servers (Envoy) checks the client and lets through only the requests the pod's role needs; the servers behind
+it listen on the pod's loopback interface.
 
-- `identity`: the names certificates carry, and the pods whose heartbeats say they are alive and where (`live`).
-- `leases`: each pod's lease (which run holds it), and the time each run held a pod, charged at its price.
+- `identity`: the names certificates carry, and the pods whose heartbeats say they are alive (`live`).
+- `leases`: each pod's lease (which run holds it, and where the pod is reached), and the time each run held a pod,
+  charged at its price.
 - `leasing`: a run's pods, claimed (started, or taken warm), renewed and released (`Pods`); the reaper (`reap`).
 - `inference`: what runs beside a stock vLLM server on an inference pod: a follower that loads what the channel of the
   run that holds the pod should serve, beats, and says when the pod is ready (`InferencePod`).
@@ -18,7 +20,7 @@ The images that run these, and how the certificates are issued and renewed, are 
 (docs/research/runpod-providers.md).
 """
 
-from rollout_train.pods.identity import GATEWAY_IDENTITY, PodAddress, live, pod_identity
+from rollout_train.pods.identity import GATEWAY_IDENTITY, LivePod, live, pod_identity
 from rollout_train.pods.leases import HELD, IDLE, STARTING, PodLease, PodLeases, PodTime, pod_leases_of
 from rollout_train.pods.leasing import LeaseLost, PodNeed, Pods, PodsDidNotStart, needs_of, reap
 from rollout_train.pods.trainer import RemoteTrainer, TrainerBusy, TrainerRefused, TrainerUnreachable
@@ -29,7 +31,7 @@ __all__ = [
     "IDLE",
     "STARTING",
     "LeaseLost",
-    "PodAddress",
+    "LivePod",
     "PodLease",
     "PodLeases",
     "PodNeed",

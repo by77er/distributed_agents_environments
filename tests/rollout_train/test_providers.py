@@ -83,13 +83,13 @@ def test_a_setting_says_what_it_accepts() -> None:
 
 
 def test_mutual_tls_with_the_clusters_ca_a_client_certificate_and_the_pods_identity() -> None:
-    pods = Auth("mtls", identity="beats")
+    pods = Auth("mtls", identity="leased")
     connection = pods.connection(TLS, identity="spiffe://rollout/pod/inference-run-1")
     assert (
         connection.ca == "~/ca.pem" and connection.certificate == "~/gateway.crt" and connection.key == "~/gateway.key"
     )
     assert connection.identity == "spiffe://rollout/pod/inference-run-1" and connection.token_env is None
-    with pytest.raises(ValueError, match="from its heartbeat"):
+    with pytest.raises(ValueError, match="its pod's own"):
         pods.connection(TLS)
     with pytest.raises(ValueError, match="cluster's CA"):
         pods.connection(None, identity="spiffe://rollout/pod/x")

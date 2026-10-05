@@ -480,23 +480,26 @@ class Run:
 
     async def _on_pod(self, provider: TrainerProvider) -> Trainer:
         """The trainer of a `runpod-trainer`: the training service of the pod the run holds for its steps (its own, or
-        its host's), reached at the address its beat says, its identity checked; its budget and the settings it takes
-        between steps as the pod says."""
-        from rollout_train.pods import RemoteTrainer, live
+        its host's), reached at the address its lease says (RunPod's, never the pod's own word), its identity checked;
+        its budget and the settings it takes between steps as the pod says."""
+        from rollout_train.pods import RemoteTrainer, live, pod_identity
         from rollout_train.presence import presence_of
 
         held = self.pods.of("trainer") if self.pods is not None else []
         presence = presence_of(self.ledger)
         if not held or presence is None:
             raise ValueError(f"the run holds no pod for its trainer {provider.name}'s steps")
-        (address,) = [each for each in live(await presence.beats()) if each.name == held[0].pod] or [None]
-        if address is None:
-            raise ValueError(f"pod {held[0].pod} does not beat: its steps cannot be asked of it")
-        connection = provider.auth.connection(self.cluster.tls, identity=address.identity)
-        said = await RemoteTrainer(address.address, self.checkpoints, connection=connection).describe()
+        lease = held[0]
+        if not [each for each in live(await presence.beats()) if each.name == lease.pod]:
+            raise ValueError(f"pod {lease.pod} does not beat: its steps cannot be asked of it")
+        address = lease.address
+        if address is None or not address.startswith("https://"):
+            raise ValueError(f"pod {lease.pod}'s lease says no https address: its steps cannot be asked of it")
+        connection = provider.auth.connection(self.cluster.tls, identity=pod_identity(lease.pod))
+        said = await RemoteTrainer(address, self.checkpoints, connection=connection).describe()
         budget = Budget(**dict(said.get("budget") or {}))
         return RemoteTrainer(
-            address.address, self.checkpoints, weights=str(said.get("weights") or provider.capabilities.produces),
+            address, self.checkpoints, weights=str(said.get("weights") or provider.capabilities.produces),
             budget=budget, objective=objective_in(self.settings), changeable=dict(said.get("changeable") or {}),
             connection=connection,
         )  # fmt: skip

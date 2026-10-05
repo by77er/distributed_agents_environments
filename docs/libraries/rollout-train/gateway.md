@@ -250,17 +250,17 @@ The gateway samples a channel through its `Sampler` ([channels](channels.md)):
 
 - **A channel a run's start names** with a provider the gateway's
   [`ChannelDirectory`](../../guide/reference.md#channeldirectory) knows is built the first time a key of that run is
-  shown (or the runner asks whether the run's channels can be sampled): from the run settings its newest start
-  records, the channel's providers, model, renderer and thinking budget, as a `RemoteChannel` over those providers'
-  servers. Nothing registers it, and it serves what its mode says ([what a channel should
+  shown (or the runner asks whether the run's channels can be sampled): from the run settings its newest start records,
+  the channel's providers, model, renderer and thinking budget, as a `RemoteChannel` over those providers' servers.
+  Nothing registers it, and it serves what its mode says ([what a channel should
   serve](channels.md#what-a-channel-should-serve)): the trained channel what the run trains, a `follows` channel the
-  followed channel's checkpoint `lag` records back, a `fixed` one its pinned checkpoint or the base model. The
-  directory knows providers by name with the servers each is reached at (`Provided`): `ChannelDirectory.of(cluster,
-  ledger)` takes every provider of the [cluster config](../../guide/cluster.md) whose servers answer vLLM's API at its
-  endpoints (`vllm`, `vllm-servers`), and every provider on RunPod's pods (`runpod-inference`, `runpod-host`), whose
-  channel's servers are found at each look: the pods the run's leases name for it that beat ready, each reached over
-  mutual TLS with the gateway's certificate and checked by the identity its beat names (`LeasedServers`). A run's
-  channel takes precedence over a channel of the same name in the gateway's own process.
+  followed channel's checkpoint `lag` records back, a `fixed` one its pinned checkpoint or the base model. The directory
+  knows providers by name with the servers each is reached at (`Provided`): `ChannelDirectory.of(cluster, ledger)` takes
+  every provider of the [cluster config](../../guide/cluster.md) whose servers answer vLLM's API at its endpoints
+  (`vllm`, `vllm-servers`), and every provider on RunPod's pods (`runpod-inference`, `runpod-host`), whose channel's
+  servers are found at each look: the pods the run's leases name for it that beat ready, each reached over mutual TLS at
+  the address its lease says (RunPod's) with the gateway's certificate and checked by the identity named for it
+  (`LeasedServers`). A run's channel takes precedence over a channel of the same name in the gateway's own process.
 - **A routed channel** (`Routes`: a run's channel on its engine hosts, or on servers at addresses, or a router in front
   of them) is sampled per run, as a `RemoteChannel`. It reads what the run says its channel should serve
   ([what a channel should serve](channels.md#what-a-channel-should-serve)), and asks the servers for that checkpoint
