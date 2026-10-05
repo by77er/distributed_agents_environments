@@ -213,7 +213,7 @@ def _door(agents: int, rng: random.Random) -> Level:
 
 
 def _gate(agents: int, rng: random.Random) -> Level:
-    first = rng.randint(4, 6)
+    first = rng.randint(max(4, agents + 1), 6)  # (four agents and the plate need room to pass one another)
     plan = Plan(
         rng, [first, rng.randint(3, 4)], rng.randint(3, 4), (0, rng.randint(2, min(4, first)), rng.randint(1, 2))
     )
