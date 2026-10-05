@@ -18,8 +18,8 @@ on and evals play.
 It is a uv project of its own, with its own lock, outside the workspace: verifiers ships development releases daily
 and pins what it needs (`openai<3`, `mcp==2.0.0`, a pre-release of Prime's `renderers`), so it is resolved apart from
 the platform. It pins `verifiers==0.3.2.dev185` and the Hub's `gsm8k` 0.1.4 wheel, and depends on the workspace's
-`rollout` (and, for its tests and a run's driver, `rollout-train`; for training here, in its `spike` group, the vLLM
-engine, the LoRA trainer and the Qwen renderers) by path.
+`rollout` (and, for its tests and a run's driver, `rollout-train`; for a run's job, in its `platform` group, the vLLM
+engine, the LoRA and Tinker trainers, the objectives and the Qwen renderers) by path.
 
 ```py
 from rollout_verifiers import VerifiersEnvironment
@@ -35,7 +35,7 @@ gsm8k = VerifiersEnvironment(
 cd implementations/rollout-verifiers
 uv sync                  # the adapter, GSM8K, rollout-train (the commands, the database ledger) and the tests
 uv run pytest tests
-uv sync --group spike    # with vLLM, the LoRA trainer and the Qwen renderers: training on this machine
+uv sync --group platform # with vLLM, the trainers (LoRA, Tinker), the Qwen renderers and the objectives
 ```
 
 Another environment is installed into the project the same way: its Hub wheel as a dependency, and an object of its
@@ -79,7 +79,7 @@ interpreter = "/opt/rollout/verifiers/bin/python"                   # where its 
 
 The preset `gsm8k-tinker` plays it with the base `Qwen/Qwen3.5-9B` sampled at Tinker
 ([Tinker](rollout-tinker.md#evals-of-a-base-model)); a run's settings that name a `vllm` provider and the LoRA trainer
-train an adapter over Qwen3-0.6B on this machine, with the project synced with its `spike` group. From the project's
+train an adapter over Qwen3-0.6B on this machine, with the project synced with its `platform` group. From the project's
 directory (where `env check` plays an episode in this process):
 
 ```bash

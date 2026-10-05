@@ -1,7 +1,7 @@
 # A project of its own, locked apart from the workspace: verifiers moves fast and pins what it needs (openai, mcp, a
 # pre-release of renderers), so it resolves here and never in the platform's lock.
 #   uv sync                     the adapter, its environments (GSM8K), and what its tests and its evals need
-#   uv sync --group spike       with vLLM, the LoRA trainer and the Qwen renderers: training on this machine
+#   uv sync --group platform    with vLLM, the trainers (LoRA, Tinker), the Qwen renderers and the objectives: a run's job
 [project]
 name = "rollout-verifiers"
 version = "0.0.0"
@@ -21,10 +21,12 @@ dev = [
     "pytest>=8.4",
     "pytest-asyncio>=1.2",
 ]
-spike = [
+platform = [  # what a run's job needs in this Python: engines, trainers, renderers and objectives
     "rollout-vllm",
     "rollout-lora",
     "rollout-qwen",
+    "rollout-tinker",
+    "rollout-objectives",
 ]
 
 [tool.uv.sources]
@@ -35,6 +37,7 @@ rollout-lora = { path = "../rollout-lora", editable = true }
 rollout-objectives = { path = "../rollout-objectives", editable = true }
 rollout-qwen = { path = "../rollout-qwen", editable = true }
 rollout-s3 = { path = "../rollout-s3", editable = true }
+rollout-tinker = { path = "../rollout-tinker", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

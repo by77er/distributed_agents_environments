@@ -62,8 +62,8 @@ Run on 2026-10-04 on one RTX 5080, from `implementations/rollout-verifiers`, on 
 ledger.
 
 **Installing and running it.** `implementations/rollout-verifiers` is a uv project of its own, locked apart from the
-workspace, with the Hub's `gsm8k` 0.1.4 wheel among its dependencies; its `spike` group adds vLLM, the LoRA trainer and
-the Qwen renderers (all by path from the workspace). From that directory:
+workspace, with the Hub's `gsm8k` 0.1.4 wheel among its dependencies; its `platform` group adds vLLM, the LoRA and
+Tinker trainers, the objectives and the Qwen renderers (all by path from the workspace). From that directory:
 
 ```bash
 uv sync --group spike

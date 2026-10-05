@@ -31,11 +31,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --all-packages --all-extras --no-dev \
     && cd environments/minecraft/harness && npm ci --omit=dev \
     && ray --version && java -version 2>&1 | head -1 && node --version
-# rollout-verifiers in a Python environment of its own, from its own lock: the runs on GSM8K start in it;
+# rollout-verifiers in a Python environment of its own, from its own lock, with its platform group (engines, trainers,
+# renderers, objectives): the runs on GSM8K start in it;
 # rsync, for copying run directories onto the state volume.
 RUN apt-get update && apt-get install -y --no-install-recommends rsync && rm -rf /var/lib/apt/lists/*
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_PROJECT_ENVIRONMENT=/opt/rollout/verifiers uv sync --frozen --project implementations/rollout-verifiers \
-    && /opt/rollout/verifiers/bin/python -c "import ray, rollout_s3, rollout_train, rollout_verifiers"
+        --group platform \
+    && /opt/rollout/verifiers/bin/python -c "import ray, rollout_s3, rollout_train, rollout_verifiers, rollout_tinker, rollout_vllm, rollout_objectives, rollout_qwen"
 
 COPY . .
