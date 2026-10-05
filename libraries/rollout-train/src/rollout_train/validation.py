@@ -989,6 +989,9 @@ def _pods(run: _Run, key: str) -> None:
                        f"(max_pods): it would never start")  # fmt: skip
         if not table.step_ca:
             run.refuse("capacity", key, f"{name}'s pods get their certificates from step-ca: say {where} step_ca")
+        if table.store is None and run.cluster.blobs.kind == "files":
+            run.refuse("capacity", key, f"{name}'s pods cannot read a store of files: name a bucket they reach in "
+                       f"{where} store ([stores.NAME])")  # fmt: skip
     ledger = run.cluster.ledger
     if counted and (
         ledger.token is None or not (ledger.public or (ledger.url or "").startswith(("http://", "https://")))

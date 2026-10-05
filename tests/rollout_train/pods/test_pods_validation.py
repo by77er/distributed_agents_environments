@@ -16,13 +16,16 @@ STEP_CA = '{ url = "https://ca.example.com", provisioner = "launcher", key_file 
 
 
 def cluster_of(ledger: str = 'token_env = "LEDGER_TOKEN"\npublic = "https://ledger.example.com"',
-               host: str = f"step_ca = {STEP_CA}") -> Cluster:  # fmt: skip
+               host: str = f'step_ca = {STEP_CA}\nstore = "r2"') -> Cluster:  # fmt: skip
     return parsed(
         tomllib.loads(f"""
 name = "test"
 [ledger]
 url = "sqlite:///~/ledger.db"
 {ledger}
+[stores.r2]
+kind = "rollout_s3:S3BlobStore"
+bucket = "rollout"
 [tls]
 ca = "~/ca.pem"
 certificate = "~/gateway.crt"
@@ -76,10 +79,11 @@ def test_a_run_is_refused_what_its_pods_cannot_be_given() -> None:
     assert not [each for each in refused(cluster_of(), RunSettings(SETTINGS)) if "pod" in each]
     two = RunSettings({**SETTINGS, "channels.policy.replicas": 2})
     assert any("needs 2 pods of h100, which has at most 1" in each for each in refused(cluster_of(), two))
-    assert any(
-        "get their certificates from step-ca" in each for each in refused(cluster_of(host=""), RunSettings(SETTINGS))
-    )
+    no_ca = cluster_of(host='store = "r2"')
+    assert any("get their certificates from step-ca" in each for each in refused(no_ca, RunSettings(SETTINGS)))
     assert any("reach the ledger service at [ledger] public" in each
                for each in refused(cluster_of(ledger=""), RunSettings(SETTINGS)))  # fmt: skip
+    files = cluster_of(host=f"step_ca = {STEP_CA}")  # (no store: the cluster's [blobs], files)
+    assert any("cannot read a store of files" in each for each in refused(files, RunSettings(SETTINGS)))
     gpus = check(RunSettings(SETTINGS), cluster_of(), ENVIRONMENT, LedgerFacts(gpus=0.0))
     assert not [each for each in gpus if each.refuses and "GPUs" in each.reason]  # (pods are not the cluster's GPUs)
