@@ -498,7 +498,7 @@ async def test_a_runner_whose_claim_lapsed_does_not_record_the_episode(tmp_path:
 
     def runner(name: str) -> EpisodeRunner:
         recorder = gateway_endpoints(plain_channel(always=[("yes\n", "stop")]), ledger=ledger, blobs=blobs)
-        local = LocalRunner(recorder=recorder, pools={"boxes": pool})
+        local = LocalRunner(gateway=recorder, pools={"boxes": pool})
         return EpisodeRunner(
             name, ledger, local, recorder, blobs, places=1, pools={"boxes": pool}, presence=beats, every=0.02,
             beating=1000.0,

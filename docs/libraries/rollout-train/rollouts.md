@@ -11,8 +11,8 @@ group's episodes is only a matter of where runners are.
 ```python
 await plan(ledger, "train", Plan(program, binding), fence)        # how the run's episodes are played
 await ledger.append(table("train", GROUPS), "1", {"parameters": row, "episodes": 4}, fence)
-recorder = GatewayEndpoints.of(gateway)                            # what the runs' recorded slots sample through
-async with playing(EpisodeRunner("host/train", ledger, LocalRunner(recorder=recorder), recorder, blobs, places=6)):
+endpoints = GatewayEndpoints.of(gateway)                           # what the runs' recorded slots sample through
+async with playing(EpisodeRunner("host/train", ledger, LocalRunner(gateway=endpoints), endpoints, blobs, places=6)):
     episodes = await episodes_of(ledger, blobs, "train", 1, 4)     # the group's four, once all have ended
 ```
 

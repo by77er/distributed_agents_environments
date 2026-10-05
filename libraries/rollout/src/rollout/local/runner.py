@@ -114,11 +114,12 @@ class LocalRunner:
         providers: Mapping[str, EndpointFactory] | None = None,
         tool_sets: Mapping[str, ToolSet] | None = None,
         blobs: Blobs | None = None,
-        recorder: RecordedEndpoints | None = None,
+        gateway: RecordedEndpoints | None = None,
         hooks: Sequence[RunHooks] = (),
         pools: Mapping[str, Pool] | None = None,
     ) -> None:
-        """`recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`. `pools`
+        """`gateway` serves recorded model bindings (trainable channels: a gateway's endpoints); direct bindings use
+        `providers`. `pools`
         are the sandbox pools a binding names as `local`. `hooks` watch every run: each event recorded and each model
         sample."""
         self._hooks = list(hooks)
@@ -126,7 +127,7 @@ class LocalRunner:
         self._tool_sets = dict(tool_sets or {})
         self._pools = dict(pools or {})
         self._blobs = blobs
-        self._recorder = recorder
+        self._gateway = gateway
         self._runs: dict[str, LocalRunHandle] = {}
 
     def _recorded(self, handle: LocalRunHandle, event: RunEvent) -> None:
@@ -156,7 +157,7 @@ class LocalRunner:
         if run_id in self._runs:
             raise ValueError(f"run {run_id} already exists")
         program = instantiate(specification.program)
-        endpoints = resolve_endpoints(program, specification.binding, self._providers, self._recorder)
+        endpoints = resolve_endpoints(program, specification.binding, self._providers, self._gateway)
         endpoints = observed(endpoints, self._hooks, run_id)
         tool_sets = resolve_tool_sets(program, specification.binding, self._tool_sets)
         pools = resolve_pools(program, specification.binding, self._pools)
@@ -225,9 +226,9 @@ def resolve_endpoints(
     program: Program,
     binding: RunBinding,
     providers: Mapping[str, EndpointFactory],
-    recorder: RecordedEndpoints | None = None,
+    gateway: RecordedEndpoints | None = None,
 ) -> dict[str, ModelEndpoint]:
-    """An endpoint for each model slot of the program, from the binding: the recorder serves recorded models, the
+    """An endpoint for each model slot of the program, from the binding: the gateway serves recorded models, the
     registered providers direct ones."""
     endpoints: dict[str, ModelEndpoint] = {}
     for slot in program.model_slots():
@@ -235,9 +236,9 @@ def resolve_endpoints(
         if model is None:
             raise ValueError(f"the binding has no model for slot {slot!r}")
         if model.recorded is not None:
-            if recorder is None:
-                raise ValueError(f"slot {slot!r} is bound to a recorded channel, but the runner has no recorder")
-            endpoints[slot] = recorder.endpoint(model.recorded)
+            if gateway is None:
+                raise ValueError(f"slot {slot!r} is bound to a recorded channel, but the runner has no gateway")
+            endpoints[slot] = gateway.endpoint(model.recorded)
             continue
         assert model.direct is not None  # a binding is one or the other
         factory = providers.get(model.direct.provider)

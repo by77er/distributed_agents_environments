@@ -89,7 +89,7 @@ async def played(
     ledger: FileLedger, blobs: FileBlobStore, recorder: GatewayEndpoints, program: ProgramReference
 ) -> tuple[list[Episode], list[Episode]]:
     """Two groups of one episode, a run's rows `yes` and `no`, played by a runner over `ledger`."""
-    runner = LocalRunner(recorder=recorder)
+    runner = LocalRunner(gateway=recorder)
     fence = await ledger.take(scope("train"))
     await plan(ledger, "train", Plan(program, binding_of(program)), fence)
     for number, word in ((1, "yes"), (2, "no")):

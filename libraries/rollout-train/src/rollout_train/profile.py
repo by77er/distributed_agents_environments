@@ -455,7 +455,7 @@ class Platform:
             self.tool_bindings[name] = ToolBinding(local=name)
             stack.push_async_callback(_closed, tool_sets[name])
         pools = await self._pools(stack)
-        runner = LocalRunner(recorder=self.recorder, tool_sets=tool_sets, pools=pools, hooks=[feed], blobs=self.blobs)
+        runner = LocalRunner(gateway=self.recorder, tool_sets=tool_sets, pools=pools, hooks=[feed], blobs=self.blobs)
         self.feed = feed
         self.runner = EpisodeRunner(
             f"{socket.gethostname()}/{directory.name}",  # (the same name when started again: what it claimed is free)

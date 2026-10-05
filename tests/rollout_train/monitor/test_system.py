@@ -61,7 +61,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     ledger = FileLedger(tmp_path / LEDGER)
     recorder = policy.gateway(ledger, blobs)
     checkpoints = Checkpoints(ledger, blobs)
-    local = LocalRunner(recorder=recorder, hooks=[feed])
+    local = LocalRunner(gateway=recorder, hooks=[feed])
     presence = presence_of(ledger)
     assert presence is not None
     channel = policy.channels["policy"]

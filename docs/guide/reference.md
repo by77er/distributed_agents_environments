@@ -2244,7 +2244,8 @@ name.
 
 **Methods**
 
-- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, blobs: Blobs | None = None, recorder: RecordedEndpoints | None = None, hooks: Sequence[RunHooks] = (), pools: Mapping[str, Pool] | None = None) -> None` — `recorder` serves recorded model bindings (trainable channels); direct bindings use `providers`. `pools`
+- `def __init__(self, *, providers: Mapping[str, EndpointFactory] | None = None, tool_sets: Mapping[str, ToolSet] | None = None, blobs: Blobs | None = None, gateway: RecordedEndpoints | None = None, hooks: Sequence[RunHooks] = (), pools: Mapping[str, Pool] | None = None) -> None` — `gateway` serves recorded model bindings (trainable channels: a gateway's endpoints); direct bindings use
+  `providers`. `pools`
   are the sandbox pools a binding names as `local`. `hooks` watch every run: each event recorded and each model
   sample.
 - `async def launch(self) -> None` — Nothing to start: runs execute on the caller's event loop.

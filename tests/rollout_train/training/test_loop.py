@@ -68,7 +68,7 @@ def checkpoints_in(directory: Path) -> Checkpoints:
 def wiring(tmp_path: Path) -> tuple[Runner, Policy]:
     recorder = answering()
     recorded = recorder.gateway(FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs"))
-    return LocalRunner(recorder=recorded), recorder
+    return LocalRunner(gateway=recorded), recorder
 
 
 async def test_the_loop_records_each_group_and_steps_on_what_it_played(

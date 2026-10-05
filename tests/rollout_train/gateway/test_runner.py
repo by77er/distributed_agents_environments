@@ -86,7 +86,7 @@ async def test_an_episode_played_through_the_gateway_elsewhere_is_the_episode_on
     http = httpx.AsyncClient(transport=Losing(app, losing=2))
     endpoints = GatewayEndpoints("http://gateway", keyring(), TurnStore(ledger, blobs), contracts(), http=http)
     endpoints.admit("r_same", Attempt("train", await ledger.take("runs/train/episodes/1/1"), "1/1", 1))
-    events = await played(LocalRunner(recorder=endpoints), "r_same")
+    events = await played(LocalRunner(gateway=endpoints), "r_same")
     through_gateway = assemble(events, await endpoints.sessions("train", "r_same"), run="train", group=1, number=1)
     assert (
         len(cast(EchoEngine, channel.engines[0]).prompts) == 3
@@ -95,7 +95,7 @@ async def test_an_episode_played_through_the_gateway_elsewhere_is_the_episode_on
     here_ledger, here_blobs = stores(tmp_path / "here")
     here = gateway_endpoints(echo_channel(), ledger=here_ledger, blobs=here_blobs)
     here.admit("r_same", Attempt("train", await here_ledger.take("runs/train/episodes/1/1"), "1/1", 1))
-    events = await played(LocalRunner(recorder=here), "r_same")
+    events = await played(LocalRunner(gateway=here), "r_same")
     in_process = assemble(events, await here.sessions("train", "r_same"), run="train", group=1, number=1)
 
     assert through_gateway.outcome is Outcome.COMPLETED and through_gateway.reward == 1.0
@@ -120,7 +120,7 @@ async def test_the_turns_of_an_attempt_taken_over_are_not_recorded_further_nor_r
     await endpoint.sample(sample_request([Message.user("Walk.")], "r_old:0:0", session_id="r_old/policy"))
     second = await ledger.take("runs/train/episodes/1/1")  # another runner claims attempt 2
     endpoints.admit("r_new", Attempt("train", second, "1/1", 2))
-    events = await played(LocalRunner(recorder=endpoints), "r_new")
+    events = await played(LocalRunner(gateway=endpoints), "r_new")
     try:
         await endpoint.sample(sample_request([Message.user("Walk on.")], "r_old:0:1", session_id="r_old/policy"))
         raise AssertionError("a stale attempt's sample was recorded")

@@ -171,7 +171,7 @@ async def test_a_run_bound_to_a_recorded_channel_is_recorded(tokenizer: Tokenize
     engine = ScriptedEngine(tokenizer, [("ok</think>", "stop"), ("\n\nhi<|im_end|>", "stop")])
     recorder = await recorded(channel(engine), tmp_path)
     await admitted(recorder, "r_asked")
-    runner = LocalRunner(recorder=recorder)
+    runner = LocalRunner(gateway=recorder)
     binding = RunBinding(models={"policy": ModelBinding(recorded=POLICY)})
     handle = await runner.start(RunSpecification(program=agent_program(Ask), binding=binding), run_id="r_asked")
     await handle.result()

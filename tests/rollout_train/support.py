@@ -118,7 +118,7 @@ async def here(
     """A runner that plays what runs ask for in `ledger`, while the block runs, recording through a gateway in this
     process over `recorder`'s channels."""
     recorded = recorder.gateway(ledger, blobs)
-    played = runner if runner is not None else LocalRunner(recorder=recorded)
+    played = runner if runner is not None else LocalRunner(gateway=recorded)
     episodes = EpisodeRunner(name, ledger, played, recorded, blobs, places, hooks=hooks, every=0.01)
     async with playing(episodes):
         yield episodes
@@ -260,7 +260,7 @@ def episode_runner(tmp_path: Path, pool: SandboxPool, url: str | None = None, **
     return EpisodeRunner(
         "here",
         ledger,
-        LocalRunner(recorder=recorder, pools={"boxes": pool}),
+        LocalRunner(gateway=recorder, pools={"boxes": pool}),
         recorder,
         blobs,
         places=4,
@@ -292,7 +292,7 @@ def runner(
     played = EpisodeRunner(
         name,
         ledger,
-        LocalRunner(recorder=recorder),
+        LocalRunner(gateway=recorder),
         recorder,
         blobs,
         places,
