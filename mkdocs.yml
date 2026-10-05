@@ -175,6 +175,7 @@ nav:
       - "Minecraft rewards": research/minecraft-rewards.md
       - "Minecraft memory": research/minecraft-memory.md
       - "Where sandboxes run": research/sandbox-placement.md
+      - "Where a run runs": research/run-placement.md
       - "SFT datasets": research/sft-datasets.md
       - "Thinking Machines' API": research/thinking-machines.md
       - "Prime Intellect's verifiers": research/prime-compat.md
