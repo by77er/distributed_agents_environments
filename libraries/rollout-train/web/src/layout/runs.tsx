@@ -1,5 +1,6 @@
 // How a run is said wherever it appears: whether it is running (its process is there and writes), idle (there, and
-// quiet), paused (there, and asked to start nothing new) or ended, on which host when not this one, when it last wrote, its color, and where its episodes are read.
+// quiet), paused (there, and asked to start nothing new) or ended, on which host while it is live and not on this one,
+// when it last wrote, its color, and where its episodes are read.
 
 import { useCallback } from "react";
 import { useSystem } from "../api/queries";
@@ -10,7 +11,11 @@ import { useNow } from "../lib/now";
 /** A run's state in a word: `pausing` while it is wanted paused and its process has not paused it yet. */
 export const stateOf = (run: Run): string => (run.pause && (run.state === "running" || run.state === "idle") ? "pausing" : run.state);
 
-export const running = (run: Run, host: string): string => `${stateOf(run)}${run.host && run.host !== host ? ` on ${run.host}` : ""}`;
+const LIVE = new Set(["running", "idle", "paused", "pausing"]);
+
+/** A run's state, and while it is live, the host it runs on when that is not this one. */
+export const running = (run: Run, host: string): string =>
+  `${stateOf(run)}${LIVE.has(stateOf(run)) && run.host && run.host !== host ? ` on ${run.host}` : ""}`;
 
 /** How long ago the run last wrote, counting up. */
 export function Wrote({ run }: { run: { written: number | null } }) {

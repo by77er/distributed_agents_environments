@@ -14,7 +14,7 @@ import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported } from "
 import { basePlace, environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, subjectPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { versionTag } from "../lib/suites";
-import { RunDot, running, useRunColor } from "./runs";
+import { RunDot, running, stateOf, useRunColor } from "./runs";
 import { MachinesTree } from "./MachinesTree";
 
 /** A row of the tree: it opens its place. */
@@ -157,7 +157,7 @@ const RunBranch = memo(function RunBranch({ run, only, place, folds, fold, showi
         <Twist open={runOpen} onToggle={() => fold(runKey, !runOpen)} />
         <RunDot run={run} host={host} />
         <span className="name" title={`id: ${run.run}`}>{nameOf(run)}</span>
-        <span className="tag">{running(run, host)}</span>
+        <span className="tag" title={running(run, host)}>{stateOf(run)}</span>
       </Node>
       {runOpen ? <div className="children">{children}</div> : null}
     </>
@@ -331,7 +331,7 @@ function EnvironmentsTree({ place, system }: { place: Place; system: System }) {
                   <Node key={run.run} to={runPlace(run.run)}>
                     <RunDot run={run} host={system.host} />
                     <span className="name" title={`id: ${run.run}`}>{nameOf(run)}</span>
-                    <span className="tag">{running(run, system.host)}</span>
+                    <span className="tag" title={running(run, system.host)}>{stateOf(run)}</span>
                   </Node>
                 ))}
                 {suites.map(suite => (
@@ -383,7 +383,7 @@ function StatisticsTree({ place, system }: { place: Place; system: System }) {
           >
             <span className="swatch" style={{ background: colorOf(run.run) }} />
             <span className="name">{nameOf(run)}</span>
-            <span className="tag">{running(run, system.host)}</span>
+            <span className="tag" title={running(run, system.host)}>{stateOf(run)}</span>
           </div>
         );
       })}
