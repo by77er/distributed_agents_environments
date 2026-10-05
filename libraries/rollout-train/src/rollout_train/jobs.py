@@ -15,7 +15,7 @@ job, or as a RayJob on Kubernetes; `rollout train --here` runs it in the calling
    the trainer as an actor with its share of a GPU (half of the card where it is colocated with the trained channel's
    engines, which then sleep while it steps), on the driver's node, since a step's files are handed to it by path, and
    a bundle for the bridges' tasks. While the group or an actor waits for Ray, the driver beats as `run/RUN` saying
-   what it waits for, and notes it on its launch;
+   what it waits for (and its demand), and notes it on its launch;
 3. samples every channel its settings name through a gateway in its own process (`rollout_train.gateway.Gateway`):
    a channel on engine hosts or on servers elsewhere (`vllm-servers`, RunPod pods) is a routed channel, sampled by
    checkpoint name from what the run's serving records say (`rollout_train.inference.Routes`); a channel on Tinker is
@@ -44,6 +44,7 @@ import secrets
 import shutil
 import socket
 import sys
+import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -283,6 +284,10 @@ class Run:
     """What its scheduled parts need (`rollout_train.demand`)."""
     group: Any = None
     """The placement group that reserves them."""
+    asked_at: float | None = None
+    """When it asked Ray for its placement group."""
+    reserved_at: float | None = None
+    """When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own)."""
     _said: str | None = field(default=None, init=False, repr=False)
 
     @property
@@ -329,8 +334,10 @@ class Run:
         import ray
 
         asked = self.demand = demand(self.settings, self.cluster, sandboxes=self.sandboxes)
+        self.asked_at = time.time()
         self.group = reserve(asked, f"run/{self.run.id}")
         if self.group is None:
+            self.reserved_at = time.time()
             return
         wants = [f"run/{self.run.id}/{part.name} ({part.asks.said()})" for each in asked.bundles for part in each.parts]
         ready = self.group.ready()
@@ -338,15 +345,23 @@ class Run:
         while not (await asyncio.to_thread(ray.wait, [ready], timeout=LOOK))[0]:
             said = True
             await self._told(wants)
+        self.reserved_at = time.time()
         if said and self.noted is not None:
             await self.noted("running")
+
+    def _held(self) -> dict[str, JsonValue]:
+        """What a beat says of what the run asked Ray for: its demand in all (`demand`, the driver's and its placement
+        group's), when it asked (`asked`) and when Ray reserved it (`reserved`); nothing before it asked."""
+        if self.demand is None:
+            return {}
+        return {"demand": self.demand.total.to_json(), "asked": self.asked_at, "reserved": self.reserved_at}
 
     async def _told(self, waits: Sequence[str]) -> None:
         """Say what the run waits for: in a beat as `run/RUN`, then on its launch (once for each change)."""
         presence = presence_of(self.ledger)
         if presence is not None:
             about: dict[str, JsonValue] = {"kind": "run", "run": self.run.id, "host": socket.gethostname(),
-                                           "waiting": cast(JsonValue, list(waits))}  # fmt: skip
+                                           "waiting": cast(JsonValue, list(waits)), **self._held()}  # fmt: skip
             with contextlib.suppress(Exception):
                 await presence.beat(f"run/{self.run.id}", about)
         now = "waits for " + ", ".join(waits)
@@ -589,7 +604,8 @@ class Run:
         return pools
 
     def _about(self) -> dict[str, JsonValue]:
-        """What the runner says in each beat: its machine, the run, and what each channel serves."""
+        """What the runner says in each beat: its machine, the run, what each channel serves, and what the run holds of
+        Ray (`_held`)."""
         channels: list[JsonValue] = [
             {"channel": name, "adapter": channel.serving, "version": channel.version, **channel.take()}
             for name, channel in self.channels.items()
@@ -599,7 +615,7 @@ class Run:
             channels.append({"channel": name, **channel.take(), "servers": servers})
         return {
             "host": socket.gethostname(), "directory": str(self.directory), "machine": measured(self.directory),
-            "run": self.run.id, "channels": channels,
+            "run": self.run.id, "channels": channels, **self._held(),
         }  # fmt: skip
 
     def binding(self, environment: Environment) -> Any:

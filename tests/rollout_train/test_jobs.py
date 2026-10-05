@@ -8,7 +8,7 @@ the reasons; a run that cannot have its GPUs yet waits, and says what for."""
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import JsonValue
@@ -150,6 +150,8 @@ async def test_a_run_that_cannot_have_its_gpus_yet_waits_and_says_what_for(tmp_p
         presence = run.stores.ledger.presence  # pyright: ignore[reportAttributeAccessIssue]
         (beat,) = [each for each in await presence.beats() if each.runner == f"run/{run.run.id}"]
         assert beat.about["kind"] == "run" and beat.about["waiting"]
+        demanded = cast(dict[str, Any], beat.about["demand"])  # (what the monitor's queue shows it waits with)
+        assert demanded["gpus"] > 1 and isinstance(beat.about["asked"], float) and beat.about["reserved"] is None
     finally:
         going.cancel()
         await asyncio.gather(going, return_exceptions=True)
