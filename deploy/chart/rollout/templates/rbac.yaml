@@ -1,6 +1,8 @@
 # The monitors' account: a monitor submits each run asked for from its page as a RayJob, reads how it goes (with Kueue,
 # why its Workload waits), and deletes it to stop it (`rollout_train.submitting.RayJobResources`), in the namespace the
-# chart is installed into.
+# chart is installed into. With Kueue, it also reads the queue (`rollout_train.monitor.queue`): the LocalQueue and the
+# Workloads in that namespace, and, cluster-wide, the chart's ClusterQueue and the order of its pending Workloads
+# (Kueue's visibility API).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -23,6 +25,10 @@ rules:
   - apiGroups: [kueue.x-k8s.io]
     resources: [workloads]
     verbs: [get, list, watch]
+  - apiGroups: [kueue.x-k8s.io]
+    resources: [localqueues]
+    resourceNames: [{{ .Values.kueue.queue }}]
+    verbs: [get]
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -33,3 +39,29 @@ metadata:
 subjects:
   - {kind: ServiceAccount, name: monitor, namespace: {{ .Release.Namespace }}}
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: monitor}
+{{- if .Values.kueue.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-monitor
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [kueue.x-k8s.io]
+    resources: [clusterqueues]
+    resourceNames: [{{ .Values.kueue.clusterQueue }}]
+    verbs: [get]
+  - apiGroups: [visibility.kueue.x-k8s.io]
+    resources: [clusterqueues/pendingworkloads]
+    resourceNames: [{{ .Values.kueue.clusterQueue }}]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-monitor
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+subjects:
+  - {kind: ServiceAccount, name: monitor, namespace: {{ .Release.Namespace }}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ .Release.Namespace }}-monitor}
+{{- end }}

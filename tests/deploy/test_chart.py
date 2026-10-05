@@ -1,7 +1,8 @@
 """The Helm chart (deploy/chart/rollout), rendered: its cluster config reads as the code reads it, names the cluster's
 stores and makes each run's job a RayJob from its template, which renders into a run's RayJob; its presets are run
-settings that cluster takes; the monitors' account may make RayJobs; every container says what it needs and the most
-memory it may take; every volume is of the class `storageClass` names. Skipped where helm is not installed."""
+settings that cluster takes; the monitors' account may make RayJobs and, with Kueue, read the queue; every container
+says what it needs and the most memory it may take; every volume is of the class `storageClass` names. Skipped where
+helm is not installed."""
 
 import shutil
 import tomllib
@@ -214,8 +215,31 @@ def test_with_kueue_runs_are_admitted_whole_through_a_queue_the_chart_makes(rend
     (role,) = [each for each in on if each["kind"] == "Role" and each["metadata"]["name"] == "monitor"]
     (workloads,) = [rule for rule in role["rules"] if rule["resources"] == ["workloads"]]
     assert workloads["apiGroups"] == ["kueue.x-k8s.io"] and "list" in workloads["verbs"]
+    (local_queue,) = [rule for rule in role["rules"] if rule["resources"] == ["localqueues"]]
+    assert local_queue["resourceNames"] == [local["metadata"]["name"]] and local_queue["verbs"] == ["get"]
     for key, text in config_of(on).items():  # (every preset fits the queue's quota)
         if key.startswith("presets_"):
             settings = flattened(tomllib.loads(text))
             kind = "train" if "trainer.provider" in settings else "check"
             assert [each for each in check(RunSettings({**settings, "kind": kind}), cluster) if each.refuses] == [], key
+
+
+def test_with_kueue_the_monitors_may_read_the_queue_and_its_pending_order(rendered: list[dict[str, Any]]) -> None:
+    def cluster_wide(rendered: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [each for each in rendered if each["kind"] in ("ClusterRole", "ClusterRoleBinding")]
+
+    assert cluster_wide(rendered) == []  # (without Kueue the monitors read nothing outside their namespace)
+    (role,) = [each for each in rendered if each["kind"] == "Role" and each["metadata"]["name"] == "monitor"]
+    assert not [rule for rule in role["rules"] if "kueue.x-k8s.io" in rule["apiGroups"]]
+    on = render("--set", "kueue.enabled=true", "--set", "kueue.clusterQueue=runs-queue")
+    roles = {each["kind"]: each for each in cluster_wide(on)}
+    assert set(roles) == {"ClusterRole", "ClusterRoleBinding"}
+    assert {(tuple(rule["apiGroups"]), tuple(rule["resources"]), tuple(rule["resourceNames"]), tuple(rule["verbs"]))
+            for rule in roles["ClusterRole"]["rules"]} == {
+        (("kueue.x-k8s.io",), ("clusterqueues",), ("runs-queue",), ("get",)),
+        (("visibility.kueue.x-k8s.io",), ("clusterqueues/pendingworkloads",), ("runs-queue",), ("get",)),
+    }  # fmt: skip
+    binding = roles["ClusterRoleBinding"]
+    assert binding["subjects"] == [{"kind": "ServiceAccount", "name": "monitor", "namespace": "rollout"}]
+    assert binding["roleRef"] == {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole",
+                                  "name": roles["ClusterRole"]["metadata"]["name"]}  # fmt: skip
