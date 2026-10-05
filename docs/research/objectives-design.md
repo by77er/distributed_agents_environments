@@ -77,10 +77,14 @@ validation refuses the rest. Every component below is built but those marked pro
 Where a component that follows from another is not given, it follows: a KL to the reference reads `reference = base`,
 a preference loss with a reference reads it and one without reads none, and an odds ratio is length-normalized.
 
-The step's existing controls stay as they are: `max_kl` (stop a pass when the policy has moved too far), the
-gradient norm, the learning rate and warmup, `passes`, and `tokens_per_step`. They are trainer settings, not
-components: every preset runs with the trainer's `max_kl` (0.02 by default), which a run sets to none for the papers'
-unbounded steps.
+The step's own controls are `max_kl` (stop a pass when the policy has moved too far), the gradient norm, the learning
+rate and warmup, `passes`, and `tokens_per_step`. They are trainer settings, not components: every preset runs with the
+trainer's `max_kl` (0.02 by default), which a run sets to none for the papers' unbounded steps. `max_kl` is in nats per
+token, against the k3 estimate of KL(old ‖ now) on the minibatch's sampled tokens, `(r - 1) - log r` with `log r = now
+- old`: never below 0, and with the KL's mean on tokens sampled where the step began. The k1 estimate, `old - now`, has
+the same mean and either sign; a step that makes every sampled token likelier (REINFORCE without a baseline, a
+distillation whose teacher is surer than the student) reads near 0 or below by it however far the policy moved, so k1
+would let exactly those steps run furthest. The step's `kl_moved` is the same k3 estimate.
 
 ## Presets
 
@@ -263,6 +267,9 @@ reached through the gateway, so every judge call is recorded, counted in spend, 
 
 ## Checked on Qwen3-0.6B
 
+**Recorded on 2026-10-04, before `kl_moved` was the k3 estimate:** *KL moved* below is the k1 estimate, which has
+either sign.
+
 On 2026-10-04, at commit `94146d7` (the code of this branch, run before it was rebased onto main's scoring and
 untrained-slot changes), every preset took a short real run on one RTX 5080 (16 GB): `rollout train` over GSM8K
 (`rollout_verifiers.environments:gsm8k`), sampled by local vLLM (`gpu_memory_utilization` 0.35, sleeping while the
@@ -317,8 +324,8 @@ What looks wrong, and is reported rather than tuned away:
 - **`dpo`'s margins swing from -11.7 to 6.2** across steps: each step's pairs are new episodes, and a log ratio summed
   over a few hundred tokens moves by many nats under an adapter that has trained two steps. Accuracy on one or two
   fresh pairs a step says little.
-- **`kl_moved` can be negative** (`ipo`, -0.0024): it is the k1 estimate on the sampled tokens, which is unbiased but
-  not bounded below.
+- **`kl_moved` reads negative** (`ipo`, -0.0024): these runs recorded the k1 estimate, which is unbiased but has
+  either sign.
 
 ## Checked on Qwen3
 

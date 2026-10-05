@@ -38,8 +38,9 @@ of distillation) is refused (validation says so before a run starts).
 
 Each minibatch's statistics are the objective's terms of the logprobs the forward-backward returns (the policy before
 that update), so a step's metrics are `PolicyStep`'s (`rollout_objectives.step.metrics`). A minibatch that finds the
-policy further than `max_kl` from where the step began stops the pass; its gradient has been accumulated where no call
-clears it, so that client is not used again.
+policy further than `max_kl` from where the step began, by the k3 estimate the LoRA step reads
+(`rollout_objectives.terms.moved_kl`), stops the pass; its gradient has been accumulated where no call clears it, so
+that client is not used again.
 """
 
 import asyncio
@@ -56,7 +57,7 @@ from tinker import AdamParams, Datum, ForwardBackwardOutput
 
 from rollout_objectives.distillation import distilled
 from rollout_objectives.step import MINIBATCHES, Plan, line, metrics, preference_terms
-from rollout_objectives.terms import SUMS, Terms, tally, terms, units
+from rollout_objectives.terms import SUMS, Terms, moved_kl, tally, terms, units
 from rollout_tinker.data import datum, rows
 from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of, unpaid
 from rollout_tinker.settings import TinkerSettings
@@ -355,7 +356,7 @@ class TinkerTrainer:
                 for item, found in preference_terms(objective, minibatch, now, {}):
                     tally(sums, found, objective, segments=float(len(segments_of(item))))
                 sums["moved"] = sum(
-                    float((part.old - now[id(part.segment)]).sum()) for part in parts if part.old is not None
+                    float(moved_kl(part.old, now[id(part.segment)]).sum()) for part in parts if part.old is not None
                 )
                 sums["tokens"] = sum(float(now[id(part.segment)].numel()) for part in parts)
                 return sums

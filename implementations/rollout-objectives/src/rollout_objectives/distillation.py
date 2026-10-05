@@ -37,7 +37,7 @@ from dataclasses import dataclass
 
 import torch
 
-from rollout_objectives.terms import Terms, importance_weight, kl_estimate, policy_gradient, reduced
+from rollout_objectives.terms import Terms, importance_weight, kl_estimate, moved_kl, policy_gradient, reduced
 from rollout_train.objectives import DISTILLATION, POLICY_GRADIENT, Objective
 from rollout_train.recorder import TeacherScores
 from rollout_train.trainer import Distilled
@@ -198,7 +198,7 @@ def distillation(
         found.ratio = float(torch.exp(logprobs - old).sum())
         found.weight = float(weight.sum()) if weight is not None else found.tokens
         found.truncated = float((weight != raw).sum()) if weight is not None and raw is not None else 0.0
-        found.moved = float((old - logprobs).sum())
+        found.moved = float(moved_kl(old, logprobs).sum())
         found.kl = float(penalty.sum()) if penalty is not None else 0.0
     return found
 

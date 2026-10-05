@@ -31,7 +31,7 @@ libraries; it is installed with either the `gpu` or the `tinker` extra.
 | `rank` | The adapter's rank |
 | `learning_rate` | AdamW's learning rate. Adam moves a weight by at most this much per optimizer step |
 | `tokens_per_step` | Sampled tokens per optimizer step. How far a step moves the policy is set by how many optimizer steps its tokens make |
-| `max_kl` | The pass stops when the policy has moved this far from where the step began, in nats per token (`None`: never). A likelihood step does not stop |
+| `max_kl` | The pass stops when the policy has moved this far from where the step began, in nats per token by the k3 estimate of KL(old ‖ now) on the sampled tokens (`None`: never). A likelihood step does not stop |
 | `max_gradient_norm` | Gradients are clipped to this norm before each optimizer step |
 | `passes` | Passes a step takes over its items, each shuffled anew and cut into minibatches of its own (1) |
 | `warmup_updates` | When a step's optimizer starts afresh, its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` (0: none) |
@@ -161,7 +161,11 @@ the top-k form of distillation. Which items, and with what advantages, is the
    minibatch steps from; before any update, old) gives each logprob's gradient, and each segment's logprobs, computed
    again with a gradient, are moved by it. The gradient is the loss's.
 4. **The stop.** Before a minibatch's optimizer step, its estimate of KL(old ‖ now) on the sampled tokens is compared
-   with `max_kl`; if it is more, the pass stops without that step.
+   with `max_kl`; if it is more, the pass stops without that step. The estimate is the mean over its sampled tokens of
+   k3, `(r - 1) - log r` with `log r = now - old` (`moved_kl`): never below 0, and with the KL's mean on tokens sampled
+   where the step began. (The k1 estimate, `old - now`, has the same mean and either sign: a step that makes every
+   sampled token likelier, as REINFORCE without a baseline or a distillation whose teacher is surer than the student
+   does, reads near 0 or below by it however far the policy moved.)
 5. **The update.** Gradients are clipped to `max_gradient_norm` and AdamW steps, with no weight decay, at the
    minibatch's (warmed-up) rate.
 
@@ -175,7 +179,7 @@ A step returns these; a trainer adds its own (`peak_gpu_gib`, `billed_tokens`).
 | `kl_floor`, `mean_mismatch` | KL(behavior ‖ old) estimated on the sampled tokens, and the mean absolute difference: how far the data is from the policy the step starts from (tokens without a finite behaviour logprob left out) |
 | `mean_weight`, `truncated_fraction` | The mean importance weight, and the share of tokens whose weight was truncated or masked |
 | `clip_fraction`, `mean_ratio` | The share of tokens whose ratio was outside the clip's bounds, and the mean ratio |
-| `kl_moved` | KL(old ‖ now) as the last stepped minibatch found it: how far the step moved the policy |
+| `kl_moved` | KL(old ‖ now) by the k3 estimate the stop reads, as the last stepped minibatch found it: how far the step moved the policy (never below 0) |
 | `kl_penalty`, `entropy` | The mean KL penalty's estimate and the mean entropy per token, where the objective has them |
 | `stopped_at_max_kl` | 1 if the pass stopped at `max_kl` |
 | `items`, `preference_accuracy`, `preference_margin` | For a preference loss: items trained on, the share whose chosen side's log ratio is above the rejected's (a desirable example's above `z`, an undesirable one's below), and the mean `h` (an example's distance from `z` on its label's side) |
@@ -191,7 +195,7 @@ A step returns these; a trainer adds its own (`peak_gpu_gib`, `billed_tokens`).
 | `start_seconds`, `seconds` | The first pass, and the whole step |
 
 `state/minibatches.jsonl`, which a trainer writes, has a line per minibatch stepped on (`line`): segments, tokens,
-loss, clip fraction, KL estimate and learning rate, and the trainer's gradient norm.
+loss, clip fraction, KL estimate (as `kl_moved`) and learning rate, and the trainer's gradient norm.
 
 ## Tests
 
@@ -202,8 +206,9 @@ their placement, the entropy bonus, aggregation), the default against the step's
 components (to the last bit), and the step over pairs and labelled examples (its two-part gradient equal to the
 gradient of the whole loss, the direction of DPO's, SimPO's and KTO's updates, the stop at `max_kl`). `test_step.py`
 covers the step on a toy policy: the direction of an update, minibatches, warmup, forced tokens, segments left out, the
-KL stop, a missing logprob, the likelihood objective, the importance weight and its truncation, the token clip and the
-segment ratio. `test_distillation.py` covers distillation's terms against their definitions (each top-k divergence over
+KL stop (also where every advantage pushes the same way, REINFORCE's and a policy-gradient distillation's, whose k1
+estimate falls below 0 as the policy moves), a missing logprob, the likelihood objective, the importance weight and its
+truncation, the token clip and the segment ratio. `test_distillation.py` covers distillation's terms against their definitions (each top-k divergence over
 the whole vocabulary equal to the full one: GKD's JSD as TRL writes it, Hinton's softened KL, the reverse KL), tokens
 the teacher did not score, a teacher that gave fewer than k tokens, the importance mask, a KL in the reward and in the
 loss, a policy gradient's distillation term, and the step on a toy policy, whose every distillation preset moves it

@@ -43,7 +43,7 @@ do not edit by hand.
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
 - **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
-- **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`importance_weight`](#importance_weight), [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`TALLIED`](#tallied), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
+- **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`importance_weight`](#importance_weight), [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`moved_kl`](#moved_kl), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`TALLIED`](#tallied), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
 - **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`positions`](#positions), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`TrainablePolicy`](#trainablepolicy)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls)
@@ -8576,6 +8576,20 @@ def likelihood(objective: Objective, logprobs: torch.Tensor, advantage: float) -
 One segment's likelihood loss: its sampled tokens' log-likelihood, weighted by its advantage (imitation: what
 was sampled is what to do), reading neither `old` nor `behavior`.
 
+### `moved_kl`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
+
+```python
+def moved_kl(old: torch.Tensor, logprobs: torch.Tensor) -> torch.Tensor
+```
+
+Each sampled token's estimate of KL(old || now), how far the step has moved the policy (no gradient): Schulman's
+k3 of `log_r = logprobs - old`, `(r - 1) - log r`. On tokens sampled where the step began its mean is the KL's,
+and no token's estimate is below 0. The k1 estimate, `old - logprobs`, has the same mean but either sign: where an
+update makes every sampled token likelier (every advantage positive, as REINFORCE without a baseline, or a
+distillation whose teacher is surer than the student), it reads near 0 or below however far the policy moved.
+
 ### `pair`
 
 *function* · `implementations/rollout-objectives/src/rollout_objectives/terms.py`
@@ -8680,7 +8694,7 @@ preference item's; the rest are counts and sums, for the step's statistics.
 | `truncated` | `float` | `0.0` | Tokens whose importance weight was truncated, or that a mask dropped. |
 | `ratio` | `float` | `0.0` |  |
 | `weight` | `float` | `0.0` |  |
-| `moved` | `float` | `0.0` | The sum of `old - logprobs`: an estimate of KL(old \|\| now) on the sampled tokens, times their number. |
+| `moved` | `float` | `0.0` | The sum of `moved_kl` over the tokens: an estimate of KL(old \|\| now) on the sampled tokens, times their number. |
 | `kl` | `float` | `0.0` | The sum of the KL penalty's estimate over the tokens. |
 | `entropy` | `float` | `0.0` |  |
 | `items` | `float` | `0.0` | Preference items: pairs or examples. |

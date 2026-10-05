@@ -2,6 +2,7 @@
 """The policy step, on a toy policy: the direction of an update, what is never trained on, when a pass stops, and
 how its objectives weigh tokens."""
 
+import copy
 import math
 from collections.abc import Sequence
 
@@ -13,7 +14,8 @@ from rollout_objectives.settings import StepSettings
 from rollout_objectives.step import PolicyStep, minibatches
 from rollout_objectives.terms import terms
 from rollout_train import Weighted
-from rollout_train.recorder import Segment, Span
+from rollout_train.recorder import Segment, Span, TeacherScores
+from rollout_train.trainer import Distilled
 
 
 class ToyPolicy:
@@ -26,10 +28,14 @@ class ToyPolicy:
     def parameters(self) -> list[nn.Parameter]:
         return list(self.model.parameters())
 
+    def distribution(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
+        """The logprobs of every token of the vocabulary at each position."""
+        ids = torch.tensor(list(tokens))
+        return torch.log_softmax(self.model(ids[[p - 1 for p in positions]]), -1)
+
     def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
         ids = torch.tensor(list(tokens))
-        logits = self.model(ids[[p - 1 for p in positions]])
-        return torch.log_softmax(logits, -1).gather(-1, ids[list(positions)].unsqueeze(-1)).squeeze(-1)
+        return self.distribution(tokens, positions).gather(-1, ids[list(positions)].unsqueeze(-1)).squeeze(-1)
 
 
 def segment(policy: ToyPolicy, tokens: list[int], advantage: float) -> Weighted:
@@ -130,6 +136,57 @@ def test_the_pass_stops_once_the_policy_has_moved_as_far_as_allowed() -> None:
     held, _ = run(0.05)
     assert held["stopped_at_max_kl"] and held["optimizer_steps"] < 10 and held["segments"] < 20
     assert held["kl_moved"] <= 0.05  # the minibatch that found it further was not stepped on
+
+
+SAME_WAY = [[1, 2, 3, 4], [1, 5, 6, 7], [2, 3, 4, 5], [6, 1, 2, 0]]
+
+
+def pushed_the_same_way(policy: ToyPolicy, preset: str) -> list[Weighted | Distilled]:
+    """Items whose every token's advantage is positive: REINFORCE's of a reward of 1 with no baseline, or a
+    policy-gradient distillation's from a teacher surer of each sampled token than the student."""
+    made: list[Weighted | Distilled] = []
+    for tokens in SAME_WAY:
+        sampled = segment(policy, tokens, 1.0)
+        if preset == "reinforce":
+            made.append(sampled)
+        else:
+            made.append(Distilled(sampled.segment, TeacherScores("teacher", [-0.05] * (len(tokens) - 1))))
+    return made * 6
+
+
+def moved(start: ToyPolicy, now: ToyPolicy) -> tuple[float, float]:
+    """Over the sampled positions: the mean of `old - now` of the sampled tokens (the k1 estimate of KL(start || now)),
+    and the mean KL(start || now) over the whole vocabulary."""
+    k1, exact, count = 0.0, 0.0, 0
+    with torch.no_grad():
+        for tokens in SAME_WAY:
+            at = range(1, len(tokens))
+            k1 += float((start.logprobs(tokens, at) - now.logprobs(tokens, at)).sum())
+            before, after = start.distribution(tokens, at), now.distribution(tokens, at)
+            exact += float((before.exp() * (before - after)).sum())
+            count += len(at)
+    return k1 / count, exact / count
+
+
+@pytest.mark.parametrize("preset", ["reinforce", "on_policy_distillation"])
+def test_the_stop_reads_how_far_the_policy_moved_when_every_advantage_pushes_the_same_way(preset: str) -> None:
+    """Each update makes every sampled token likelier, so the k1 estimate of how far the policy moved falls below 0
+    while the policy moves away; the stop reads the k3 estimate, which is never below 0, and stops the pass."""
+
+    def run(max_kl: float | None) -> tuple[dict[str, float], ToyPolicy, ToyPolicy]:
+        policy = ToyPolicy()
+        start = copy.deepcopy(policy)
+        settings = StepSettings(objective=preset, learning_rate=0.05, tokens_per_step=12, max_kl=max_kl)
+        metrics = PolicyStep(policy, settings).step(pushed_the_same_way(policy, preset))  # type: ignore[arg-type]
+        return metrics, start, policy
+
+    free, start, after = run(None)
+    k1, exact = moved(start, after)
+    assert free["optimizer_steps"] == 6 and k1 < -1.0 and exact > 1.0  # (k1: -1.7; the KL over the vocabulary: 1.8)
+    held, start, stopped = run(0.05)
+    assert held["stopped_at_max_kl"] and held["optimizer_steps"] == 1
+    k1, exact = moved(start, stopped)  # where the second minibatch found it: past 0.05, which k1 does not say
+    assert k1 < 0 and exact > 0.05  # (k1: -0.62; the KL over the vocabulary: 0.07; k3 on the sampled tokens: 0.33)
 
 
 def test_a_sampled_token_without_a_logprob_is_refused() -> None:

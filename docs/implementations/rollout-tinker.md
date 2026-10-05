@@ -204,7 +204,7 @@ precision: on the tests' fixed batch, after several Adam updates at a rate of 0.
 - A parent not trained on Tinker: the step fails. No call takes an adapter trained elsewhere into a Tinker run.
 
 **The stop at `max_kl`.** A minibatch that finds the policy further than `max_kl` from where the step began stops the
-pass. Each minibatch after the first reads that distance before its update is sent, which takes two of Tinker's clock
+pass, by the k3 estimate the LoRA step reads ([the step](rollout-objectives.md#the-step)). Each minibatch after the first reads that distance before its update is sent, which takes two of Tinker's clock
 cycles; the first, and every minibatch when nothing is checked, sends its update beside its forward-backward. Its gradient was accumulated where no call clears it, so that client is not used again: the next step resumes
 the saved state.
 

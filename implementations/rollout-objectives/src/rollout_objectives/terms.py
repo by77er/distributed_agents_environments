@@ -12,7 +12,8 @@ Four logprobs of each sampled token meet here:
 
 `old` against `behavior` is where the data came from: an older checkpoint, and the engine computing differently from
 the trainer. The importance correction weighs it (`importance`: a constant, with no gradient). `logprobs` against
-`old` is how far the step has moved the policy: the ratio that clipping bounds, exactly 1 when the step begins.
+`old` is how far the step has moved the policy: the ratio that clipping bounds, exactly 1 when the step begins, and
+`moved_kl`, which the stop at `max_kl` reads.
 `logprobs` against `reference` (or `old`) is what a KL penalty measures.
 
 A **policy gradient** (`policy_gradient`) of one segment: each token's surrogate is the advantage times its ratio
@@ -42,6 +43,7 @@ __all__ = [
     "kl_estimate",
     "labelled",
     "likelihood",
+    "moved_kl",
     "pair",
     "policy_gradient",
     "reduced",
@@ -65,7 +67,8 @@ class Terms:
     ratio: float = 0.0
     weight: float = 0.0
     moved: float = 0.0
-    """The sum of `old - logprobs`: an estimate of KL(old || now) on the sampled tokens, times their number."""
+    """The sum of `moved_kl` over the tokens: an estimate of KL(old || now) on the sampled tokens, times their
+    number."""
     kl: float = 0.0
     """The sum of the KL penalty's estimate over the tokens."""
     entropy: float = 0.0
@@ -119,6 +122,16 @@ def kl_estimate(estimator: str, logprobs: torch.Tensor, target: torch.Tensor) ->
     if estimator == "k2":
         return 0.5 * log_r.square()
     return torch.exp(log_r) - 1 - log_r
+
+
+def moved_kl(old: torch.Tensor, logprobs: torch.Tensor) -> torch.Tensor:
+    """Each sampled token's estimate of KL(old || now), how far the step has moved the policy (no gradient): Schulman's
+    k3 of `log_r = logprobs - old`, `(r - 1) - log r`. On tokens sampled where the step began its mean is the KL's,
+    and no token's estimate is below 0. The k1 estimate, `old - logprobs`, has the same mean but either sign: where an
+    update makes every sampled token likelier (every advantage positive, as REINFORCE without a baseline, or a
+    distillation whose teacher is surer than the student), it reads near 0 or below however far the policy moved."""
+    log_r = (logprobs - old).detach()
+    return torch.expm1(log_r) - log_r
 
 
 def importance_weight(
@@ -212,7 +225,7 @@ def policy_gradient(
             truncated=float((weight != raw).sum()) if weight is not None and raw is not None else 0.0,
             ratio=float(shown.sum()),
             weight=float(weight.sum()) if weight is not None else tokens,
-            moved=float((old - logprobs).sum()),
+            moved=float(moved_kl(old, logprobs).sum()),
             kl=float(penalty.sum()) if penalty is not None else 0.0,
             entropy=float(entropy.sum()) if entropy is not None else 0.0,
         )

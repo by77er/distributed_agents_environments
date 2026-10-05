@@ -7,7 +7,8 @@ First every sampled token's logprob is computed on the weights the step starts f
 the reference's where the objective reads it (`reference`: an adapter switched off, or a frozen copy). Then the batch's
 items (weighted segments, pairs, labelled examples or distilled segments) are taken in shuffled minibatches of about
 `tokens_per_step` sampled tokens, an optimizer step each. The pass stops early if a minibatch finds the policy further
-than `max_kl` from where the step began (a likelihood step reads no `old`, and does not stop). A step takes `passes`
+than `max_kl` from where the step began, by the k3 estimate of KL(old || now) on its sampled tokens
+(`rollout_objectives.terms.moved_kl`; a likelihood step reads no `old`, and does not stop). A step takes `passes`
 passes, each shuffled anew; a fresh optimizer's rate is warmed up over its first `warmup_updates` updates. Only tokens
 the policy sampled are trained on. The numbers are `StepSettings`'; which items, and with what advantages, is the
 algorithm's business (`rollout_train.algorithm`).
@@ -32,7 +33,7 @@ from torch import nn
 
 from rollout_objectives.distillation import Taught, distilled
 from rollout_objectives.settings import StepSettings
-from rollout_objectives.terms import SUMS, Scored, Terms, labelled, pair, tally, terms, units
+from rollout_objectives.terms import SUMS, Scored, Terms, labelled, moved_kl, pair, tally, terms, units
 from rollout_train.objectives import LIKELIHOOD, PREFERENCE, Objective
 from rollout_train.recorder import Segment
 from rollout_train.trainer import Distilled, Item, Labelled, Pair, Weighted, segments_of
@@ -377,7 +378,7 @@ class PolicyStep:
             for segment in segments:  # (before any update, where the step starts is what the policy gives now)
                 found = old[id(segment)] if not updated else self.policy.logprobs(segment.tokens, positions(segment))
                 now[id(segment)] = found.detach().clone().requires_grad_(True)
-        distance = sum(float((old[key] - now[key].detach()).sum()) for key in now)
+        distance = sum(float(moved_kl(old[key], now[key]).sum()) for key in now)
         tokens = sum(float(now[key].numel()) for key in now)
         found_terms = preference_terms(objective, batch, now, references)
         for item, found in found_terms:
@@ -449,8 +450,8 @@ def metrics(
         "mean_mismatch": sum(float((behavior - old).abs().sum()) for behavior, old in finite) / start_tokens,
         "mean_weight": totals["weight"] / tokens,
         "truncated_fraction": totals["truncated"] / tokens,
-        # How far the update moved the policy: KL(start || now) on the sampled tokens, as the last minibatch
-        # stepped on found it before its step.
+        # How far the update moved the policy: KL(start || now) on the sampled tokens by the k3 estimate
+        # (`moved_kl`), as the last minibatch stepped on found it before its step: what the stop at `max_kl` reads.
         "kl_moved": moved,
         "kl_penalty": totals["kl"] / tokens,
         "entropy": totals["entropy"] / tokens,
