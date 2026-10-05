@@ -16,6 +16,17 @@ from typing import Any
 from rollout.processes import children
 from rollout_train.inference.channel import Generation, Scores, most_likely, scored_range
 
+LORA_RANKS = (1, 8, 16, 32, 64, 128, 256, 320, 512)
+"""The ranks vLLM allocates adapter room for; an engine asked for another takes the next one up."""
+
+
+def lora_rank(asked: int) -> int:
+    """The smallest rank vLLM accepts that holds an adapter of rank `asked`."""
+    fits = [rank for rank in LORA_RANKS if rank >= asked]
+    if not fits:
+        raise ValueError(f"max_lora_rank {asked} is above the largest vLLM serves ({LORA_RANKS[-1]})")
+    return fits[0]
+
 
 class VllmEngine:
     def __init__(
@@ -46,7 +57,7 @@ class VllmEngine:
             max_num_seqs=max_num_seqs,
             max_num_batched_tokens=max_num_batched_tokens,
             enable_lora=True,
-            max_lora_rank=max_lora_rank,  # pyright: ignore[reportArgumentType] (a Literal of allowed ranks)
+            max_lora_rank=lora_rank(max_lora_rank),  # pyright: ignore[reportArgumentType] (a Literal of allowed ranks)
             max_loras=max_loras,
             enable_sleep_mode=True,
             language_model_only=language_model_only,

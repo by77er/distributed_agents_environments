@@ -319,6 +319,14 @@ def test_a_hosts_share_of_a_gpu_and_its_engine_come_from_the_cluster_and_the_run
     colocated = host_spec(cluster, "local-vllm", "Qwen/Qwen3.5-4B", settings=trained_by("local-lora"))
     assert colocated.gpus == 0.5  # (the trainer shares the card: each asks Ray for half)
     assert host_spec(cluster, "local-vllm", "Qwen/Qwen3.5-4B", settings=trained_by("tinker-lora")).gpus == 1.0
+    ranked = {"trainer.model": "Qwen/Qwen3.5-4B", "trainer.rank": 16}
+    own = host_spec(
+        cluster, "local-vllm", "Qwen/Qwen3.5-4B", settings=RunSettings({**ranked, "trainer.provider": "local-lora"})
+    )
+    bridged = host_spec(
+        cluster, "local-vllm", "Qwen/Qwen3.5-4B", settings=RunSettings({**ranked, "trainer.provider": "tinker-lora"})
+    )
+    assert (own.options["max_lora_rank"], bridged.options["max_lora_rank"]) == (16, 48)  # (Tinker's q, k and v: x3)
     with pytest.raises(ValueError, match="runs no engine host"):
         host_spec(cluster, "tinker", "Qwen/Qwen3.5-4B")
     with pytest.raises(ValueError, match="does not serve"):

@@ -149,7 +149,9 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 A model a provider offers (`models."MODEL"`) has a `context`, and optionally a `base` (the model it was quantized
 from), a `cost` table (dollars per million tokens by class: `input`, `cached_input`, `output`, `thinking`; or
 `hour`; cached input is priced as input and thinking as output where the table does not say) and `options` (what its
-engines are started with; `max_lora_rank` is the highest adapter rank it loads; a hosted API's model says what it
+engines are started with; `max_lora_rank` is the highest adapter rank it loads, and a training run's engines are
+started with room for its own adapters only, `trainer.rank` times the bridge's rank factor, since a larger rank costs
+cache; vLLM takes the next rank it accepts (1, 8, 16, 32, 64, 128, 256, 320 or 512); a hosted API's model says what it
 takes, [below](#hosted-apis)).
 
 A trainer's `cost` is dollars per million tokens trained (`train`, every token of each trained segment: its prompts and

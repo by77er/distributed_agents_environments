@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import JsonValue
 
 from rollout.names import named
+from rollout_train.bridges import NoBridge, path, rank_factor
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.cluster import SCRATCH, Cluster
 from rollout_train.following import Binding, Follower
@@ -45,6 +46,7 @@ from rollout_train.providers import INFERENCE_KINDS
 from rollout_train.serving import qualified
 
 if TYPE_CHECKING:
+    from rollout_train.providers import TrainerProvider
     from rollout_train.recorder.renderers import Renderer
     from rollout_train.run_settings import RunSettings
 
@@ -254,7 +256,24 @@ def host_spec(cluster: Cluster, provider: str, model: str, *, settings: "RunSett
     resources = dict(cluster.placement.get("engines", {}))
     offer = offered.models[model]
     options = {"max_model_len": offer.context, **offer.options, "max_logprobs": offered.capabilities.top_logprobs}
+    if (needed := _adapter_rank(trainer, settings, offered.capabilities.loads, model)) is not None:
+        options["max_lora_rank"] = needed  # (room for the run's own adapters only: a larger rank costs cache)
     return HostSpec(engine, model, options, gpus, resources)
+
+
+def _adapter_rank(
+    trainer: "TrainerProvider | None", settings: "RunSettings | None", loads: Collection[str], model: str
+) -> int | None:
+    """The rank of the adapters a training run's engines load: its `trainer.rank` times the rank factor of the
+    bridges from its trainer's format to what the engines load (none: not a run that trains a LoRA with a rank it
+    says)."""
+    if trainer is None or settings is None or trainer.capabilities.produces != "lora":
+        return None
+    rank = settings.get("trainer.rank")
+    chain = path(trainer.capabilities.format, loads)
+    if not isinstance(rank, int) or isinstance(chain, NoBridge):
+        return None
+    return rank * rank_factor(chain, str(settings.trainer_model or model))
 
 
 def started(
