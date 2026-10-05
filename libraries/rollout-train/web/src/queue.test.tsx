@@ -33,6 +33,38 @@ const queue = (): Queue => ({
 const names: Record<string, string> = { run_a: "alpha", run_b: "beta", run_g: "gamma", run_d: "delta" };
 const name = (run: string | null) => (run ? names[run] ?? run : "another job");
 
+describe("the pods", () => {
+  it("lists each pod with its run, GPU, price and what its run was charged, and a warm one as warm", async () => {
+    const { PodList } = await import("./components/queue");
+    const client = newQueryClient();
+    client.setQueryData(topics.system().key, { at: 200, host: "here", runs: [], checkpoints: [],
+      names: { runs: { run_a: "alpha" }, bookmarks: {} } } as unknown as System);
+    render(
+      <QueryClientProvider client={client}><MemoryRouter>
+        <PodList pods={[
+          { pod: "rollout-k3s-h100-0-abc", provider: "h100", gpu: "NVIDIA H100 80GB HBM3", price: 2.69, state: "held", run: "run_a", since: 100, spent: 1.234 },
+          { pod: "rollout-k3s-h100-1-def", provider: "h100", gpu: "NVIDIA H100 80GB HBM3", price: 2.69, state: "idle", run: null, since: 200, spent: 0 },
+        ]} />
+      </MemoryRouter></QueryClientProvider>,
+    );
+    const rows = within(screen.getByRole("table", { name: "pods" })).getAllByRole("row");
+    expect(rows[0].textContent).toContain("alpha");
+    expect(rows[0].textContent).toContain("$2.69/h");
+    expect(rows[0].textContent).toContain("$1.23");
+    expect(rows[1].textContent).toContain("warm");
+    cleanup();
+  });
+
+  it("says a RunPod provider's pods in the New run form by their GPU and price", async () => {
+    const { podsOf } = await import("./lib/form");
+    const pods = { gpu: "NVIDIA H100 80GB HBM3", gpu_types: ["NVIDIA H100 80GB HBM3"], gpu_count: 1, price: 2.69,
+      cloud: "SECURE", regions: [], max_pods: 1, idle_stop: 600, host: null };
+    expect(podsOf(pods)).toBe("NVIDIA H100 80GB HBM3 · $2.69 an hour");
+    expect(podsOf({ ...pods, price: null, gpu_count: 2 })).toBe("2× NVIDIA H100 80GB HBM3");
+    expect(podsOf(null)).toBe("");
+  });
+});
+
 describe("the queue", () => {
   it("splits each resource's bar into the admitted runs' shares, in proportion, and what no run holds apart", () => {
     const cpu = barOf(queue(), "cpu")!;

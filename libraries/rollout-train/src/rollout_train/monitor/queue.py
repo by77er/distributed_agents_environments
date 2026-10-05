@@ -3,8 +3,9 @@
 One shape, whichever says it:
 
     {"source": "kueue" | "ray" | None, "capacity": {RESOURCE: TOTAL}, "used": {RESOURCE: AMOUNT},
-     "admitted": [{"run", "name", "requests", "since"}],
-     "pending": [{"run", "name", "requests", "since", "position", "reason", "lacks", "held_by"}]}
+     "admitted": [{"run", "name", "requests", "since", "pods"}],
+     "pending": [{"run", "name", "requests", "since", "position", "reason", "lacks", "held_by", "pods"}],
+     "pods": [{"pod", "provider", "gpu", "price", "state", "run", "since", "spent"}]}
 
 Resources are `cpu` (CPUs), `memory` (bytes) and `gpu` (Kubernetes' `nvidia.com/gpu`, Ray's `GPU`). `run` is the run's
 id and `name` what the registry calls it; `requests` what it asks for in all, `since` when it was admitted or began to
@@ -19,6 +20,10 @@ is not known), and `held_by` the admitted runs that hold any of what it lacks, m
   `QuotaReserved` condition's message as `reason`). Pending Workloads are in Kueue's order where its visibility API
   serves the ClusterQueue's pending workloads (`order` is `kueue`), else in the order they were made (`order` is
   `created`). Where the API server refuses, `error` says why.
+- **Pods** (`pods`), beside either: every pod the platform rents on RunPod, from its lease
+  (`rollout_train.pods.leases`): its provider, GPU type, hourly price, state (`starting`, `held`, `idle`: warm), the run
+  that holds it, since when, and what its run has been charged for it. Each run lists the pods it holds (`pods`). Pods
+  are outside the queue's capacity: Kueue's quota covers only what runs in the cluster.
 - **Ray** (`ray`), otherwise: each run whose driver beats what it asked Ray for (`demand`, the driver's and its
   placement group's resources, and `reserved`, when Ray reserved the group): admitted once its group is reserved,
   pending while its driver waits for it (`reason`: what it waits for). `capacity` is the Ray cluster's, and `used` what
@@ -52,6 +57,23 @@ _SUFFIXES = {
 def nothing(source: str | None = None, **more: Any) -> dict[str, Any]:
     """The topic with nothing in it, from `source`."""
     return {"source": source, "capacity": {}, "used": {}, "admitted": [], "pending": [], **more}
+
+
+def with_pods(queue: dict[str, Any], leases: Sequence[Any], times: Sequence[Any]) -> dict[str, Any]:
+    """The topic with every pod's lease (`pods`), and each run's own pods beside it (each run's `pods`)."""
+    spent: dict[str, float] = {}
+    for each in times:
+        if not each.closed and each.run is not None:
+            spent[f"{each.pod}/{each.run}"] = spent.get(f"{each.pod}/{each.run}", 0.0) + each.dollars
+    listed = [
+        {"pod": lease.pod, "provider": lease.provider, "gpu": lease.gpu, "price": lease.price, "state": lease.state,
+         "run": lease.run, "since": lease.released if lease.state == "idle" else lease.held,
+         "spent": round(spent.get(f"{lease.pod}/{lease.run}", 0.0), 4)}
+        for lease in leases
+    ]  # fmt: skip
+    for entry in [*queue.get("admitted", []), *queue.get("pending", [])]:
+        entry["pods"] = [each for each in listed if each["run"] is not None and each["run"] == entry.get("run")]
+    return {**queue, "pods": listed}
 
 
 def quantity(text: object) -> float:

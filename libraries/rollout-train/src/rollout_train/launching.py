@@ -12,7 +12,8 @@ the setting it is about; one that does not is a note (the run waits for somethin
 `offers` is what the New run form chooses from: the cluster config's environments (built-in, and every published
 version beside the ledger), trainers with their settings, inference providers with their capabilities and models (each
 with the renderer families that render it, among those named so far), each trainer's and provider's allocation and the
-weights it takes (`lora`, `full`), each trainer and provider pair's bridge or why there is none, sandbox pools, presets,
+weights it takes (`lora`, `full`), a RunPod provider's pods (their GPU type and hourly price, cloud, regions, most at
+once), each trainer and provider pair's bridge or why there is none, sandbox pools, presets,
 the GPUs the heartbeats say are free, the objective's families, presets and components, and the keys a training run
 takes (the schema). Each environment carries the renderer families runs and presets on it named for their trained
 channel (its model family, as far as is known).
@@ -20,6 +21,7 @@ channel (its model family, as far as is known).
 
 import asyncio
 import contextlib
+import itertools
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -191,11 +193,18 @@ async def ledger_facts(
     own: str | None = None,
     gpus: float | None = None,
     free: Resources | None = None,
+    cluster: Cluster | None = None,
 ) -> LedgerFacts:
     """What validation reads of the ledger: each checkpoint the settings name (the start, a fixed channel's), the
-    suites their evals name, the names other runs have (`own`, the run's id, is left out), and the GPUs and free
-    resources the caller knows of."""
+    suites their evals name, the names other runs have (`own`, the run's id, is left out), the GPUs and free resources
+    the caller knows of, and, for a run with pods on `cluster`'s RunPod providers, how long a step took here lately."""
     from rollout_train.evals import suite_of, versions_of
+    from rollout_train.pods.leasing import needs_of
+
+    try:
+        pods = bool(needs_of(settings, cluster)) if cluster is not None else False
+    except ValueError:
+        pods = False
 
     registry = registry_of(ledger)
     references = [settings["start"], *(value for key, value in settings.values.items()
@@ -248,7 +257,35 @@ async def ledger_facts(
             suites[name] = SuiteFacts(name, max(version.number for version in versions), environments, entries)
     runs = await registry.runs() if registry is not None else []
     taken = frozenset(each.name for each in runs if each.id != own)
-    return LedgerFacts(checkpoints=checkpoints, suites=suites, names_taken=taken, gpus=gpus, free=free)
+    seconds = await _step_seconds(settings, ledger) if pods else None
+    return LedgerFacts(checkpoints=checkpoints, suites=suites, names_taken=taken, gpus=gpus, free=free,
+                       step_seconds=seconds)  # fmt: skip
+
+
+async def _step_seconds(settings: RunSettings, ledger: Ledger) -> float | None:
+    """How long a step of the run's trainer and model took here lately: the median time between the checkpoints of the
+    newest run of the same trainer provider and model that made three or more (none: no such run)."""
+    from rollout_train.checkpoints import checkpoints_in
+    from rollout_train.record import recorded_settings
+
+    provider, model = settings.get("trainer.provider"), settings.trainer_model
+    if settings.kind != "train" or provider is None:
+        return None
+    made: dict[str, list[float]] = {}
+    for each in await checkpoints_in(ledger):
+        if each.run is not None:
+            made.setdefault(each.run, []).append(each.made)
+    for run, times in sorted(made.items(), key=lambda item: -max(item[1])):
+        if len(times) < 3:
+            continue
+        said = await recorded_settings(ledger, run) or {}
+        trained = said.get("trainer.model") or said.get(f"channels.{said.get('trainer.channel') or 'policy'}.model")
+        if said.get("trainer.provider") != provider or trained != model:
+            continue
+        times.sort()
+        gaps = sorted(later - earlier for earlier, later in itertools.pairwise(times))
+        return gaps[len(gaps) // 2]
+    return None
 
 
 async def checked(
@@ -292,7 +329,7 @@ async def examined(
     settings = completed(settings, cluster)
     environment = settings.get("environment")
     facts = await environment_facts(str(environment) if environment else None, cluster, ledger, loaded=loaded)
-    known = await ledger_facts(settings, ledger, own=own, gpus=gpus, free=free)
+    known = await ledger_facts(settings, ledger, own=own, gpus=gpus, free=free, cluster=cluster)
     return Examined(
         check(settings, cluster, facts, known),
         facts,
@@ -384,7 +421,7 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
             "colocate_with": trainer.colocate_with, "segment_tokens": trainer.segment_tokens,
             "cost": dict(trainer.cost), "families": sorted(trainer.capabilities.families), "settings": specs,
             "allocation": trainer.allocation, "concurrency": trainer.concurrency,
-            "weights": [trainer.capabilities.produces],
+            "weights": [trainer.capabilities.produces], "pods": _pods_offered(cluster, name),
         })  # fmt: skip
     inference: list[dict[str, Any]] = []
     for name, provider in cluster.inference.items():
@@ -404,6 +441,7 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
             "name": name, "kind": provider.kind, "gpus": provider.gpus, "replicas": provider.replicas,
             "allocation": provider.allocation, "concurrency": provider.concurrency, "capabilities": capabilities,
             "models": models, "weights": [each for each in WEIGHTS if serves(provider, each) is None],
+            "pods": _pods_offered(cluster, name),
         })  # fmt: skip
     pairs: list[dict[str, Any]] = []
     for trainer_name, trainer in cluster.trainers.items():
@@ -437,6 +475,26 @@ async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -
         "objectives": _objectives(),
         "schema": _schema(),
     }
+
+
+def _pods_offered(cluster: Cluster, name: str) -> dict[str, JsonValue] | None:
+    """What a RunPod provider's pods are, as the form shows them: the GPU type (the first of those it asks for, and
+    all of them), the hourly price a pod is reckoned at, the cloud tier, the regions, the most pods at once, and how
+    long a released pod stays warm; none for another kind (a trainer on a host's pods: the host's)."""
+    from rollout_train.providers import RUNPOD, pod_table
+
+    provider = cluster.inference.get(name) or cluster.trainers.get(name)
+    if provider is None or provider.kind not in RUNPOD:
+        return None
+    host = getattr(provider, "colocate_with", None)
+    if host is not None:
+        return _pods_offered(cluster, host)
+    table = pod_table(provider.kind, provider.settings)
+    return {
+        "gpu": table.gpu_types[0], "gpu_types": list(table.gpu_types), "gpu_count": table.gpu_count,
+        "price": table.price, "cloud": table.cloud, "regions": list(table.regions), "max_pods": table.max_pods,
+        "idle_stop": table.idle_stop, "host": host,
+    }  # fmt: skip
 
 
 def _objectives() -> dict[str, Any]:

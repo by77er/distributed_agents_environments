@@ -1,11 +1,11 @@
 // The queue: a bar for each resource the cluster gives runs, its capacity split into each admitted run's share (in the
-// run's color, linked to it), and the runs that wait, in the queue's order, with what each asks for, how long it has
-// waited and why.
+// run's color, linked to it), the runs that wait, in the queue's order, with what each asks for, how long it has
+// waited and why, and the pods the platform rents on RunPod (outside the queue's capacity), each with its run.
 
 import { memo } from "react";
 import { Link } from "react-router-dom";
 import { useKnown, useQueue } from "../api/queries";
-import type { Queue, QueuePending } from "../api/types";
+import type { Queue, QueuePending, QueuePod } from "../api/types";
 import { Ago, useRunColor } from "../layout/runs";
 import { bytes } from "../lib/format";
 import { amount, type Bar, barOf, cell, pendingOf, queued, RESOURCES, waitsFor } from "../lib/queue";
@@ -105,7 +105,28 @@ export function QueueSection() {
           {queue.pending.length ? <PendingList queue={queue} /> : <Empty>Nothing waits.</Empty>}
         </Card>
       </div>
+      {queue.pods?.length ? <Card title="Pods"><PodList pods={queue.pods} /></Card> : null}
     </>
+  );
+}
+
+/** The pods the platform rents on RunPod: each its run (linked to it; `warm` for one no run holds), GPU, price, and
+ * what its run has been charged for it. */
+export function PodList({ pods }: { pods: QueuePod[] }) {
+  const known = useKnown();
+  const colorOf = useRunColor();
+  return (
+    <div className="queue-holding" role="table" aria-label="pods">
+      {pods.map(each => (
+        <div key={each.pod} className="queue-row" role="row">
+          <span className="swatch" style={{ background: each.run ? colorOf(each.run) : "var(--faint)" }} />
+          <span role="cell">{each.run ? <Link to={runPlace(each.run)}>{known.run(each.run)}</Link> : each.state === "idle" ? "warm" : each.state}</span>
+          <span role="cell" title={each.pod}>{each.gpu}</span>
+          <span role="cell" className="n">${Number(each.price.toFixed(2))}/h</span>
+          <span role="cell" className="n">{each.run ? `$${each.spent.toFixed(2)}` : <Ago at={each.since} />}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 

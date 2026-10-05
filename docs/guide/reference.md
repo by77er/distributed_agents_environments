@@ -5496,12 +5496,12 @@ A name no run has: the one wanted, else it with the first number after it that n
 *function* · `libraries/rollout-train/src/rollout_train/launching.py`
 
 ```python
-async def ledger_facts(settings: RunSettings, ledger: Ledger, *, own: str | None = None, gpus: float | None = None, free: Resources | None = None) -> LedgerFacts
+async def ledger_facts(settings: RunSettings, ledger: Ledger, *, own: str | None = None, gpus: float | None = None, free: Resources | None = None, cluster: Cluster | None = None) -> LedgerFacts
 ```
 
 What validation reads of the ledger: each checkpoint the settings name (the start, a fixed channel's), the
-suites their evals name, the names other runs have (`own`, the run's id, is left out), and the GPUs and free
-resources the caller knows of.
+suites their evals name, the names other runs have (`own`, the run's id, is left out), the GPUs and free resources
+the caller knows of, and, for a run with pods on `cluster`'s RunPod providers, how long a step took here lately.
 
 ### `offers`
 
@@ -8901,6 +8901,7 @@ What the ledger and the live cluster say, asked beforehand.
 | `names_taken` | `frozenset[str]` | `frozenset()` |  |
 | `gpus` | `float \| None` | `None` | GPUs the cluster has in all (none: not known). |
 | `free` | `Resources \| None` | `None` | What the cluster has free now (none: not known). |
+| `step_seconds` | `float \| None` | `None` | How long a step of the run's trainer and model took here lately (none: not known): what its pods' hours per step are reckoned from. |
 
 ### `refusals`
 

@@ -359,6 +359,21 @@ export interface QueueAdmitted {
   /** Its RayJob and Workload, with Kueue. */
   job?: string | null;
   workload?: string | null;
+  /** The pods it holds on RunPod. */
+  pods?: QueuePod[];
+}
+
+/** A pod the platform rents on RunPod, from its lease: its GPU, hourly price, state (`idle`: warm, held by no run), the
+ * run that holds it, since when, and what that run has been charged for it. */
+export interface QueuePod {
+  pod: string;
+  provider: string;
+  gpu: string;
+  price: number;
+  state: "starting" | "held" | "idle";
+  run: string | null;
+  since: number | null;
+  spent: number;
 }
 
 /** A run that waits in the queue: its place (1 first), why it waits as Kueue or its driver says, what of its requests the
@@ -381,6 +396,8 @@ export interface Queue {
   error?: string;
   /** How the pending runs are ordered, with Kueue: as its visibility API says, or by when each was made. */
   order?: "kueue" | "created";
+  /** Every pod the platform rents on RunPod: outside the queue's capacity. */
+  pods?: QueuePod[];
 }
 
 export type RunKind ="train" | "eval" | "imitate" | "check";
@@ -459,6 +476,21 @@ export interface OfferedEnvironment {
 export type Weights = "lora" | "full";
 export type Allocation = "metered" | "scheduled";
 
+/** What a RunPod provider's pods are: the GPU type (the first of those it asks for), the hourly price a pod is reckoned
+ * at, the cloud tier, the regions, the most at once, and how long a released pod stays warm. */
+export interface OfferedPods {
+  gpu: string;
+  gpu_types: string[];
+  gpu_count: number;
+  price: number | null;
+  cloud: string;
+  regions: string[];
+  max_pods: number;
+  idle_stop: number;
+  /** The host provider whose pods a trainer takes its steps on. */
+  host: string | null;
+}
+
 export interface OfferedTrainer {
   name: string;
   kind: string;
@@ -475,6 +507,8 @@ export interface OfferedTrainer {
   concurrency: number | null;
   /** What it trains: its kind's one of `lora` and `full`. */
   weights: Weights[];
+  /** Its pods, for a trainer on RunPod. */
+  pods?: OfferedPods | null;
 }
 
 export interface OfferedModel {
@@ -498,6 +532,8 @@ export interface OfferedProvider {
   concurrency: number | null;
   /** The weights it serves a run's checkpoints as: adapters (`lora`), full weights reloaded in place (`full`). */
   weights: Weights[];
+  /** Its pods, for a provider on RunPod. */
+  pods?: OfferedPods | null;
 }
 
 /** One component of an objective (`rollout_train.objectives.COMPONENTS`). */

@@ -3,7 +3,7 @@
 // what follows from a choice upstream (`settled`); the objective's presets by family and the components a family
 // accepts; which settings the form has a field for; and the settings a launch asks for.
 
-import type { ObjectiveComponent, ObjectivePreset, OfferedProvider, OfferedTrainer, Offers, Preset, Weights } from "../api/types";
+import type { ObjectiveComponent, ObjectivePreset, OfferedPods, OfferedProvider, OfferedTrainer, Offers, Preset, Weights } from "../api/types";
 
 export const WEIGHTS: Weights[] = ["lora", "full"];
 export const WEIGHT_LABELS: Record<Weights, string> = { lora: "LoRA", full: "Full weights" };
@@ -110,6 +110,13 @@ export function pricesOf(provider: OfferedProvider | undefined, model: unknown):
   const dollars = (value: number) => `$${Number(value.toFixed(4))}`;
   const said = [cost.input != null ? `${dollars(cost.input)} in` : "", cost.output != null ? `${dollars(cost.output)} out` : ""];
   return `${said.filter(Boolean).join(" · ")} a million tokens`;
+}
+
+/** What a RunPod provider's pods are, in words: `NVIDIA H100 80GB HBM3 · $2.69 an hour`. */
+export function podsOf(pods: OfferedPods | null | undefined): string {
+  if (!pods) return "";
+  const gpu = pods.gpu_count > 1 ? `${pods.gpu_count}× ${pods.gpu}` : pods.gpu;
+  return pods.price != null ? `${gpu} · $${Number(pods.price.toFixed(4))} an hour` : gpu;
 }
 
 /** The bridges from a trainer's checkpoints to what a provider loads, where there is work to do. */

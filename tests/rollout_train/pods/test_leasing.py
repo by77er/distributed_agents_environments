@@ -297,3 +297,23 @@ async def test_a_pods_token_reads_only_while_its_lease_names_its_run(
 
 
 Factory = Callable[..., Any]
+
+
+async def test_the_queue_shows_every_pod_and_each_runs_own(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    from rollout_train.monitor.queue import with_pods
+
+    ledger, fake, _ = world
+    store = pod_leases_of(ledger)
+    assert store is not None
+    held = pods_of("run_1", cluster_of(tmp_path), ledger, fake)
+    (lease,) = await held.claim([NEED])
+    await held.renewed()
+    queue = {"source": "kueue", "admitted": [{"run": "run_1"}, {"run": "run_2"}], "pending": []}
+    shown = with_pods(queue, await store.all(), await store.times())
+    (pod,) = shown["pods"]
+    assert (pod["pod"], pod["run"], pod["state"], pod["price"]) == (lease.pod, "run_1", "held", 0.79)
+    assert pod["spent"] >= 0 and "token" not in pod
+    assert [each["pod"] for each in shown["admitted"][0]["pods"]] == [lease.pod] and shown["admitted"][1]["pods"] == []
+    await held.release()

@@ -807,8 +807,24 @@ class System:
             found = launches_of(self._ledger)
             listed = await found.all() if found is not None and await asyncio.to_thread(present, self._ledger) else []
             given = api if isinstance(api, KubernetesApi) else KubernetesApi(section.api)
-            return await from_kueue(given, section.namespace, section.queue, listed, called)
-        return from_ray(await self._beats(), called, ray_totals())
+            said = await from_kueue(given, section.namespace, section.queue, listed, called)
+        else:
+            said = from_ray(await self._beats(), called, ray_totals())
+        return await self._with_pods(said)
+
+    async def _with_pods(self, queue: dict[str, Any]) -> dict[str, Any]:
+        """The queue with the pods the platform rents on RunPod, and each run's own (`with_pods`)."""
+        from rollout_train.monitor.queue import with_pods
+        from rollout_train.pods.leases import pod_leases_of
+
+        store = pod_leases_of(self._ledger) if await asyncio.to_thread(present, self._ledger) else None
+        if store is None:
+            return with_pods(queue, [], [])
+        try:
+            leases, times = await store.all(), await store.times()
+        except Exception:  # (a ledger made before pods' leases: none)
+            return with_pods(queue, [], [])
+        return with_pods(queue, leases, times)
 
     @contextlib.asynccontextmanager
     async def one_reading(self) -> AsyncGenerator[None]:

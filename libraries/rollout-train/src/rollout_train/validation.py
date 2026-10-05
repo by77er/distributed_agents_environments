@@ -194,6 +194,9 @@ class LedgerFacts:
     """GPUs the cluster has in all (none: not known)."""
     free: Resources | None = None
     """What the cluster has free now (none: not known)."""
+    step_seconds: float | None = None
+    """How long a step of the run's trainer and model took here lately (none: not known): what its pods' hours per
+    step are reckoned from."""
 
 
 def refusals(findings: list[Finding]) -> list[Finding]:
@@ -957,15 +960,52 @@ def _capacity(run: _Run) -> None:
                    "start")  # fmt: skip
     elif free is not None and (short := _short(needs, free)):
         run.note("capacity", key, f"the run needs {short}: it waits")
+    _pods(run, key)
+
+
+def _pods(run: _Run, key: str) -> None:
+    """A run's pods on RunPod (none of them the cluster's capacity): no more of a provider than its `max_pods`, and
+    what the pods need of the cluster (the ledger service, which pods reach at `[ledger] public` with tokens signed
+    with the platform's, and step-ca for their certificates)."""
+    from rollout_train.pods.leasing import needs_of
+    from rollout_train.providers import pod_table
+
+    try:
+        needs = needs_of(run.settings, run.cluster)
+    except ValueError as error:
+        run.refuse("capacity", key, str(error))
+        return
+    counted: dict[str, int] = {}
+    for need in needs:
+        counted[need.provider] = counted.get(need.provider, 0) + need.count
+    for name, count in counted.items():
+        provider = run.cluster.inference.get(name) or run.cluster.trainers.get(name)
+        if provider is None:
+            continue
+        table = pod_table(provider.kind, provider.settings)
+        where = f"[{'inference' if name in run.cluster.inference else 'trainers'}.{name}]"
+        if count > table.max_pods:
+            run.refuse("capacity", key, f"the run needs {count} pods of {name}, which has at most {table.max_pods} "
+                       f"(max_pods): it would never start")  # fmt: skip
+        if not table.step_ca:
+            run.refuse("capacity", key, f"{name}'s pods get their certificates from step-ca: say {where} step_ca")
+    ledger = run.cluster.ledger
+    if counted and (
+        ledger.token is None or not (ledger.public or (ledger.url or "").startswith(("http://", "https://")))
+    ):
+        run.refuse("capacity", key, "pods reach the ledger service at [ledger] public, with tokens signed with the "
+                   "platform's ([ledger] token_env): the cluster config says neither")  # fmt: skip
 
 
 def _elsewhere(run: _Run) -> float:
-    """The GPUs of the run's scheduled providers whose servers are outside its Ray cluster (`vllm-servers`, RunPod),
-    by provider: those a channel's replicas take."""
+    """The GPUs of the run's scheduled providers whose servers are outside its Ray cluster and are the cluster's own
+    (`vllm-servers`; RunPod's pods are not), by provider: those a channel's replicas take."""
+    from rollout_train.providers import RUNPOD
+
     taken: dict[str, float] = {}
     for channel in run.settings.channels:
         for name, provider in run.providers(channel):
-            if provider.allocation == "scheduled" and provider.kind != "vllm":
+            if provider.allocation == "scheduled" and provider.kind != "vllm" and provider.kind not in RUNPOD:
                 replicas = run.settings[f"channels.{channel}.replicas"]
                 count = replicas if isinstance(replicas, int) else provider.replicas
                 taken[name] = max(taken.get(name, 0.0), count * provider.gpus)
@@ -1081,8 +1121,11 @@ def spend_of(
     model = str(settings.get(f"channels.{trained}.model"))
     metered = [(name, cluster.inference[name]) for name in settings.providers(trained)
                if name in cluster.inference and cluster.inference[name].allocation == "metered"]  # fmt: skip
+    pods = _pod_hours(settings, cluster, ledger)
+    if isinstance(pods, Spend):
+        return pods
     if trainer.allocation != "metered" and not metered:
-        return Spend(0.0)
+        return Spend(sum(pods.values()), pods)
     if environment is None:
         return Spend(None, why="the environment's numbers are not known here")
     size = settings["group_size"]
@@ -1113,7 +1156,45 @@ def spend_of(
         return dearest
     if dearest is not None:
         parts[dearest[0]] = dearest[1]
+    parts |= pods
     return Spend(sum(parts.values()), parts)
+
+
+def _hourly(run: _Run) -> list[str]:
+    """The RunPod providers a run's pods are of."""
+    from rollout_train.pods.leasing import needs_of
+
+    try:
+        return sorted({need.provider for need in needs_of(run.settings, run.cluster)})
+    except ValueError:
+        return []
+
+
+def _pod_hours(settings: RunSettings, cluster: Cluster, ledger: LedgerFacts | None) -> dict[str, float] | Spend:
+    """What one step of a training run costs on its pods on RunPod, by provider: each pod's hourly price (its table's
+    `price`) for as long as a step of its trainer and model took here lately (`LedgerFacts.step_seconds`), a host's
+    pod once for its trainer and its channel. A `Spend` that says why not where it cannot be reckoned."""
+    from rollout_train.pods.leasing import needs_of
+    from rollout_train.providers import pod_table
+
+    try:
+        needs = needs_of(settings, cluster)
+    except ValueError:
+        return {}
+    parts: dict[str, float] = {}
+    for need in needs:
+        provider = cluster.inference.get(need.provider) or cluster.trainers.get(need.provider)
+        if provider is None:
+            continue
+        table = pod_table(provider.kind, provider.settings)
+        if table.price is None:
+            return Spend(None, why=f"{need.provider}'s pods are paid by the hour, and its table says no price")
+        seconds = ledger.step_seconds if ledger is not None else None
+        if seconds is None:
+            return Spend(None, why=f"{need.provider}'s pods are paid by the hour (${table.price:g} each), and how long "
+                         "a step takes here is not known yet")  # fmt: skip
+        parts[need.provider] = parts.get(need.provider, 0.0) + need.count * table.price * seconds / 3600
+    return parts
 
 
 def estimated_spend(
@@ -1142,8 +1223,11 @@ def _spend(run: _Run) -> None:
         if metered:
             run.note("spend", "limits.spend", f"{', '.join(metered)} {'is' if len(metered) == 1 else 'are'} metered, "
                      "and no limits.spend bounds what the run spends")  # fmt: skip
+        if hourly := _hourly(run):
+            run.note("spend", "limits.spend", f"{', '.join(hourly)}'s pods are paid by the hour, and no limits.spend "
+                     "bounds what the run spends (limits.hours bounds how long)")  # fmt: skip
         return
-    spend = spend_of(run.settings, run.cluster, run.environment)
+    spend = spend_of(run.settings, run.cluster, run.environment, run.ledger)
     if spend.dollars is None:
         run.note("spend", "limits.spend", f"one step's spend cannot be estimated yet ({spend.why}): the run still ends "
                  f"once its spend reaches ${limit:g}")  # fmt: skip
