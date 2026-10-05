@@ -23,7 +23,7 @@ do not edit by hand.
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rollout_trainrecorderrendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#run), [`run_directory`](#run_directory), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
-- **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`declared`](#declared), [`environment_facts`](#environment_facts), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_capacity`](#ray_capacity), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
+- **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_capacity`](#ray_capacity), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
 - **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
@@ -5065,6 +5065,35 @@ What validation reads of an environment: imported here (`loaded`, where the call
 slots; a published one's sandboxes as its version recorded them, or that there is no such version. None where it is
 not known here: an environment whose Python is a project of its own, which this process does not import.
 
+### `Examined`
+
+*class* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+class Examined
+```
+
+A run's settings, checked: the findings, what is known of its environment, one step's estimated spend and what
+it trains.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `findings` | `list[Finding]` | required |  |
+| `environment` | `EnvironmentFacts \| None` | required |  |
+| `spend` | `Spend` | required |  |
+| `weights` | `str \| None` | required |  |
+
+### `examined`
+
+*function* · `libraries/rollout-train/src/rollout_train/launching.py`
+
+```python
+async def examined(settings: RunSettings, cluster: Cluster, ledger: Ledger, *, loaded: 'Environment | None' = None, own: str | None = None, gpus: float | None = None, gpus_free: float | None = None) -> Examined
+```
+
+A run's settings checked on this cluster with the facts gathered now (`checked`), with those facts' environment,
+one step's estimated spend (`rollout_train.validation.spend_of`) and what it trains (`weights_of`).
+
 ### `free_name`
 
 *function* · `libraries/rollout-train/src/rollout_train/launching.py`
@@ -5605,8 +5634,16 @@ class System
 - `async def offers(self) -> dict[str, Any]` — What a run can be asked for here (`rollout_train.launching.offers`); nothing where this monitor was started
   without a cluster config.
 - `async def check(self, body: Mapping[str, Any]) -> dict[str, Any]` — What a launch's body would be refused for, and the notes beside (each with the setting it is about), on
-  this monitor's cluster (`rollout_train.launching.checked`), and the settings it would run with. Raises `Taken`
-  where this monitor has no cluster config, or for a body it cannot read.
+  this monitor's cluster (`rollout_train.launching.examined`); the settings it would run with, what it trains,
+  one step's estimated spend on its metered parts (or why it cannot be estimated yet), and the slots its
+  environment's programs declare, where they are known here. Raises `Taken` where this monitor has no cluster
+  config, or for a body it cannot read.
+- `async def presets(self) -> dict[str, Any]` — Every preset's newest version, each with how many versions it has (`rollout_train.presets`).
+- `async def preset(self, name: str) -> dict[str, Any] | None` — A preset's versions, oldest first; none where there is no such preset (or it was deleted).
+- `async def save_preset(self, name: str, body: Mapping[str, Any]) -> dict[str, Any]` — Save `body`'s settings (`{"settings": {KEY: VALUE}, "note"}`) as a preset's next version. Raises `Taken`
+  for a name that cannot be one, settings that are not a table of run settings, or a ledger that keeps no
+  presets.
+- `async def delete_preset(self, name: str) -> dict[str, Any]` — Delete a preset (its versions stay readable by number). Raises `KeyError` for one there is none of.
 - `async def launch(self, body: Mapping[str, Any]) -> dict[str, Any]` — Ask for a run (`check`'s body), and start its job if nothing refuses it (`rollout_train.submitting
   .submit`): the launch, and the notes beside. Raises `rollout_train.launching.Refused` with the findings that
   refuse it, `Taken` where this monitor has no cluster config or the body says no name.

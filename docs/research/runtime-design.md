@@ -1,8 +1,9 @@
 # Runtime design: one cluster config, run settings, providers, roles on Ray, one gateway
 
 **Status: in progress.** The cluster config, run settings and presets, provider declarations, bridges, validation,
-engine hosts and published environments are built ([the cluster config](../guide/cluster.md)); runs submitted as Ray
-jobs are being built. A design note: see [Design notes](README.md) for the others.
+engine hosts, published environments, runs submitted as Ray jobs, the New run form and the Presets page are built
+([the cluster config](../guide/cluster.md), [the monitor](../libraries/rollout-train/monitor.md#launching-a-run)); a
+run's gang placement and the environment worker are not. A design note: see [Design notes](README.md) for the others.
 
 A design, to be carried out in the sequence of commits at its end. It removes profiles and every path that runs
 without Ray, and describes what replaces them: one config per cluster, a run's own settings (with presets), inference
@@ -1287,9 +1288,15 @@ from the table above:
 - **Profiles are deleted, and presets are files.** The presets ship in `deploy/chart/rollout/files/presets`, one TOML
   file a preset, saved beside the ledger by `rollout preset load DIR` and by the chart's hook at every install and
   upgrade.
+- **The New run form is built on the offers** ([launching a run](../libraries/rollout-train/monitor.md#launching-a-run)).
+  It asks the environment, the weights, the trainer and its model, inference for the trained channel and each other
+  slot the environment declares, the objective, budgets, evals, the spend limit and the name, in that order; a choice
+  that can never work is disabled with its reason; the monitor checks the settings as they change, and the check
+  answers what the run trains, one step's spend on its metered parts and the environment's slots. The Presets page
+  (`/api/presets`) lists, shows, edits and deletes presets.
 
-What is left of the design: the New run form of §3 over the offers, and the environment worker (§4; runs import their environment in their own Python, which
-the cluster config's `[environments]` entry gives).
+What is left of the design: a run's gang placement (a placement group, Kueue's admission) and the environment worker
+(§4; runs import their environment in their own Python, which the cluster config's `[environments]` entry gives).
 
 ### What the acceptance run needs from each step
 
@@ -1428,7 +1435,8 @@ The user settled the design's open questions on 2026-10-04:
   settings, and it decides the rest: which trainers (LoRA or full-weight kinds; Tinker trains LoRAs only), which
   inference providers (for a LoRA, those that load adapters at the run's rank; for full weights, those that reload
   full weights in place, never Tinker's sampler), which bridges, and how much memory its engines need. The New run
-  form asks it first and offers only what fits.
+  form asks it first and offers only what fits. *Built*: the run setting `weights`, its trainer's where unsaid and
+  recorded in the start, the weights rule of validation, and each trainer's and provider's `weights` in the offers.
 - **Resources are metered or scheduled.** Each provider declares its allocation. A metered provider (Tinker, hosted
   APIs) is a commodity with nothing to place: a run is bounded by its spend limit (`limits.spend`, from the
   catalog's prices), the provider's rate limits and an optional concurrency cap, and the form treats it as always
@@ -1436,12 +1444,15 @@ The user settled the design's open questions on 2026-10-04:
   on, and a run gets its scheduled parts together or not at all: its trainer and its engines are one gang, reserved
   at once by a Ray placement group inside the run's Ray cluster, and admitted whole by Kueue on Kubernetes, which
   queues a RayJob until its total request fits. So two runs never deadlock holding half of what each needs.
+  *Built*: each provider's and trainer's `allocation` (its kind's unless said) and a metered one's `concurrency`,
+  reported in the offers; capacity counts the scheduled parts, and the spend estimate the metered ones. The gang is
+  not built.
 - **A run's engines are its own.** Engines serve one run: its trained channel's window of `max_lag + 1` adapters, its
   channels that follow its own snapshots, and evals of its own checkpoints. Runs never share an inference server's
   throughput, so one run's speed, staleness and failures never depend on another's, and a run is the unit of
   scheduling. When the GPUs are taken, a run waits in the queue rather than squeezing in. A read-only service for
   untrained channels (a fixed judge, a base model for evals) may later be shared across runs, since contention there
-  costs only speed.
+  costs only speed. *Built*: there are no shared pools; each run starts engine hosts of its own.
 
 ### Later directions
 

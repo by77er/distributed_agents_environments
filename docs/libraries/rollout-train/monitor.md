@@ -161,6 +161,8 @@ so a reload stays there.
 |---|---|---|---|
 | Runs | Every run | `#/runs` (and `#/`) | the launches (each asked-for run: its state, what it waits for, the settings it changed, why it failed, a Stop button); each run, running ones first: its state and host, groups in flight and done, steps, the share solved over its last groups, each group's mean reward in order, and where its episodes are read |
 | Runs | New run | `#/runs/new` | a form asking for a run ([launching a run](#launching-a-run)) |
+| Runs | Presets | `#/presets` | every preset's newest version: its name, version and how many there are, how many settings, its note and when it was saved; each opening its page |
+| Runs | Preset | `#/presets/NAME` | a version's settings (the newest unless another is picked), those it changed from the version before marked and those it removed listed; **Edit** (a row a setting and a note, saved as the next version) and **Delete** (its versions stay readable by number) |
 | Runs | Run | `#/run/RUN` | its name (with a control to rename it) and the buttons its state allows ([pausing, resuming and stopping](#pausing-resuming-and-stopping)), id, state, base model (or the full checkpoint its adapters build on), the checkpoint it started from and the one it is at, what each of its channels serves; figures: where it started and is now, steps, groups done and solved (all, some, none), episodes, the share solved early and late, mean reward, rows unlocked, inference; the step being taken, with its groups; the groups recorded and waiting for a step; each group in flight with its stage (asked, claimed, played, recorded) and episodes; every group's rewards, in the order of the steps they went into (a column opens its group); the latest steps; the tasks played; each suite's score along the line to its newest checkpoint ([scores along a line](#scores-along-a-line)); its settings ([a run's settings](#a-runs-settings)). An eval's run shows the eval's page instead |
 | Runs | Step | `#/run/RUN/step/N` | the checkpoint the step made and its parent, the groups that went into it (and those decided before it that gave nothing to train on), and the update's statistics |
 | Runs | Group | `#/run/RUN/group/N` | the group's stage, its episodes (each with its reward and what it reported; one playing with its reward so far, and each slot's where they differ; one asked for and not started holds a place; one cut short is marked interrupted), which runners play it, the step it went into, what was done with it (the step's statistics and the checkpoint it made, or why it was skipped), and its start |
@@ -332,8 +334,12 @@ A monitor started with a cluster config asks for runs on it ([launching runs](la
 
 | Route | Does |
 |---|---|
-| `GET /api/offers` | What a run can be asked for (topic `offers`, `System.offers`, [what a cluster offers](launching.md#what-a-cluster-offers)): the environments (the cluster config's and every published version), trainers, inference providers and their models, the pairs that bridge, sandbox pools, presets, and the GPUs free by the heartbeats. Without a cluster config, `cluster` is null and the lists are empty |
-| `POST /api/launches/check` | The refusals and notes a run's settings would have (`System.check`): `{"refusals", "notes", "settings", "preset"}`, each finding `{"rule", "key", "reason", "refuses"}`, nothing recorded |
+| `GET /api/offers` | What a run can be asked for (topic `offers`, `System.offers`, [what a cluster offers](launching.md#what-a-cluster-offers)): the environments (the cluster config's and every published version), trainers and inference providers (each with its allocation and the weights it takes) and their models, the pairs that bridge, sandbox pools, presets, the GPUs free by the heartbeats, the objective's families, presets and components, and the keys a training run takes. Without a cluster config, `cluster` is null and the lists are empty |
+| `POST /api/launches/check` | The refusals and notes a run's settings would have (`System.check`): `{"refusals", "notes", "settings", "preset", "weights", "spend", "environment"}`, each finding `{"rule", "key", "reason", "refuses"}`; `weights` what it trains, `spend` one step's estimate on its metered parts (`{"dollars", "parts", "why"}`, `dollars` none and `why` said where it cannot be estimated yet), `environment` the slots its programs declare (`{"slots", "untrained", "judges"}`, none where they are not known here); nothing recorded |
+| `GET /api/presets` | Every preset's newest version, each with how many versions it has (topic `presets`, `System.presets`), and `keeps`: whether the ledger keeps presets |
+| `GET /api/presets/NAME` | A preset's versions, oldest first (topic `preset/NAME`, `System.preset`); 404 for one there is none of or that was deleted |
+| `POST /api/presets/NAME` | Save `{"settings", "note"}` as its next version (`System.save_preset`); 409 for a name or a setting a preset cannot hold |
+| `DELETE /api/presets/NAME` | Delete it (`System.delete_preset`); its versions stay readable by number |
 | `POST /api/launches` | Ask for a run (`System.launch`): checked, and where nothing refuses, recorded and its job submitted (`rollout_train.submitting.submit`); answers `{"launch", "notes"}`, or 422 with `{"error", "refusals", "notes"}` |
 | `GET /api/launches` | The runs asked for, newest first, each with its job and state (topic `launches`), and `submits`: whether this monitor asks for runs. A launch going is read with its job's status too (`followed`) |
 | `POST /api/launches/ID/stop` | Ask a launch to stop (`System.stop`): one whose job is not made yet stops at once; a job going is asked to stop, and its run stops at a group boundary |
@@ -344,14 +350,28 @@ A run's body is `{"kind", "name", "environment", "settings", "preset"}`: the kin
 environment is the suite's first entry's where the body says none. A body that says no name, or a monitor with no
 cluster config, is refused (409); a preset or a suite there is none of, 404.
 
-**New run** (`#/runs/new`, from the Runs page) asks for a training run: a preset (the presets the cluster offers, or
-none), whose settings stand as defaults the user may change; an environment (picked from those offered, by name with
-`module:name` under it; `?environment=` chooses one, `?model=` a preset whose channel serves that model, else that
-model); the run's name; the checkpoint it starts from (the base model, a bookmark, or any checkpoint whose weights are
-kept); a bookmark for it to carry; its groups, groups a step and seed; the evals it makes of its checkpoints (a suite
-the ledger has, every how many steps, and episodes per start, empty for the suite's own; or none); and the preset's
-other settings, with rows for any other `trainer.KEY`. It sends the settings that differ from the preset's. A refusal is
-shown under the field of the setting it names, or in a list with its key. With no cluster config, the form says the
+**New run** (`#/runs/new`, from the Runs page) asks for a training run from what the cluster offers, in the order
+its choices decide each other:
+
+| Step | Settings | Choices |
+|---|---|---|
+| Environment | `environment` | Those offered, built in and imported, by name (an imported one with its version's first characters), `module:name` under it; `?environment=` chooses one |
+| Weights | `weights` | LoRA or full weights; one no trainer trains is disabled |
+| Trainer | `trainer.provider`, `trainer.model`, `start`, `trainer.KEY` | The trainers (each with its kind and allocation), one that trains the other weights disabled; its models, those of the environment's model family first (`?model=` chooses one and a trainer of it); where it starts (the base model, a bookmark or a checkpoint; one whose weights were deleted, an adapter for full weights, or one Tinker did not make for Tinker disabled); its own settings under **Advanced**, each with its default |
+| Inference | `channels.NAME.provider`, `.model`, `.renderer`, `.mode`, `.follows`, `.lag`, `slots.SLOT`, `self_judging` | The trained channel's provider (disabled where it cannot serve the run's weights, does not return the exact tokens it sampled and their logprobs, or has no bridge from the trainer's format; the chosen pair's bridge said under it), its model (the trainer's, or one quantized from it) and renderer (those runs named for it offered); then a channel for each other slot the environment's programs declare (one not trained, or one that judges): its provider, model and renderer, and whether it serves a fixed model or follows the trained channel some checkpoints behind, with self-judging for a judge that follows it |
+| Objective | `objective.preset`, `objective.COMPONENT` | The presets by family; under **Advanced**, the components its family accepts, each with the preset's value, edited as overrides |
+| Budgets | `groups`, `groups_per_step`, `episodes_at_once`, `channels.NAME.thinking_tokens`, `.answer_tokens`, `max_lag` | Each with its default |
+| Evals | `evals.suite`, `evals.every`, `evals.episodes` | A suite whose environments are offered, or none |
+| Spend | `limits.spend` | Under it, one step's estimate on the run's metered parts, or why it cannot be estimated yet |
+| Name | the run's name, `bookmark` | |
+
+A choice that can never work stays in its picker, disabled, its reason after its name and in its tooltip; choosing
+the weights, the trainer or the trained channel's model or provider moves what follows to the first choice that fits,
+where the one chosen no longer does. A preset fills the form, its fields marked as long as they hold the preset's
+value; **Save as preset** saves the form's settings as a preset's next version (**Presets** opens the presets). The
+monitor checks the settings a moment after each change (`POST /api/launches/check`): a refusal is said under the field
+of the setting it names, or in a list with its key; the notes (a run that waits, spend) beside the submit button.
+**Launch the run** asks for it and opens Runs, where its launch's tile is. With no cluster config, the form says the
 monitor asks for no runs.
 
 A launch's tile on Runs (and on Evals, a suite's page and a checkpoint's or base model's page) has its run's name

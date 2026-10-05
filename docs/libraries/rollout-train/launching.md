@@ -166,10 +166,17 @@ A run's channels on a `vllm` provider get engine hosts of the run's own (`Run.ho
 | Field | Holds |
 |---|---|
 | `cluster`, `kinds`, `submits` | The cluster's name, the kinds of run, and where jobs go (`ray` or `kubernetes`) |
-| `environments` | The cluster config's (`environment`, `python`: `platform` or `project`), then every published version beside the ledger (`environment` as `NAME@VERSION`, `name`, `source`, `commit`, `imported`, `sandboxes`) |
-| `trainers` | Each trainer: `name`, `kind`, `produces`, `format`, `models`, `gpus`, `colocate_with`, `segment_tokens`, `cost`, `families`, and its `settings` (each `key`, `types`, `default`, `changeable`) |
-| `inference` | Each provider: `name`, `kind`, `gpus`, `replicas`, `shared`, `capabilities`, and its `models` (each `model`, `context`, `base`, `max_lora_rank`, `cost`, the `renderers` runs and presets named for it so far and their `families`) |
-| `pairs` | Each trainer and provider: the `bridge` chain's names, or none and why it is `refused` |
+| `environments` | The cluster config's (`environment`, `python`: `platform` or `project`), then every published version beside the ledger (`environment` as `NAME@VERSION`, `name`, `source`, `commit`, `imported`, `sandboxes`); each with the renderer `families` runs and presets on it named for their trained channel |
+| `trainers` | Each trainer: `name`, `kind`, `produces`, `format`, `models`, `gpus`, `colocate_with`, `segment_tokens`, `cost`, `families` (the objective families it takes), `allocation` (`metered` or `scheduled`), `concurrency`, `weights` (`lora` or `full`: what it trains), and its `settings` (each `key`, `types`, `default`, `changeable`) |
+| `inference` | Each provider: `name`, `kind`, `gpus`, `replicas`, `allocation`, `concurrency`, `capabilities`, `weights` (those it serves a run's checkpoints as: `lora` with adapters, `full` with full-weight reload), and its `models` (each `model`, `context`, `base`, `max_lora_rank`, `cost`, the `renderers` runs and presets named for it so far and their `families`) |
+| `pairs` | Each trainer and provider: the `bridge` chain's names, or none and why it is `refused` (no bridge, or a provider that cannot serve the trainer's weights) |
 | `sandboxes` | Each pool's `size` and `provider` |
 | `presets` | Each preset's newest version: `name`, `version`, `id`, `settings`, `note`, `saved` |
 | `capacity` | The GPUs the machines that beat now have, and those idle (under a twentieth of their memory used), by machine; none where no beat says |
+| `objectives` | The objective's `families`, its `presets` (each `name`, `family`, `source`, `says` and its family's `components` with their values) and the `components` (each `key`, `types`, `families` that accept it, `changeable`, `says`, `choices`, `least`, `above`) |
+| `schema` | The keys a training run takes, each `key`, `types`, `default`, `changeable`, `says`, `choices`, `least` |
+
+`examined(settings, cluster, ledger)` is `checked` with what it found beside the findings: the environment's facts, one
+step's estimated spend on the run's metered parts (`spend_of`) and what the run trains (`weights_of`). The monitor's
+`POST /api/launches/check` answers with it. A training run is submitted with its `weights` said (its trainer's, where
+the settings do not say), so its start records what it trains.
