@@ -26,9 +26,9 @@ uv run minecraft-team server --seed 12345                   # a temporary server
 ```
 
 The cluster config needs a pool of its worlds (`[sandboxes.minecraft]`, `provider = "minecraft_team.worlds:worlds"`,
-`size = 6`) and the environment among its `[environments]` (`deploy/clusters/example.toml` has both). The presets are
-`deploy/chart/rollout/files/presets/minecraft-one-gpu.toml` (the 4-bit Qwen3.5-9B on the cluster's vLLM engines and a
-LoRA trainer sharing their card) and `minecraft-tinker.toml` (the full Qwen3.5-9B trained and sampled at Tinker), each
+`size = 6`, `memory_gib = 1.75`) and the environment among its `[environments]` (`deploy/clusters/example.toml` has
+both). The presets are `deploy/chart/rollout/files/presets/minecraft-one-gpu.toml` (the 4-bit Qwen3.5-9B on the
+cluster's vLLM engines and a LoRA trainer sharing their card) and `minecraft-tinker.toml` (the full Qwen3.5-9B trained and sampled at Tinker), each
 commented with why its numbers are what they are. The run's driver writes the monitor's feed into its directory, and
 `rollout monitor` serves the page over the ledger (every run in it) and that feed. The page shows the run's steps and the groups that went into each, every episode of every group and, for each agent, what
 it sees (the map included), what it thinks, what it does and what comes back
@@ -45,10 +45,10 @@ Paths are under `environments/minecraft/`.
 | Piece | Where | What it does |
 |---|---|---|
 | Ground-truth plugin (Java) | `plugin/` | A control API on 127.0.0.1 inside Paper: freeze the game, run it for a window of ticks, and hold the players still in between; set up episodes and tasks (teleports across dimensions, kits, carved rooms, chests, dropped items, creatures, places to stand, structures); report each player's diamonds, the advancements the team earned and what it got hold of since the episode began, and the damage done to the dragon; log events (blocks mined, hits, deaths, moves the server refused). Agents cannot run commands |
-| Server configuration | `config/` | Offline mode, anti-xray, nether and end enabled, and how far large things are tracked; merged into Paper's defaults. `operators.txt` names who may watch |
-| Paper servers | `minecraft_team/paper.py` | Downloads Paper (`PAPER_VERSION`, checked by SHA-256), builds the plugin with `javac`, generates a template server per world seed and configuration (the overworld around the origin included), and starts temporary servers as copies of it. A server ends with the process that started it |
+| Server configuration | `config/` | Offline mode, anti-xray, nether and end enabled, uncompressed packets, and how far large things are tracked; merged into Paper's defaults. `operators.txt` names who may watch |
+| Paper servers | `minecraft_team/paper.py` | Downloads Paper (`PAPER_VERSION`, checked by SHA-256), builds the plugin with `javac`, generates a template server per world seed and configuration (the overworld around the origin included), and starts temporary servers as copies of it, each Java held to the memory its world needs (`HEAP`, `JVM`, `JAVA_ENVIRONMENT`: [memory](../research/minecraft-memory.md)). A server ends with the process that started it |
 | Control client | `minecraft_team/control.py` | The Python client of the plugin's control API |
-| Harness (Node) | `harness/`, `minecraft_team/harness.py` | One mineflayer bot per agent: observations by line of sight, the actions, the chat filter, and pausing while ticks are frozen. The Python side talks to it in JSON lines |
+| Harness (Node) | `harness/`, `minecraft_team/harness.py` | One mineflayer bot per agent: observations by line of sight, the actions, the chat filter, and pausing while ticks are frozen. One Node process per world; the Python side talks to it in JSON lines |
 | Limits | `limits.json`, `minecraft_team/limits.py`, `harness/lib/limits.js` | The numbers an action keeps and agents are told: reach, the longest `move`, how long walking may dig at a block, what it bridges with, how long `wait` waits, smelting time and fuels, the window's length, a chat message's length. Python and Node read the one file |
 | Prompts | `minecraft_team/prompts.py` | What agents read and call: the system prompt, observations as text, the map, the actions as tools |
 | Tasks | `minecraft_team/tasks.py` | 59 tasks in three tiers, each built in a live world from ground truth and scored by its own objective, and unguided variants (`tXXXu`) of the 41 whose way starts from a kit: 100 rows |
@@ -86,9 +86,16 @@ names for `minecraft` before the episode begins, and releases it when the episod
 `MinecraftWorlds` is the provider: for each lease it starts a server from the seed's template, connects the bots,
 builds the task and waits until every bot holds the chunks around it; the lease's addresses are where a player joins
 the world to watch it (`game`) and the plugin's control API (`control`). It holds at most `size` worlds at once (6),
-each a Paper server of its own (1 to 2 GB of memory), and an episode runner claims an episode only while one more
-fits. `worlds(directory, size=6)` makes it for a run's driver (the run's directory, and the pool's `size`), keeping the
-bots' logs under `directory/logs`.
+each a Paper server of its own and a Node process for its bots, and an episode runner claims an episode only while one
+more fits. `worlds(directory, size=6, heap="1536M")` makes it for a run's driver (the run's directory, and the pool's
+`size` and `heap`, the cluster config's `[sandboxes.minecraft]` settings), keeping the bots' logs under
+`directory/logs`.
+
+A world takes 1.1 GiB on a staged task, 1.25 to 1.45 GiB in the nether and 1.75 to 1.85 GiB with four bots walking
+apart on the surface; bots that roam for long through terrain the template does not hold take up to 2.4 GiB (the
+server's live set grows to 1 GiB). The cluster config counts `memory_gib = 1.75` a world.
+[Minecraft memory](../research/minecraft-memory.md) has the measurements, and why the worlds are servers of their own
+rather than worlds of one server.
 
 Every agent's operations reach the episode's world through `run.sandbox("world")`, each a recorded effect:
 
@@ -347,7 +354,7 @@ page.
 | Engine | One engine host of `local-vllm` (`rollout_vllm:VllmEngine`), its options the model's in the cluster config: 0.78 of the card, `max_num_seqs` 20: the `episodes_at_once` (6) episodes of one to four agents ask for fifteen requests on average, and the engine queues the rest | [vLLM engine](../implementations/rollout-vllm.md) |
 | Trainer | `local-lora` (`rollout_lora:LoraTrainer`) on the same checkpoint, rank 32, learning rate 5e-5, segments of up to 8,000 tokens (a peak of 12.4 GiB), 384 a step; `colocate_with = "local-vllm"`: the engine sleeps while it steps | [LoRA trainer](../implementations/rollout-lora.md) |
 | Worlds | `[sandboxes.minecraft]`: `minecraft_team.worlds:worlds`, at most six at once, in the run's driver | [The worlds](#the-worlds) |
-| Memory | `[guards]` `runs_gib` and `training_gib`: each episode runs a Paper server | [Deploying](../guide/deploying.md) |
+| Memory | `[guards]` `runs_gib` and `training_gib`: each episode runs a Paper server and its bots | [Deploying](../guide/deploying.md), [Minecraft memory](../research/minecraft-memory.md) |
 | Bridge | The LoRA trainer's files are PEFT's, which vLLM loads as they are: each checkpoint is bridged (`verbatim`) as a Ray task on the run's Ray cluster | [Bridges](../libraries/rollout-train/checkpoints.md#bridges), [Ray](../guide/deploying.md#ray) |
 
 `minecraft-tinker` keeps these settings where they still apply, with Tinker's trainer (`tinker-lora`, `trainer.model =
@@ -378,7 +385,7 @@ sleeps, the trainer) is kept inside it by these:
 | Concern | What the system does |
 |---|---|
 | System memory between steps | The [trainer](../implementations/rollout-lora.md#a-fresh-process-per-step) exits after every step, and the [engine](../implementations/rollout-vllm.md#sleep-and-wake) drops its weights when it sleeps |
-| System memory for episodes | Each Paper server has a heap of its own (`PaperServer.heap`). The cluster config's `[guards]` say what must be available before episodes are admitted (short of it, the runner waits) and before a colocated step starts (short of it, the run stops with a message) |
+| System memory for episodes | Each Paper server has a heap of its own, at most `heap` (`[sandboxes.minecraft]`), and its Java is held to what its world needs ([the worlds](#the-worlds)). The cluster config's `[guards]` say what must be available before episodes are admitted (short of it, the runner waits) and before a colocated step starts (short of it, the run stops with a message) |
 | GPU memory in a step | No turn is longer than the trainer can hold, which is settled when the turn is sampled: a long prompt leaves less room to think. The trainer is held to the GPU memory that is free when it starts ([the memory bound](../implementations/rollout-lora.md#the-memory-bound)). With the engine asleep, what other programs hold of the card stays in use |
 | A failed step | It is written down with its error, the adapter stays as it was, and play goes on ([training](../libraries/rollout-train/training.md#the-loop)) |
 | Stopping | A run asked to stop ends its servers, its engine and a step in progress; its engine hosts and trainer end with its job ([deploying](../guide/deploying.md#stopping)) |

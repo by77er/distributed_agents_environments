@@ -134,7 +134,7 @@ costs = { "Qwen/Qwen3.5-4B" = { train = 0.737 }, "Qwen/Qwen3.5-9B" = { train = 1
 provider = "minecraft_team.worlds:worlds"
 size = 6
 cpus = 1
-memory_gib = 1.5
+memory_gib = 1.75                             # a server and its bots: 1.1 GiB on a staged task, 1.75 walking apart
 
 [environments."minecraft_team.environment:environment"]
 python = "platform"

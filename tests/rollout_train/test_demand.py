@@ -65,7 +65,7 @@ def test_tinker_alone_asks_ray_for_its_driver_only() -> None:
 
 def test_the_driver_counts_its_runners_and_the_sandbox_pools_its_environment_declares() -> None:
     many = demand(RunSettings({**TINKER, "episodes_at_once": 20}), CLUSTER, sandboxes={"minecraft", "unknown"})
-    assert many.driver == Resources(cpus=1 + 3 + 6 * 2, memory_gib=2 + 6 * 1.5)  # (3 runners; 6 worlds of 2 CPUs)
+    assert many.driver == Resources(cpus=1 + 3 + 6 * 2, memory_gib=2 + 6 * 1.75)  # (3 runners; 6 worlds of 2 CPUs)
 
 
 def test_an_eval_of_a_checkpoint_has_a_bridge_bundle_and_a_check_none() -> None:

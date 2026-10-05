@@ -81,9 +81,10 @@ What drives the numbers:
   vLLM serves it: the engines sleep while the trainer steps ([the LoRA trainer's
   measurements](../implementations/rollout-lora.md#measurements),
   [vLLM's](../implementations/rollout-vllm.md#measurements)). A run trained and sampled on Tinker needs no GPU.
-- **Episodes.** Each Minecraft episode runs a Paper server: about 1 to 2 CPUs and 1.5 GiB each. The cluster config's
-  `[guards]` (`runs_gib`, `training_gib`) say how much system memory must be free before a runner claims another
-  episode, and before a step of a trainer that shares the engines' GPU.
+- **Episodes.** Each Minecraft episode runs a Paper server and its bots' Node process: about 1 to 2 CPUs, and 1.1 to
+  1.75 GiB ([measured](../research/minecraft-memory.md)). The cluster config's `[guards]` (`runs_gib`,
+  `training_gib`) say how much system memory must be free before a runner claims another episode, and before a step of
+  a trainer that shares the engines' GPU.
 - **Storage.** The blob store grows with every checkpoint's weights and optimizer state, and with every episode's
   trajectory; checkpoints' saves thin out with age
   ([checkpoints](../libraries/rollout-train/checkpoints.md#checkpoints)). The Hugging Face cache on the state volume

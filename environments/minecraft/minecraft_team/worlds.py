@@ -26,7 +26,7 @@ from pydantic import JsonValue
 from minecraft_team.control import Control
 from minecraft_team.harness import Harness
 from minecraft_team.limits import LIMITS, TICKS_PER_SECOND
-from minecraft_team.paper import Installation, PaperServer, sweep
+from minecraft_team.paper import HEAP, Installation, PaperServer, sweep
 from minecraft_team.tasks import TASKS, TEAM, Built, Task, build, saturated, scored
 from rollout.contracts import RetryClass, Text, ToolResult, ToolSpecification
 from rollout.harness import Reach, SandboxSpec
@@ -63,11 +63,14 @@ class EpisodeWorld:
 
 @dataclass
 class MinecraftWorlds:
-    """At most `size` worlds at once, each a Paper server of its own (1 to 2 GB of memory)."""
+    """At most `size` worlds at once, each a Paper server of its own whose heap is at most `heap`, and the Node harness
+    of its bots: together 1.1 to 1.85 GiB of memory in a task's first 15 turns, up to 2.4 GiB when the bots roam far
+    (docs/research/minecraft-memory.md)."""
 
     installation: Installation = field(default_factory=Installation)
     logs: Path | None = None
     size: int = 6
+    heap: str = HEAP
     deduplicates: ClassVar[bool] = False
     """An operation asked for twice is performed twice: nothing here remembers an effect's id."""
     _worlds: dict[str, EpisodeWorld] = field(default_factory=dict[str, EpisodeWorld])
@@ -98,7 +101,7 @@ class MinecraftWorlds:
         parameters: Any = spec.parameters
         task = TASKS[str(parameters["task"])]
         team = [str(name) for name in parameters.get("names", TEAM)]
-        server = PaperServer(self.installation, seed=int(parameters["world_seed"]))
+        server = PaperServer(self.installation, seed=int(parameters["world_seed"]), heap=self.heap)
         await server.start()
         control = Control(server.control_url)
         harness: Harness | None = None
@@ -252,11 +255,12 @@ async def loaded(control: Control, harness: Harness, *, seconds: float = 30.0) -
         await asyncio.sleep(0.25)
 
 
-def worlds(directory: Path, size: int = 6) -> MinecraftWorlds:
+def worlds(directory: Path, size: int = 6, heap: str = HEAP) -> MinecraftWorlds:
     """The worlds of a deployment whose state is under `directory` (the cluster config's `[sandboxes.minecraft]
-    provider` names this function): at most `size` at once on this machine, their logs kept there. Servers a stopped
-    process left behind are removed."""
-    made = MinecraftWorlds(logs=directory / "logs", size=size)
+    provider` names this function, and its `size` and `heap` are this function's): at most `size` at once on this
+    machine, each server's heap at most `heap`, their logs kept there. Servers a stopped process left behind are
+    removed."""
+    made = MinecraftWorlds(logs=directory / "logs", size=size, heap=heap)
     (directory / "logs").mkdir(parents=True, exist_ok=True)
     sweep(made.installation)
     return made

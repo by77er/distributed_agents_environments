@@ -11,7 +11,10 @@ from typing import Any, Self
 
 from minecraft_team.paper import HARNESS, PAPER_VERSION, Installation
 
-__all__ = ["HARNESS", "Harness", "HarnessError"]
+__all__ = ["HARNESS", "NODE_FLAGS", "Harness", "HarnessError"]
+
+NODE_FLAGS = ("--max-semi-space-size=4",)
+"""What Node is started with: a young generation of 4 MiB a half, not 16 (docs/research/minecraft-memory.md)."""
 
 
 class HarnessError(RuntimeError):
@@ -35,7 +38,7 @@ class Harness:
             raise HarnessError(str(error)) from error
         stderr = log.open("a") if log is not None else asyncio.subprocess.DEVNULL
         process = await asyncio.create_subprocess_exec(
-            "node", str(HARNESS / "harness.js"), cwd=HARNESS,
+            "node", *NODE_FLAGS, str(HARNESS / "harness.js"), cwd=HARNESS,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=stderr,
             limit=16 * 1024 * 1024, env={**os.environ, "NODE_PATH": str(packages)},
         )  # fmt: skip

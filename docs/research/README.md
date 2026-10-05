@@ -16,6 +16,8 @@ pages are the reference; a design note never overrides them.
   the provider kinds are not wired yet.
 - [Ledger guarantees](ledger-guarantees.md), **built**: what the ledger promises its writers and readers (fences,
   claims, retries), each promise with the test that holds it. Its last section proposes an HTTP ledger service.
+- [Minecraft memory](minecraft-memory.md), **built**: the memory of the Minecraft team's worlds measured on real
+  servers and episodes, the Java and Node settings chosen from it, and why several worlds do not share one server.
 - [Cleanup inventory](cleanup-inventory.md), **in progress**: what to remove and what to factor out, ranked, and the
   order of the removal commits.
 

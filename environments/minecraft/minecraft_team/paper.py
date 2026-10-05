@@ -64,6 +64,23 @@ GENERATED_CHUNKS = 19
 within 240 blocks of it and reach 40 further."""
 SHARED = ("libraries", "versions", "cache")
 """Directories every server shares with the bootstrap server, so none downloads or patches anything."""
+HEAP = "1536M"
+"""A server's largest heap. Four bots roaming apart through terrain the template does not hold keep up to 1 GiB live
+(docs/research/minecraft-memory.md); in 15 turns of a task the live set grows from 214 MiB to 420 to 560 MiB."""
+JVM = (
+    "-XX:+UseG1GC", "-XX:GCTimeRatio=4", "-XX:MinHeapFreeRatio=20", "-XX:MaxHeapFreeRatio=40",
+    "-Djava.net.preferIPv4Stack=true",
+)  # fmt: skip
+"""What every server's Java runs with besides its heap (docs/research/minecraft-memory.md):
+
+- G1, whose pauses stay well within a tick (most under 5 ms), held to the heap the live set needs: it grows the heap
+  only while collecting takes more than a fifth of the time (`GCTimeRatio=4`; at G1's default, a thirteenth, the heap
+  grew to most of `HEAP`), and keeps a fifth to two fifths of it free after a collection;
+- IPv4 only: Java otherwise listens on an IPv6 socket with a mapped address (::ffff:127.0.0.1), which WSL does not
+  forward to Windows' localhost, so a client on the Windows side could not join to watch."""
+JAVA_ENVIRONMENT = {"MALLOC_ARENA_MAX": "2"}
+"""What Java's environment adds: two malloc arenas, where glibc would keep up to eight per core, each holding on to
+native memory once freed."""
 
 
 @dataclass
@@ -87,6 +104,11 @@ class Installation:
             raise RuntimeError(f"the Paper jar from {download['url']} does not match its checksum")
         _write_atomically(jar, data)
         return jar
+
+    def command(self, heap: str, *options: str) -> list[str]:
+        """How Java starts a server in its directory: `heap` its largest heap, `options` more of Java's options (the
+        plugin's system properties)."""
+        return [self.java, f"-Xmx{heap}", *JVM, *options, "-jar", str(self.paper_jar()), "--nogui"]
 
     @contextlib.contextmanager
     def _lock(self, name: str) -> Generator[None]:
@@ -113,8 +135,9 @@ class Installation:
         _write_properties(directory, {**server_properties(), "server-port": str(free_port())})
         (directory / "eula.txt").write_text("eula=true\n")
         process = subprocess.Popen(
-            [self.java, "-Xmx1G", "-jar", str(self.paper_jar()), "--nogui"],
+            self.command(HEAP),
             cwd=directory,
+            env=java_environment(),
             stdin=subprocess.PIPE,
             stdout=(directory / "bootstrap.log").open("w"),
             stderr=subprocess.STDOUT,
@@ -239,8 +262,9 @@ class Installation:
         shutil.copy2(self.plugin_jar(), directory / "plugins" / "rollout-ground-truth.jar")
         control = free_port()
         process = subprocess.Popen(  # (the plugin is there to generate the play area)
-            [self.java, "-Xmx2G", f"-Drollout.control.port={control}", "-jar", str(self.paper_jar()), "--nogui"],
+            self.command(HEAP, f"-Drollout.control.port={control}"),
             cwd=directory,
+            env=java_environment(),
             stdin=subprocess.PIPE,
             stdout=(directory / "generate.log").open("w"),
             stderr=subprocess.STDOUT,
@@ -270,7 +294,7 @@ class PaperServer:
 
     installation: Installation
     seed: int
-    heap: str = "1536M"
+    heap: str = HEAP
     name: str = field(default_factory=lambda: f"s-{uuid.uuid4().hex[:10]}")
     port: int = 0
     control_port: int = 0
@@ -310,19 +334,16 @@ class PaperServer:
             raise
 
     async def _launch(self, seconds: float) -> None:
-        # IPv4 only: Java otherwise listens on an IPv6 socket with a mapped address (::ffff:127.0.0.1), which WSL does
-        # not forward to Windows' localhost, so a client on the Windows side could not join to watch.
         self._release_ports()
         self.port, self.control_port = free_port(), free_port()
         _write_properties(self.directory, {"server-port": str(self.port)})
         log = (self.directory / "server.log").open("w")
+        command = self.installation.command(
+            self.heap, f"-Drollout.control.port={self.control_port}", f"-Drollout.server.name={self.name}"
+        )
         self.process = await asyncio.create_subprocess_exec(
-            self.installation.java, f"-Xmx{self.heap}", f"-Drollout.control.port={self.control_port}",
-            f"-Drollout.server.name={self.name}",
-            "-XX:+UseG1GC", "-Djava.net.preferIPv4Stack=true",  # see below
-            "-jar", str(self.installation.paper_jar()), "--nogui",
-            cwd=self.directory, stdin=asyncio.subprocess.PIPE, stdout=log, stderr=asyncio.subprocess.STDOUT,
-            preexec_fn=end_with_parent,
+            *command, cwd=self.directory, stdin=asyncio.subprocess.PIPE, stdout=log, stderr=asyncio.subprocess.STDOUT,
+            preexec_fn=end_with_parent, env=java_environment(),
         )  # fmt: skip
         deadline = time.monotonic() + seconds
         async with httpx.AsyncClient(timeout=2) as client:
@@ -399,6 +420,11 @@ def sweep(installation: Installation) -> list[str]:
         shutil.rmtree(directory, ignore_errors=True)
         removed.append(directory.name)
     return removed
+
+
+def java_environment() -> dict[str, str]:
+    """The environment a server's Java runs in: this process's, and `JAVA_ENVIRONMENT`."""
+    return {**os.environ, **JAVA_ENVIRONMENT}
 
 
 def release_port(port: int) -> None:
