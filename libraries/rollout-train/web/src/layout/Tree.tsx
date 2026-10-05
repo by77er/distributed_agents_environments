@@ -5,7 +5,7 @@
 
 import { memo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { useEnvironments, useEpisode, useEvalSubjects, useEvals, useFeeds, useKnown, useSystem } from "../api/queries";
+import { useEnvironments, useEpisode, useEvalSubjects, useEvals, useFeeds, useKnown, useLineage, useSystem } from "../api/queries";
 import type { EvalRun, GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, Twist } from "../components/ui";
 import { entriesText, shareText } from "../components/evals";
@@ -191,12 +191,16 @@ function EpisodeRow({ each, place, folds, fold }: { each: GroupEpisode; place: P
   );
 }
 
-/** The checkpoints: the base models they were trained from, those bookmarks name, and each run's newest. */
+/** The checkpoints: the base models (those they were trained from, then those only evals have played, as the graph has
+ * them), those bookmarks name, and each run's newest. */
 function CheckpointsTree({ place, system }: { place: Place; system: System }) {
   const known = useKnown();
+  const { data: lineage } = useLineage();
   const heads = system.runs.map(run => madeBy(system.checkpoints, run.run).at(-1)).filter(each => each !== undefined);
   const bookmarked = system.checkpoints.filter(checkpoint => checkpoint.bookmarks.length);
-  const bases = [...new Set(system.checkpoints.filter(checkpoint => !checkpoint.parents.length && checkpoint.base && !known.checkpoint(checkpoint.base)).map(checkpoint => checkpoint.base!))].sort();
+  const trained = [...new Set(system.checkpoints.filter(checkpoint => !checkpoint.parents.length && checkpoint.base && !known.checkpoint(checkpoint.base)).map(checkpoint => checkpoint.base!))].sort();
+  const built = new Set(system.checkpoints.map(checkpoint => checkpoint.base));
+  const bases = [...trained, ...(lineage?.bases ?? []).filter(base => !built.has(base) && !known.checkpoint(base))];
   const row = (id: string, tag: string, key: string) => (
     <Node key={key} to={checkpointPlace(id)} current={place.kind === "checkpoint" && place.id === id}>
       <span className="name mono" title={known.title(id)}>{known.short(id)}</span>

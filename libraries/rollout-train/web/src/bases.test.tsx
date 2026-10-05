@@ -8,6 +8,7 @@ import { basePlace, placeOf } from "./lib/places";
 import { Base } from "./pages/Base";
 import { Checkpoints } from "./pages/Checkpoints";
 import { Suite } from "./pages/Suite";
+import { Tree } from "./layout/Tree";
 
 const A = "kpqxlmnoprstuvwx", B = "vwxyzabcdefghijk";
 
@@ -101,6 +102,16 @@ describe("a base model in the checkpoints' graph", () => {
     expect(screen.getByTestId("where").textContent).toBe(basePlace("org/base-a"));
     fireEvent.keyDown(screen.getByRole("link", { name: "the checkpoint kpqx" }), { key: " " });
     expect(screen.getByTestId("where").textContent).toBe(`/checkpoint/${A}`);
+  });
+});
+
+describe("the checkpoints' sidebar", () => {
+  it("lists every base model the graph has: those trained from, then those only evals have played", () => {
+    const evaluated = { ...lineage, bases: [...lineage.bases, "org/evaluated"] };
+    shown(<Tree place={{ page: "checkpoints", kind: "checkpoints" }} />, "/checkpoints", client => client.setQueryData(topics.checkpoints().key, evaluated));
+    const label = screen.getByText("Base models");
+    const rows = [...label.parentElement!.querySelectorAll(".node")].filter(row => row.querySelector(".tag") === null).map(row => row.textContent);
+    expect(rows).toEqual(["base-a", "base-b", "evaluated"]);
   });
 });
 
