@@ -3,7 +3,8 @@ a runner claims only what its pools have room for, and a harness inside a sandbo
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, Mapping
+import random
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,6 +12,7 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
+from rollout.environment import Description, Row, Start
 from rollout.harness import (
     PoolBinding,
     Program,
@@ -29,6 +31,8 @@ from rollout_train.record import GROUPS, scope, table
 from rollout_train.rollouts import Plan, episodes_of, plan, playing
 from rollout_train.rollouts.scheduler import CLAIMS
 from rollout_train.sandboxes import FileLeases, keep, leases_of, sweep
+from tests.local_ray import LocalRay
+from tests.rollout_train.clusters import POLICY, a_cluster
 from tests.rollout_train.support import BOX, BOX_GATES, Boxed, ask_boxed, episode_runner
 
 
@@ -186,43 +190,73 @@ async def test_a_harness_inside_a_sandbox_reaches_the_recorder_through_its_envir
 
 
 def boxes(directory: Path, size: int = 4) -> FakeSandboxes:
-    """What a profile's `[pools]` names: a provider, made with the run's directory."""
+    """What the cluster config's `[sandboxes.fake]` names: a provider, made with the run's directory."""
     return FakeSandboxes(size=size)
 
 
-PROFILE = """
-directory = "{directory}"
+class Boxing:
+    """An environment whose program leases a box of kind `fake` and asks it who it is."""
 
-[channels.policy]
-model = "a-checkpoint"
-renderer = "rollout_train.testing:plain_renderer"
-engine = "rollout_train.testing:scripted_engine"
+    program = ProgramReference(program=register(Boxed))
+    version = "1"
+    description = Description()
 
-[pools.fake]
-kind = "tests.rollout_train.test_sandboxes:boxes"
+    def rows(self) -> Sequence[Row]:
+        return [Row("box", "lease a box", {})]
+
+    def start(self, row: Row, rng: random.Random) -> JsonValue:
+        return {}
+
+    def evals(self) -> Mapping[str, Sequence[Start]]:
+        return {}
+
+
+boxing = Boxing()
+SANDBOXES = """
+[sandboxes.fake]
+provider = "tests.rollout_train.test_sandboxes:boxes"
 size = 2
 """
 
 
-async def test_an_open_profile_leases_sandboxes_from_the_pools_it_names(tmp_path: Path) -> None:
+async def test_a_run_built_from_its_settings_leases_sandboxes_from_the_clusters_pools(
+    tmp_path: Path, local_ray: LocalRay
+) -> None:
     from rollout.harness import bind
-    from rollout_train.profile import Profile
+    from rollout_train.jobs import Run, started
+    from rollout_train.run_settings import RunSettings
+    from rollout_train.stores import Stores
 
-    path = tmp_path / "profile.toml"
-    path.write_text(PROFILE.format(directory=tmp_path / "run"))
-    async with Profile.load(path).open() as platform:
-        assert platform.pool_bindings == {"fake": PoolBinding(local="fake")}
+    cluster = a_cluster(tmp_path, more=SANDBOXES)
+    stores = Stores.open(cluster)
+    channel = {key: value for key, value in POLICY.items() if key.startswith("channels.")}
+    settings = RunSettings({**channel, "kind": "check", "name": "boxed", "environment": "boxing"})
+    run = Run(cluster, stores, settings, await stores.registry.create("boxed"), environment=boxing)
+    async with started(run, training=False) as live:
+        assert live.pool_bindings == {"fake": PoolBinding(local="fake")}
         reference = ProgramReference(program=register(Boxed))
-        binding = bind(reference.model_copy(update={"parameters": {}}), "policy", pools=platform.pool_bindings)
-        fence = await platform.ledger.take(scope(platform.run.id))
-        await plan(platform.ledger, platform.run.id, Plan(reference, binding), fence)
+        binding = bind(reference.model_copy(update={"parameters": {}}), "policy", pools=live.pool_bindings)
+        fence = await live.ledger.take(scope(live.run.id))
+        await plan(live.ledger, live.run.id, Plan(reference, binding), fence)
         record: JsonValue = {"parameters": {}, "episodes": 3, "decided": 1.0}
-        await platform.ledger.append(table(platform.run.id, GROUPS), "1", record, fence)
-        episodes = await episodes_of(platform.ledger, platform.blobs, platform.run.id, 1, 3, every=0.01)
+        await live.ledger.append(table(live.run.id, GROUPS), "1", record, fence)
+        episodes = await episodes_of(live.ledger, stores.blobs, live.run.id, 1, 3, every=0.01)
         assert sorted(str(episode.info["key"]).split("/", 1)[1] for episode in episodes) == [
             "1/1/1/box", "1/2/1/box", "1/3/1/box",
         ]  # fmt: skip
-        leases = leases_of(platform.ledger)
-        assert leases is not None and await leases.all() == []  # kept beside the ledger, and released
-        (beat,) = await FilePresence(tmp_path / "run" / "ledger").beats()
-        assert beat.about["pools"] == {"fake": {"size": 2, "leased": 0, "free": 2}}
+        leases = leases_of(live.ledger)
+        assert leases is not None
+        await until(lambda: _none_leased(leases))  # kept beside the ledger, and released once each episode ends
+        heartbeats = presence.presence_of(live.ledger)
+        assert heartbeats is not None
+        await until(lambda: _beats_free(heartbeats, f"run/{live.run.id}"))
+
+
+async def _none_leased(leases: Any) -> bool:
+    return await leases.all() == []
+
+
+async def _beats_free(heartbeats: Any, runner: str) -> bool:
+    """Whether `runner`'s newest beat says its pool has every sandbox free."""
+    beats = [each for each in await heartbeats.beats() if each.runner == runner]
+    return [each.about.get("pools") for each in beats] == [{"fake": {"size": 2, "leased": 0, "free": 2}}]

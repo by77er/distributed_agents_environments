@@ -629,12 +629,12 @@ class RemoteChannel:
 @dataclass(frozen=True)
 class Route:
     """How a channel whose engines serve elsewhere is sampled: its model family's renderer, its limits, its base
-    model's name, its servers (a router, a proxy, a server, or a list), how far behind a sample may be (`max_lag`), and
-    how the servers are reached (`connection`)."""
+    model's name, its servers (each the URL of a router, a proxy or a server, or a `CheckpointServer`, such as an engine
+    host's `HostServer`), how far behind a sample may be (`max_lag`), and how URLs are reached (`connection`)."""
 
     renderer: "Renderer"
     model: str
-    servers: tuple[str, ...]
+    servers: tuple["str | CheckpointServer", ...]
     limits: Limits = field(default_factory=Limits)
     max_lag: int = MAX_LAG
     connection: Connection = field(default_factory=Connection)

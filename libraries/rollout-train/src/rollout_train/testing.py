@@ -1,6 +1,6 @@
-"""Test doubles for what stands above a run: an engine that answers from a script, a token format simple enough to
-read, and a gateway in this process that records what they sample. With them an environment, an algorithm or a whole
-profile can be tried without a model or a GPU."""
+"""Test doubles for what stands above a run: an engine that answers from a script, a trainer that trains nothing, a
+token format simple enough to read, and a gateway in this process that records what they sample. With them an
+environment, an algorithm or a whole run built from its settings can be tried without a model or a GPU."""
 
 import asyncio
 import json
@@ -34,6 +34,7 @@ __all__ = [
     "PlainRenderer",
     "Policy",
     "ScriptedEngine",
+    "ScriptedTrainer",
     "admitted",
     "gateway_endpoints",
     "keyring",
@@ -271,7 +272,8 @@ def sample_request(
     )
 
 
-# What a profile can name (`rollout_train.testing:scripted_engine`, `:plain_renderer`): an engine and a renderer
+# What a cluster config and run settings can name (`[inference.NAME] engine = "rollout_train.testing:scripted_engine"`,
+# `channels.NAME.renderer = "rollout_train.testing:plain_renderer"`): an engine and a renderer
 # that need no GPU.
 
 STARTED: list[ScriptedEngine] = []
@@ -289,6 +291,35 @@ def scripted_engine(model: str, **options: Any) -> ScriptedEngine:
     engine.told.append(f"started {model} {sorted(options.items())}")
     STARTED.append(engine)
     return engine
+
+
+class ScriptedTrainer:
+    """A trainer that trains nothing: each step writes an adapter's files that say how many segments it was given (as
+    PEFT's are named, so a bridge takes them for an adapter), and the trainer's state beside them. What a cluster
+    config's trainer names as its `implementation` in tests."""
+
+    weights = "lora"
+
+    def __init__(self, model: str, *, segment_tokens: int | None = None, segments_per_step: int | None = None,
+                 **settings: Any) -> None:  # fmt: skip
+        from rollout_train.trainer import Budget
+
+        self.model = model
+        self.settings = settings
+        self.budget = Budget(segment_tokens, segments_per_step)
+
+    async def step(self, batch: Sequence[Any], *, seed: int, parent: Any, into: Path) -> Any:
+        from rollout_train.trainer import STATE, WEIGHTS, Step
+
+        def written() -> None:
+            (into / WEIGHTS).mkdir(parents=True)
+            (into / WEIGHTS / "adapter_config.json").write_text(json.dumps({"base_model_name_or_path": self.model}))
+            (into / WEIGHTS / "adapter_model.safetensors").write_text(f"trained on {len(batch)} segments")
+            (into / STATE).mkdir()
+            (into / STATE / "optimizer.bin").write_text(f"after a step of {len(batch)} segments")
+
+        await asyncio.to_thread(written)
+        return Step({"segments": float(len(batch))})
 
 
 def plain_renderer(model: str) -> Renderer:

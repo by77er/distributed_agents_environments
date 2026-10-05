@@ -232,14 +232,16 @@ class HostSpec:
 
 def host_spec(cluster: Cluster, provider: str, model: str, *, settings: "RunSettings | None" = None) -> HostSpec:
     """An engine host of `provider`'s `model` (an `[inference.NAME]` of the cluster, of a kind its engines run in an
-    engine host, `vllm`): its kind's engine, the model's options with the provider's `max_logprobs` (what it declares
-    as its top-k logprobs, and so what its engines allow), a replica's GPUs, and `[placement.engines]`. A run
-    whose trainer shares the provider's card (`colocate_with`, by its `settings`) has its host ask for half of the
-    replica's GPUs, and its trainer for the other half."""
+    engine host, `vllm`): its kind's engine (or the provider's `engine`, `module:name`), the model's options (its
+    context as `max_model_len`, unless they say one) with the provider's `max_logprobs` (what it declares as its top-k
+    logprobs, and so what its engines allow), a replica's GPUs, and `[placement.engines]`. A run whose trainer shares
+    the provider's card (`colocate_with`, by its `settings`) has its host ask for half of the replica's GPUs, and its
+    trainer for the other half."""
     offered = cluster.inference[provider]
     engine = INFERENCE_KINDS[offered.kind].implementation
     if engine is None or offered.kind != "vllm":
         raise ValueError(f"provider {provider} ({offered.kind}) runs no engine host: its servers are elsewhere")
+    engine = str(offered.settings.get("engine") or engine)
     if model not in offered.models:
         raise ValueError(f"provider {provider} does not serve {model} (it serves {', '.join(offered.models)})")
     gpus = offered.gpus
@@ -247,7 +249,8 @@ def host_spec(cluster: Cluster, provider: str, model: str, *, settings: "RunSett
     if trainer is not None and trainer.colocate_with == provider:
         gpus /= 2
     resources = dict(cluster.placement.get("engines", {}))
-    options = {**offered.models[model].options, "max_logprobs": offered.capabilities.top_logprobs}
+    offer = offered.models[model]
+    options = {"max_model_len": offer.context, **offer.options, "max_logprobs": offered.capabilities.top_logprobs}
     return HostSpec(engine, model, options, gpus, resources)
 
 

@@ -32,9 +32,6 @@ keys_file = "/etc/rollout-secrets/gateway/gateway.keys"
 listen = "0.0.0.0:8765"
 feed_episodes = 80
 
-[launcher]
-at_once = 1
-
 [runners]
 places = 8
 

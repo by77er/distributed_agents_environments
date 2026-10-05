@@ -1,5 +1,5 @@
 """Full weights: checkpoints of every weight, served in place of the engines' own; an adapter folded into its base;
-and a run that starts from a full checkpoint loading its files as the model it serves and trains."""
+and a run built from its settings that starts from a full checkpoint, trained over its files."""
 
 import os
 from collections.abc import Sequence
@@ -8,19 +8,23 @@ from pathlib import Path
 import pytest
 from pydantic import JsonValue
 
-from rollout.environment import binding_for
 from rollout.harness.blobs import FileBlobStore
-from rollout_train import Budget, train
+from rollout_train import Budget
 from rollout_train import testing as support
 from rollout_train.checkpoints import Checkpoints
+from rollout_train.cluster import Cluster
+from rollout_train.jobs import Run, ran, run_directory
+from rollout_train.launching import Refused
 from rollout_train.ledger import FileLedger
 from rollout_train.merging import SCOPE, merge
-from rollout_train.profile import Profile
 from rollout_train.record import STARTS, scope, table
-from rollout_train.stores import FILES
+from rollout_train.run_settings import RunSettings
+from rollout_train.serving import SERVING
+from rollout_train.stores import FILES, Stores
 from rollout_train.trainer import WEIGHTS, Files, Item, Step
-from tests.rollout_train.rollouts.games import words
-from tests.rollout_train.support import a_ledger, a_profile, files
+from tests.local_ray import LocalRay
+from tests.rollout_train.clusters import POLICY, WORDS, a_cluster
+from tests.rollout_train.support import files
 
 
 async def test_a_channel_serves_full_weights_in_place_of_its_engines_and_drops_the_adapters_before() -> None:
@@ -113,68 +117,108 @@ class Adapters(Full):
         return await super().step(batch, seed=seed, parent=parent, into=into)
 
 
-async def test_a_run_from_a_full_checkpoint_serves_and_trains_its_files_and_publishes_full_weights(
-    tmp_path: Path,
+TRAINERS = """
+[trainers.full]
+kind = "full"
+implementation = "tests.rollout_train.test_full_weights:Full"
+gpus = 0.5
+colocate_with = "local"
+models = ["tiny"]
+
+[trainers.adapters]
+kind = "lora"
+implementation = "tests.rollout_train.test_full_weights:Adapters"
+gpus = 0.5
+colocate_with = "local"
+models = ["tiny"]
+"""
+"""Trainers of every weight and of adapters that train nothing, beside the test cluster's."""
+
+
+def written(tmp_path: Path, name: str, *, full: bool) -> Path:
+    """A checkpoint's files as a trainer of that kind writes them: full weights, or an adapter (as PEFT names them)."""
+    directory = tmp_path / "made" / name
+    directory.mkdir(parents=True)
+    if full:
+        (directory / "config.json").write_text("{}")
+        (directory / "model.safetensors").write_text(name)
+    else:
+        (directory / "adapter_config.json").write_text("{}")
+        (directory / "adapter_model.safetensors").write_text(name)
+    return directory
+
+
+async def seeded(tmp_path: Path) -> tuple[Cluster, dict[str, str]]:
+    """The test cluster with the two trainers, and in its ledger a merged checkpoint ("merged"), an adapter over the
+    model ("plain") and one over the merged weights ("stacked"), each bookmarked by that name."""
+    cluster = a_cluster(tmp_path, more=TRAINERS)
+    stores = Stores.open(cluster)
+    fence = await stores.ledger.take(scope("elsewhere"))
+    add = stores.checkpoints.add
+    plain = await add(fence, "pppp" * 4, weights=written(tmp_path, "p", full=False), run="elsewhere", base="tiny")
+    merged = await add(fence, "mmmm" * 4, weights=written(tmp_path, "m", full=True), run=None, kind="full",
+                       parents=[plain.id], base="tiny")  # fmt: skip
+    stacked = await add(fence, "ssss" * 4, weights=written(tmp_path, "s", full=False), run="elsewhere",
+                        parents=[merged.id])  # fmt: skip
+    made = {"plain": plain.id, "merged": merged.id, "stacked": stacked.id}
+    for name, id in made.items():
+        await stores.registry.bookmark(name, id)
+    return cluster, made
+
+
+async def a_run(cluster: Cluster, trainer: str, start: str) -> Run:
+    """A run of the words on the test cluster, trained by `trainer` from the checkpoint `start` names."""
+    stores = Stores.open(cluster)
+    name = f"{trainer}-{start}"
+    settings: dict[str, JsonValue] = {
+        **POLICY, "kind": "train", "name": name, "environment": WORDS, "trainer.provider": trainer, "start": start,
+        "groups": 1, "trainer.segment_tokens": 900,
+    }  # fmt: skip
+    return Run(cluster, stores, RunSettings(settings), await stores.registry.create(name))
+
+
+async def test_a_run_from_a_full_checkpoint_trains_its_files_and_serves_full_weights(
+    tmp_path: Path, local_ray: LocalRay
 ) -> None:
-    shared, made = await a_ledger(tmp_path)
-    support.STARTED.clear()
-    async with Profile.load(a_profile(tmp_path, shared, "Full", "merged")).open() as platform:
-        fetched = tmp_path / "Full-merged" / "bases" / made["merged"]
-        assert platform.origin == made["merged"] and (fetched / "model.safetensors").read_text() == "m"
-        trainer = platform.trainer
-        assert trainer is not None and trainer.weights == "full"
-        assert support.STARTED[0].told[0].startswith(f"started {fetched}")  # (the trained channel's engines)
-        assert support.STARTED[2].told[0].startswith("started another-checkpoint")  # (not the other channel's)
-        binding = binding_for(words, "policy", platform.tool_bindings)
-        await train(
-            words, trainer, platform.checkpoints, start=platform.origin, channel="policy",
-            directory=tmp_path / "Full-merged" / "checkpoints", publish=platform.publish, run=platform.run.id,
-            groups=1, binding=binding, made=platform.made,
-        )  # fmt: skip
-        mine = [each for each in await platform.checkpoints.all() if each.run == platform.run.id]
-        assert mine and all(each.kind == "full" and each.base == "a-checkpoint" for each in mine)
-        policy = platform.channels["policy"]
-        assert policy.serving == mine[-1].id and policy.adapter is None  # (served as full weights)
-        engine = policy.engines[0]
-        assert isinstance(engine, support.ScriptedEngine)
-        assert any(each.startswith("weights ") for each in engine.told)
+    cluster, made = await seeded(tmp_path)
+    run = await a_run(cluster, "full", "merged")
+    await ran(run)
+    assert run.origin == made["merged"]
+    fetched = run_directory(cluster, run.run.id) / "bases" / made["merged"]
+    assert (fetched / "model.safetensors").read_text() == "m"  # (what the trainer is made over)
+    mine = [each for each in await run.checkpoints.all() if each.run == run.run.id]
+    assert mine and all(each.kind == "full" and each.base == "tiny" for each in mine)
+    served = [each for each in (await run.ledger.read(table(run.run.id, SERVING))).values() if each.get("checkpoint")]
+    assert served and {each["kind"] for each in served} == {"full"}  # (served as full weights)
 
 
-async def test_adapters_trained_from_full_weights_begin_new_over_them(tmp_path: Path) -> None:
-    shared, made = await a_ledger(tmp_path)
-    Adapters.began.clear()
-    async with Profile.load(a_profile(tmp_path, shared, "Adapters", "merged")).open() as platform:
-        assert platform.trainer is not None
-        binding = binding_for(words, "policy", platform.tool_bindings)
-        await train(
-            words, platform.trainer, platform.checkpoints, start=platform.origin, channel="policy",
-            directory=tmp_path / "Adapters-merged" / "checkpoints", publish=platform.publish, run=platform.run.id,
-            groups=1, binding=binding, made=platform.made,
-        )  # fmt: skip
-        mine = [each for each in await platform.checkpoints.all() if each.run == platform.run.id]
-    assert Adapters.began[0] is None  # (not the merged weights' files, as if they were an adapter)
+async def test_adapters_trained_from_full_weights_begin_new_over_them(tmp_path: Path, local_ray: LocalRay) -> None:
+    cluster, made = await seeded(tmp_path)
+    run = await a_run(cluster, "adapters", "merged")
+    await ran(run)
+    mine = [each for each in await run.checkpoints.all() if each.run == run.run.id]
     assert mine and all(each.kind == "lora" and each.base == made["merged"] for each in mine)
 
 
-async def test_a_run_from_an_adapter_over_full_weights_serves_those_weights(tmp_path: Path) -> None:
-    shared, made = await a_ledger(tmp_path)
-    support.STARTED.clear()
-    async with Profile.load(a_profile(tmp_path, shared, "Adapters", "stacked")).open() as platform:
-        assert platform.origin == made["stacked"]
-        fetched = tmp_path / "Adapters-stacked" / "bases" / made["merged"]
-        assert support.STARTED[0].told[0].startswith(f"started {fetched}")
+async def test_a_run_from_an_adapter_over_full_weights_is_trained_over_those_weights(
+    tmp_path: Path, local_ray: LocalRay
+) -> None:
+    cluster, made = await seeded(tmp_path)
+    run = await a_run(cluster, "adapters", "stacked")
+    await ran(run)
+    assert run.origin == made["stacked"]
+    fetched = run_directory(cluster, run.run.id) / "bases" / made["merged"]
+    assert (fetched / "model.safetensors").read_text() == "m"
 
 
-async def test_every_weight_is_not_trained_from_an_adapter_before_it_is_merged(tmp_path: Path) -> None:
-    shared, _ = await a_ledger(tmp_path)
-    async with Profile.load(a_profile(tmp_path, shared, "Full", "plain")).open() as platform:
-        assert platform.trainer is not None
-        with pytest.raises(ValueError, match="merge it"):
-            await train(
-                words, platform.trainer, platform.checkpoints, start=platform.origin, channel="policy",
-                directory=tmp_path / "Full-plain" / "checkpoints", publish=platform.publish, run=platform.run.id,
-                groups=1, made=platform.made,
-            )  # fmt: skip
+async def test_every_weight_is_not_trained_from_an_adapter_before_it_is_merged(
+    tmp_path: Path, local_ray: LocalRay
+) -> None:
+    cluster, _ = await seeded(tmp_path)
+    run = await a_run(cluster, "full", "plain")
+    with pytest.raises(Refused) as refused:
+        await ran(run)
+    assert any(each.key == "start" and "merge" in each.reason for each in refused.value.refusals)
 
 
 async def test_a_checkpoint_kept_in_another_runs_blob_store_is_read_from_there(tmp_path: Path) -> None:

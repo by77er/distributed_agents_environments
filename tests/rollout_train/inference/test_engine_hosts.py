@@ -309,7 +309,8 @@ def test_a_hosts_share_of_a_gpu_and_its_engine_come_from_the_cluster_and_the_run
     alone = host_spec(cluster, "local-vllm", "Qwen/Qwen3.5-4B")
     assert (alone.engine, alone.gpus) == ("rollout_vllm:VllmEngine", 1.0)
     offered = cluster.inference["local-vllm"]
-    assert alone.options == {**offered.models["Qwen/Qwen3.5-4B"].options, "max_logprobs": 20}  # (what it declares)
+    offer = offered.models["Qwen/Qwen3.5-4B"]
+    assert alone.options == {"max_model_len": offer.context, **offer.options, "max_logprobs": 20}  # (its context too)
     assert offered.capabilities.top_logprobs == 20
 
     def trained_by(trainer: str) -> RunSettings:

@@ -25,18 +25,18 @@ do not edit by hand.
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
-- **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`LauncherSection`](#launchersection), [`LedgerSection`](#ledgersection), [`load`](#load), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
+- **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`KubernetesSection`](#kubernetessection), [`LedgerSection`](#ledgersection), [`load`](#load), [`located`](#located), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, shared pools, routing. [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`SharedPool`](#sharedpool), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Distillation`](#distillation), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`objective_in`](#objective_in), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
-- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`FILES`](#files), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
+- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`FILES`](#files), [`ledger_at`](#ledger_at), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`offered_json`](#offered_json), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#runtime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
-- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`SECRETS`](#secrets)
+- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
 - **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
@@ -3957,14 +3957,14 @@ class Route
 ```
 
 How a channel whose engines serve elsewhere is sampled: its model family's renderer, its limits, its base
-model's name, its servers (a router, a proxy, a server, or a list), how far behind a sample may be (`max_lag`), and
-how the servers are reached (`connection`).
+model's name, its servers (each the URL of a router, a proxy or a server, or a `CheckpointServer`, such as an engine
+host's `HostServer`), how far behind a sample may be (`max_lag`), and how URLs are reached (`connection`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `renderer` | `'Renderer'` | required |  |
 | `model` | `str` | required |  |
-| `servers` | `tuple[str, ...]` | required |  |
+| `servers` | `tuple['str \| CheckpointServer', ...]` | required |  |
 | `limits` | `Limits` | `field(default_factory=Limits)` |  |
 | `max_lag` | `int` | `MAX_LAG` |  |
 | `connection` | `Connection` | `field(default_factory=Connection)` |  |
@@ -4099,10 +4099,11 @@ def host_spec(cluster: Cluster, provider: str, model: str, *, settings: 'RunSett
 ```
 
 An engine host of `provider`'s `model` (an `[inference.NAME]` of the cluster, of a kind its engines run in an
-engine host, `vllm`): its kind's engine, the model's options with the provider's `max_logprobs` (what it declares
-as its top-k logprobs, and so what its engines allow), a replica's GPUs, and `[placement.engines]`. A run
-whose trainer shares the provider's card (`colocate_with`, by its `settings`) has its host ask for half of the
-replica's GPUs, and its trainer for the other half.
+engine host, `vllm`): its kind's engine (or the provider's `engine`, `module:name`), the model's options (its
+context as `max_model_len`, unless they say one) with the provider's `max_logprobs` (what it declares as its top-k
+logprobs, and so what its engines allow), a replica's GPUs, and `[placement.engines]`. A run whose trainer shares
+the provider's card (`colocate_with`, by its `settings`) has its host ask for half of the replica's GPUs, and its
+trainer for the other half.
 
 ### `HostPausable`
 
@@ -5359,10 +5360,10 @@ A cluster, as its config describes it. It holds no secret, only references to se
 | `blobs` | `BlobsSection` | `field(default_factory=BlobsSection)` |  |
 | `scratch` | `str` | `SCRATCH` | Node-local: checkpoints in use, fetched bases, bridge work, built Pythons. |
 | `ray` | `RaySection` | `field(default_factory=RaySection)` |  |
+| `kubernetes` | `KubernetesSection \| None` | `None` |  |
 | `tls` | `Tls \| None` | `None` |  |
 | `gateway` | `GatewaySection` | `field(default_factory=GatewaySection)` |  |
 | `monitor` | `MonitorSection` | `field(default_factory=MonitorSection)` |  |
-| `launcher` | `LauncherSection` | `field(default_factory=LauncherSection)` |  |
 | `runners` | `RunnersSection` | `field(default_factory=RunnersSection)` |  |
 | `guards` | `GuardsSection` | `field(default_factory=GuardsSection)` |  |
 | `inference` | `Mapping[str, InferenceProvider]` | `field(default_factory=dict[str, InferenceProvider])` |  |
@@ -5405,6 +5406,11 @@ cached virtualenv.
 | `environment` | `str` | required |  |
 | `python` | `str \| None` | `'platform'` |  |
 | `project` | `str \| None` | `None` | A uv project's directory (relative paths are from the config file's). |
+| `interpreter` | `str \| None` | `None` | The interpreter a run on it starts in, where it is not the platform's: by default a project's `PROJECT/.venv/bin/python`. |
+
+**Methods**
+
+- `@property def runs_in(self) -> str | None` — The interpreter a run on it starts in; none: the platform's.
 
 ### `find`
 
@@ -5458,17 +5464,24 @@ def inspect(cluster: Cluster, environ: Mapping[str, str] | None = None) -> list[
 What is wrong with the cluster on this node, in words: each secret reference that does not resolve (by name,
 never by value), and each environment's project with no `uv.lock`. Empty: nothing.
 
-### `LauncherSection`
+### `KubernetesSection`
 
 *class* · `libraries/rollout-train/src/rollout_train/cluster.py`
 
 ```python
-class LauncherSection
+class KubernetesSection
 ```
+
+Where each run's job is a RayJob with a Ray cluster of its own (`[kubernetes]`): the namespace RayJobs are made
+in, the template each is made from (a RayJob's YAML: its Ray cluster, image, volumes and retries; relative paths
+are from the config file's), and the API server (by default the one of the cluster the process runs in, reached
+with its service account).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `at_once` | `int` | `1` | Runs it plays at once, beside what the cluster's resources allow. |
+| `namespace` | `str` | required |  |
+| `rayjob` | `str` | required |  |
+| `api` | `str` | `'https://kubernetes.default.svc'` |  |
 
 ### `LedgerSection`
 
@@ -5492,6 +5505,17 @@ def load(path: Path) -> Cluster
 ```
 
 The cluster a config file describes, checked. Raises `ClusterError` saying what is wrong and where.
+
+### `located`
+
+*function* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+def located(given: str | None = None, environ: Mapping[str, str] | None = None) -> Cluster
+```
+
+The cluster config this process works with: the one its job was handed (`ROLLOUT_CLUSTER_JSON`), else the file
+`find` finds, read and checked. Raises `ClusterError` saying what is wrong.
 
 ### `MonitorSection`
 
@@ -5527,11 +5551,11 @@ class RaySection
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `address` | `str` | `'auto'` | The head this machine runs (`auto`), or `ray://host:port`. |
+| `address` | `str` | `'auto'` | The Ray cluster's address (its GCS, `host:port`), which a run's driver joins; `auto`: the one Ray finds (in a job, the cluster the job runs on). |
 | `jobs` | `str` | `'http://127.0.0.1:8265'` | The job server. |
 | `temp_dir` | `str` | `'~/.cache/ray'` | On disk: /tmp may be memory. |
 | `memory_threshold` | `float` | `0.85` | Ray's memory monitor kills a task past this share of the machine's memory. |
-| `python` | `str` | `'platform'` | The interpreter platform actors run in. |
+| `python` | `str` | `'platform'` | The interpreter a run's job starts in: `platform`, the `python` on the job's `PATH` (the platform's), or a path. |
 
 ### `RunnersSection`
 
@@ -5849,7 +5873,7 @@ turns are shared among its runs by their `share`.
 class Tls
 ```
 
-The cluster's own certificate authority and the client certificate its gateway and launcher present
+The cluster's own certificate authority and the client certificate its gateway and runs' drivers present
 (the cluster config's `[tls]`): paths, never the keys themselves.
 
 | Field | Type | Default | Description |
@@ -5864,7 +5888,7 @@ The cluster's own certificate authority and the client certificate its gateway a
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={**_OBJECTIVE, 'frozen_reference': "an adapter's reference is the model with the adapter switched off"}), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), not_settings={**_OBJECTIVE, 'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_FAMILY, True, frozenset({'tinker'}), reference='no', entropy=False, distribution=False), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), not_settings={**_OBJECTIVE, 'project': 'the cluster config says it ([trainers.NAME] project)'}), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', 'image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca'), secrets=('api_key',), not_settings=_OBJECTIVE))}
+TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation',), not_settings={**_OBJECTIVE, 'frozen_reference': "an adapter's reference is the model with the adapter switched off"}), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation',), not_settings={**_OBJECTIVE, 'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_FAMILY, True, frozenset({'tinker'}), reference='no', entropy=False, distribution=False), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project', 'implementation'), secrets=('project',), not_settings={**_OBJECTIVE, 'project': 'the cluster config says it ([trainers.NAME] project)'}), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('trainer', 'image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca'), secrets=('api_key',), not_settings=_OBJECTIVE))}
 ```
 
 Every kind of trainer, by name.
@@ -5908,7 +5932,7 @@ What a kind of trainer is, whatever cluster it is in.
 | `settings` | `str` | required | `module:name` of its settings dataclass: each field a setting `trainer.FIELD`, the module's `CHANGEABLE` the ones it takes between steps. |
 | `auths` | `tuple[AuthKind, ...]` | required |  |
 | `auth` | `Auth` | required |  |
-| `fields` | `tuple[str, ...]` | `()` | The settings of its `[trainers.NAME]` table beyond those every trainer has. |
+| `fields` | `tuple[str, ...]` | `()` | The settings of its `[trainers.NAME]` table beyond those every trainer has (`implementation`: what makes the trainer, `module:name`, in place of the kind's own, called as it is). |
 | `secrets` | `tuple[str, ...]` | `()` |  |
 | `not_settings` | `Mapping[str, str]` | `field(default_factory=dict[str, str])` | Fields of its settings dataclass a run does not set, and why. |
 
@@ -5941,6 +5965,7 @@ A trainer as a cluster deploys it (`[trainers.NAME]`).
 
 - `def cost_of(self, model: str) -> Mapping[str, float]` — What training `model` here costs: its own entry in `costs`, else `cost`.
 - `@property def runs(self) -> TrainerKind` — The kind of trainer its steps are taken by (for `runpod-trainer`, the one it names).
+- `@property def implementation(self) -> str` — `module:name` of what makes the trainer: its table's `implementation`, else its kind's.
 
 ## `rollout_train.bridges`
 
@@ -6731,6 +6756,17 @@ def blobs_at(cluster: 'Cluster') -> dict[str, JsonValue]
 
 Where a cluster's blob store is (its `[blobs]`), as `opened` opens it: a directory of files made absolute.
 
+### `cluster_ledger`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def cluster_ledger(cluster: Mapping[str, Any]) -> 'Ledger'
+```
+
+The ledger a cluster config names (given as JSON, `Cluster.described`), opened on this node: what a ledger's
+location `ledger_at` gives names (`rollout_train.ledger.opened`).
+
 ### `FILES`
 
 *constant* · `libraries/rollout-train/src/rollout_train/stores.py`
@@ -6740,6 +6776,17 @@ FILES = 'rollout.harness.blobs:FileBlobStore'
 ```
 
 The store of files in a directory (`{"kind": FILES, "directory": …}`).
+
+### `ledger_at`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def ledger_at(cluster: 'Cluster') -> dict[str, JsonValue]
+```
+
+Where a cluster's ledger is, as a ledger's location (`rollout_train.ledger.opened`) that names the cluster
+config: whoever opens it reads the URL, and any secret it is behind, on its own node.
 
 ### `ledger_url`
 
@@ -6761,8 +6808,8 @@ it came from, never the URL: it may hold a password).
 def location(store: Mapping[str, Any], directory: Path) -> dict[str, Any]
 ```
 
-Where a profile's blob store is (`store`: its `[blobs]` table, `kind` and the store's settings; empty: files
-under `directory`), without any setting that looks like a credential.
+Where a blob store is (`store`: a `[blobs]` table, `kind` and the store's settings; empty: files under
+`directory`), without any setting that looks like a credential.
 
 ### `opened`
 
@@ -7402,7 +7449,7 @@ One thing wrong with a run's settings: the rule, the key it is about (the field 
 class LedgerFacts
 ```
 
-What the ledger, and the launchers' offers beside it, say, asked beforehand.
+What the ledger and the live cluster say, asked beforehand.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -7717,6 +7764,27 @@ too.
 - `async def sleep(self) -> None`
 - `async def wake(self) -> None`
 - `def close(self) -> None`
+
+### `ScriptedTrainer`
+
+*class* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+class ScriptedTrainer
+```
+
+A trainer that trains nothing: each step writes an adapter's files that say how many segments it was given (as
+PEFT's are named, so a bridge takes them for an adapter), and the trainer's state beside them. What a cluster
+config's trainer names as its `implementation` in tests.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `weights` |  | `'lora'` |  |
+
+**Methods**
+
+- `def __init__(self, model: str, *, segment_tokens: int | None = None, segments_per_step: int | None = None, **settings: Any) -> None`
+- `async def step(self, batch: Sequence[Any], *, seed: int, parent: Any, into: Path) -> Any`
 
 ### `SECRETS`
 

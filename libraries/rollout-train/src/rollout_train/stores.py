@@ -8,7 +8,9 @@ read on this node from the environment variable or file the config names, where 
 the ledger (checkpoints, the registry, presets) are reached through it.
 
 A run's `starts` record notes where its blobs are (`location`, `Stores.location`), and the monitor reads finished
-episodes from there, wherever it runs (`opened`).
+episodes from there, wherever it runs (`opened`). A process the run starts elsewhere (an engine host, a bridge's task)
+is told where the ledger is as `ledger_at`: the cluster config itself, so that it reads the ledger's URL on its own
+node (`cluster_ledger`), and no secret is handed on.
 """
 
 from collections.abc import Mapping
@@ -28,7 +30,7 @@ if TYPE_CHECKING:
     from rollout_train.presets import Presets
     from rollout_train.registry import Registry
 
-__all__ = ["FILES", "Stores", "blobs_at", "ledger_url", "location", "opened"]
+__all__ = ["FILES", "Stores", "blobs_at", "cluster_ledger", "ledger_at", "ledger_url", "location", "opened"]
 
 FILES = "rollout.harness.blobs:FileBlobStore"
 """The store of files in a directory (`{"kind": FILES, "directory": …}`)."""
@@ -39,8 +41,8 @@ DATABASES = ("sqlite:", "postgresql:", "postgresql+")
 
 
 def location(store: Mapping[str, Any], directory: Path) -> dict[str, Any]:
-    """Where a profile's blob store is (`store`: its `[blobs]` table, `kind` and the store's settings; empty: files
-    under `directory`), without any setting that looks like a credential."""
+    """Where a blob store is (`store`: a `[blobs]` table, `kind` and the store's settings; empty: files under
+    `directory`), without any setting that looks like a credential."""
     if not store:
         return {"kind": FILES, "directory": str(directory)}
     return {key: value for key, value in store.items() if not any(word in key.lower() for word in SECRET)}
@@ -69,6 +71,21 @@ def ledger_url(cluster: "Cluster", environ: Mapping[str, str] | None = None) -> 
         said = repr(url) if named_by is None else f"the URL {named_by} holds"
         raise ClusterError(f"[ledger] url is a database's (sqlite:///… or postgresql://…), and {said} is not")
     return url
+
+
+def cluster_ledger(cluster: Mapping[str, Any]) -> "Ledger":
+    """The ledger a cluster config names (given as JSON, `Cluster.described`), opened on this node: what a ledger's
+    location `ledger_at` gives names (`rollout_train.ledger.opened`)."""
+    from rollout_train.cluster import parsed
+    from rollout_train.database import DatabaseLedger
+
+    return DatabaseLedger(ledger_url(parsed(cluster)))
+
+
+def ledger_at(cluster: "Cluster") -> dict[str, JsonValue]:
+    """Where a cluster's ledger is, as a ledger's location (`rollout_train.ledger.opened`) that names the cluster
+    config: whoever opens it reads the URL, and any secret it is behind, on its own node."""
+    return {"kind": "rollout_train.stores:cluster_ledger", "cluster": dict(cluster.described)}
 
 
 def blobs_at(cluster: "Cluster") -> dict[str, JsonValue]:

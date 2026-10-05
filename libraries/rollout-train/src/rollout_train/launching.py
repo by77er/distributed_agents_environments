@@ -1,0 +1,373 @@
+"""What asking for a run takes, wherever it is asked: its settings in layers, the facts validation reads, and what a
+cluster offers.
+
+A run is asked for with its kind, its name, its environment, its settings and the preset they start from (`settled`:
+the preset's settings, then those given). Before it is recorded, and again by its driver before it claims anything,
+its settings are checked against the cluster config (`checked`, over `rollout_train.validation.check`) with the facts
+gathered here: the environment's (`environment_facts`: whether it loads, the sandboxes and slots its programs declare;
+a published one's from its version's record) and the ledger's (`ledger_facts`: the checkpoints the settings name, the
+suites, the names taken, and the GPUs the caller knows of). A finding that refuses names the setting it is about; one
+that does not is a note (the run waits for something).
+
+`offers` is what the New run form chooses from: the cluster config's environments (built-in, and every published
+version beside the ledger), trainers with their settings, inference providers with their capabilities and models (each
+with the renderer families that render it, among those named so far), each trainer and provider pair's bridge or why
+there is none, sandbox pools, presets, and the GPUs the heartbeats say are free.
+"""
+
+import asyncio
+import contextlib
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict
+from typing import TYPE_CHECKING, Any, cast
+
+from pydantic import JsonValue
+
+from rollout_train.bridges import NoBridge, format_of, path
+from rollout_train.cluster import Cluster
+from rollout_train.ledger import Ledger
+from rollout_train.presence import Beat, alive
+from rollout_train.presets import Presets
+from rollout_train.providers import settings_of
+from rollout_train.published import environment_versions_of, is_published
+from rollout_train.registry import registry_of, resolved
+from rollout_train.run_settings import RunSettings, layered
+from rollout_train.validation import CheckpointFacts, EnvironmentFacts, Finding, LedgerFacts, SuiteFacts, check
+
+if TYPE_CHECKING:
+    from rollout.environment import Environment
+
+__all__ = [
+    "Refused",
+    "capacity_of",
+    "checked",
+    "declared",
+    "environment_facts",
+    "free_name",
+    "ledger_facts",
+    "offers",
+    "ray_capacity",
+    "settled",
+]
+
+
+class Refused(ValueError):
+    """A run whose settings are refused: the findings that refuse it (each with the setting it is about), and the notes
+    beside them."""
+
+    def __init__(self, findings: Sequence[Finding]) -> None:
+        self.findings = list(findings)
+        refusing = [each for each in self.findings if each.refuses]
+        super().__init__("; ".join(f"{each.key}: {each.reason}" for each in refusing) or "refused")
+
+    @property
+    def refusals(self) -> list[Finding]:
+        return [each for each in self.findings if each.refuses]
+
+
+async def settled(
+    kind: str,
+    name: str | None,
+    settings: Mapping[str, JsonValue],
+    *,
+    preset: str | None = None,
+    presets: Presets | None = None,
+) -> tuple[RunSettings, str | None]:
+    """A run's settings: the preset's (`NAME` or `NAME@N`: those a run of its kind takes, so that a training run's
+    preset serves an eval of the same channels), then `settings`, then its kind and name; and the preset's version
+    (`NAME@N`). Raises `KeyError` for a preset there is none of."""
+    from rollout_train.run_settings import TRAINING, is_trainers, key_of
+
+    def taken(key: str) -> bool:
+        found = key_of(key)
+        return kind in found.kinds if found is not None else is_trainers(key) and kind in TRAINING
+
+    chosen = None
+    if preset:
+        chosen = await presets.get(preset) if presets is not None else None
+        if chosen is None:
+            raise KeyError(f"there is no preset {preset!r}")
+    kept = {key: value for key, value in chosen.settings.items() if taken(key)} if chosen else None
+    said = layered(kept, settings, {"kind": kind, "name": name})
+    return said, chosen.id if chosen else None
+
+
+def declared(environment: "Environment") -> tuple[frozenset[str], EnvironmentFacts]:
+    """The sandbox kinds an environment's first program declares, and what validation reads of it."""
+    from rollout.environment import first_program
+    from rollout.harness import instantiate
+    from rollout_train.slots import Declared
+
+    program = instantiate(first_program(environment))
+    kinds = frozenset(spec.kind for spec in program.sandboxes().values())
+    slots = Declared.of(program.model_slots())
+    return kinds, EnvironmentFacts(
+        "", sandboxes=kinds, slots=slots.names, untrained=slots.untrained, judges=slots.judges
+    )
+
+
+async def environment_facts(
+    environment: str | None, cluster: Cluster, ledger: Ledger, *, loaded: "Environment | None" = None
+) -> EnvironmentFacts | None:
+    """What validation reads of an environment: imported here (`loaded`, where the caller has it), its sandboxes and
+    slots; a published one's sandboxes as its version recorded them, or that there is no such version. None where it is
+    not known here: an environment whose Python is a project of its own, which this process does not import."""
+    if not environment:
+        return None
+    if is_published(environment):
+        versions = environment_versions_of(ledger)
+        version = await versions.get(environment) if versions is not None else None
+        if version is None:
+            return EnvironmentFacts(environment, loads=False, why=f"there is no published environment {environment}")
+        if loaded is not None:
+            return _facts(environment, loaded)
+        listed = version.description.get("sandboxes")
+        kinds = (
+            frozenset(str(each) for each in cast(list[Any], listed)) if isinstance(listed, list) else frozenset[str]()
+        )
+        return EnvironmentFacts(environment, sandboxes=kinds)
+    python = cluster.environments.get(environment)
+    if loaded is None and (python is None or python.project is not None):
+        return None
+    if loaded is None:
+        from rollout.names import named
+
+        try:
+            imported: Environment = await asyncio.to_thread(named, environment)
+        except Exception as error:  # (whatever importing it raises: it does not load)
+            return EnvironmentFacts(environment, loads=False, why=f"{type(error).__name__}: {error}")
+        return _facts(environment, imported)
+    return _facts(environment, loaded)
+
+
+def _facts(name: str, environment: "Environment") -> EnvironmentFacts:
+    try:
+        _, facts = declared(environment)
+    except Exception as error:  # (a program that cannot be made: it does not load)
+        return EnvironmentFacts(name, loads=False, why=f"{type(error).__name__}: {error}")
+    return EnvironmentFacts(name, sandboxes=facts.sandboxes, slots=facts.slots, untrained=facts.untrained,
+                            judges=facts.judges)  # fmt: skip
+
+
+async def ledger_facts(
+    settings: RunSettings,
+    ledger: Ledger,
+    *,
+    own: str | None = None,
+    gpus: float | None = None,
+    gpus_free: float | None = None,
+) -> LedgerFacts:
+    """What validation reads of the ledger: each checkpoint the settings name (the start, a fixed channel's), the
+    suites their evals name, the names other runs have (`own`, the run's id, is left out), and the GPUs the caller
+    knows of."""
+    from rollout_train.evals import suite_of, versions_of
+
+    registry = registry_of(ledger)
+    references = [settings["start"], *(value for key, value in settings.values.items()
+                                       if key.startswith("channels.") and key.endswith(".checkpoint"))]  # fmt: skip
+    checkpoints: dict[str, CheckpointFacts] = {}
+    for reference in references:
+        if not isinstance(reference, str) or reference in checkpoints:
+            continue
+        try:
+            id = await resolved(ledger, registry, reference)
+        except KeyError:
+            checkpoints[reference] = CheckpointFacts(reference, exists=False)
+            continue
+        if id is None:
+            continue
+        from rollout_train.checkpoints import Checkpoints
+
+        made = Checkpoints(ledger, cast(Any, None))
+        record = await made.checkpoint(id)
+        files: Mapping[str, Any] = record.weights.files if record.weights is not None else {}
+        model, seen = record.base, {record.id}
+        while model is not None and model not in seen:  # (an adapter over full weights: the model those are over)
+            seen.add(model)
+            try:
+                model = (await made.checkpoint(model)).base
+            except KeyError:
+                break
+        checkpoints[reference] = CheckpointFacts(
+            reference, released=record.weights is None, formats=format_of(files), model=model
+        )
+    suites: dict[str, SuiteFacts] = {}
+    for key in ("evals.suite", "eval.suite"):
+        named = settings.get(key)
+        if not isinstance(named, str):
+            continue
+        name = named.partition("@")[0]
+        versions = await versions_of(ledger, name)
+        newest = await suite_of(ledger, name)
+        if newest is not None and versions:
+            environments = frozenset(each for version in versions for each in version.environments)
+            suites[name] = SuiteFacts(name, max(version.number for version in versions), environments)
+    runs = await registry.runs() if registry is not None else []
+    taken = frozenset(each.name for each in runs if each.id != own)
+    return LedgerFacts(checkpoints=checkpoints, suites=suites, names_taken=taken, gpus=gpus, gpus_free=gpus_free)
+
+
+async def checked(
+    settings: RunSettings,
+    cluster: Cluster,
+    ledger: Ledger,
+    *,
+    loaded: "Environment | None" = None,
+    own: str | None = None,
+    gpus: float | None = None,
+    gpus_free: float | None = None,
+) -> list[Finding]:
+    """Everything wrong with a run's settings on this cluster (`rollout_train.validation.check`), with the facts
+    gathered now."""
+    environment = settings.get("environment")
+    facts = await environment_facts(str(environment) if environment else None, cluster, ledger, loaded=loaded)
+    known = await ledger_facts(settings, ledger, own=own, gpus=gpus, gpus_free=gpus_free)
+    return check(settings, cluster, facts, known)
+
+
+def ray_capacity() -> tuple[float | None, float | None]:
+    """The GPUs the Ray cluster this process is connected to has free (none: not connected). Its total is not said:
+    an autoscaled cluster has more than its nodes now."""
+    import ray
+
+    if not ray.is_initialized():
+        return None, None
+    free = ray.available_resources().get("GPU", 0.0)  # pyright: ignore[reportUnknownMemberType]
+    return None, float(free)
+
+
+def capacity_of(beats: Sequence[Beat]) -> dict[str, JsonValue] | None:
+    """The GPUs the machines that beat now have, and those of them idle (under a twentieth of their memory used), by
+    machine; none where no beat says."""
+    machines: dict[str, list[dict[str, Any]]] = {}
+    for beat in beats:
+        if not alive(beat):
+            continue
+        measured = beat.about.get("machine")
+        host = beat.about.get("host")
+        if not isinstance(measured, dict) or not isinstance(host, str):
+            continue
+        listed = cast(dict[str, Any], measured).get("accelerators")
+        if isinstance(listed, list) and listed:
+            machines[host] = cast(list[dict[str, Any]], listed)
+    if not machines:
+        return None
+    total = sum(len(each) for each in machines.values())
+    idle = sum(
+        1 for each in machines.values() for gpu in each if gpu.get("total") and gpu.get("used", 0) < gpu["total"] / 20
+    )
+    return {"gpus": total, "gpus_free": idle, "machines": {host: len(each) for host, each in machines.items()}}
+
+
+def free_name(wanted: str, taken: set[str]) -> str:
+    """A name no run has: the one wanted, else it with the first number after it that no run has."""
+    wanted = re.sub(r"[^\w .@:()/-]+", "-", wanted).strip() or "run"
+    if wanted not in taken:
+        return wanted
+    number = 2
+    while f"{wanted} ({number})" in taken:
+        number += 1
+    return f"{wanted} ({number})"
+
+
+def _family(renderer: str) -> str:
+    return renderer.partition(":")[0]
+
+
+async def offers(cluster: Cluster, ledger: Ledger, beats: Sequence[Beat] = ()) -> dict[str, Any]:
+    """What a run can be asked for here (the module's docstring), as JSON."""
+    from rollout_train.presets import presets_of
+
+    environments: list[dict[str, JsonValue]] = [
+        {"environment": name, "published": False, "python": "project" if each.project else "platform"}
+        for name, each in cluster.environments.items()
+    ]
+    versions = environment_versions_of(ledger)
+    for version in await versions.all() if versions is not None else []:
+        listed = version.description.get("sandboxes")
+        environments.append({
+            "environment": version.reference, "published": True, "name": version.name, "source": version.source,
+            "commit": version.commit, "imported": version.imported,
+            "sandboxes": cast(JsonValue, listed if isinstance(listed, list) else []),
+        })  # fmt: skip
+    renderers = await _renderers(ledger)
+    trainers: list[dict[str, Any]] = []
+    for name, trainer in cluster.trainers.items():
+        try:
+            specs = [asdict(each) for each in settings_of(trainer.runs)]
+        except ImportError:  # (its package is not installed where this runs)
+            specs = []
+        trainers.append({
+            "name": name, "kind": trainer.kind, "produces": trainer.capabilities.produces,
+            "format": trainer.capabilities.format, "models": list(trainer.models), "gpus": trainer.gpus,
+            "colocate_with": trainer.colocate_with, "segment_tokens": trainer.segment_tokens,
+            "cost": dict(trainer.cost), "families": sorted(trainer.capabilities.families), "settings": specs,
+        })  # fmt: skip
+    inference: list[dict[str, Any]] = []
+    for name, provider in cluster.inference.items():
+        capabilities = asdict(provider.capabilities)
+        capabilities["loads"] = sorted(provider.capabilities.loads)
+        capabilities["unchecked"] = sorted(provider.capabilities.unchecked)
+        models = [
+            {"model": model, "context": offer.context, "base": offer.base, "max_lora_rank": offer.max_lora_rank,
+             "cost": dict(offer.cost), "renderers": renderers.get(model, renderers.get(offer.base or "", [])),
+             "families": sorted({_family(each) for each in renderers.get(model, renderers.get(offer.base or "", []))})}
+            for model, offer in provider.models.items()
+        ]  # fmt: skip
+        inference.append({
+            "name": name, "kind": provider.kind, "gpus": provider.gpus, "replicas": provider.replicas,
+            "shared": provider.pool is not None, "capabilities": capabilities, "models": models,
+        })  # fmt: skip
+    pairs: list[dict[str, Any]] = []
+    for trainer_name, trainer in cluster.trainers.items():
+        for name, provider in cluster.inference.items():
+            found = path(trainer.capabilities.format, provider.capabilities.loads)
+            if isinstance(found, NoBridge):
+                pairs.append({"trainer": trainer_name, "inference": name, "bridge": None, "refused": found.reason})
+            else:
+                pairs.append({"trainer": trainer_name, "inference": name, "bridge": [each.name for each in found]})
+    presets = presets_of(ledger)
+    listed = await presets.all() if presets is not None else []
+    kept = [
+        {"name": each.name, "version": each.version, "id": each.id, "settings": dict(each.settings), "note": each.note,
+         "saved": each.saved}
+        for each in listed
+    ]  # fmt: skip
+    return {
+        "cluster": cluster.name,
+        "kinds": ["train", "eval", "imitate", "check"],
+        "submits": "kubernetes" if cluster.kubernetes is not None else "ray",
+        "environments": environments,
+        "trainers": trainers,
+        "inference": inference,
+        "pairs": pairs,
+        "sandboxes": {kind: {"size": each.size, "provider": each.provider} for kind, each in cluster.sandboxes.items()},
+        "presets": kept,
+        "capacity": capacity_of(beats),
+    }
+
+
+async def _renderers(ledger: Ledger) -> dict[str, list[str]]:
+    """The renderers runs and presets named for each model so far, by model."""
+    from rollout_train.presets import presets_of
+    from rollout_train.record import recorded_settings, runs_in
+
+    found: dict[str, set[str]] = {}
+
+    def note(said: Mapping[str, Any]) -> None:
+        for key, value in said.items():
+            if key.startswith("channels.") and key.endswith(".model") and isinstance(value, str):
+                renderer = said.get(key.removesuffix(".model") + ".renderer")
+                if isinstance(renderer, str):
+                    found.setdefault(value, set()).add(renderer)
+
+    presets = presets_of(ledger)
+    for each in await presets.all() if presets is not None else []:
+        note(each.settings)
+    with contextlib.suppress(Exception):  # (a ledger that cannot list its runs: none named)
+        for run in await runs_in(ledger):
+            recorded = await recorded_settings(ledger, run)
+            if recorded is not None:
+                note(recorded)
+    return {model: sorted(each) for model, each in found.items()}

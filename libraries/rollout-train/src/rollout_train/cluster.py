@@ -1,13 +1,15 @@
 """The cluster config: one TOML file per cluster, the only description of its infrastructure.
 
 It says where the ledger and the blob store are, the node-local scratch directory, the cluster's certificate
-authority, the gateway, the monitor, the launcher, the runners and the memory guards; the inference providers and
-trainers it offers (`rollout_train.providers`); its sandbox pools, tool sets served elsewhere, the environments it
-offers and the Python each runs in; and where roles run (placement) and what bridges need. Nothing about a run is in
-it: that is the run's settings (`rollout_train.run_settings`).
+authority, the Ray cluster runs' jobs are submitted to (or, with `[kubernetes]`, the RayJob each run's job is made
+from), the gateway, the monitor, the runners and the memory guards; the inference providers and trainers it offers
+(`rollout_train.providers`); its sandbox pools, tool sets served elsewhere, the environments it offers and the Python
+each runs in; and where roles run (placement) and what bridges need. Nothing about a run is in it: that is the run's
+settings (`rollout_train.run_settings`).
 
 A process finds the file (`find`) by `--cluster PATH` or `--cluster NAME` (`~/.config/rollout/clusters/NAME.toml`),
-else the `ROLLOUT_CLUSTER` environment variable (a path or a name), else `~/.config/rollout/cluster.toml`. `load`
+else the `ROLLOUT_CLUSTER` environment variable (a path or a name), else `~/.config/rollout/cluster.toml`. A run's job
+is handed the config it was submitted with as JSON (`ROLLOUT_CLUSTER_JSON`, which `located` reads first). `load`
 reads and checks it into a `Cluster`: an unknown key is an error, every kind is known, every trainer's
 `colocate_with` names a `vllm` provider, a provider reached with no auth is on this machine.
 
@@ -51,7 +53,7 @@ __all__ = [
     "EnvironmentSection",
     "GatewaySection",
     "GuardsSection",
-    "LauncherSection",
+    "KubernetesSection",
     "LedgerSection",
     "MonitorSection",
     "RaySection",
@@ -62,15 +64,18 @@ __all__ = [
     "find",
     "inspect",
     "load",
+    "located",
     "parsed",
 ]
 
 HOME = Path("~/.config/rollout")
-ROLES = ("gateway", "monitor", "launcher", "runners", "pools", "engines", "trainers", "workers", "bridges")
+ROLES = ("gateway", "monitor", "runners", "pools", "engines", "trainers", "workers", "bridges")
 """The roles `[placement.ROLE]` may steer."""
 SCRATCH = "~/.cache/rollout/scratch"
 """Where a node keeps its working files unless the config says (`[scratch] directory`): on disk, since a machine's /tmp
 may be memory."""
+HANDED = "ROLLOUT_CLUSTER_JSON"
+"""The environment variable a run's job is handed its cluster config in, as JSON (`Cluster.described`)."""
 SECRET_WORDS = ("secret", "password", "token", "credential", "access_key", "api_key", "private_key")
 """A key with one of these in its name holds a secret: it is named (`_env`, `_file`), never written."""
 
@@ -82,7 +87,8 @@ class ClusterError(ValueError):
 @dataclass(frozen=True)
 class RaySection:
     address: str = "auto"
-    """The head this machine runs (`auto`), or `ray://host:port`."""
+    """The Ray cluster's address (its GCS, `host:port`), which a run's driver joins; `auto`: the one Ray finds (in a
+    job, the cluster the job runs on)."""
     jobs: str = "http://127.0.0.1:8265"
     """The job server."""
     temp_dir: str = "~/.cache/ray"
@@ -90,7 +96,20 @@ class RaySection:
     memory_threshold: float = 0.85
     """Ray's memory monitor kills a task past this share of the machine's memory."""
     python: str = "platform"
-    """The interpreter platform actors run in."""
+    """The interpreter a run's job starts in: `platform`, the `python` on the job's `PATH` (the platform's), or a
+    path."""
+
+
+@dataclass(frozen=True)
+class KubernetesSection:
+    """Where each run's job is a RayJob with a Ray cluster of its own (`[kubernetes]`): the namespace RayJobs are made
+    in, the template each is made from (a RayJob's YAML: its Ray cluster, image, volumes and retries; relative paths
+    are from the config file's), and the API server (by default the one of the cluster the process runs in, reached
+    with its service account)."""
+
+    namespace: str
+    rayjob: str
+    api: str = "https://kubernetes.default.svc"
 
 
 @dataclass(frozen=True)
@@ -128,12 +147,6 @@ class MonitorSection:
     listen: str = "127.0.0.1:8765"
     feed_episodes: int = 80
     """Episodes kept in a run's live feed."""
-
-
-@dataclass(frozen=True)
-class LauncherSection:
-    at_once: int = 1
-    """Runs it plays at once, beside what the cluster's resources allow."""
 
 
 @dataclass(frozen=True)
@@ -185,6 +198,16 @@ class EnvironmentSection:
     python: str | None = "platform"
     project: str | None = None
     """A uv project's directory (relative paths are from the config file's)."""
+    interpreter: str | None = None
+    """The interpreter a run on it starts in, where it is not the platform's: by default a project's
+    `PROJECT/.venv/bin/python`."""
+
+    @property
+    def runs_in(self) -> str | None:
+        """The interpreter a run on it starts in; none: the platform's."""
+        if self.interpreter is not None:
+            return self.interpreter
+        return str(Path(self.project) / ".venv" / "bin" / "python") if self.project is not None else None
 
 
 @dataclass(frozen=True)
@@ -207,10 +230,10 @@ class Cluster:
     scratch: str = SCRATCH
     """Node-local: checkpoints in use, fetched bases, bridge work, built Pythons."""
     ray: RaySection = field(default_factory=RaySection)
+    kubernetes: KubernetesSection | None = None
     tls: Tls | None = None
     gateway: GatewaySection = field(default_factory=GatewaySection)
     monitor: MonitorSection = field(default_factory=MonitorSection)
-    launcher: LauncherSection = field(default_factory=LauncherSection)
     runners: RunnersSection = field(default_factory=RunnersSection)
     guards: GuardsSection = field(default_factory=GuardsSection)
     inference: Mapping[str, InferenceProvider] = field(default_factory=dict[str, InferenceProvider])
@@ -269,6 +292,20 @@ def find(given: str | None = None, environ: Mapping[str, str] | None = None) -> 
     return default
 
 
+def located(given: str | None = None, environ: Mapping[str, str] | None = None) -> Cluster:
+    """The cluster config this process works with: the one its job was handed (`ROLLOUT_CLUSTER_JSON`), else the file
+    `find` finds, read and checked. Raises `ClusterError` saying what is wrong."""
+    import json
+
+    environ = os.environ if environ is None else environ
+    if given is None and (handed := environ.get(HANDED)):
+        try:
+            return parsed(json.loads(handed))
+        except json.JSONDecodeError as error:
+            raise ClusterError(f"{HANDED} is not JSON: {error}") from error
+    return load(find(given, environ))
+
+
 def _named(said: str) -> Path:
     if "/" in said or said.endswith(".toml"):
         return Path(said).expanduser()
@@ -320,6 +357,16 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
         python=ray.text("python", "platform"),
     )
     ray.done()
+    kubernetes: KubernetesSection | None = None
+    if "kubernetes" in table.table:
+        said = table.section("kubernetes")
+        template = Path(said.text("rayjob")).expanduser()
+        if not template.is_absolute() and relative_to is not None:
+            template = relative_to / template
+        kubernetes = KubernetesSection(
+            namespace=said.text("namespace"), rayjob=str(template), api=said.text("api", KubernetesSection.api)
+        )
+        said.done()
     tls: Tls | None = None
     if "tls" in table.table:
         said = table.section("tls")
@@ -344,9 +391,6 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
         monitor.text("listen", MonitorSection.listen), monitor.whole("feed_episodes", 80, least=1)
     )
     monitor.done()
-    launcher = table.section("launcher")
-    launcher_said = LauncherSection(launcher.whole("at_once", 1, least=1))
-    launcher.done()
     runners = table.section("runners")
     runners_said = RunnersSection(places=runners.whole("places", 8, least=1))
     runners.done()
@@ -370,6 +414,7 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
         said = _Table(each, f'[environments."{environment}"]')
         project = said.text("project", None)
         python = said.text("python", None if project else "platform")
+        interpreter = said.text("interpreter", None)
         said.done()
         if (python is None) == (project is None):
             raise ClusterError(f'[environments."{environment}"] has python = "platform" or a project, one of them')
@@ -380,7 +425,7 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
             if not where.is_absolute() and relative_to is not None:
                 where = relative_to / where
             project = str(where)
-        environments[environment] = EnvironmentSection(environment, python, project)
+        environments[environment] = EnvironmentSection(environment, python, project, interpreter)
     for kind, pool in sandboxes.items():
         if pool.python not in ("platform", *environments):
             raise ClusterError(f"[sandboxes.{kind}] python is platform or an environment of this cluster")
@@ -407,10 +452,10 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
         blobs=BlobsSection(blob_kind, blob_settings),
         scratch=scratch_directory,
         ray=ray_said,
+        kubernetes=kubernetes,
         tls=tls,
         gateway=gateway_said,
         monitor=monitor_said,
-        launcher=launcher_said,
         runners=runners_said,
         guards=guards_said,
         inference=inference,
@@ -420,7 +465,7 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
         environments=environments,
         placement=placement,
         bridges=bridges,
-        described=_handed_on(described, environments),
+        described=_handed_on(described, environments, kubernetes),
     )
 
 
@@ -628,12 +673,18 @@ def _refuse_secret_values(table: Mapping[str, Any], where: str) -> None:
             )
 
 
-def _handed_on(described: Mapping[str, Any], environments: Mapping[str, EnvironmentSection]) -> dict[str, Any]:
-    """The config as JSON, with each environment's project as it was resolved."""
+def _handed_on(
+    described: Mapping[str, Any],
+    environments: Mapping[str, EnvironmentSection],
+    kubernetes: KubernetesSection | None = None,
+) -> dict[str, Any]:
+    """The config as JSON, with each environment's project and the RayJob template as they were resolved."""
     handed: dict[str, Any] = _json(described)
     for name, python in environments.items():
         if python.project is not None:
             handed["environments"][name]["project"] = python.project
+    if kubernetes is not None:
+        handed["kubernetes"]["rayjob"] = kubernetes.rayjob
     return handed
 
 

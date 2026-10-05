@@ -24,6 +24,7 @@ from rollout_train.cluster import Cluster, auth_problem
 from rollout_train.distillation import routes_of
 from rollout_train.objectives import DEFAULT, POLICY_GRADIENT, Objective, composed
 from rollout_train.providers import InferenceProvider, SettingSpec, TrainerProvider, settings_of
+from rollout_train.published import is_published
 from rollout_train.registry import Taken, valid
 from rollout_train.run_settings import KINDS, TRAINING, RunSettings, is_trainers, key_of, objective_in
 from rollout_train.slots import Declared
@@ -156,7 +157,7 @@ class PoolUse:
 
 @dataclass(frozen=True)
 class LedgerFacts:
-    """What the ledger, and the launchers' offers beside it, say, asked beforehand."""
+    """What the ledger and the live cluster say, asked beforehand."""
 
     checkpoints: Mapping[str, CheckpointFacts] = field(default_factory=dict[str, CheckpointFacts])
     """Every checkpoint reference the settings name, looked up (one not here does not exist)."""
@@ -656,7 +657,8 @@ def _evals(run: _Run) -> None:
             continue
         if number and (not number.isdigit() or not 1 <= int(number) <= suite.newest):
             run.refuse("evals", key, f"suite {name} has versions 1 to {suite.newest}, not {number}")
-        for environment in sorted(suite.environments - set(run.cluster.environments)):
+        offered = set(run.cluster.environments)
+        for environment in sorted(each for each in suite.environments - offered if not is_published(each)):
             run.refuse("evals", key, f"suite {name} plays {environment}, which this cluster does not offer")
 
 
@@ -720,11 +722,15 @@ def _environment(run: _Run) -> None:
     environment = run.settings["environment"]
     if not isinstance(environment, str) or run.kind == "imitate":
         return
-    if environment not in run.cluster.environments:
+    facts = run.environment
+    if is_published(environment):
+        if facts is not None and not facts.loads:
+            run.refuse("environment", "environment", facts.why or f"there is no published environment {environment}")
+            return
+    elif environment not in run.cluster.environments:
         offered = ", ".join(run.cluster.environments) or "none"
         run.refuse("environment", "environment", f"this cluster does not offer {environment} (it offers {offered})")
         return
-    facts = run.environment
     if facts is None:
         return
     if not facts.loads:

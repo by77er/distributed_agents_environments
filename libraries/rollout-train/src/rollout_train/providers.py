@@ -103,7 +103,7 @@ class Secret:
 
 @dataclass(frozen=True)
 class Tls:
-    """The cluster's own certificate authority and the client certificate its gateway and launcher present
+    """The cluster's own certificate authority and the client certificate its gateway and runs' drivers present
     (the cluster config's `[tls]`): paths, never the keys themselves."""
 
     ca: str | None = None
@@ -311,7 +311,7 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
             ),
             auths=("none", "bearer", "mtls"),
             auth=Auth("none"),
-            fields=("engine", "listen", "max_logprobs", "pool"),
+            fields=("engine", "listen", "max_logprobs", "pool"),  # (`engine`: what makes its engines, `module:name`)
             implementation="rollout_vllm:VllmEngine",
             shared=True,
         ),
@@ -466,7 +466,8 @@ class TrainerKind:
     auths: tuple[AuthKind, ...]
     auth: Auth
     fields: tuple[str, ...] = ()
-    """The settings of its `[trainers.NAME]` table beyond those every trainer has."""
+    """The settings of its `[trainers.NAME]` table beyond those every trainer has (`implementation`: what makes the
+    trainer, `module:name`, in place of the kind's own, called as it is)."""
     secrets: tuple[str, ...] = ()
     not_settings: Mapping[str, str] = field(default_factory=dict[str, str])
     """Fields of its settings dataclass a run does not set, and why."""
@@ -486,6 +487,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_lora.settings:LoraSettings",
             auths=("none",),
             auth=Auth("none"),
+            fields=("implementation",),
             not_settings={
                 **_OBJECTIVE,
                 "frozen_reference": "an adapter's reference is the model with the adapter switched off",
@@ -498,6 +500,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_lora.settings:LoraSettings",
             auths=("none",),
             auth=Auth("none"),
+            fields=("implementation",),
             not_settings={**_OBJECTIVE, "rank": "a full-weight trainer has no adapter"},
         ),
         TrainerKind(
@@ -516,7 +519,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_tinker.settings:TinkerSettings",
             auths=("vendor",),
             auth=Auth("vendor", key=Secret(env="TINKER_API_KEY")),
-            fields=("project",),
+            fields=("project", "implementation"),
             secrets=("project",),
             not_settings={**_OBJECTIVE, "project": "the cluster config says it ([trainers.NAME] project)"},
         ),
@@ -569,6 +572,12 @@ class TrainerProvider:
         if self.kind == "runpod-trainer":
             return TRAINER_KINDS[str(self.settings.get("trainer", "lora"))]
         return TRAINER_KINDS[self.kind]
+
+    @property
+    def implementation(self) -> str:
+        """`module:name` of what makes the trainer: its table's `implementation`, else its kind's."""
+        said = self.settings.get("implementation")
+        return str(said) if said else TRAINER_KINDS[self.kind].implementation
 
 
 @dataclass(frozen=True)
