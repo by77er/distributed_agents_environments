@@ -15,10 +15,10 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
-- **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Unserved`](#unserved)
+- **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#scores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`Renderer`](#renderer), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
-- **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
+- **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
@@ -31,7 +31,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`offered_json`](#offered_json), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#runtime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
-- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
+- **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer), [`StepSettings`](#stepsettings)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35), [`tokenizer_of`](#rollout_qwentokenizer_of)
@@ -3544,13 +3544,15 @@ class Channel
 **Methods**
 
 - `@property def context_limit(self) -> int` — The longest turn the channel takes, and what it tells programs.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, top: int = 0) -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
   beginnings are cached. `version` and `request` (the version the caller stamps the tokens with, and a name for
   the request) are for samplers elsewhere: this process's own callers read what it publishes.
-- `async def sample(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], name: str | None, session: str = '') -> Generation` — Sample what is served under `name` (a checkpoint's id, or the model's name; None: the model), as a server
+- `async def sample(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], name: str | None, session: str = '', top: int = 0) -> Generation` — Sample what is served under `name` (a checkpoint's id, or the model's name; None: the model), as a server
   elsewhere is asked (`rollout_train.inference.remote.CheckpointServer`): `NotLoaded` where it is not served here
   once a load in progress has ended (a turn caught by a full checkpoint's load is sampled again). The answer
   names what sampled it.
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Scores` — Score tokens on the session's engine (`Engine.score`), as `generate` samples there.
+- `async def scored(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, name: str | None, session: str = '') -> Scores` — Score tokens with what is served under `name`, as `sample` samples it. The answer names what scored them.
 - `def resolved(self, name: str | None) -> str | None` — The adapter the engines are asked for to sample what is served under `name`: the adapter itself, or None
   for the full checkpoint they hold or the model's own (`model`, or None); `NotLoaded` for anything else.
 - `async def weights(self, session: str) -> tuple[str | None, int]` — The adapter a session's next turn samples from (None: the weights the engines hold), and the version its
@@ -3598,8 +3600,11 @@ host actor).
 
 - `async def models(self, within: float = 2.0) -> dict[str, Any]` — The checkpoints it holds, by name (each a card as vLLM's `/v1/models` lists it); `Unreachable` if it does
   not answer `within` seconds.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None) -> Generation` — Sample from the checkpoint `adapter` names (None: the model it started with); `NotLoaded` where it does not
-  hold it, `Unreachable` where it does not answer. The answer names what sampled it (`Generation.model`).
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, top: int = 0) -> Generation` — Sample from the checkpoint `adapter` names (None: the model it started with); `NotLoaded` where it does not
+  hold it, `Unreachable` where it does not answer. The answer names what sampled it (`Generation.model`). With
+  `top`, each sampled token comes with the `top` most likely tokens there (`Engine.generate`).
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', request: str | None = None) -> Scores` — Score tokens with the checkpoint `adapter` names (`Engine.score`), refused as `generate` refuses. The answer
+  names what scored them (`Scores.model`).
 - `def close(self) -> None`
 
 ### `Connection`
@@ -3644,7 +3649,10 @@ One replica serving a model: in this process, or a client of a server elsewhere.
 
 **Methods**
 
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, top: int = 0) -> Generation` — Sample a completion of `prompt` from `adapter` (None: the weights it holds). With `top`, each sampled
+  token comes with the `top` most likely tokens there and their logprobs.
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None) -> Scores` — The logprobs `adapter` gives the tokens at positions `start` to `end` (None: to the end) of `tokens`, each
+  given those before it, with the `top` most likely tokens at each. Nothing is sampled.
 - `async def load_adapter(self, name: str, path: str) -> None` — Register a LoRA adapter under `name`; requests name it to sample from it.
 - `async def remove_adapter(self, name: str) -> None`
 - `async def load_weights(self, path: str) -> None` — Serve the full weights in `path` (a checkpoint's files) in place of the model's own, from now on.
@@ -3667,6 +3675,8 @@ class Generation
 | `logprobs` | `list[float]` | required | Of each sampled token, under the distribution it was sampled from. |
 | `finish_reason` | `str` | required | `stop` (a stop token, included in `tokens`) or `length`. |
 | `model` | `str \| None` | `None` | The model that sampled it, where a server elsewhere says (`rollout_train.inference.remote`): the checkpoint, by the name it is served as. The gateway checks that it is the checkpoint it stamps the tokens with. |
+| `top_tokens` | `list[list[int]]` | `field(default_factory=list[list[int]])` | Where a request asked for the `top` most likely tokens at each position: at each sampled token, those tokens, most likely first, under the distribution it was sampled from (empty where none were asked for). |
+| `top_logprobs` | `list[list[float]]` | `field(default_factory=list[list[float]])` | Their logprobs, beside `top_tokens`. |
 
 ### `Limits`
 
@@ -3737,8 +3747,10 @@ every `every` seconds.
 - `async def reaches(self) -> bool` — Whether a server would take a turn now.
 - `async def weights(self, session: str) -> tuple[str | None, int]` — The checkpoint a session's next turn samples from (None: the base model) and the version its tokens are
   stamped with: its depth.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Generation` — Sample on the session's server, from the checkpoint `adapter` names. `Unserved` if the server does not have
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, top: int = 0) -> Generation` — Sample on the session's server, from the checkpoint `adapter` names. `Unserved` if the server does not have
   it any more (`NotLoaded`), answers for another, or does not answer (`Unreachable`).
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Scores` — Score tokens on the session's server with the checkpoint `adapter` names, refused as `generate` is: every
+  token scored is counted as a token in, and none as a token out.
 - `def servers(self) -> list[dict[str, JsonValue]]` — The servers it samples on, as last asked: each one's address, the checkpoint it would sample from now and its
   depth, and how far that is behind what the channel should serve.
 - `def take(self) -> dict[str, float]` — What passed through since the last call, as `Channel.take` counts it.
@@ -3767,8 +3779,13 @@ under a name of their own by the server: `load_weights` refuses.
 
 - `def __init__(self, model: str = '', *, address: str, connection: Connection | None = None, client: httpx.AsyncClient | None = None, max_model_len: int | None = None) -> None`
 - `async def models(self, within: float = 2.0) -> dict[str, Any]` — The models the server has (`/v1/models`), by name; `Unreachable` if it does not answer `within` seconds.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None) -> Generation` — Complete the prompt's tokens with the model `adapter` names (the base model for none): the tokens sampled,
-  the logprob of each, how it ended, and the model the server says sampled it.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, top: int = 0) -> Generation` — Complete the prompt's tokens with the model `adapter` names (the base model for none): the tokens sampled,
+  the logprob of each, how it ended, and the model the server says sampled it. With `top`, the `top` most likely
+  tokens at each, by id (`return_tokens_as_token_ids`).
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', request: str | None = None) -> Scores` — The logprobs the model `adapter` names (the base model for none) gives the tokens at positions `start` to
+  `end` of `tokens`, with the `top` most likely tokens at each, and the model the server says scored them: a
+  completion of the tokens up to `end` with `prompt_logprobs`, whose one generated token (vLLM generates at least
+  one) is dropped. The server caps `top` at its `--max-logprobs`.
 - `async def load_adapter(self, name: str, path: str) -> None` — Load the adapter at `path` (read on the server's machine) under `name`. One the server holds under that name
   already (loaded before a follower started again) is taken as loaded.
 - `async def remove_adapter(self, name: str) -> None`
@@ -3837,8 +3854,35 @@ servers elsewhere (`rollout_train.inference.remote.RemoteChannel`).
 - `@property def context_limit(self) -> int`
 - `async def weights(self, session: str) -> tuple[str | None, int]` — The adapter (the checkpoint) a session's next turn samples from (None: the weights the engines hold), and
   the version its tokens are stamped with.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Generation` — Sample from the checkpoint `adapter` names, stamped `version`; `Unserved` where it is not served (or the
-  server is gone). `request` names the request, for whatever logs it.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, top: int = 0) -> Generation` — Sample from the checkpoint `adapter` names, stamped `version`; `Unserved` where it is not served (or the
+  server is gone). `request` names the request, for whatever logs it. With `top`, each sampled token comes with
+  the `top` most likely tokens there (`Engine.generate`).
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Scores` — Score the tokens at positions `start` to `end` of `tokens` with the checkpoint `adapter` names
+  (`Engine.score`), as `generate` samples from it.
+
+### `Scores`
+
+*class* · `libraries/rollout-train/src/rollout_train/inference/channel.py`
+
+```python
+class Scores
+```
+
+A model's logprobs of given tokens: of each position from `start` on, the logprob of the token there given the
+tokens before it, and the `top` most likely tokens there with their logprobs, most likely first. Scores are of the
+model's own distribution (temperature 1).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `start` | `int` | required | The first position scored (at least 1: the first token has nothing before it). |
+| `logprobs` | `list[float]` | required | Of the token at each position scored, in order. |
+| `top_tokens` | `list[list[int]]` | `field(default_factory=list[list[int]])` | At each position scored, the most likely tokens, most likely first (empty where none were asked for). |
+| `top_logprobs` | `list[list[float]]` | `field(default_factory=list[list[float]])` | Their logprobs, beside `top_tokens`. |
+| `model` | `str \| None` | `None` | The model that scored them, where a server elsewhere says, as `Generation.model`. |
+
+**Methods**
+
+- `@property def end(self) -> int` — The position after the last one scored.
 
 ### `Unserved`
 
@@ -3881,8 +3925,10 @@ is its index among the replicas of what it serves, and how many there are. It ke
 - `async def models(self) -> dict[str, Any]` — What it holds, by name, each as a card of vLLM's `/v1/models`: the model it was started with (unless full
   weights replaced it), each adapter (its `parent` the model), each full checkpoint, with the depth each was
   published as.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None) -> Generation` — Sample the checkpoint `adapter` names (None: the model), as a `CheckpointServer`; `NotLoaded` where it does
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, top: int = 0) -> Generation` — Sample the checkpoint `adapter` names (None: the model), as a `CheckpointServer`; `NotLoaded` where it does
   not hold it (once a load in progress has ended).
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', request: str | None = None) -> Scores` — Score tokens with the checkpoint `adapter` names (None: the model), as a `CheckpointServer`, refused as
+  `generate` is.
 - `async def served(self) -> list[JsonValue]` — What each channel serves, as its beats say (`Follower.served`).
 - `async def pause(self) -> None` — Hold new requests back, and wait for those in flight to finish.
 - `async def resume(self) -> None`
@@ -3899,7 +3945,8 @@ def host_spec(cluster: Cluster, provider: str, model: str, *, settings: 'RunSett
 ```
 
 An engine host of `provider`'s `model` (an `[inference.NAME]` of the cluster, of a kind its engines run in an
-engine host, `vllm`): its kind's engine, the model's options, a replica's GPUs, and `[placement.engines]`. A run
+engine host, `vllm`): its kind's engine, the model's options with the provider's `max_logprobs` (what it declares
+as its top-k logprobs, and so what its engines allow), a replica's GPUs, and `[placement.engines]`. A run
 whose trainer shares the provider's card (`colocate_with`, by its `settings`) has its host ask for half of the
 replica's GPUs, and its trainer for the other half.
 
@@ -3937,7 +3984,8 @@ each call is an actor call. A host that does not answer (it died, or is starting
 
 - `def __init__(self, handle: Any, address: str) -> None`
 - `async def models(self, within: float = 2.0) -> dict[str, Any]`
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None) -> Generation`
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, top: int = 0) -> Generation`
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', request: str | None = None) -> Scores`
 - `def close(self) -> None`
 
 ### `HostSpec`
@@ -4255,6 +4303,10 @@ its endpoints). Each turn records what its sampler samples with: the sampler's `
 - `async def sample(self, grant: Grant, request: SampleRequest, links: Sequence[Link] = ()) -> Reply` — One reply, recorded before it is returned: the one recorded under the request's effect id, if there is one.
   `links` are those its harness declared besides the request's own. Raises `Refused`, or the endpoint's
   `ModelEndpointError` (`ContextOverflow` when the context is too long).
+- `async def score(self, grant: Grant, request: ScoreRequest) -> Reply` — The scores the grant's channel gives the request's tokens (`Reply.scores`), recorded as a turn of its own
+  use before they are returned: those recorded under the request's effect id, if there are any. Raises `Refused`
+  (`ValueError` from the channel, for a range or a `top` it does not take, is a request refused), or the
+  endpoint's `ModelEndpointError` (`ContextOverflow` for a sequence too long to score).
 - `def observe(self, grant: Grant, request: SampleRequest, reply: Reply, seconds: float) -> None` — Tell the hooks of a sample a harness asked for, newly recorded.
 - `async def count(self, grant: Grant, prompt: Prompt) -> int` — How many tokens a prompt renders to with the channel's renderer: what a turn's prompt would hold.
 - `async def ready(self) -> dict[str, str]` — What is not ready, by part (empty: ready): the ledger and the blob store must answer.
@@ -4431,6 +4483,27 @@ What a recorded turn answered, and who it answered.
 | `result` | `SampleResult` | required |  |
 | `replayed` | `bool` | `True` | Whether it was recorded before (False: by the call that returned it). |
 | `timings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The turn's timings (`TurnRecord.timings`), as recorded. |
+| `scores` | `Scores \| None` | `None` | A scoring turn's scores (`TurnRecord.scores`). |
+
+### `ScoreRequest`
+
+*class* · `libraries/rollout-train/src/rollout_train/gateway/service.py`
+
+```python
+class ScoreRequest(BaseModel)
+```
+
+A request to score tokens: the logprobs the channel gives the tokens at positions `start` to `end` of `tokens`
+(`end` absent: to the end), each given those before it, with the `top` most likely tokens at each.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `effect_id` | `str` | `Field(min_length=1)` | Its request id: a request under one that was recorded is answered with what was recorded. |
+| `session_id` | `str` | required | The key's session. |
+| `tokens` | `list[int]` | `Field(min_length=2)` |  |
+| `start` | `int` | `Field(ge=1)` |  |
+| `end` | `int \| None` | `None` |  |
+| `top` | `int` | `Field(default=0, ge=0)` |  |
 
 ### `TurnRecord`
 
@@ -4461,6 +4534,8 @@ One turn, as the gateway sampled and recorded it.
 | `links` | `tuple[Link, ...]` | `()` |  |
 | `timings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | `started` (seconds since the epoch), `phases` (seconds each generation took) and `seconds` (the whole turn). |
 | `sampled_with` | `tuple[str, ...]` | `TOKEN_LEVEL` | What it was sampled with, of `TOKEN_LEVEL`: what its sampler could do (a turn recorded without saying was sampled with all of them). |
+| `use` | `str` | `SAMPLE` | `sample`, or `score`: the logprobs the channel gave the prompt's tokens (`scores`), with nothing sampled. |
+| `scores` | `Scores \| None` | `None` | A scoring turn's scores. |
 
 **Methods**
 
@@ -4497,8 +4572,9 @@ cache.
   (`replayed` if it was not this one). `index` is the run's records, if they were read. Raises `Fenced` if
   `fence` was taken again.
 - `async def turns(self, run: str, run_id: str) -> list[TurnRecord]` — A program's run's turns, in the order they were recorded.
-- `async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]` — What each model slot of a program's run exports, by slot (`segments_of` its turns). With `accepted_only`,
-  what a compaction attempt sampled is trained on only if its harness went on from it.
+- `async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]` — What each model slot of a program's run exports, by slot (`segments_of` its samples: scoring turns are left
+  out). With `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from
+  it.
 
 ### `unaccepted`
 
@@ -5317,7 +5393,7 @@ What an inference provider's kind can do.
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-INFERENCE_KINDS: Mapping[str, InferenceKind] = {each.name: each for each in (InferenceKind('vllm', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=True, loads=frozenset({'peft', 'full'})), auths=('none', 'bearer', 'mtls'), auth=Auth('none'), fields=('engine', 'listen', 'max_logprobs', 'pool'), implementation='rollout_vllm:VllmEngine', shared=True), InferenceKind('vllm-servers', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'})), auths=('none', 'bearer', 'mtls'), auth=None, fields=('addresses', 'via', 'loader', 'max_logprobs', 'pool'), implementation='rollout_train.inference:RemoteEngine', shared=True, remote=True), InferenceKind('tinker', _token_level(prompt_logprobs=False, top_logprobs=0, full_reload=False, loads=frozenset({'tinker'}), bills='tokens', unchecked=frozenset({'prompt_logprobs', 'top_logprobs'})), auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), implementation='rollout_tinker:TinkerEngine'), InferenceKind('api', Capabilities(token_exact=False, sampled_logprobs=False, prompt_logprobs=False, top_logprobs=0, honours_sampling=False, adapters=False, full_reload=False, streaming=True, loads=frozenset(), bills='tokens'), auths=('vendor', 'bearer'), auth=None, fields=('endpoint',)), InferenceKind('runpod-inference', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca', 'max_logprobs', 'pool'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', shared=True, remote=True))}
+INFERENCE_KINDS: Mapping[str, InferenceKind] = {each.name: each for each in (InferenceKind('vllm', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=True, loads=frozenset({'peft', 'full'})), auths=('none', 'bearer', 'mtls'), auth=Auth('none'), fields=('engine', 'listen', 'max_logprobs', 'pool'), implementation='rollout_vllm:VllmEngine', shared=True), InferenceKind('vllm-servers', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'})), auths=('none', 'bearer', 'mtls'), auth=None, fields=('addresses', 'via', 'loader', 'max_logprobs', 'pool'), implementation='rollout_train.inference:RemoteEngine', shared=True, remote=True), InferenceKind('tinker', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'tinker'}), bills='tokens', unchecked=frozenset({'prompt_logprobs', 'top_logprobs'})), auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), implementation='rollout_tinker:TinkerEngine'), InferenceKind('api', Capabilities(token_exact=False, sampled_logprobs=False, prompt_logprobs=False, top_logprobs=0, honours_sampling=False, adapters=False, full_reload=False, streaming=True, loads=frozenset(), bills='tokens'), auths=('vendor', 'bearer'), auth=None, fields=('endpoint',)), InferenceKind('runpod-inference', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=BEATS), fields=('image', 'gpu_types', 'pods', 'idle_stop', 'volume_gb', 'secrets', 'step_ca', 'max_logprobs', 'pool'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', shared=True, remote=True))}
 ```
 
 Every kind of inference provider, by name.
@@ -5358,7 +5434,7 @@ An inference provider as a cluster deploys it (`[inference.NAME]`).
 |---|---|---|---|
 | `name` | `str` | required |  |
 | `kind` | `str` | required |  |
-| `capabilities` | `Capabilities` | required | The kind's, with this deployment's `max_logprobs`. |
+| `capabilities` | `Capabilities` | required | The kind's, with this deployment's `max_logprobs` as its top-k logprobs: what a `vllm` provider's engines are started with, and what a `vllm-servers` or `runpod-inference` provider's servers were (`--max-logprobs`). |
 | `models` | `Mapping[str, ModelOffer]` | required |  |
 | `auth` | `Auth` | required |  |
 | `gpus` | `float` | `0` | Per replica. |
@@ -6908,6 +6984,17 @@ def scripted_engine(model: str, **options: Any) -> ScriptedEngine
 An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start, and `loading` is
 how many seconds its full weights take to load.
 
+### `scripted_top`
+
+*function* · `libraries/rollout-train/src/rollout_train/testing.py`
+
+```python
+def scripted_top(tokens: Sequence[int], top: int, logprob: float = -0.25) -> tuple[list[list[int]], list[list[float]]]
+```
+
+The `top` most likely tokens a scripted engine gives at each position of `tokens`: the token there (at
+`logprob`) and those after it, each a nat less likely than the one before (none when `top` is 0).
+
 ### `ScriptedEngine`
 
 *class* · `libraries/rollout-train/src/rollout_train/testing.py`
@@ -6917,8 +7004,8 @@ class ScriptedEngine
 ```
 
 Answers each generate with the next scripted (text, finish reason), or with `always` once the script is
-spent; logprobs are -0.5 per token. Keeps what it was asked and told. Full weights take `loading` seconds to
-load.
+spent; logprobs are -0.5 per token. Scores each token at -0.25. Keeps what it was asked and told. Full weights take
+`loading` seconds to load.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -6928,7 +7015,8 @@ load.
 **Methods**
 
 - `def __init__(self, tokenizer: Tokenizer, script: Sequence[tuple[str, str]] = (), *, always: Sequence[tuple[str, str]] = (), loading: float = 0.0) -> None`
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, top: int = 0) -> Generation`
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None) -> Scores` — Each token scored at -0.25, its `top` most likely being itself and the tokens after it (`scripted_top`).
 - `async def load_adapter(self, name: str, path: str) -> None`
 - `async def remove_adapter(self, name: str) -> None`
 - `async def load_weights(self, path: str) -> None`
@@ -6950,8 +7038,14 @@ class VllmEngine
 
 **Methods**
 
-- `def __init__(self, model: str, *, gpu_memory_utilization: float = 0.72, max_model_len: int = 8192, max_num_seqs: int = 32, max_num_batched_tokens: int = 4096, max_lora_rank: int = 32, max_loras: int = 2, language_model_only: bool = True, speculative: Mapping[str, Any] | None = None, quantization: str | None = None, seed: int = 0) -> None`
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
+- `def __init__(self, model: str, *, gpu_memory_utilization: float = 0.72, max_model_len: int = 8192, max_num_seqs: int = 32, max_num_batched_tokens: int = 4096, max_lora_rank: int = 32, max_loras: int = 2, language_model_only: bool = True, speculative: Mapping[str, Any] | None = None, quantization: str | None = None, seed: int = 0, max_logprobs: int = 20) -> None`
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, top: int = 0) -> Generation`
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None) -> Scores` — The logprobs the model (or `adapter`) gives the tokens at positions `start` to `end` of `tokens`, each given
+  those before it, and the `top` most likely tokens at each: vLLM's prompt logprobs of `tokens` up to `end`, with
+  one token generated (vLLM generates at least one) and dropped. The scores are of the model's own distribution
+  (prompt logprobs skip temperature). The sequence must leave room for that token (`max_model_len`). vLLM
+  computes the logits of every position before `end`, 1,024 positions at a time, so scoring a long sequence takes
+  about 0.6 GiB of the GPU beyond the engine's own share (Qwen3's vocabulary of 152K), however long it is.
 - `async def load_adapter(self, name: str, path: str) -> None` — Register a LoRA adapter (a PEFT directory) under `name`; samples name it to use it.
 - `async def remove_adapter(self, name: str) -> None`
 - `async def load_weights(self, path: str) -> None` — Serve the full weights in `path` (a checkpoint's files, in the model's own layout) in place of the ones
@@ -7429,7 +7523,8 @@ as `TinkerTrainer` takes it.
 **Methods**
 
 - `def __init__(self, model: str, *, max_model_len: int = 32768, project: str | None = None, service: 'Service | str | None' = None) -> None`
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None) -> Generation`
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, top: int = 0) -> Generation`
+- `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None) -> Scores`
 - `async def load_adapter(self, name: str, path: str) -> None` — Sample from the sampler checkpoint that the pointer in `path` (a version's weights) names.
 - `async def remove_adapter(self, name: str) -> None`
 - `async def load_weights(self, path: str) -> None`

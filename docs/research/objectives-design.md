@@ -119,10 +119,12 @@ Coefficients can change between steps; the family and the structural components 
 - **On-policy.** The student samples as it does for reinforcement learning. The teacher channel scores each sampled
   token with its own logprobs (prompt logprobs over the student's tokens, with the top k at each position), and the
   loss is the reverse KL per token. It needs a teacher provider that returns prompt logprobs, with the same tokenizer
-  as the student, which the validation's renderer-family rule already checks. vLLM can return prompt logprobs, but
-  `VllmEngine` has no path for them yet, so that is the first piece to build.
-- **Off-policy, with logprobs.** The teacher samples, with its top-k logprobs at each position, and the student fits
-  them by forward KL. A dataset of teacher samples (the dataset module, with a `teacher` supervision) serves as
+  as the student, which the validation's renderer-family rule already checks. Scoring is built: `Engine.score` gives
+  the logprobs of given tokens with the top k at each position, on `VllmEngine` (vLLM's prompt logprobs),
+  `RemoteEngine` and engine hosts, and the gateway's `POST /v1/scores` asks a run's channel for them, recording each
+  request as a turn that is never trained on ([scoring tokens](../libraries/rollout-train/gateway.md#scoring-tokens)).
+- **Off-policy, with logprobs.** The teacher samples, with its top-k logprobs at each position (built:
+  `generate(…, top=K)`), and the student fits them by forward KL. A dataset of teacher samples (the dataset module, with a `teacher` supervision) serves as
   well as live sampling. Sampling stays exact as far as it goes: the teacher's turns are recorded through the gateway
   like any other.
 - Either kind can be mixed with a policy gradient by a coefficient. Black-box distillation (from a teacher's text
@@ -157,5 +159,5 @@ reached through the gateway, so every judge call is recorded, counted in spend, 
    episodes and from datasets. Use the adapter-off reference for LoRA.
 3. **Judges**: judge channels, rubric scores and comparisons, and comparisons feeding preferences and group
    rankings.
-4. **Distillation**: prompt logprobs in `VllmEngine`, then on-policy distillation, then off-policy distillation with
-   teacher datasets.
+4. **Distillation**: prompt logprobs in `VllmEngine` (built: scoring through the engines and the gateway), then
+   on-policy distillation, then off-policy distillation with teacher datasets.
