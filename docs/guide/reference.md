@@ -12,13 +12,13 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout.curriculum`](#rolloutcurriculum)** — Which row to train on next, and gates on evals. [`Curriculum`](#curriculum), [`curriculum_of`](#curriculum_of), [`GroupResult`](#groupresult), [`solved_share`](#solved_share)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
-- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#loaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#stored), [`Trajectory`](#trajectory)
+- **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#plan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`Renderer`](#renderer), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
-- **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#refused), [`Reply`](#reply), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
+- **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`create_app`](#create_app), [`deployed`](#deployed), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.profile`](#rollout_trainprofile)** — A deployment, described and opened. [`ChannelSpec`](#channelspec), [`EvalsSpec`](#evalsspec), [`GatewaySpec`](#gatewayspec), [`NotEnoughMemory`](#notenoughmemory), [`Platform`](#platform), [`Profile`](#profile), [`TrainerSpec`](#trainerspec)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: their identities, the training service's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`live`](#live), [`pod_identity`](#pod_identity), [`PodAddress`](#podaddress), [`RemoteTrainer`](#remotetrainer), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
@@ -26,8 +26,10 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, shared pools, routing. [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`OBJECTIVES`](#objectives), [`ROUTING`](#routing), [`Routing`](#routing), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`SharedPool`](#sharedpool), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts)
-- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`FILES`](#files), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
+- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`FILES`](#files), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`Stores`](#stores)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#preset), [`Presets`](#presets), [`presets_of`](#presets_of)
+- **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`offered_json`](#offered_json), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
+- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#publish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#runtime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`PoolUse`](#pooluse), [`refusals`](#refusals), [`Rule`](#rule), [`RULES`](#rules), [`SuiteFacts`](#suitefacts)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`recording`](#recording), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`ScriptedEngine`](#scriptedengine)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
@@ -2507,7 +2509,7 @@ Watch a runner (episodes as they start and end) or a run (its results and steps)
 - `def on_note(self, event: Mapping[str, JsonValue]) -> None` — `event["kind"]` is `started` or `ended` (an episode, by a runner: an adopted one is started again), or the
   run's `result`, `step` or `published`.
 
-### `loaded`
+### `loaded` {#rollout_trainrolloutsloaded}
 
 *function* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
 
@@ -2610,7 +2612,7 @@ What a runner needs of what records its runs' samples (`rollout_train.gateway.Ga
 - `async def sessions(self, run: str, run_id: str) -> dict[str, list[Segment]]` — What each model slot of a run recorded, by slot.
 - `def forget(self, run_id: str) -> None`
 
-### `stored`
+### `stored` {#rollout_trainrolloutsstored}
 
 *function* · `libraries/rollout-train/src/rollout_train/rollouts/episodes.py`
 
@@ -4396,7 +4398,7 @@ label, which is kept as it is).
 | `type` | `str` | required |  |
 | `source` | `str` | required |  |
 
-### `Refused`
+### `Refused` {#rollout_traingatewayrefused}
 
 *class* · `libraries/rollout-train/src/rollout_train/gateway/service.py`
 
@@ -4746,9 +4748,10 @@ class System
 
 **Methods**
 
-- `def __init__(self, directory: Path | None = None, feed: FeedReader | None = None, *, ledger: Ledger | None = None, client: httpx.Client | None = None) -> None` — Over a run's `directory` (its ledger, as `rollout_train.ledger.of_run` finds it: every run that shares
+- `def __init__(self, directory: Path | None = None, feed: FeedReader | None = None, *, ledger: Ledger | None = None, client: httpx.Client | None = None, importer: Importer | None = None) -> None` — Over a run's `directory` (its ledger, as `rollout_train.ledger.of_run` finds it: every run that shares
   it), or over a `ledger` alone. `feed` reads the directory's feed (by default its `feed`). `client` asks the
-  monitors on other machines for their runs' episodes.
+  monitors on other machines for their runs' episodes. `importer` is where environments imported from git go
+  (`import_environment`); none: this monitor imports none.
 - `@property def ledger(self) -> str` — Where the ledger is: its directory, or its database's URL.
 - `async def snapshot(self, relayed: bool = False) -> dict[str, Any]` — Where everything stands now: every run (where it is and whether it is running; its groups that are not
   done with and the ones that are), the checkpoints (each with where it came from and the bookmarks that name it),
@@ -4781,6 +4784,16 @@ class System
   in this process (its version, rows, eval data, description and curriculum; else why it does not load) and what
   the ledger has of it (each row played, its runs, suites, evals and newest check). None where it neither loads
   nor is known.
+- `async def environment_versions(self) -> dict[str, Any]` — Every published environment's version the ledger keeps (`rollout_train.published`), the newest imported
+  first.
+- `async def environment_version(self, reference: str) -> dict[str, Any] | None` — A published environment's version, by its id or `NAME@VERSION`; none where the ledger keeps no such one.
+- `async def imports(self) -> dict[str, Any]` — The imports this monitor made since it started, newest first: each with what it imports, its stage
+  (`fetching`, `reading`, `packing`, `storing`, `checking`, `recording`, then `done` or `refused`), when it began
+  and ended, and the version it made or why it was refused.
+- `async def import_environment(self, body: Mapping[str, Any]) -> dict[str, Any]` — Import an environment from git (`rollout_train.publishing.publish`): `url`, and optionally `ref`,
+  `subdirectory` and `entry_point`. Returns the version (`version`) and whether it was there already
+  (`existing`). Raises `Taken` where this monitor imports nothing or the body says no URL, `Refused` saying why
+  the import cannot be made.
 - `async def save_suite(self, name: str, body: Mapping[str, Any]) -> Suite` — Make a suite, or its next version, as the page's forms say it (`rollout_train.evals.make_suite`,
   `edit_suite`): its `entries`, each its `environment` (`module:name`), how its starts are `chosen` (`eval data`,
   of the name `eval_data`; `rows and seeds`, `rows` (none: every row) and `seeds`; `starts`, each a row (`task`)
@@ -6019,6 +6032,16 @@ What `--model`, `--provider`, `--renderer` and `--trainer` set, for the channel 
 
 The ledger and the blob store a cluster config names, opened on this node.
 
+### `blobs_at`
+
+*function* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+def blobs_at(cluster: 'Cluster') -> dict[str, JsonValue]
+```
+
+Where a cluster's blob store is (its `[blobs]`), as `opened` opens it: a directory of files made absolute.
+
 ### `FILES`
 
 *constant* · `libraries/rollout-train/src/rollout_train/stores.py`
@@ -6190,6 +6213,410 @@ def presets_of(ledger: object) -> Presets | None
 
 The presets beside a ledger: a table in a database ledger's database, a directory beside a ledger of files
 (`presets`, in its directory); none beside any other.
+
+## `rollout_train.published`
+
+Versions of environments imported from their source, beside the ledger.
+
+### `DatabaseEnvironmentVersions`
+
+*class* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+class DatabaseEnvironmentVersions
+```
+
+`EnvironmentVersions` in the `environment_versions` table of a database: a row per version, keyed by its id
+(inserting one that is there fails, and the one there is read).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `COLUMNS` |  | `('version', 'name', 'source', 'ref', 'commit_id', 'subdirectory', 'entry_point', 'blob', 'runtime_env', 'dependencies', 'description', 'checked', 'imported')` |  |
+
+**Methods**
+
+- `def __init__(self, database: 'Database') -> None`
+- `async def all(self) -> list[EnvironmentVersion]`
+- `async def get(self, reference: str) -> EnvironmentVersion | None`
+- `async def record(self, version: EnvironmentVersion) -> EnvironmentVersion`
+
+### `environment_versions_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+def environment_versions_of(ledger: object) -> EnvironmentVersions | None
+```
+
+The published versions beside a ledger: a table in a database ledger's database, a directory beside a ledger
+of files (`environment_versions`, in its directory); none beside any other.
+
+### `EnvironmentVersion`
+
+*class* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+class EnvironmentVersion
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | The environment's name: its entry point's name in the project's `rollout.environments` group, else the project's name. |
+| `version` | `str` | required | The SHA-256 of its source's zip. |
+| `source` | `str` | required | The git URL it was fetched from. |
+| `ref` | `str \| None` | required | The branch, tag or commit asked for; none: the default branch. |
+| `commit` | `str` | required | The commit the ref was when it was fetched. |
+| `subdirectory` | `str` | required | The project's directory in the repository (empty: its root). |
+| `entry_point` | `str` | required | `module:name`: what makes the environment, imported in its runtime environment. |
+| `blob` | `Mapping[str, JsonValue]` | required | The zip's blob reference (`rollout.contracts.BlobReference`, as JSON). |
+| `runtime_env` | `Mapping[str, JsonValue]` | required | The Ray runtime environment its code runs in: `working_dir` (the zip, where Ray fetches it), `env_vars` (the project's `src` on the path, for a project laid out so), and `uv` (the dependencies the platform does not hold). |
+| `dependencies` | `Sequence[str]` | `()` | The project's dependencies, as its `pyproject.toml` declares them. |
+| `description` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | What the environment says of itself: its version, description, rows, eval data and curriculum. |
+| `check` | `Sequence[Mapping[str, JsonValue]]` | `()` | What its check found: each finding's check, whether it passed, and what it said. |
+| `imported` | `float` | `0.0` |  |
+
+**Methods**
+
+- `@property def reference(self) -> str` — `NAME@VERSION`: how launches, runs and suites name it.
+- `def to_json(self) -> dict[str, Any]`
+
+### `EnvironmentVersions`
+
+*class* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+class EnvironmentVersions(Protocol)
+```
+
+**Methods**
+
+- `async def all(self) -> list[EnvironmentVersion]` — Every version, the newest imported first.
+- `async def get(self, reference: str) -> EnvironmentVersion | None` — A version by its id, or by `NAME@VERSION` (none where the name is not its).
+- `async def record(self, version: EnvironmentVersion) -> EnvironmentVersion` — Record a version, unless one of its id is there: the version as it is kept (the one there, if there was
+  one).
+
+### `FileEnvironmentVersions`
+
+*class* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+class FileEnvironmentVersions
+```
+
+`EnvironmentVersions` in a directory: `VERSION.json` for each, written beside its place and linked into it only
+if no file of its id is there, so writers need no lock.
+
+**Methods**
+
+- `def __init__(self, directory: Path) -> None`
+- `async def all(self) -> list[EnvironmentVersion]`
+- `async def get(self, reference: str) -> EnvironmentVersion | None`
+- `async def record(self, version: EnvironmentVersion) -> EnvironmentVersion`
+
+### `is_published`
+
+*function* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+def is_published(environment: str) -> bool
+```
+
+Whether an environment's name is a published version's (`NAME@VERSION`), not a built-in's (`module:name`).
+
+### `loaded` {#rollout_trainpublishedloaded}
+
+*function* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+async def loaded(environment: str, ledger: object) -> tuple[Any, EnvironmentVersion | None]
+```
+
+An environment by its name, imported here: a built-in one by `module:name`; a published one (`NAME@VERSION`) by
+its version's entry point, which imports where this process runs in the version's runtime environment (a Ray job
+given its `runtime_env`), with the version. Raises `KeyError` for a published version the ledger does not keep,
+and whatever importing raises.
+
+### `offered_json`
+
+*function* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+def offered_json(versions: Sequence[EnvironmentVersion]) -> list[dict[str, JsonValue]]
+```
+
+What a launcher says of the published versions it offers: each one's reference, name, source and commit.
+
+### `parsed` {#rollout_trainpublishedparsed}
+
+*function* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+def parsed(reference: str) -> tuple[str, str] | None
+```
+
+`NAME@VERSION` as its name and version; none for anything else.
+
+### `provenance`
+
+*function* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+def provenance(version: EnvironmentVersion) -> dict[str, JsonValue]
+```
+
+What a run's start records of the published version it plays: where its source came from and what it ran.
+
+### `short`
+
+*function* · `libraries/rollout-train/src/rollout_train/published.py`
+
+```python
+def short(version: str) -> str
+```
+
+A version's id, in a few characters.
+
+## `rollout_train.publishing`
+
+Importing an environment from git: fetched, stored, checked on Ray, recorded.
+
+### `checked_on_ray`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+async def checked_on_ray(jobs: str, entry_point: str, runtime_env: Mapping[str, JsonValue], *, within: float = CHECKING, every: float = 1.0) -> dict[str, Any]
+```
+
+Check an environment in a Ray job in its runtime environment (`report`, run by `python -m
+rollout_train.publishing check`), on the cluster whose job server is `jobs`: what it found (`findings`), what the
+environment says of itself (`described`), and the job's Python (`python`, and where it imported `rollout` and
+`rollout_train` from: `platform`). Raises `Refused` where the job's Python environment is not built, the entry
+point does not load, a check fails, or the job does not end within `within` seconds.
+
+### `entry_point_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+def entry_point_of(project: Mapping[str, Any], given: str | None) -> tuple[str, str]
+```
+
+The environment's name and entry point (`module:name`) of a project (its `[project]` table): `given` (an entry
+point, or its name in `GROUP`), else the one environment the project declares in `GROUP`. The name is the entry
+point's in `GROUP`, else the project's. Raises `Refused` where there is none, or several and none given.
+
+### `EXCLUDED`
+
+*constant* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+EXCLUDED = frozenset({'.git', '.venv', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.ipynb_checkpoints'})
+```
+
+Directories never packed.
+
+### `fetched`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+async def fetched(url: str, ref: str | None, into: Path) -> tuple[Path, str]
+```
+
+A shallow clone of `url` at `ref` (a branch or tag; a commit, where the server gives one by its id; none: the
+default branch) in `into`, and the commit it is. Raises `Refused` saying why it does not clone.
+
+### `GROUP`
+
+*constant* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+GROUP = 'rollout.environments'
+```
+
+The entry-point group a project declares its environments in.
+
+### `Importer`
+
+*class* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+class Importer
+```
+
+Where imports are made: the blob store their zips go to, the Ray cluster's job server their checks run on, and
+the directory clones are read in.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `blobs` | `Blobs` | required |  |
+| `jobs` | `str` | required |  |
+| `scratch` | `Path` | required |  |
+
+**Methods**
+
+- `@classmethod def of(cls, cluster: 'Cluster') -> 'Importer'` — A cluster's: its `[blobs]`, its `[ray] jobs`, and `imports` under its `[scratch]`.
+
+### `MARK`
+
+*constant* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+MARK = 'rollout-check: '
+```
+
+What the check's job begins the line it says what it found with.
+
+### `missing`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+def missing(dependencies: Sequence[str]) -> list[str]
+```
+
+The requirements of `dependencies` this Python does not satisfy: each whose distribution is not installed, is
+installed at a version its specifier leaves out, is asked for at a URL, or lacks what an extra asked for needs.
+Requirements whose markers do not hold here are left out. Raises `Refused` for one that is no requirement.
+
+### `packed`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+def packed(directory: Path) -> bytes
+```
+
+A project's files as a zip: every regular file under `directory` but those in `EXCLUDED` directories and
+compiled bytecode, by its path relative to `directory`, stored uncompressed in sorted order with fixed times and
+modes (executable or not). Raises `Refused` for a zip larger than `LARGEST`.
+
+### `Project`
+
+*class* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+class Project
+```
+
+A project as an import reads it: its directory, its environment's name and entry point, where its module is
+imported from (`""` or `"src"`), and its dependencies.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `directory` | `Path` | required |  |
+| `name` | `str` | required |  |
+| `entry_point` | `str` | required |  |
+| `root` | `str` | required |  |
+| `dependencies` | `tuple[str, ...]` | required |  |
+
+### `project_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+def project_of(clone: Path, subdirectory: str, given: str | None) -> Project
+```
+
+The project in a clone's `subdirectory` (empty: its root), with its environment's entry point (`given`, else
+the one it declares: `entry_point_of`). Raises `Refused` for a directory that is not in the clone or holds no
+`pyproject.toml`, a project with no entry point, or an entry point whose module is not in it.
+
+### `publish`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+async def publish(source: Source, *, versions: EnvironmentVersions, blobs: Blobs, jobs: str, scratch: Path, said: Said = _quiet, within: float = CHECKING) -> Published
+```
+
+Import an environment from git: fetch it, read it, pack it, store it, check it in a Ray job on the cluster
+whose job server is `jobs`, and record it (the module's docstring). `scratch` holds the clone while it is read.
+`said` is told each stage as it begins. Raises `Refused` saying why an import cannot be made.
+
+### `Published`
+
+*class* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+class Published
+```
+
+What an import made: the version, and whether it was recorded already (the same source imported before).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `version` | `EnvironmentVersion` | required |  |
+| `existing` | `bool` | required |  |
+
+### `Refused` {#rollout_trainpublishingrefused}
+
+*class* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+class Refused(ValueError)
+```
+
+An import that cannot be made, and why.
+
+### `report`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+def report(entry_point: str) -> dict[str, Any]
+```
+
+What the check's job says of an environment, imported here by its entry point: whether it loaded (and why not),
+the findings of `rollout_train.check.checked` and of an episode answered by a scripted model (where its program
+imports no tool set and declares no sandbox, which an import cannot serve), what it says of itself, and this
+Python and where it imported `rollout` and `rollout_train` from.
+
+### `runtime_env_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+def runtime_env_of(package: str, root: str, dependencies: Sequence[str]) -> dict[str, JsonValue]
+```
+
+The Ray runtime environment a version's code runs in: `package` (the zip, where Ray fetches it) as its
+`working_dir`; `root` (`src`, for a project that keeps its packages there) on `PYTHONPATH`, relative to that
+directory, which every process of the job starts in; and `dependencies` (those the platform does not hold) for uv
+to install over a copy of the platform's Python. Ray names that copy by the dependencies, so versions that need the
+same ones share it.
+
+### `Source`
+
+*class* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+class Source
+```
+
+What to import: a git URL; the branch, tag or commit (none: the default branch); the project's directory in
+the repository; its entry point (`module:name`, or its name in `GROUP`; none: the one it declares).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `url` | `str` | required |  |
+| `ref` | `str \| None` | `None` |  |
+| `subdirectory` | `str` | `''` |  |
+| `entry_point` | `str \| None` | `None` |  |
+
+### `stored` {#rollout_trainpublishingstored}
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+async def stored(blobs: Blobs, data: bytes) -> tuple[BlobReference, str]
+```
+
+Store a project's zip, and say where Ray fetches it as a runtime environment's `working_dir`: for a store that
+names copies of its blobs (`with_extension`: in S3, `s3://BUCKET/KEY.zip`), that; for a store of files, a `.zip`
+beside its blobs (`packages/VERSION.zip`), which whoever submits the job uploads. Raises `Refused` for a store Ray
+cannot be handed a blob of.
 
 ## `rollout_train.validation`
 
@@ -6847,6 +7274,9 @@ Implements `Blobs` in an S3 bucket.
 - `async def put(self, data: bytes, media_type: str) -> BlobReference`
 - `async def read(self, reference: BlobReference) -> bytes`
 - `async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None`
+- `async def with_extension(self, reference: BlobReference, extension: str) -> str` — The URI of a copy of a blob's object named by its key and `extension` (`s3://BUCKET/KEY.zip`), made inside
+  the bucket the first time it is asked for: for readers that tell an archive by its name, as Ray does a runtime
+  environment's `working_dir`. Raises `FileNotFoundError` where the store does not have the blob.
 
 ## `rollout_runpod`
 

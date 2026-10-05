@@ -25,7 +25,10 @@ rank 16 that shares the card. It needs no sandbox pool and no tool set.
 
 In the K3s cluster (deploy/chart/rollout), the launcher `gridworld` offers it with the same profile over the cluster's
 stores (`files/profiles/gridworld/qwen3-0.6b.toml`), submitting each run as a Ray job that asks for the GPU; the
-cluster config lists it under `[environments]`, in the platform's Python.
+cluster config lists it under `[environments]`, in the platform's Python. Its project declares its environment for an
+import from git (`[project.entry-points."rollout.environments"]`, [writing an environment others can
+import](../guide/publishing.md)): imported from this repository with the subdirectory `environments/gridworld`, it is
+the version `gridworld@VERSION`, which runs in the platform's Python too, since `rollout` is its only dependency.
 
 ## The game
 

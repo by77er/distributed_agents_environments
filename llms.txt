@@ -28,6 +28,7 @@ the test suite and a block tagged `py` does not. The API reference is generated 
 - [Testing](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers
 - [Deploying](docs/guide/deploying.md): the profile file and the `rollout` command
 - [The cluster config and run settings](docs/guide/cluster.md): providers, trainers, bridges, run settings, presets, validation
+- [Writing an environment others can import](docs/guide/publishing.md): the entry point, dependencies on the platform, what an import from git checks
 - [API reference](docs/guide/reference.md): every public name, by module, with signatures, fields and docstrings
 
 ## Architecture

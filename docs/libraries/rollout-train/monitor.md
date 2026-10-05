@@ -45,14 +45,17 @@ page draws each view from what it has read, and reads again only what the monito
 
 - **Topics.** Each thing a view shows is a topic (`rollout_train.monitor.stream`): `system` (where every run stands),
   `feeds`, `machines`, `launches`, `statistics`, `checkpoints`, `checkpoint-evals/ID`, `path/ID`, `environments`,
-  `environment/MODULE:NAME`, `evals`, `eval-subjects`, `history/checkpoint/ID`, `history/model/NAME`, `settings/RUN`,
-  `group/RUN/N`, `episode/RUN_ID`. The monitor reads a topic at most once a beat (1.5 seconds), whoever asks, and gives
+  `environment/MODULE:NAME` (a published one's `environment/NAME@VERSION`), `environment-versions`,
+  `environment-version/VERSION`, `imports`, `evals`, `eval-subjects`, `history/checkpoint/ID`, `history/model/NAME`,
+  `settings/RUN`, `group/RUN/N`, `episode/RUN_ID`. The monitor reads a topic at most once a beat (1.5 seconds), whoever
+  asks, and gives
   each reading a **version**, a hash of what it says (leaving out when it was read). Each beat it reads the ledger once
   for every topic watched (`System.one_reading`; a database ledger in one query, `read_all`).
 - **The stream.** `/api/stream?topic=…` is a stream of server-sent events: the version of each topic asked for at
   once, then a `version` event each time one changes. The page watches the topics of the place shown (always
   `system` and `feeds`; the launches on Runs and New run; a group, an episode, the statistics, the machines, the
-  environments and an environment, or the graph, as they are shown), and opens a new stream
+  environments (with the imports on their list) and an environment, or the graph, as they are shown), and opens a new
+  stream
   when it moves elsewhere. While nobody watches, the monitor reads nothing.
 - **ETags.** Each JSON answer carries its topic's version as its ETag. The page sends the version it has
   (`If-None-Match`), and the monitor answers 304, with nothing, when it is the same. An episode's lines are asked for
@@ -89,6 +92,7 @@ them ([rollouts](rollouts.md)), and the checkpoints. Each run keeps the rest in 
 | the registry | each run's id and name, and the bookmarks ([the registry](checkpoints.md#the-registry)) | what each run is called, and the bookmarks that name each checkpoint |
 | the heartbeats | each runner's, pool's, engine host's, launcher's and gateway's newest beat, with its recent beats' measurements (`rollout_train.presence`) | the machines and the roles on them (memory, accelerators, disk, places, pools, what each channel serves and how fast), whether a run is running or paused, which launchers are alive and what they offer |
 | the launches | the runs and evals asked for and how each goes (`rollout_train.launches`) | the launches on Runs and Evals, the New run form, a suite's Run this suite form, and each launcher's launches going |
+| the published environments | each version of an environment imported from git: its source, commit, entry point, blob, runtime environment, what it says of itself and its check (`rollout_train.published`) | the published environments on Environments, their pages, and the eval data a launch on one may name |
 | the sandboxes' leases | each pool's leases, by key (`rollout_train.sandboxes`) | each pool's leases on the Machines page: the episode each was acquired for, how long it has been held, its time limit |
 | `evaluations/` | each suite's versions, and each eval's subject (with the version it played) and results ([evals](evals.md)) | the Evals page, a suite's page, and the suites a checkpoint played |
 | the registry's suite names | the version each suite's name points to ([versions](evals.md#versions)) | which version a suite's page, its tile and the forms take as its newest |
@@ -161,8 +165,8 @@ so a reload stays there.
 | Evals | Eval | `#/eval/RUN` | the buttons its state allows, while it is not done ([pausing, resuming and stopping](#pausing-resuming-and-stopping)); who played (a checkpoint, or the base model), the suite and the version it played, who asked for it (by hand, or a run's schedule at a step), when it started; its share solved and mean reward (each environment's, for a suite of several), episodes played of those asked for, how long it took; and at each start of that version (by environment, for a suite of several), its episodes, how many solved and their mean reward. A run that plays one environment of an eval (`part_of`) shows its eval |
 | Evals | A checkpoint's or base model's evals | `#/evals/checkpoint/ID` (or the start of one), `#/evals/model/NAME` | what it is (a checkpoint's shortest id and bookmarks, its id opening its page, the run and step that made it; or the base model's name), its evals and suites counted; for a checkpoint, each version of a suite's score along its line ([scores along a line](#scores-along-a-line)); then every eval it has had ([a subject's history](#a-subjects-history)), a card for each version of a suite it played (suites by name, a suite's versions newest first, a suite's name opening its page): each environment's share solved where its episodes say (else its mean reward) over time, and its evals, newest first, each with its share solved and mean reward at each environment, episodes, who asked for it (by hand, or a run's schedule at a step), when it started and whether it is done, each opening the eval |
 | Evals | Suite | `#/evals/SUITE` | the version its name points to (another, once picked): its version, environment and its version, how its starts were chosen, rows, seeds, episodes per start, limits (for a suite of several environments, a table of them, one each), whether it is held out of training; an **Edit** form that saves its next version, adding and removing environments; for a suite of one environment, the subject that did best at that version; a **Run this suite** form ([evals](evals.md#made-edited-and-asked-for-from-the-page)); its launches and the evals playing it; every subject's episodes at every start, with totals: a column group for each version played, newest first and marked off from the next (a version picker shows one), within a version of several environments a column group for each environment with each subject's total there, a row for each start of the versions shown (struck through under a version that does not have it), and within a version a column per subject: the base model first, then each run's checkpoints under the run's name (those made outside a run together), runs in the order their checkpoints grew and within a run by depth, each column saying the checkpoint, what its weights are (`full`, or `over full` for an adapter over full weights), its step, its episodes per start (opening the eval) and whether a schedule asked for it; two subjects of one version compared at the starts both played |
-| Environments | Every environment | `#/environments` | every environment the system knows of ([environments](#environments)), by name: its `module:name`, whether a launcher alive offers it, the versions seen, its training runs and suites counted, and when a run last started on it; each opening its page |
-| Environments | Environment | `#/environment/MODULE:NAME` | its name and `module:name`, whether a launcher alive offers it, its version as it loads on the monitor's machine (or that it does not load there) and every version seen, what its results say (the reward range, whether they say solved, what a duration counts) and its curriculum (the generic one, or its own by class); **New run** (the new run's form with it chosen) and **New suite** (the new suite's form with it as the first entry); its rows, easiest first as it orders them, each with the groups and episodes its training runs played of it, the share solved, the mean reward and its eval starts (a row only its eval data has is marked eval only), and every row together; each list of its eval data and how many starts; the suites with a version that plays it (each version, the one its name points to marked); its training runs (state, version, groups, episodes, share solved, when started); every eval of such a suite, by who played it, with its score at this environment's entry; its newest check, each group with its rewards and whether every episode scored the same |
+| Environments | Every environment | `#/environments` | an **Import from git** form ([importing from git](#importing-from-git)); every environment the system knows of ([environments](#environments)), by name: its `module:name` (a published one's entry point), whether a launcher alive offers it, the versions seen, a published one's source and commit and what its check found, its training runs and suites counted, and when a run last started on it; each opening its page |
+| Environments | Environment | `#/environment/MODULE:NAME`, `#/environment/NAME@VERSION` | its name and `module:name` (a published one's source, commit and ref, entry point, version and when it was imported, and its import's check, each finding with what it said), whether a launcher alive offers it, its version as it loads on the monitor's machine (or that it does not load there) and every version seen, what its results say (the reward range, whether they say solved, what a duration counts) and its curriculum (the generic one, or its own by class); **New run** (the new run's form with it chosen) and **New suite** (the new suite's form with it as the first entry); its rows, easiest first as it orders them, each with the groups and episodes its training runs played of it, the share solved, the mean reward and its eval starts (a row only its eval data has is marked eval only), and every row together; each list of its eval data and how many starts; the suites with a version that plays it (each version, the one its name points to marked); its training runs (state, version, groups, episodes, share solved, when started); every eval of such a suite, by who played it, with its score at this environment's entry; its newest check, each group with its rewards and whether every episode scored the same |
 | Statistics | Across every training run | `#/statistics`, `#/statistics/SECTION` | the sections below, each run in its own color; evals and their parts are on Evals |
 
 Renaming on a run's page asks the monitor (`POST /api/rename`, `{"id", "name"}`), which renames it in the registry
@@ -176,18 +180,22 @@ monitor hears of the change through its stream.
 
 ## Environments
 
-The **Environments** page lists every environment the system knows of, by `module:name`
-(`rollout_train.monitor.environments`). It knows them from several sources, each a function from what the monitor
-read (the ledger's tables, the launchers alive, the registry's names) to what it saw of environments: the launchers
-alive that offer one, the runs started on one (training runs, evals and checks), and the suites whose versions play
-one. The list folds every source's word of an environment into one line: the versions seen (in training runs' starts
-and suites' entries; an eval's version is its suite's), whether a launcher alive offers it, its training runs, the
-suites with a version that plays it, and when a run last started on it. A source is one function added to
-`SOURCES`. `/api/environments` serves the list (topic `environments`); the pickers on the forms read it too.
+The **Environments** page lists every environment the system knows of, by `module:name`, and each published one by
+`NAME@VERSION` ([importing from git](#importing-from-git)) (`rollout_train.monitor.environments`). It knows them from
+several sources, each a function from what the monitor read (the ledger's tables, the launchers alive, the registry's
+names, the published versions) to what it saw of environments: the launchers alive that offer one, the runs started on
+one (training runs, evals and checks), the suites whose versions play one, and the published versions the ledger
+keeps. The list folds every source's word of an environment into one line: the versions seen (in training runs'
+starts and suites' entries; an eval's version is its suite's), whether a launcher alive offers it, its training runs,
+the suites with a version that plays it, when a run last started on it, and for a published one where its source came
+from (URL, ref, commit, subdirectory, entry point) and what its check found (`published`). A source is one function
+added to `SOURCES`. `/api/environments` serves the list (topic `environments`); the pickers on the forms read it too.
 
 An environment's page (`/api/environments/MODULE:NAME`, topic `environment/MODULE:NAME`; 404 for one neither known nor
 loading) imports the environment in the monitor's process, once, for what it says of itself: its version, description,
-rows, eval data and curriculum. Where it does not load there, the page says why, its rows are those its runs played
+rows, eval data and curriculum. A published one's page (`/api/environments/NAME@VERSION`) takes what it says of itself
+from its version's record, as its check in its own runtime environment found it, and adds its source and check
+(`published`). Where an environment does not load, the page says why, its rows are those its runs played
 (in the order first played), and its description is its newest run's start's. An environment of a project with an
 environment of its own, such as GSM8K (`rollout_verifiers.environments:gsm8k`, [verifiers
 environments](../../implementations/rollout-verifiers.md#gsm8k)), is listed from a launcher started in that project
@@ -206,6 +214,32 @@ its own rows and eval data. Beside that, from the ledger:
 The forms the page opens are the new run's (`#/runs/new?environment=MODULE:NAME` chooses it) and the new suite's,
 with it as the first entry. The suites' and the new run's forms read the same answer for an environment's rows and
 eval data, and say "does not load here" where it does not.
+
+### Importing from git
+
+**Import from git**, on the Environments page, imports an environment from a git repository
+([writing an environment others can import](../../guide/publishing.md)): its URL, a ref (a branch, a tag or a commit;
+empty for the default branch), the project's subdirectory (empty for the root) and its entry point (empty for the one
+its `pyproject.toml` declares). It posts them to `POST /api/environments/import` (`System.import_environment`,
+`rollout_train.publishing.publish`), which fetches the source at that ref, packs and stores it, checks it in a Ray job
+in its own runtime environment and records the version; it answers with the version (`version`, and `existing` where
+the same source was imported before: that version, not checked again), or 422 with why the import was refused (a source
+that does not clone, no `pyproject.toml`, no entry point, an entry point that does not load in its runtime environment,
+checks that fail), which the form says under its button. While the import goes, the button says its stage (fetching,
+reading, packing, storing, checking on Ray, recording), from `/api/environments/imports` (topic `imports`: the imports
+this monitor made since it started, newest first, each with its stage, when it began and ended, and the version it made
+or why it was refused). Once done, the page opens the version's page.
+
+The published versions are read at `/api/environments/versions` (topic `environment-versions`; with `importing`,
+whether this monitor imports) and one at `/api/environments/versions/VERSION`, by its id or `NAME@VERSION` (topic
+`environment-version/VERSION`; 404 for one the ledger does not keep).
+
+A monitor imports with the blob store, the Ray cluster's job server and the scratch directory of a cluster config
+(`rollout monitor WHERE --cluster [PATH or NAME]`, [the cluster config](../../guide/cluster.md);
+`rollout_train.publishing.Importer`), and records the versions beside the ledger it watches; one started without a
+cluster config imports nothing, says so (409), and its button is greyed. It reaches the job server as the launchers do
+(with the cluster's token where the cluster asks for one), and clones into `[scratch]/imports`, deleting each clone once
+it is read.
 
 ## Scores along a line
 
@@ -293,7 +327,9 @@ says, as `rollout_lora`'s do), the base models an eval may play with it (`models
 `--cluster` the models the cluster's inference providers of its engine's kind serve) and the settings a launch may
 change and their values in the profile (the trainer's
 settings, `trainer.start`, `trainer.bookmark`, `episodes_at_once`, each channel's `thinking_tokens` and
-`answer_tokens`, and the `evals.` settings), the environments, and how many runs it plays of how many it may.
+`answer_tokens`, and the `evals.` settings), the environments, and how many runs it plays of how many it may. A
+launcher with `--ray` offers the published environments too, each by `NAME@VERSION` beside those it names (and in
+`published`, with its source and commit), so the form lists them.
 
 **New run** (`#/runs/new`, from the Runs page) offers what the launchers alive offer: a profile and an environment
 (picked from those the monitor knows, by name with `module:name` under it; one no launcher alive offers cannot be
@@ -314,7 +350,8 @@ launcher alive offers the profile and every environment the run plays (its own a
 launch names in `environments`), the name is no other run's, every setting is the profile's, a trainer's or one every
 training run can change, the checkpoint is one, and the run says the evals it makes: a suite in `evals.suite`, null for
 none, or its profile's `[evals]`; a suite in the ledger, a version the suite has, or, where the environment loads on the
-monitor's machine, its eval data of that name) and appends it to the launches; a
+monitor's machine, its eval data of that name; for a published environment, the eval data its version recorded) and
+appends it to the launches; a
 refusal (409 or 404) is said under the button. With no launcher alive, the form says so and gives the command that
 starts one.
 
@@ -322,7 +359,9 @@ A launcher claims only a launch whose every environment it offers (one that name
 for an eval that names a base model (`model`), whose profile it offers that model with. It
 makes the run's directory under `--runs` (`NAME-ID`), and starts `rollout train` there with
 `--name` and each setting as `--set KEY=VALUE` (no evals as `--set evals.suite=""`, so that the profile's `[evals]` is
-not used), as a process of its own whose output goes to `train.log` in that directory, or, with `--ray`, as a Ray job. The launch's state
+not used), as a process of its own whose output goes to `train.log` in that directory, or, with `--ray`, as a Ray job;
+a run on a published environment is a Ray job in that version's runtime environment, whose start records the version
+(`published`: its name, id, source, ref, commit, subdirectory and entry point). The launch's state
 follows: `asked`, `claimed`, `running` (with the process), and `ended`, `failed` (with the end of its output) or
 `stopped`. **Stop** (`POST /api/launches/ID/stop`) cancels a launch not yet claimed at once; a running one is sent an
 interrupt, and the run stops as on Ctrl-C, at a group boundary. Once the run writes its start, its tile links to it.
@@ -408,8 +447,10 @@ the ledger, live and once it ended.
 beats and the roles on it), `environments()` (every environment the system knows), `environment(name)` (an
 environment's page: [environments](#environments)), `settings(run)` and `want(run, settings)`, `pause(run)`,
 `resume(run)`, `launches()`, `launch(asked)`, `stop(id)`, `rename(who, name)`, `bookmark(name, checkpoint)`,
-`unbookmark(name)` and `save_suite(name, body)`. `create_app(where)` serves them, the stream and the page; its routes
-are listed in `rollout_train.monitor.app`.
+`unbookmark(name)`, `save_suite(name, body)`, `environment_versions()`, `environment_version(reference)`,
+`import_environment(body)` and `imports()` (with `System(…, importer=Importer(blobs, jobs, scratch))`).
+`create_app(where, importer=…)` serves them, the stream and the page; its routes are listed in
+`rollout_train.monitor.app`.
 
 A group's stage is read from the records alone, so it is what a [loop](training.md) that started now would find:
 

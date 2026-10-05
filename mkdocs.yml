@@ -59,6 +59,7 @@ nav:
       - "Testing": guide/testing.md
       - "Deploying": guide/deploying.md
       - "The cluster config and run settings": guide/cluster.md
+      - "Writing an environment others can import": guide/publishing.md
       - "API reference": guide/reference.md
   - Architecture:
       - "Overview": architecture/overview.md

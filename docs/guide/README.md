@@ -22,6 +22,7 @@ tagged `py` shows a shape and is not run. Every profile in a `toml` block is loa
 | [Testing](testing.md) | test tasks and agents with a scripted model |
 | [Deploying](deploying.md) | describe engines, the trainer, the runner and tool sets in a profile; the `rollout` command |
 | [The cluster config and run settings](cluster.md) | describe a cluster's providers and trainers once; a run's settings, presets, and the check of a run |
+| [Writing an environment others can import](publishing.md) | publish an environment in a git repository: the entry point, its dependencies, what the import checks |
 | [API reference](reference.md) | look up any public name |
 
 Beyond the guide:

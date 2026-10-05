@@ -234,7 +234,7 @@ memory_gib = 48
 | `[trainers.NAME]` | `kind` (`module:name`), `gpus`, `colocate_with`, `models`, `segment_tokens`, `cost`, secret references | §2 |
 | `[sandboxes.KIND]` | `provider`, `python`, `size`, `cpus`, `memory_gib`, provider settings | One pool actor per kind (more with `pools = N`) |
 | `[tools.NAME]` | `url`, `connection` | |
-| `[environments."NAME"]` | `python = "platform"` or `project = PATH` | §4.6. Replaced by the environments table once environment publishing lands |
+| `[environments."NAME"]` | `python = "platform"` or `project = PATH` | §4.6. Launchers offer the published environments' versions beside these ([published environments, as built](#published-environments-as-built)) |
 | `[placement.ROLE]` | `resources` | Roles: `gateway`, `monitor`, `launcher`, `runners`, `pools`, `engines`, `trainers`, `workers`, `bridges` |
 | `[bridges."module:name"]` | `cpus`, `memory_gib` | Overrides a bridge's declared needs |
 
@@ -738,8 +738,8 @@ take an `Environment` now.
 - `python = "platform"`: the platform's own interpreter (Minecraft, the toy games). Same actor, same protocol; there is
   no in-process path.
 - `project = PATH`: `uv sync --frozen --project PATH` into the cache, keyed by `BUILD = sha256(uv.lock, pyproject.toml,
-  every source file)`. Once environment publishing lands, the source comes from the environment's blobs and `BUILD`
-  is its manifest hash, the version id; nothing else changes.
+  every source file)`. For a published environment, the source comes from its version's blob and `BUILD` is the
+  version's id ([published environments, as built](#published-environments-as-built)); nothing else changes.
 
 The worker actor, and the runner actors of a run on that environment, are started with
 `runtime_env={"py_executable": "[scratch]/pythons/BUILD/bin/python"}` (with `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0`, as
@@ -766,6 +766,44 @@ trainers and bridges never import an environment, so they stay in the platform's
   would exceed.
 - **Ray still places and supervises.** `py_executable` is a Ray runtime environment field: Ray starts the actor in the
   built interpreter, restarts it, and ends it with the job.
+
+### Published environments, as built
+
+Environments are published, and their code runs in Ray's own runtime environments; the environment worker above comes
+later, behind the same published versions ([writing an environment others can import](../guide/publishing.md),
+[importing from git](../libraries/rollout-train/monitor.md#importing-from-git)).
+
+- **Publish** (`rollout_train.publishing.publish`; the monitor's `POST /api/environments/import`): a shallow clone at a
+  ref (a branch, a tag or a commit), the project's `pyproject.toml` and its entry point (`module:name`, declared in the
+  entry-point group `rollout.environments`, or named), the project's directory packed into one zip (stored uncompressed,
+  sorted, with fixed times and modes, without `.git`, `.venv` and caches) and kept as a blob. The version's id is the
+  zip's SHA-256, so the same source is the same version and importing it again returns it. Versions are kept beside the
+  ledger (`rollout_train.published`: the `environment_versions` table of a database ledger, a file per version beside a
+  ledger of files), each with its name, source URL, ref, commit, subdirectory, entry point, blob, runtime environment,
+  what it says of itself and its check's findings.
+- **Resolve**: a launch names a version as `NAME@VERSION`, and the run's start records it (`published`: name, id,
+  source, ref, commit, subdirectory, entry point). Launchers on Ray offer every version the ledger keeps beside the
+  environments they name, so the New run form lists them; the profile is picked at launch, as for any environment.
+- **Run**: a run on a version is a Ray job with the version's `runtime_env`, so the run's process (its training loop
+  and runners) imports the environment from it. `working_dir` is the zip: a store in S3 hands Ray a copy of the blob's
+  object named `KEY.zip` (Ray tells an archive by its name, and each node reads `s3://` with the cluster's
+  credentials), a store of files a local `.zip` that the job's submitter uploads. `env_vars` puts `src` on
+  `PYTHONPATH` for a project that keeps its packages there. `uv` lists the project's dependencies the platform's Python
+  does not hold: Ray builds that Python on a node the first time a job there asks for the list, as a copy of the
+  platform's virtual environment with uv installing the list into it, and keeps it while its Ray cluster lives;
+  `rollout` and `rollout-train` are the platform's (`uv` is a dependency of `rollout-train`, so `python -m uv` runs in
+  the copy, which has no pip). A version whose dependencies the platform holds runs in the platform's Python, with
+  nothing built.
+- **Check**: before a version is recorded, a Ray job in its runtime environment imports the entry point and runs the
+  checks `rollout env check` runs without a model, and an episode answered by a scripted model; it says what the
+  environment says of itself, which the monitor shows for it, since the monitor's process does not import it.
+
+What the worker design adds over this: the environment's code in a process of its own per version, behind the protocol
+above, instead of in the run's process; an exact lock (`uv sync --frozen`) instead of dependencies installed over a copy
+of the platform's packages, where a dependency at another version than the platform's replaces the platform's in that
+copy; and a build of the size of the environment's own dependencies, where a copy of the platform's virtual environment
+costs that environment's size per dependency list and node. The worker reads the same versions: its `BUILD` is the
+version's id, and its source the version's blob.
 
 ## 5. The unified gateway
 
@@ -1328,3 +1366,8 @@ The user settled the design's open questions on 2026-10-04:
   launcher claims launches). The service keeps what docs/research/ledger-guarantees.md §10 lists: request ids for
   retries, the fence checked when an append is applied, `Fenced` as its own error, deciding reads from the primary,
   and change streams by commit position.
+- **Environments are published without a redeploy.** An environment's source is fetched at a commit, kept in the blob
+  store, and recorded as a version whose id is the source's hash; a run records the version it resolved in its start;
+  the environment's code runs in a Python environment of its own. That last step runs on Ray's runtime environments
+  (`working_dir` and `uv`) now, and on the environment worker later, behind the same versions
+  ([published environments, as built](#published-environments-as-built)).

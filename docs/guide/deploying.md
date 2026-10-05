@@ -195,6 +195,8 @@ names `ray`, else in this process, its scratch files under `directory/resharding
 and over every other run sharing its ledger (`rollout monitor` also takes the ledger itself: a database's URL or a
 ledger's directory). `rollout train --monitor http://HOST:PORT` writes where that page serves into the run's start, so
 that a monitor on another machine asks it for the run's episodes ([monitor](../libraries/rollout-train/monitor.md)).
+`rollout monitor RUN --cluster` imports environments from git, with the cluster config's blob store and Ray cluster
+([importing from git](../libraries/rollout-train/monitor.md#importing-from-git)).
 
 ## Runners
 
@@ -440,8 +442,10 @@ kind's implementation is the profile's channel's engine, played with the profile
 may change, with their values in the file (the trainer's settings, `trainer.start`, `trainer.bookmark`,
 `episodes_at_once`, each channel's `thinking_tokens` and `answer_tokens`, and `evals.suite`, `evals.every` and
 `evals.episodes`, which the monitor's **New run** form asks for as the run's evals); its environments; and how many runs
-it plays. A channel's budget left empty in the form, or set to `none` (`--set channels.policy.thinking_tokens=none`), is
-no budget, whatever the profile says.
+it plays. With `--ray` it offers every environment imported from git too ([writing an environment others can
+import](publishing.md)), by `NAME@VERSION`, and submits a run on one as a Ray job in that version's runtime
+environment. A channel's budget left empty in the form, or set to `none`
+(`--set channels.policy.thinking_tokens=none`), is no budget, whatever the profile says.
 A launch (`rollout_train.launches`) names a profile, an environment, the run's name, the checkpoint it starts from, a
 bookmark, `groups`, `groups_per_step`, `seed`, and the settings it changes, by dotted key (any `trainer.` key, one
 every training run can change, or one the profile offers). A training run's launch says the evals it makes
