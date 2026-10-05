@@ -1,6 +1,8 @@
 # The monitors' account: a monitor submits each run asked for from its page as a RayJob, reads how it goes (with Kueue,
 # why its Workload waits), and deletes it to stop it (`rollout_train.submitting.RayJobResources`), in the namespace the
-# chart is installed into. With Kueue, it also reads the queue (`rollout_train.monitor.queue`): the LocalQueue and the
+# chart is installed into; and reads that namespace's own labels, which `rollout cluster check` checks for its Pod
+# Security levels (`rollout_train.submitting.pod_security`). What a RayJob it makes may ask for is held by the
+# namespace's Pod Security level and by templates/admission.yaml. With Kueue, it also reads the queue (`rollout_train.monitor.queue`): the LocalQueue and the
 # Workloads in that namespace, and, cluster-wide, the chart's ClusterQueue and the order of its pending Workloads
 # (Kueue's visibility API).
 apiVersion: v1
@@ -21,6 +23,10 @@ rules:
   - apiGroups: [ray.io]
     resources: [rayjobs/status]
     verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [namespaces]
+    resourceNames: [{{ .Release.Namespace }}]  # (a Role grants this of its own namespace alone)
+    verbs: [get]
   {{- if .Values.kueue.enabled }}
   - apiGroups: [kueue.x-k8s.io]
     resources: [workloads]

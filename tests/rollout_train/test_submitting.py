@@ -314,6 +314,32 @@ async def test_a_run_on_kubernetes_is_a_rayjob_made_read_and_deleted_through_the
     assert gone.state == FAILED and "is gone" in str(gone.detail)
 
 
+async def test_the_namespaces_pod_security_labels_are_checked(tmp_path: Path) -> None:
+    from rollout_train.submitting import pod_security
+
+    cluster = a_cluster(tmp_path, kubernetes=True)
+    assert cluster.kubernetes is not None
+    labels: dict[str, str] = {}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/api/v1/namespaces/rollout":
+            return httpx.Response(404, json={"reason": "NotFound"})
+        return httpx.Response(200, json={"metadata": {"name": "rollout", "labels": labels}})
+
+    api = KubernetesApi(cluster.kubernetes.api, token="t", transport=httpx.MockTransport(answer))
+    unset = await pod_security(cluster.kubernetes, api)
+    assert len(unset) == 3 and "pod-security.kubernetes.io/enforce is not set, not baseline or restricted" in unset[0]
+    assert "kubectl label namespace rollout pod-security.kubernetes.io/enforce=baseline" in unset[0]
+    labels.update({"pod-security.kubernetes.io/enforce": "privileged", "pod-security.kubernetes.io/warn": "restricted",
+                   "pod-security.kubernetes.io/audit": "restricted"})  # fmt: skip
+    (weak,) = await pod_security(cluster.kubernetes, api)
+    assert "enforce is 'privileged'" in weak
+    labels["pod-security.kubernetes.io/enforce"] = "baseline"
+    assert await pod_security(cluster.kubernetes, api) == []
+    labels["pod-security.kubernetes.io/enforce"] = "restricted"
+    assert await pod_security(cluster.kubernetes, api) == []
+
+
 async def test_a_rayjob_kueue_holds_waits_for_admission_and_says_why(tmp_path: Path) -> None:
     cluster = a_cluster(tmp_path, kubernetes=True, queue=True)
     assert cluster.kubernetes is not None and cluster.kubernetes.queue == "runs"

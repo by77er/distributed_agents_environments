@@ -1,7 +1,7 @@
 # Prepare a Kubernetes cluster
 
 What a Kubernetes cluster needs before the chart can be installed: the KubeRay operator, GPUs that pods can use, a
-storage class and an ingress controller. This page is for whoever sets up the cluster, on one machine with K3s or on
+storage class, an ingress controller, and the namespace's Pod Security level. This page is for whoever sets up the cluster, on one machine with K3s or on
 an existing cluster.
 
 **Read first:** [Choose a setup](setups.md). **Next:** [Build the platform image](image.md).
@@ -23,6 +23,9 @@ an existing cluster.
   `Retain`, so that deleting a claim keeps its data ([volumes and backups](backups.md)).
 - **An ingress controller**, named by `ingress.className` (Traefik by default, which K3s includes).
 - **A registry the nodes pull from**, for the platform image ([build the platform image](image.md)).
+- **Kubernetes 1.30 or later**, for ValidatingAdmissionPolicies (the chart's `admission`), and a network plugin that
+  enforces NetworkPolicies (the chart's `networkPolicies`; K3s's does).
+- **The namespace labelled for Pod Security** ([below](#pod-security)).
 
 ## Install K3s on one machine
 
@@ -101,6 +104,39 @@ K3s.
     kubectl apply -f deploy/k3s/storage-class.yaml
     ```
 
+## Pod Security
+
+The namespace the chart is installed into enforces Pod Security's `baseline` level, and warns of and audits what
+`restricted` would refuse. Helm does not own the namespace, so label it yourself, once, when you make it:
+
+```bash
+kubectl create namespace rollout
+kubectl label namespace rollout pod-security.kubernetes.io/enforce=baseline \
+  pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/audit=restricted
+```
+
+`baseline` refuses a pod that is privileged, shares the node's network, processes or IPC, mounts a directory of the
+node (`hostPath`), takes a host port or adds capabilities, whoever makes it: a RayJob's pods too, which KubeRay makes
+from whatever the RayJob says. Every pod of the platform passes it, the GPU pods (`runtimeClassName: nvidia`), the Ray
+clusters' pods with what KubeRay adds to them (its autoscaler, its init containers), step-ca, Postgres, versitygw and
+cloudflared among them. None passes `restricted`, which also asks every container to run as a user other than root
+with no privilege escalation and its capabilities dropped: the platform's image runs as root.
+
+The chart's admission policy (`admission.enabled`, `templates/admission.yaml`) holds what `baseline` does not: it
+refuses a RayJob in the namespace that submits to a Ray cluster it does not make, exposes its Ray cluster outside the
+namespace, runs KubeRay's autoscaler (whose account may make pods), sets the options that bring in Secrets of their own,
+runs a pod under another account than the namespace's default, mounts another claim than the state volume, or reads a
+Secret a run is not given (each run's pods read the Secrets [a run's job is given](helm.md#what-each-role-is-given), and
+no other). The monitors' account may make RayJobs, and these two keep that from being a way onto the node or to every
+Secret.
+
+`rollout cluster check`, run in a monitor's pod (whose account may read its namespace), says when a label is missing
+or names another level:
+
+```bash
+kubectl -n rollout exec deploy/monitor-main -- rollout cluster check --role monitor
+```
+
 ## Check the cluster
 
 Each command should list what it asks for:
@@ -111,6 +147,7 @@ kubectl get crd rayclusters.ray.io rayjobs.ray.io
 kubectl get crd clusterqueues.kueue.x-k8s.io localqueues.kueue.x-k8s.io   # with Kueue
 kubectl get storageclass
 kubectl get ingressclass
+kubectl get namespace rollout --show-labels                                 # pod-security.kubernetes.io/…
 ```
 
 A GPU node whose `GPUS` column is empty has no device plugin running on it: see

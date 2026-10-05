@@ -86,10 +86,13 @@ policies](../../docs/deploy/helm.md#network-policies)). Every container has requ
 
 ### Install
 
-The Secrets are made outside the chart, once:
+The namespace is labelled for Pod Security, and the Secrets are made outside the chart, once
+([Pod Security](../../docs/deploy/kubernetes.md#pod-security)):
 
 ```sh
 kubectl create namespace rollout
+kubectl label namespace rollout pod-security.kubernetes.io/enforce=baseline \
+  pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/audit=restricted
 kubectl -n rollout create secret generic stores --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
   --from-literal=ROOT_ACCESS_KEY_ID=rollout --from-literal=ROOT_SECRET_ACCESS_KEY="$(openssl rand -hex 24)"
 kubectl -n rollout create secret generic gateway-keys --from-literal=gateway.keys="k1 $(openssl rand -hex 32)"

@@ -48,7 +48,9 @@ echo "http://localhost:8765/login?token=$token"
 
 `rollout cluster check` reads the cluster config and says which of its secrets and projects do not resolve on the
 node it runs on; `--role` checks only what one role reads, since each role's pod is given only that
-([what each role is given](../deploy/helm.md#what-each-role-is-given)). On Kubernetes, run it in the role's pod:
+([what each role is given](../deploy/helm.md#what-each-role-is-given)). On Kubernetes it also says whether the
+namespace is labelled for Pod Security ([Pod Security](../deploy/kubernetes.md#pod-security)), where its account may
+read the namespace (a monitor's may). Run it in the role's pod:
 
 ```bash
 kubectl -n rollout exec deploy/gateway -- rollout cluster check --role gateway

@@ -208,7 +208,8 @@ the ledger are reached through it: `checkpoints`, `registry` and `presets`.
 rollout cluster check                      # the config found as above: its providers, trainers, pools, environments,
                                            # and each secret or project that does not resolve here (exit 1 if any)
 rollout cluster check --cluster lab        # ~/.config/rollout/clusters/lab.toml
-rollout cluster check --role gateway       # only what the gateway reads (run, gateway, monitor, ledger, pool, reaper)
+rollout cluster check --role gateway       # only what the gateway reads (run, gateway, monitor, ledger, pool, reaper);
+                                           # in a pod with [kubernetes], also the namespace's Pod Security labels
 rollout checkpoints --cluster              # a command over a ledger, on the cluster's ledger
 rollout bookmark diamonds first:20 --cluster lab
 ```

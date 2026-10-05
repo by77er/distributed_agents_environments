@@ -185,6 +185,12 @@ ingress:
   className: traefik
   rayHost: ray.localhost      # Ray's dashboard; it asks for the cluster's token
 
+# What a RayJob in the namespace may ask for (templates/admission.yaml): a ValidatingAdmissionPolicy, bound to the
+# release's namespace, that refuses a RayJob whose pods are privileged, share the node's network, mount the node's
+# disk or another claim than the state volume, run under another account, or read a Secret a run is not given.
+admission:
+  enabled: true
+
 # Who may reach what in the namespace (templates/networkpolicies.yaml): nothing reaches a pod unless a policy lets it,
 # and each role is reached only by the roles that use it. `ingressController` is where the ingress controller's pods
 # are (what the Ingresses' traffic comes from), `kuberay` KubeRay's operator's namespace, `dns` the cluster's DNS.

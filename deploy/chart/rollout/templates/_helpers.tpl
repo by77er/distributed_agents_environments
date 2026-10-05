@@ -123,6 +123,29 @@ to:
       except: {{- toYaml .Values.networkPolicies.privateRanges | nindent 8 }}
 {{- end }}
 
+{{/* The checks `templates/admission.yaml` makes of each pod spec of a RayJob, at the CEL path given: a YAML list of
+`expression` and `message`, `@@` standing for the path. */}}
+{{- define "rollout.podChecks" -}}
+{{- $checks := list
+  (dict "message" "it shares none of the node's network, processes or IPC, and has no ephemeral containers"
+        "expression" "!(has(@@.hostNetwork) && @@.hostNetwork) && !(has(@@.hostPID) && @@.hostPID) && !(has(@@.hostIPC) && @@.hostIPC) && (!has(@@.ephemeralContainers) || size(@@.ephemeralContainers) == 0)")
+  (dict "message" "it runs under the namespace's default account"
+        "expression" "(!has(@@.serviceAccountName) || @@.serviceAccountName in ['', 'default']) && (!has(@@.serviceAccount) || @@.serviceAccount in ['', 'default'])")
+  (dict "message" "its volumes are ConfigMaps, empty directories, the downward API, projections and the run's Secrets and claims"
+        "expression" "!has(@@.volumes) || @@.volumes.all(v, !has(v.hostPath) && (has(v.configMap) || has(v.emptyDir) || has(v.downwardAPI) || has(v.projected) || (has(v.secret) && has(v.secret.secretName) && v.secret.secretName in variables.secrets) || (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName in variables.claims)) && (!has(v.projected) || !has(v.projected.sources) || v.projected.sources.all(s, !has(s.secret) || (has(s.secret.name) && s.secret.name in variables.secrets))))")
+}}
+{{- range $list, $said := dict "containers" "container" "initContainers" "init container" }}
+{{- $checks = append $checks (dict "message" (printf "no %s is privileged, adds capabilities or takes a host port" $said)
+      "expression" (printf "!has(@@.%s) || @@.%s.all(c, (!has(c.securityContext) || ((!has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0))) && (!has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)))" $list $list)) }}
+{{- $checks = append $checks (dict "message" (printf "no %s reads a Secret but the run's" $said)
+      "expression" (printf "!has(@@.%s) || @@.%s.all(c, (!has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef) || (has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name in variables.secrets))) && (!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef) || (has(e.secretRef.name) && e.secretRef.name in variables.secrets))))" $list $list)) }}
+{{- end }}
+{{- range $checks }}
+- message: {{ .message | quote }}
+  expression: {{ .expression | replace "@@" $ | quote }}
+{{- end }}
+{{- end }}
+
 {{/* The pod that publishes the root, the provisioner's key and the gateway's certificate (templates/step-ca.yaml), as a
 Job's or a CronJob's template: given Values, Release and step-ca's in-cluster url. */}}
 {{- define "rollout.pkiPod" -}}

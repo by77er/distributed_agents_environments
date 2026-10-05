@@ -817,6 +817,18 @@ def _check_cluster(given: str | None, role: str = "run") -> int:
                         ("sandbox pools", cluster.sandboxes), ("environments", cluster.environments)):  # fmt: skip
         print(f"  {kind}: {', '.join(names) or 'none'}")
     problems = inspect(cluster, role=role)
+    if cluster.kubernetes is not None:
+        import httpx
+
+        from rollout_train.submitting import KubernetesApi, pod_security
+
+        if (KubernetesApi.ACCOUNT / "token").exists():
+            try:
+                problems += asyncio.run(pod_security(cluster.kubernetes))
+            except (RuntimeError, httpx.HTTPError) as error:
+                print(f"  the namespace's Pod Security labels were not read: {error}")
+        else:
+            print("  the namespace's Pod Security labels were not read: no Kubernetes account here (run this in a pod)")
     for problem in problems:
         print(f"  {problem}")
     reads = "everything it names" if role == "run" else f"everything a {role} reads"
@@ -1108,7 +1120,9 @@ def main() -> None:
     clusters = commands.add_parser("cluster", help="work with the cluster config")
     cluster_commands = clusters.add_subparsers(dest="cluster_command", required=True)
     cluster_checking = cluster_commands.add_parser(
-        "check", help="read the cluster config, and say which of its secrets and projects do not resolve on this node"
+        "check",
+        help="read the cluster config, and say which of its secrets and projects do not resolve on this node "
+        "(and, in a pod, whether its namespace is labelled for Pod Security)",
     )
     cluster_checking.add_argument("--cluster", **_cluster_option("the cluster config"))
     cluster_checking.add_argument(

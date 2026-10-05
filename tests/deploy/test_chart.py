@@ -426,6 +426,103 @@ def test_nothing_reaches_a_pod_but_the_roles_that_use_it() -> None:
     assert not [each for each in plain if each["kind"] == "NetworkPolicy" and "Egress" in each["spec"]["policyTypes"]]
 
 
+BASELINE_VOLUMES = {"configMap", "emptyDir", "downwardAPI", "projected", "secret", "persistentVolumeClaim"}
+
+
+def refusals(pod: dict[str, Any], secrets: set[str], claims: set[str], accounts: tuple[str, ...] = ()) -> list[str]:
+    """Why the admission policy (templates/admission.yaml) and the namespace's `baseline` Pod Security would refuse a
+    pod, as this test reads them (the cluster's own checks are CEL and Pod Security Admission: docs/deploy/kubernetes.md
+    says how they were checked against K3s)."""
+    spec: Any = pod["spec"]
+    found: list[str] = []
+    found += [f"shares the node's {each}" for each in ("hostNetwork", "hostPID", "hostIPC") if spec.get(each)]
+    if spec.get("serviceAccountName") not in (None, "", "default", *accounts):
+        found.append(f"runs as {spec['serviceAccountName']}")
+    volumes: list[Any] = spec.get("volumes") or list[Any]()
+    for volume in volumes:
+        kinds = set(volume) - {"name"}
+        if not kinds <= BASELINE_VOLUMES:
+            found.append(f"mounts {kinds}")
+        if "secret" in volume and volume["secret"]["secretName"] not in secrets:
+            found.append(f"mounts the Secret {volume['secret']['secretName']}")
+        if "persistentVolumeClaim" in volume and volume["persistentVolumeClaim"]["claimName"] not in claims:
+            found.append(f"mounts the claim {volume['persistentVolumeClaim']['claimName']}")
+    containers: list[Any] = [*spec["containers"], *(spec.get("initContainers") or list[Any]())]
+    for container in containers:
+        context: Any = container.get("securityContext") or {}
+        capabilities: Any = context.get("capabilities") or {}
+        if context.get("privileged") or capabilities.get("add"):
+            found.append(f"{container['name']} is privileged")
+        ports: list[Any] = container.get("ports") or list[Any]()
+        if any(port.get("hostPort") for port in ports):
+            found.append(f"{container['name']} takes a host port")
+        env: list[Any] = container.get("env") or list[Any]()
+        sources: list[Any] = [each.get("valueFrom") or {} for each in env]
+        named: set[str] = {source["secretKeyRef"]["name"] for source in sources if "secretKeyRef" in source}
+        whole: list[Any] = container.get("envFrom") or list[Any]()
+        named |= {each["secretRef"]["name"] for each in whole if "secretRef" in each}
+        found += [f"{container['name']} reads the Secret {each}" for each in sorted(named - secrets)]
+    return found
+
+
+def test_runs_rayjobs_may_ask_for_no_more_than_a_run_is_given() -> None:
+    every = render("--set", "runpod.reaper=true", "--set", "stepCa.enabled=true", "--set", "tunnel.enabled=true")
+    (policy,) = [each for each in every if each["kind"] == "ValidatingAdmissionPolicy"]
+    (binding,) = [each for each in every if each["kind"] == "ValidatingAdmissionPolicyBinding"]
+    assert policy["metadata"]["name"] == binding["spec"]["policyName"] == "rollout-rayjobs"
+    assert binding["spec"]["validationActions"] == ["Deny"] and policy["spec"]["failurePolicy"] == "Fail"
+    assert binding["spec"]["matchResources"]["namespaceSelector"] == {
+        "matchLabels": {"kubernetes.io/metadata.name": "rollout"}
+    }  # (the release's namespace alone)
+    (rule,) = policy["spec"]["matchConstraints"]["resourceRules"]
+    assert (rule["apiGroups"], rule["resources"], rule["operations"]) == (["ray.io"], ["rayjobs"], ["CREATE", "UPDATE"])
+    variables = {each["name"]: each["expression"] for each in policy["spec"]["variables"]}
+    secrets = set(yaml.safe_load(variables["secrets"].replace("'", '"')))
+    claims = set(yaml.safe_load(variables["claims"].replace("'", '"')))
+    assert secrets == {
+        "stores",
+        "tinker",
+        "providers",
+        "ledger",
+        "runpod",
+        "r2",
+        "step-ca",
+        "gateway-tls",
+        "gateway-keys",
+    } and claims == {"state"}  # (never monitor-token, step-ca-password, tunnel, ray)
+    messages = " ".join(each["message"] for each in policy["spec"]["validations"])
+    for said in ("clusterSelector", "Ingress", "autoscaler", "default account", "network, processes or IPC",
+                 "privileged", "reads a Secret but the run's", "the run's Secrets and claims"):  # fmt: skip
+        assert said in messages, said
+    for where in ("the head's pod", "a worker's pod", "the submitter's pod"):
+        assert sum(each["message"].startswith(where) for each in policy["spec"]["validations"]) == 7, where
+    template = yaml.safe_load(config_of(every)["rayjob.yaml"])
+    launch = new_launch(Asked(TRAIN, "team 8", {"environment": "minecraft_team.environment:environment"}), "run_1")
+    made = made_from(template, launch, f"python -m rollout_train.jobs {launch.id}", {"env_vars": {}}, "rollout")
+    spec = made["spec"]
+    assert "clusterSelector" not in spec and "autoscalerOptions" not in spec["rayClusterSpec"]
+    for name, pod in workloads(every).items():  # (the platform's own: each passes, and each run's within its own)
+        own: set[str] = {secret.split(":")[0].rstrip("/") for secret in GIVEN[name]} if "rayjob" not in name else set()
+        allowed = secrets | own
+        allowed_claims = claims | {"data-step-ca-0"} if name.startswith("pki") else claims
+        accounts = () if "rayjob" in name else ("monitor", "pki")  # (the chart's own accounts, for its own pods)
+        assert refusals(pod, allowed, allowed_claims, accounts) == [], name
+    for pod in (spec["rayClusterSpec"]["headGroupSpec"]["template"], spec["submitterPodTemplate"]):
+        assert refusals(pod, secrets, claims) == []
+    assert not [each for each in render("--set", "admission.enabled=false") if "AdmissionPolicy" in each["kind"]]
+
+
+def test_the_monitors_may_read_their_namespaces_pod_security_labels(rendered: list[dict[str, Any]]) -> None:
+    (role,) = [each for each in rendered if each["kind"] == "Role" and each["metadata"]["name"] == "monitor"]
+    (namespaces,) = [rule for rule in role["rules"] if rule["resources"] == ["namespaces"]]
+    assert namespaces == {
+        "apiGroups": [""],
+        "resources": ["namespaces"],
+        "resourceNames": ["rollout"],
+        "verbs": ["get"],
+    }
+
+
 def test_with_kueue_runs_are_admitted_whole_through_a_queue_the_chart_makes(rendered: list[dict[str, Any]]) -> None:
     assert not [each for each in rendered if each["apiVersion"].startswith("kueue.x-k8s.io")]  # (off by default)
     on = render("--set", "kueue.enabled=true")

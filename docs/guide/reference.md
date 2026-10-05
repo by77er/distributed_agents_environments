@@ -26,7 +26,7 @@ do not edit by hand.
 - **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`HoursReached`](#hoursreached), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#run), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
 - **[`rollout_train.demand`](#rollout_traindemand)** — What a run's scheduled parts need, and the placement group that reserves them together. [`BRIDGE`](#bridge), [`bridge_asks`](#bridge_asks), [`Bundle`](#bundle), [`colocating`](#colocating), [`Demand`](#demand), [`demand`](#demand), [`HEADROOM`](#headroom), [`Part`](#part), [`placed`](#placed), [`played_channel`](#played_channel), [`Pod`](#rollout_traindemandpod), [`pods`](#pods), [`requested`](#requested), [`reserve`](#reserve), [`Resources`](#resources), [`SUBMITTER`](#submitter), [`TRAINER`](#trainer)
 - **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`checkpoints_at`](#checkpoints_at), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
-- **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
+- **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`POD_SECURITY`](#pod_security), [`pod_security`](#pod_security), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
 - **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: identities, leases, a run's pods, the reaper, the trainer's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`HELD`](#held), [`IDLE`](#idle), [`LeaseLost`](#leaselost), [`live`](#live), [`LivePod`](#livepod), [`needs_of`](#needs_of), [`pod_identity`](#pod_identity), [`pod_leases_of`](#pod_leases_of), [`PodLease`](#podlease), [`PodLeases`](#podleases), [`PodNeed`](#podneed), [`Pods`](#pods), [`PodsDidNotStart`](#podsdidnotstart), [`PodTime`](#podtime), [`reap`](#reap), [`RemoteTrainer`](#remotetrainer), [`STARTING`](#starting), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
@@ -5703,6 +5703,29 @@ account's token and CA (by default the pod's own), over `transport` where given 
 - `async def read(self, path: str) -> dict[str, Any] | None` — What the API server answers at `path` (`/apis/GROUP/VERSION/...`): none where it is not found. Raises
   `RuntimeError` for any other refusal (a resource the account may not read, an API that is not served).
 - `async def delete(self, namespace: str, name: str) -> None`
+
+### `POD_SECURITY`
+
+*constant* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+POD_SECURITY = {'enforce': ('baseline', 'restricted'), 'warn': ('restricted',), 'audit': ('restricted',)}
+```
+
+The Pod Security Admission levels the release's namespace is labelled with (`pod-security.kubernetes.io/MODE`): it
+enforces `baseline` (every pod of the platform passes it), and warns of and audits what `restricted` would refuse
+(docs/deploy/kubernetes.md#pod-security).
+
+### `pod_security`
+
+*function* · `libraries/rollout-train/src/rollout_train/submitting.py`
+
+```python
+async def pod_security(section: KubernetesSection, api: KubernetesApi | None = None) -> list[str]
+```
+
+What is wrong with the Pod Security labels of `section`'s namespace, in words (`POD_SECURITY`): each label that
+is missing or names another level. Raises `RuntimeError` where the namespace cannot be read.
 
 ### `RayJobResources`
 

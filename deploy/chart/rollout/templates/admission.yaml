@@ -1,0 +1,83 @@
+# What a RayJob in the release's namespace may ask for (`admission.enabled`): a ValidatingAdmissionPolicy, bound to the
+# namespace alone, that refuses a RayJob whose pods could reach past what a run is given. The monitors' account may make
+# RayJobs (templates/rbac.yaml), and KubeRay makes whatever pods a RayJob describes, so without it that account could
+# run a privileged pod, mount the node's disk, or read any Secret of the namespace. A run's RayJob (files/rayjob.yaml,
+# filled in by `rollout_train.submitting.rendered`) passes it. Its pods, like every pod of the namespace, must also pass
+# the namespace's Pod Security level (docs/deploy/kubernetes.md#pod-security).
+#
+# A RayJob is refused where it:
+# - submits to a Ray cluster it does not make (`clusterSelector`), or makes none;
+# - exposes its Ray cluster outside the namespace's Services (an Ingress, a Service of another type), runs KubeRay's
+#   autoscaler (whose account KubeRay lets make pods, which could mount any Secret), or sets the options that bring in
+#   Secrets or volumes of their own (the autoscaler's, GCS fault tolerance's, TLS', the history server's, a token
+#   Secret of its own);
+# - has a pod (its head's, its workers', its submitter's) that runs under another account than the namespace's
+#   default, shares the node's network, processes or IPC, mounts a volume of a kind other than a ConfigMap, an empty
+#   directory, the downward API, a projection, a Secret of `secrets` or a claim of `claims`, or has a container that is
+#   privileged, adds capabilities, takes a host port, or reads a Secret but those of `secrets`.
+{{- if .Values.admission.enabled }}
+{{- $secrets := list .Values.secrets.stores .Values.secrets.tinker .Values.secrets.providers .Values.secrets.ledger .Values.secrets.runpod .Values.secrets.r2 .Values.secrets.stepCa .Values.secrets.gatewayTls .Values.secrets.gatewayKeys }}
+{{- $claims := list .Values.state.claim }}
+{{- $quoted := list }}
+{{- range $secrets }}{{ $quoted = append $quoted (printf "'%s'" .) }}{{ end }}
+{{- $claimed := list }}
+{{- range $claims }}{{ $claimed = append $claimed (printf "'%s'" .) }}{{ end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-rayjobs
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [ray.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [rayjobs]
+  variables:
+    - name: secrets
+      expression: "[{{ join ", " $quoted }}]"
+    - name: claims
+      expression: "[{{ join ", " $claimed }}]"
+  validations:
+    - expression: "!has(object.spec.clusterSelector) || size(object.spec.clusterSelector) == 0"
+      message: a run's RayJob makes a Ray cluster of its own (no clusterSelector)
+    - expression: "has(object.spec.rayClusterSpec)"
+      message: a run's RayJob makes a Ray cluster of its own (rayClusterSpec)
+    - expression: >-
+        (!has(object.spec.rayClusterSpec.enableInTreeAutoscaling) || !object.spec.rayClusterSpec.enableInTreeAutoscaling)
+        && !has(object.spec.rayClusterSpec.autoscalerOptions) && !has(object.spec.rayClusterSpec.gcsFaultToleranceOptions)
+        && !has(object.spec.rayClusterSpec.tlsOptions) && !has(object.spec.rayClusterSpec.historyServerOptions)
+        && (!has(object.spec.rayClusterSpec.authOptions) || !has(object.spec.rayClusterSpec.authOptions.secretName))
+      message: a run's RayJob runs no autoscaler (whose account may make pods) and sets no GCS fault tolerance, TLS, history server or token Secret options
+    - expression: >-
+        (!has(object.spec.rayClusterSpec.headGroupSpec.enableIngress) || !object.spec.rayClusterSpec.headGroupSpec.enableIngress)
+        && (!has(object.spec.rayClusterSpec.headGroupSpec.serviceType) || object.spec.rayClusterSpec.headGroupSpec.serviceType == 'ClusterIP')
+        && !has(object.spec.rayClusterSpec.headGroupSpec.headService)
+      message: a run's Ray cluster is reached only inside the namespace (no Ingress, no Service of another type)
+    {{- range $where, $path := dict "head" "object.spec.rayClusterSpec.headGroupSpec.template.spec" "submitter" "object.spec.submitterPodTemplate.spec" }}
+    {{- $guard := ternary "!has(object.spec.submitterPodTemplate) || " "" (eq $where "submitter") }}
+    {{- range $check := include "rollout.podChecks" $path | fromYamlArray }}
+    - expression: {{ printf "%s(%s)" $guard $check.expression | quote }}
+      message: {{ printf "the %s's pod: %s" $where $check.message | quote }}
+    {{- end }}
+    {{- end }}
+    {{- range $check := include "rollout.podChecks" "g.template.spec" | fromYamlArray }}
+    - expression: {{ printf "!has(object.spec.rayClusterSpec.workerGroupSpecs) || object.spec.rayClusterSpec.workerGroupSpecs.all(g, %s)" $check.expression | quote }}
+      message: {{ printf "a worker's pod: %s" $check.message | quote }}
+    {{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-rayjobs
+  labels: {{- include "rollout.labels" . | nindent 4 }}
+spec:
+  policyName: {{ .Release.Namespace }}-rayjobs
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: {{ .Release.Namespace }}}
+{{- end }}

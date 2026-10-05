@@ -53,9 +53,12 @@ By role, in the namespace it is installed into (these pages use `rollout`):
 - **Kueue's queue** (with `kueue.enabled`): a ResourceFlavor, a ClusterQueue with `kueue.quota` and a LocalQueue in the
   namespace (`templates/kueue.yaml`), [below](#kueue).
 - **The monitors' account.** A ServiceAccount `monitor` with a Role that may create, get, list, watch and delete
-  `rayjobs`; with Kueue, also get, list and watch `workloads` and get the chart's LocalQueue, and a ClusterRole
+  `rayjobs`, and get its own namespace (whose Pod Security labels `rollout cluster check` reads); with Kueue, also get, list and watch `workloads` and get the chart's LocalQueue, and a ClusterRole
   (`NAMESPACE-monitor`) that may get the chart's ClusterQueue and its pending Workloads through Kueue's visibility API
   (`templates/rbac.yaml`, [what the monitor shows](#what-the-monitor-shows)).
+- **The admission policy** (with `admission.enabled`, the default): a ValidatingAdmissionPolicy and its binding,
+  `NAMESPACE-rayjobs`, bound to the release's namespace, which refuses a RayJob that asks for more than a run is
+  given ([Pod Security](kubernetes.md#pod-security)). Its pods also meet the namespace's Pod Security level.
 - **The presets.** A hook Job, `presets`, saves `files/presets/*.toml` beside the ledger after every install and
   upgrade (`rollout preset load /etc/rollout/presets --cluster`), a new version only where a preset's newest says
   otherwise.
@@ -96,6 +99,7 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `monitors.NAME.ingress`, `.host`, `.hosts` | `false`, `monitor.localhost`, none | Whether a monitor has an Ingress, its host, and more names the monitor answers under (beside `localhost`, `127.0.0.1` and its Service's names) |
 | `secrets.monitor` | `monitor-token` | The monitors' token (`ROLLOUT_MONITOR_TOKEN`), which the chart makes where it is missing |
 | `ingress.className`, `ingress.rayHost` | `traefik`, `ray.localhost` | The ingress controller, and the host of Ray's dashboard |
+| `admission.enabled` | `true` | The admission policy that holds what a RayJob in the namespace may ask for ([Pod Security](kubernetes.md#pod-security)) |
 | `networkPolicies.enabled`, `.egress` | `true`, `true` | The namespace's NetworkPolicies, and the egress limits of the long-lived Ray cluster's workers and the sandbox pools ([network policies](#network-policies)) |
 | `networkPolicies.ingressController`, `.kuberay`, `.dns` | K3s's Traefik in `kube-system`, `kuberay`, K3s's CoreDNS | Where the ingress controller, KubeRay's operator and the cluster's DNS run |
 
@@ -174,10 +178,12 @@ The chart reads the Secrets below and makes none of them, so that uninstalling t
 The one it makes is the monitors' token, `monitor-token`, where it is missing, and it keeps that one when it is
 uninstalled ([opening the monitor](access.md#opening-the-monitor)). Make the others once, before the first install:
 
-1. The namespace:
+1. The namespace, labelled for Pod Security ([Pod Security](kubernetes.md#pod-security)):
 
     ```bash
     kubectl create namespace rollout
+    kubectl label namespace rollout pod-security.kubernetes.io/enforce=baseline \
+      pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/audit=restricted
     ```
 
 2. **`stores`**: the Postgres password and the S3 store's root keys. Postgres reads its password only when it first

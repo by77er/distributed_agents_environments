@@ -57,6 +57,7 @@ from rollout_train.registry import registry_of
 from rollout_train.run_settings import RunSettings
 
 __all__ = [
+    "POD_SECURITY",
     "Backend",
     "JobState",
     "KubernetesApi",
@@ -68,6 +69,7 @@ __all__ = [
     "entrypoint_of",
     "followed",
     "job_name",
+    "pod_security",
     "rendered",
     "runtime_env_of",
     "sized",
@@ -432,6 +434,30 @@ def sized(cluster: Mapping[str, Any], asked: Demand) -> dict[str, Any]:
     if groups:
         made["workerGroupSpecs"] = groups
     return made
+
+
+POD_SECURITY = {"enforce": ("baseline", "restricted"), "warn": ("restricted",), "audit": ("restricted",)}
+"""The Pod Security Admission levels the release's namespace is labelled with (`pod-security.kubernetes.io/MODE`): it
+enforces `baseline` (every pod of the platform passes it), and warns of and audits what `restricted` would refuse
+(docs/deploy/kubernetes.md#pod-security)."""
+
+
+async def pod_security(section: KubernetesSection, api: KubernetesApi | None = None) -> list[str]:
+    """What is wrong with the Pod Security labels of `section`'s namespace, in words (`POD_SECURITY`): each label that
+    is missing or names another level. Raises `RuntimeError` where the namespace cannot be read."""
+    namespace = section.namespace
+    found = await (api or KubernetesApi(section.api)).read(f"/api/v1/namespaces/{namespace}")
+    if found is None:
+        raise RuntimeError(f"there is no namespace {namespace}")
+    labels: Any = dict(found.get("metadata") or {}).get("labels") or {}
+    problems: list[str] = []
+    for mode, levels in POD_SECURITY.items():
+        key = f"pod-security.kubernetes.io/{mode}"
+        if labels.get(key) not in levels:
+            said = f"is {labels[key]!r}" if key in labels else "is not set"
+            problems.append(f"namespace {namespace}: {key} {said}, not {' or '.join(levels)} "
+                            f"(kubectl label namespace {namespace} {key}={levels[0]})")  # fmt: skip
+    return problems
 
 
 class RayJobResources:
