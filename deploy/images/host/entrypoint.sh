@@ -32,7 +32,8 @@ if [ "${ROLLOUT_SLEEP_VLLM:-}" = 1 ]; then
 fi
 
 start certificates /opt/rollout/bin/pki.sh renew
-start envoy envoy --config-path "${ENVOY_CONFIG:-/etc/envoy/envoy.yaml}" --log-level "${ENVOY_LOG_LEVEL:-warn}"
+start envoy envoy --config-path "${ENVOY_CONFIG:-/etc/envoy/envoy.yaml}" --log-level "${ENVOY_LOG_LEVEL:-warn}" \
+    --concurrency "${ENVOY_CONCURRENCY:-4}" # (by default Envoy runs a worker per hardware thread the machine has, not the pod)
 start vllm vllm serve "$ROLLOUT_MODEL" --host 127.0.0.1 --port 8000 \
     --enable-lora --max-lora-rank "${VLLM_MAX_LORA_RANK:-32}" "${lora_options[@]}" "${sleeping[@]}" \
     --logprobs-mode processed_logprobs "${vllm_options[@]}"

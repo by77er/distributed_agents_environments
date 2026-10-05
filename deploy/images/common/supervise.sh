@@ -2,6 +2,10 @@
 # What both pods' entrypoints share: start each of a pod's processes, and end them all when any one ends, so that the
 # container exits and RunPod starts it again with nothing half running. Sourced by an entrypoint.
 
+# As many open files as the container may have: a machine's default soft limit can be too few for Envoy, vLLM and
+# their connections.
+ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+
 children=()
 
 start() { # start NAME COMMAND...: run COMMAND in the background, its output prefixed with NAME

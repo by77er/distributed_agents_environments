@@ -18,7 +18,8 @@ unset STEP_TOKEN # (used, and good for nothing more: no other process sees it)
 export HF_HOME=${HF_HOME:-/workspace/huggingface}
 
 start certificates /opt/rollout/bin/pki.sh renew
-start envoy envoy --config-path "${ENVOY_CONFIG:-/etc/envoy/envoy.yaml}" --log-level "${ENVOY_LOG_LEVEL:-warn}"
+start envoy envoy --config-path "${ENVOY_CONFIG:-/etc/envoy/envoy.yaml}" --log-level "${ENVOY_LOG_LEVEL:-warn}" \
+    --concurrency "${ENVOY_CONCURRENCY:-4}" # (by default Envoy runs a worker per hardware thread the machine has, not the pod)
 start trainer /opt/rollout/venv/bin/python -m rollout_train.pods.training
 
 supervise
