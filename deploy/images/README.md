@@ -67,4 +67,5 @@ and a `step ca renew --daemon` beside the gateway.
 | `SYSTEM_ROOTS` | The system's root certificates, which step-ca's TLS is checked by with `STEP_CA_TRUST=system` (default `/etc/ssl/certs/ca-certificates.crt`) |
 | `ENVOY_CONFIG` | Another Envoy configuration (default `/etc/envoy/envoy.yaml`) |
 | `ENVOY_LOG_LEVEL` | Envoy's log level (default `warn`); its access log is always on |
+| `ENVOY_CONCURRENCY` | Envoy's worker threads (default 4): left to itself, Envoy runs one per hardware thread of the machine, not of the pod |
 | `HF_HOME` | Where models are downloaded (default `/workspace/huggingface`); `HF_TOKEN` for a gated model |
