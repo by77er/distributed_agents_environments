@@ -171,6 +171,7 @@ nav:
       - "Ledger guarantees": research/ledger-guarantees.md
       - "The checkpoint graph": research/policy-dag.md
       - "Curricula": research/curricula.md
+      - "Minecraft rewards": research/minecraft-rewards.md
       - "SFT datasets": research/sft-datasets.md
       - "Thinking Machines' API": research/thinking-machines.md
       - "Prime Intellect's verifiers": research/prime-compat.md

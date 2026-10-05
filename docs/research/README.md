@@ -28,6 +28,9 @@ pages are the reference; a design note never overrides them.
   distillation, shared trainers and their queues. The monitor's view of the graph that exists is built.
 - [Curricula](curricula.md), **proposed**: building training curricula and frozen evaluation suites from a run's data.
   `Curriculum`, suites and evals are built.
+- [Minecraft rewards](minecraft-rewards.md), **built**: the noise and coarseness of curriculum-9's rewards, measured,
+  and the reward from 0 to 1 designed from them: half for solving, half for progress along the task's path, no speed
+  by default; replayed over the run's episodes.
 - [SFT datasets](sft-datasets.md), **built**: datasets made by rejection sampling from a run's episodes, the rules
   measured on one ledger, and the one recommended.
 

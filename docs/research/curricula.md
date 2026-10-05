@@ -111,7 +111,8 @@ For row *i*, when a row is drawn while the newest checkpoint is at depth *v*:
   unsolved episodes, which is what DAPO's filter keeps. It is learnability p(1−p) corrected for groups of four, and
   for how much is known.
 - **Partial credit.** d_i is the age-weighted share of the row's groups in which every episode had the same solved
-  outcome but task rewards differed (steps of a chain, diamonds beyond the threshold). Those groups still train.
+  outcome but task rewards differed (steps of a task's path: [Minecraft rewards](minecraft-rewards.md)). Those
+  groups still train.
 - **Weight.** w_i = m_i + λ·d_i, with λ = 0.25: a group with partial credit only is worth a quarter of a group
   with mixed outcomes.
 - **Parked rows.** A row with m_i < 0.15 and d_i = 0 is parked. Parked rows share a fixed 5% of draws, spread
@@ -158,17 +159,16 @@ do it with the way, which is the reverse curriculum's rule (move the start back 
   from a world that lacks something (no trees).
 - **No signal: unsolved.** Parked (5% shared). It comes back on its own as evidence ages (H) or as a twin succeeds.
   For an unguided row its guided twin is the hint; for a guided row the next easier kit is the nearer start.
-- **No signal: always solved.** Parked too. The speed bonus still makes such groups train; that is the algorithm's
-  business, not the curriculum's.
+- **No signal: always solved.** Parked too. A tiebreak (`advantage.tiebreak`, off by default) makes such groups
+  train; that is the algorithm's business, not the curriculum's.
 - **Wrong evidence.** The fold takes a filter (proposed, in the curriculum record): results to ignore, by rows and
   before a time. That drops the crafting rows' results from before the harness fix.
 
 ### Outside the curriculum
 
-- **Reward scale.** Advantages are not divided by the group's spread, so a row's reward scale weighs its groups in
-  the step: diamond counts reach 28 in a group, a chain's steps up to its total weight. A row's rewards divided by
-  its cap (the diamonds laid out, the chain's total, the milestone's weight) would make rows count alike. That is
-  a change to the algorithm, and it interacts with the curriculum's weights.
+- **Reward scale.** Advantages are not divided by the group's spread. Every Minecraft row scores from 0 to 1, half
+  for solving and half for progress ([Minecraft rewards](minecraft-rewards.md)), so rows weigh in a step by how
+  their outcomes differ, not by how many diamonds there were to find.
 - **Cost.** Rows differ in budget from 3 to 66 game minutes, and a step takes at most 384 segments, so a long
   group's segments are thinned. Dividing w_i by the square root of a row's expected wall time would favour cheap
   signal. It is untested; record the times first.
