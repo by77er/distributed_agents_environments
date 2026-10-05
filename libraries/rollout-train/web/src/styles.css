@@ -2,7 +2,7 @@
     --ground: #f3f4f1; --panel: #ffffff; --raised: #f7f8f6; --line: #e1e3de; --line-strong: #c9ccc4; --grid: rgba(16, 24, 20, .035);
     --ink: #13171a; --quiet: #5b636b; --faint: #949b9f; --code: #f1f2ef;
     --accent: #0b8a7c; --accent-soft: #e3f3f0; --good: #12823f; --good-soft: #e4f3ea; --bad: #c8331f; --bad-soft: #fbe9e6;
-    --warm: #c26a06; --warm-soft: #fbf0e1; --violet: #6345c2; --violet-soft: #eeeafa;
+    --warm: #c26a06; --warm-soft: #fbf0e1; --violet: #6345c2; --violet-soft: #eeeafa; --gold: #a87b00; --gold-soft: #f7efd4;
     --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4; --series-6: #008300;
     --series-7: #4a3aa7; --series-8: #e34948;
     --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -13,7 +13,8 @@
       --ground: #0c0e10; --panel: #13161a; --raised: #191d22; --line: #242a31; --line-strong: #343c45; --grid: rgba(255, 255, 255, .025);
       --ink: #e6e9ec; --quiet: #9aa3ad; --faint: #5d6772; --code: #0e1114;
       --accent: #33c7b0; --accent-soft: #0f2c28; --good: #4cd98a; --good-soft: #0f2618; --bad: #f2766b; --bad-soft: #301513;
-      --warm: #f2b63c; --warm-soft: #30250f; --violet: #a28bf7; --violet-soft: #221b38; color-scheme: dark;
+      --warm: #f2b63c; --warm-soft: #30250f; --violet: #a28bf7; --violet-soft: #221b38; --gold: #f0c84a; --gold-soft: #2e2710;
+      color-scheme: dark;
       --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181; --series-6: #008300;
       --series-7: #9085e9; --series-8: #e66767;
     }
@@ -138,6 +139,7 @@
           min-width: 0; align-content: start; transition: border-color .12s, box-shadow .12s; }
   a.tile:hover { border-color: var(--line-strong); box-shadow: 4px 4px 0 var(--line); }
   .tile.rail { box-shadow: inset 3px 0 0 var(--faint); padding-left: 19px; }
+  .tile.rail.gold { box-shadow: inset 3px 0 0 var(--gold); background: var(--gold-soft); } .t-gold { color: var(--gold); }
   .tile.rail.good { box-shadow: inset 3px 0 0 var(--good); } .tile.rail.bad { box-shadow: inset 3px 0 0 var(--bad); }
   .tile.rail.accent { box-shadow: inset 3px 0 0 var(--accent); } .tile.rail.violet { box-shadow: inset 3px 0 0 var(--violet); }
   .tile.rail.warm { box-shadow: inset 3px 0 0 var(--warm); }

@@ -8,7 +8,7 @@ import { useEvals, useKnown, useLaunches, useOffers, useSystem } from "../api/qu
 import type { EvalSuite, SuiteEntry, SuiteVersion } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
 import { anySolved, Played, shareOf, shareText, startName, startShare, type Subject, subjectText, SuiteMatrix } from "../components/evals";
-import { LaunchList } from "../components/launches";
+import { Starting } from "../components/launches";
 import { PlayForm } from "../components/play";
 import { SuiteForm } from "../components/suites";
 import { Card, Empty, Head, Kpi, Kpis, Spec, Specs, Table } from "../components/ui";
@@ -57,7 +57,7 @@ export function Suite({ name }: { name: string }) {
         <Kpi label="Playing" value={String(playing.length)} note={playing.map(each => each.name).join(", ")} />
       </Kpis>
       {offers ? <PlayForm suite={suite} suites={evals.suites} offers={offers} system={system} title="Run this suite" /> : null}
-      {launches.length ? <LaunchList launches={launches} system={system} /> : null}
+      <Starting launches={launches} system={system} titled />
       {playing.length ? (
         <Card title="Playing now">
           <Table

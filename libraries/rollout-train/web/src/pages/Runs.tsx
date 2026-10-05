@@ -1,16 +1,17 @@
-// Every run of the ledger, running ones first, each with how it is going; and the episodes no run asked for.
+// Every run of the ledger, those asked for and not yet started first, each with how it is going and what was asked
+// of it; and the episodes no run asked for.
 
 import { memo } from "react";
 import { Link } from "react-router-dom";
 import { useFeeds, useKnown, useLaunches, useSystem } from "../api/queries";
-import type { Run } from "../api/types";
+import type { Launch, Run } from "../api/types";
 import { Spark } from "../components/charts";
 import { Card, Empty, Head, Mark, Spec, Specs, Tile } from "../components/ui";
 import { clock, figure, mean } from "../lib/format";
 import { episodeReward, nameOf, reported, runKind, slotRewards, stateKind } from "../lib/model";
 import { Marks } from "../components/checkpoints";
 import { episodePlace, launchPlace, runPlace } from "../lib/places";
-import { LaunchList } from "../components/launches";
+import { Asked, Starting, launchesByRun } from "../components/launches";
 import { RunDot, running, Wrote } from "../layout/runs";
 
 export function Runs() {
@@ -21,6 +22,7 @@ export function Runs() {
   const others = (feeds ?? []).filter(run => !run.labels.run);
   const runs = system.runs.filter(run => run.kind !== "eval");  // (evals are on their own page)
   const launches = (launched?.launches ?? []).filter(each => each.asked.kind !== "eval");
+  const byRun = launchesByRun(launches);
   const states = (["running", "paused", "idle", "finished", "stopped", "failed", "lost", "ended"] as const).map(name => [name, runs.filter(run => run.state === name).length] as const).filter(([, count]) => count);
   return (
     <>
@@ -31,14 +33,18 @@ export function Runs() {
           </Specs>
         ) : null}
       </Head>
-      {launches.length ? <LaunchList launches={launches} system={system} /> : null}
-      {runs.length ? <div className="tiles wide-tiles">{runs.map(run => <RunTile key={run.run} run={run} host={system.host} />)}</div> : <Empty>No run yet.</Empty>}
+      {runs.length || launches.length ? (
+        <div className="tiles wide-tiles">
+          <Starting launches={launches} system={system} />
+          {runs.map(run => <RunTile key={run.run} run={run} host={system.host} launch={byRun.get(run.run)} />)}
+        </div>
+      ) : <Empty>No run yet.</Empty>}
       {others.length ? <Card title={<Link to="/episodes" className="linkish">Episodes outside a run</Link>} note={String(others.length)} /> : null}
     </>
   );
 }
 
-const RunTile = memo(function RunTile({ run, host }: { run: Run; host: string }) {
+const RunTile = memo(function RunTile({ run, host, launch }: { run: Run; host: string; launch?: Launch }) {
   const known = useKnown();
   const recent = run.done.slice(-12), solved = recent.flatMap(line => line.solved), rewards = recent.flatMap(line => line.rewards);
   const committed = run.steps.filter(step => step.state === "committed").length;
@@ -65,6 +71,7 @@ const RunTile = memo(function RunTile({ run, host }: { run: Run; host: string })
         {run.host ? <span>on <b>{run.host}</b></span> : null}
         {run.episodes_at === "here" ? null : <span className={run.reached === false || !run.episodes_at ? "t-warm" : ""}>{run.episodes_at ? `episodes on ${run.episodes_at}` : "ledger only"}</span>}
       </div>
+      {launch ? <Asked launch={launch} run={run} /> : null}
     </Tile>
   );
 });

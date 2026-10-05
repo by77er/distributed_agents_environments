@@ -9,7 +9,7 @@ import { useEvalSubjects, useEvals, useKnown, useLaunches, useSystem } from "../
 import type { EvalSubject, EvalSuite } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
 import { anySolved, entriesText, shareOf, shareText, type Subject, subjectText } from "../components/evals";
-import { LaunchList } from "../components/launches";
+import { Starting } from "../components/launches";
 import { SuiteForm } from "../components/suites";
 import { Card, Empty, Head, Mark, Spec, Specs, Table, Tile } from "../components/ui";
 import { Ago } from "../layout/runs";
@@ -48,7 +48,7 @@ export function Evals() {
         </Specs>
       </Head>
       {open ? <SuiteForm title="New suite" onDone={version => navigate(suitePlace(version.split("@")[0]))} onCancel={evals.suites.length ? () => setMaking(false) : undefined} /> : null}
-      {launches.length ? <LaunchList launches={launches} system={system} /> : null}
+      <Starting launches={launches} system={system} titled />
       {evals.suites.length ? (
         <div className="tiles">{evals.suites.map(suite => <SuiteTile key={suite.suite} suite={suite} />)}</div>
       ) : null}

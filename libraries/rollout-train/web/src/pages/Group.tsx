@@ -1,5 +1,6 @@
 // A step (one update of the policy, over the groups it covers), and a group (a task, a start and its episodes).
 
+import { advantageOf, baselineOf } from "../lib/advantage";
 import { memo } from "react";
 import { Link } from "react-router-dom";
 import { useGroup, useKnown, useSystem } from "../api/queries";
@@ -75,6 +76,7 @@ export function GroupView({ run: name, number }: { run: string; number: number }
   if (!group || !system) return <Empty>Reading the group…</Empty>;
   const { outcome, checkpoint, result } = group;
   const rewards = result?.rewards ?? group.episodes.filter(each => each.outcome === "completed").map(each => each.reward ?? 0);
+  const average = baselineOf(result, rewards);
   const run = system.runs.find(each => each.run === group.run), step = run && stepOf(run, group.number);
   const kept = step && !step.groups.includes(group.number);
   const metrics = checkpoint?.metrics ?? outcome?.update;
@@ -109,7 +111,8 @@ export function GroupView({ run: name, number }: { run: string; number: number }
               <header><b>Episode {episode.episode}</b><span className="what" /><Mark state="">not started</Mark></header>
               <div className="big"><span className="faint">–</span></div>
             </div>
-          ) : <EpisodeTile key={episode.run_id} episode={episode} />)}
+          ) : <EpisodeTile key={episode.run_id} episode={episode}
+            advantage={advantageOf(average, episode.reward)} />)}
         </div>
       ) : <Empty>No episode has started.</Empty>}
       <div className="cols">
@@ -142,11 +145,13 @@ export function GroupView({ run: name, number }: { run: string; number: number }
   );
 }
 
-const EpisodeTile = memo(function EpisodeTile({ episode }: { episode: GroupEpisode }) {
+/** An episode, drawn in gold where it did better than its group's mean in a group that was trained on: the episodes
+ * whose tokens were made likelier. */
+const EpisodeTile = memo(function EpisodeTile({ episode, advantage }: { episode: GroupEpisode; advantage: number | null }) {
   const info = (episode.info ?? {}) as Record<string, unknown>;
   const bySlot = slotRewards(episode.rewards);  // (while it plays, where its slots are not rewarded together)
   return (
-    <Tile to={episodePlace(episode.run_id)} className={`rail ${episode.interrupted ? "" : stateKind(episode.state)}`}>
+    <Tile to={episodePlace(episode.run_id)} className={`rail ${advantage != null && advantage > 0 ? "gold" : episode.interrupted ? "" : stateKind(episode.state)}`}>
       <header>
         <b>Episode {episode.episode ?? "?"}</b><span className="what" />
         <Mark state={episode.interrupted ? "" : episode.state ?? "running"}>{episode.interrupted ? "interrupted" : episode.state ?? "running"}</Mark>
@@ -159,6 +164,7 @@ const EpisodeTile = memo(function EpisodeTile({ episode }: { episode: GroupEpiso
         {info.ended ? <span>ended by <b>{String(info.ended)}</b></span> : null}
         {episode.sampled ? <span><b>{tokens(episode.sampled)}</b> tokens</span> : null}
         {episode.solved ? <span className="moved">solved</span> : null}
+        {advantage != null && advantage !== 0 ? <span className={advantage > 0 ? "t-gold" : "muted"}>advantage <b>{advantage > 0 ? "+" : ""}{figure(advantage)}</b></span> : null}
       </div>
       {episode.detail ? <div className="error-text">{episode.detail.slice(0, 240)}</div> : null}
     </Tile>

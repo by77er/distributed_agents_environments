@@ -8,7 +8,7 @@ import { useBookmark, useEvals, useKnown, useLaunches, useOffers, useSystem, use
 import type { Checkpoint as CheckpointData, System } from "../api/types";
 import { BarChart, Sized } from "../components/charts";
 import { BaseName, Marks } from "../components/checkpoints";
-import { LaunchList } from "../components/launches";
+import { Starting } from "../components/launches";
 import { PlayForm } from "../components/play";
 import { CheckpointEvalsCard, PathCard } from "../components/scores";
 import { Card, Empty, Head, Kpi, Kpis, Spec, Specs, Table } from "../components/ui";
@@ -94,7 +94,7 @@ function PlayIt({ checkpoint, system }: { checkpoint: CheckpointData; system: Sy
     <>
       {!evals.suites.length ? <MakeSuite ledger={system.ledger_at} />
         : <PlayForm subject={checkpoint.id} suites={evals.suites} offers={offers} system={system} title="Run an eval" />}
-      {launches.length ? <LaunchList launches={launches} system={system} /> : null}
+      <Starting launches={launches} system={system} titled />
     </>
   );
 }

@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newQueryClient, topics } from "./api/queries";
 import type { Launch, Preset, Run, System } from "./api/types";
-import { LaunchList } from "./components/launches";
+import { Asked, Starting } from "./components/launches";
 import { changedSettings, launchState, loopChanged, settingLabel, settingValue, waitingFor } from "./lib/launches";
 
 const launch = (state: Launch["state"], more: Partial<Launch> = {}, settings: Record<string, unknown> = {}): Launch => ({
@@ -61,35 +61,51 @@ describe("a launch's settings", () => {
   });
 });
 
-describe("a launch's tile", () => {
+describe("a run that has not started yet, and what was asked of one that has", () => {
   beforeEach(() => { vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Type": "application/json" } }))); });
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
   });
 
-  const system = { runs: [run("running")], checkpoints: [], bookmarks: {}, names: { runs: {}, bookmarks: {} } } as unknown as System;
+  const empty = { runs: [], checkpoints: [], bookmarks: {}, names: { runs: {}, bookmarks: {} } } as unknown as System;
+  const started = { ...empty, runs: [run("running")] } as unknown as System;
 
-  function tile(given: Launch): HTMLElement {
+  function shown(given: Launch, system: System): HTMLElement {
     const client = newQueryClient();
     client.setQueryData(topics.system().key, system);
-    render(<QueryClientProvider client={client}><MemoryRouter><LaunchList launches={[given]} system={system} /></MemoryRouter></QueryClientProvider>);
-    return screen.getByRole("link", { name: "alpha" }).closest(".tile") as HTMLElement;
+    const { container } = render(
+      <QueryClientProvider client={client}><MemoryRouter><Starting launches={[given]} system={system} /></MemoryRouter></QueryClientProvider>,
+    );
+    return container;
   }
 
-  it("names its run once, as a link, with its state in the run's words and the time once", () => {
-    const shown = tile(launch("running", { detail: "running" }, { groups: 12, "evals.suite": null }));
-    expect(shown.querySelectorAll("b").length).toBe(1);
-    expect(shown.querySelector("header")!.textContent).toBe("alphawordsrunning");
-    expect(shown.textContent).toContain("12 groups");
-    expect(shown.textContent).toContain("no evals");
-    expect(shown.textContent).toMatch(/asked .* ago/);
-    expect(shown.textContent).not.toContain("run-1");  // (the job only in a title)
+  it("draws a run not started yet as a tile, named once, its state in the run's words and the time once", () => {
+    const tile = shown(launch("submitted", { run: null }, { groups: 12, "evals.suite": null }), empty).querySelector(".tile") as HTMLElement;
+    expect(tile.querySelectorAll("b").length).toBe(1);
+    expect(tile.querySelector("header")!.textContent).toBe("alphawordsstarting");
+    expect(tile.textContent).toContain("12 groups");
+    expect(tile.textContent).toContain("no evals");
+    expect(tile.textContent).toMatch(/asked .* ago/);
+    expect(tile.textContent).not.toContain("run-1");  // (the job only in a title)
+    expect(tile.textContent).not.toMatch(/launch/i);
   });
 
-  it("once done, says how long it took and keeps why it failed folded", () => {
-    const shown = tile(launch("failed", { detail: "Traceback: it broke" }));
-    expect(shown.textContent).toMatch(/took 60 s · .* ago/);
-    expect(shown.querySelector("details summary")!.textContent).toBe("why it failed");
+  it("keeps why a run failed before it started folded, and says how long it took", () => {
+    const tile = shown(launch("failed", { run: null, detail: "Traceback: it broke" }), empty).querySelector(".tile") as HTMLElement;
+    expect(tile.textContent).toMatch(/took 60 s · .* ago/);
+    expect(tile.querySelector("details summary")!.textContent).toBe("why it failed");
+  });
+
+  it("draws nothing for a run that exists: its own tile shows what was asked of it", () => {
+    expect(shown(launch("running"), started).querySelector(".tile")).toBeNull();
+    const client = newQueryClient();
+    render(
+      <QueryClientProvider client={client}><MemoryRouter>
+        <Asked launch={launch("running", { detail: "running" }, { "trainer.rank": 16 })} run={run("running")} />
+      </MemoryRouter></QueryClientProvider>,
+    );
+    expect(screen.getByText("rank 16")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "stop" })).toBeTruthy();
   });
 });

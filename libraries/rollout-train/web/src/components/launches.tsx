@@ -1,9 +1,10 @@
-// The runs and evals asked for from the page, and how each goes, in the words a run's tile uses (`lib/launches`).
+// Runs asked for from the page: those whose run has not appeared yet, drawn as tiles of their own, and what was asked
+// of a run that has, for its run's tile. The words for their states are a run's (`lib/launches`).
 
-import { memo, useState } from "react";
+import { memo } from "react";
 import { Link } from "react-router-dom";
 import { useOffers, useStop } from "../api/queries";
-import type { Launch, Preset, System } from "../api/types";
+import type { Launch, Preset, Run, System } from "../api/types";
 import { Ago } from "../layout/runs";
 import { publishedParts, readable } from "../lib/environments";
 import { span } from "../lib/format";
@@ -13,25 +14,63 @@ import { suiteName, versionTag } from "../lib/suites";
 import { CheckpointTag } from "./checkpoints";
 import { SectionTitle, Tile } from "./ui";
 
-const FINISHED_SHOWN = 6;
-
-/** Every launch going, and the newest that finished. */
-export function LaunchList({ launches, system }: { launches: Launch[]; system: System }) {
-  const [all, setAll] = useState(false);
+/** The runs asked for whose run has not appeared yet: asked, starting, waiting, or failed before it started. A run that
+ * exists is drawn by its own tile, with what was asked of it (`Asked`). */
+export function Starting({ launches, system, titled = false }: { launches: Launch[]; system: System; titled?: boolean }) {
   const { data: offers } = useOffers();
-  const going = launches.filter(each => GOING.has(each.state));
-  const finished = launches.filter(each => !GOING.has(each.state));
-  const shown = [...going, ...(all ? finished : finished.slice(0, FINISHED_SHOWN))];
-  const hidden = finished.length - (all ? finished.length : Math.min(finished.length, FINISHED_SHOWN));
+  const known = new Set(system.runs.map(run => run.run));
+  const waiting = launches.filter(each => !each.run || !known.has(each.run));
+  if (!waiting.length) return null;
   const presets = offers?.presets ?? [];
+  const tiles = waiting.map(launch => (
+    <LaunchTile key={launch.id} launch={launch} system={system} preset={presets.find(each => each.id === launch.asked.preset)} />
+  ));
+  return titled ? (
+    <>
+      <SectionTitle id="section-starting" title="Starting" note={String(waiting.length)} />
+      <div className="tiles wide-tiles launches">{tiles}</div>
+    </>
+  ) : <>{tiles}</>;
+}
+
+/** The launch that made each run, by the run's id. */
+export function launchesByRun(launches: Launch[]): Map<string, Launch> {
+  const by = new Map<string, Launch>();
+  for (const launch of launches) if (launch.run && !by.has(launch.run)) by.set(launch.run, launch);
+  return by;
+}
+
+/** What was asked of a run that a run's tile shows: its preset and changed settings, why it waits or failed, and the
+ * button that stops it while it goes. */
+export function Asked({ launch, run }: { launch: Launch; run: Run }) {
+  const stop = useStop();
+  const { data: offers } = useOffers();
+  const preset = (offers?.presets ?? []).find(each => each.id === launch.asked.preset);
+  const said = launchState(launch, run);
+  const going = GOING.has(launch.state);
+  const changed = changedSettings(launch.asked.settings ?? {}, preset);
   return (
     <>
-      <SectionTitle id="section-launches" title="Launches" note={`${going.length} going · ${finished.length} finished`} />
-      <div className="tiles wide-tiles launches">
-        {shown.map(launch => <LaunchTile key={launch.id} launch={launch} system={system} preset={presets.find(each => each.id === launch.asked.preset)} />)}
-      </div>
-      {hidden > 0 || all ? (
-        <button type="button" className="linkish small more" onClick={() => setAll(!all)}>{all ? "show fewer" : `and ${hidden} more finished`}</button>
+      {launch.asked.preset || changed.length ? (
+        <div className="facts wraps settings-changed">
+          {launch.asked.preset ? <span title="preset">{launch.asked.preset}</span> : null}
+          {changed.map(each => <span key={each.key} title={each.key}>{each.text}</span>)}
+        </div>
+      ) : null}
+      {said.state === "failed" && launch.detail ? (
+        <details className="launch-detail" onClick={event => event.stopPropagation()}>
+          <summary>why it failed</summary>
+          <pre>{launch.detail}</pre>
+        </details>
+      ) : said.reason ? <div className="small muted" title={launch.detail ?? undefined}>{said.reason}</div> : null}
+      {going && launch.state !== "stopping" ? (
+        <div className="launch-actions">
+          <button type="button" className="danger" disabled={stop.isPending}
+            onClick={event => { event.preventDefault(); event.stopPropagation(); stop.mutate(launch.id); }}>
+            {stop.isPending ? "stopping…" : "stop"}
+          </button>
+          {stop.isError ? <span className="error-text small">{stop.error.message}</span> : null}
+        </div>
       ) : null}
     </>
   );
@@ -70,7 +109,7 @@ const LaunchTile = memo(function LaunchTile({ launch, system, preset }: { launch
         <span className={`dot ${DOT[said.state]}`} title={said.state} />
         <b>{place ? <Link to={place} className="linkish">{asked.name}</Link> : asked.name}</b>
         <span className="what">{environment ? <EnvironmentName environment={environment} /> : null}</span>
-        <span className="faint small" title={launch.job ? `job ${launch.job}` : undefined}>{said.state}</span>
+        <span className="faint small" title={launch.job ? `job ${launch.job}` : undefined}>{said.state === "submitted" ? "starting" : said.state}</span>
       </header>
       <div className="facts wraps">
         {asked.kind === "eval" ? (

@@ -5,7 +5,7 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useEvals, useHistory, useLaunches, useLineage, useOffers, useSystem } from "../api/queries";
 import type { System } from "../api/types";
-import { LaunchList } from "../components/launches";
+import { Starting } from "../components/launches";
 import { PlayForm } from "../components/play";
 import { Card, Empty, Head, Spec, Specs, Table } from "../components/ui";
 import { historyOf } from "../lib/history";
@@ -76,7 +76,7 @@ function PlayIt({ model, system }: { model: string; system: System }) {
       {!evals.suites.length ? <MakeSuite ledger={system.ledger_at} />
         : <PlayForm model={model} suites={evals.suites} offers={offers} system={system} title="Run an eval" />}
       {offers.cluster ? <p><Link to={launchFor(model)} className="linkish">Train from {model}</Link></p> : null}
-      {launches.length ? <LaunchList launches={launches} system={system} /> : null}
+      <Starting launches={launches} system={system} titled />
     </>
   );
 }
