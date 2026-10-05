@@ -95,6 +95,9 @@ segments ([`Segment`](../../guide/reference.md#segment)), each the tokens of a c
   `sampled_logprobs` and `honours_sampling` (`TOKEN_LEVEL`). A segment without `token_exact` and `sampled_logprobs`
   (`BEHAVIOUR`) has no importance weight: the [algorithm](training.md#the-algorithm-grpo) does not train on its group, and
   a [dataset](datasets.md) of such turns is `supervised`.
+- **Whether it is trained on** (`trained`): false for a segment of a slot that is not trained (a judge's, a fixed
+  opponent's). Such a segment is kept in its episode, for the monitor and for what it sampled, and the
+  [algorithm](training.md#the-algorithm-grpo) and [datasets](datasets.md) never train on it.
 - **Forced tokens** (the close of an over-budget thought) lie between spans. They are context, and are not trained
   on.
 - Whether a conversation is one segment or many is decided by what its program sends and by the model family's

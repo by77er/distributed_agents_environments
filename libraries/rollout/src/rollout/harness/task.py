@@ -14,9 +14,19 @@ from rollout.harness.tools import DeclaredTool, collect_tools, error_result, exe
 
 @dataclass(frozen=True)
 class ModelSlot:
-    """A model the task declares. The agent acts through `policy`; other slots (a simulated user, an opponent) are
-    sampled by the task itself. What serves each slot, and whether it is recorded for training, is the run's binding's
-    to say."""
+    """A model the task declares. The agent acts through `policy`; other slots (a simulated user, an opponent, a
+    judge) are sampled by the task itself. What serves each slot is the run's binding's to say."""
+
+    trained: bool = True
+    """Whether a run may train on the slot's turns. A slot that is not (a judge, a fixed opponent) is recorded like any
+    other, and a run binds it to a channel by name (`slots.SLOT`)."""
+    judge: bool = False
+    """Whether the slot judges what other slots did. A judge is never trained, and a run binds it to a channel that
+    serves the run's own checkpoints only when it says so (`self_judging`)."""
+
+    def __post_init__(self) -> None:
+        if self.judge and self.trained:
+            raise ValueError("a judge is never trained: declare it ModelSlot(trained=False, judge=True)")
 
 
 class Task:

@@ -4,8 +4,9 @@ A turn is two things:
 
 - **a blob** holding all of it: who sampled it (the run, the episode and attempt, the program's run, the slot, the
   channel), the checkpoint that served it and its depth, the prompt's tokens, the completion's tokens, which of them
-  were sampled and which forced, the behaviour logprobs, what it was sampled with (`sampled_with`), the reply (the
-  parsed message, how it finished, usage), the links its harness declared to earlier requests, and timings;
+  were sampled and which forced, the behaviour logprobs, what it was sampled with (`sampled_with`), whether its slot is
+  trained (`trained`), the reply (the parsed message, how it finished, usage), the links its harness declared to
+  earlier requests, and timings;
 - **a ledger record** naming the blob, appended under the turn's effect id to the table of the program's run
   (`runs/RUN/turns/RUN_ID`) and under the fence its key names. The first append wins: a turn sampled twice (a retry
   that reached another replica while the first was still sampling) is recorded once, and both are answered with the
@@ -41,7 +42,7 @@ import time
 from array import array
 from collections import OrderedDict
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from pydantic import JsonValue, TypeAdapter
@@ -127,6 +128,8 @@ class TurnRecord:
     """`sample`, or `score`: the logprobs the channel gave the prompt's tokens (`scores`), with nothing sampled."""
     scores: Scores | None = None
     """A scoring turn's scores."""
+    trained: bool = True
+    """Whether it may be trained on: false for a turn of a slot that is not trained (a judge, a fixed opponent)."""
 
     @property
     def version(self) -> int:
@@ -210,6 +213,7 @@ class TurnStore:
             "prompt": len(turn.prompt),
             "sampled": sum(turn.mask),
             "at": round(time.time(), 3),
+            **({} if turn.trained else {"trained": False}),
         }
         if turn.use != SAMPLE:
             entry["use"] = turn.use
@@ -265,20 +269,26 @@ class TurnStore:
                     sampled_with=tuple(header.get("sampled_with", TOKEN_LEVEL)),
                     use=str(header.get("use", SAMPLE)),
                     scores=each.scores,
+                    trained=bool(header.get("trained", True)),
                 )
             )
         return turns
 
     async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]:
         """What each model slot of a program's run exports, by slot (`segments_of` its samples: scoring turns are left
-        out). With `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from
-        it."""
+        out). The segments of a slot that is not trained are kept, marked so (`Segment.trained`). With
+        `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from it."""
         by_slot: dict[str, list[TurnRecord]] = {}
         turns = [turn for turn in await self.turns(run, run_id) if turn.use == SAMPLE]
         for turn in turns:
             by_slot.setdefault(turn.slot, []).append(turn)
         untrained = unaccepted(turns) if accepted_only else set[str]()
-        return {slot: segments_of(each, untrained=untrained) for slot, each in by_slot.items()}
+        sessions: dict[str, list[Segment]] = {}
+        for slot, each in by_slot.items():
+            segments = segments_of(each, untrained=untrained)
+            trained = all(turn.trained for turn in each)
+            sessions[slot] = segments if trained else [replace(segment, trained=False) for segment in segments]
+        return sessions
 
     def _packed(self, turn: TurnRecord, earlier: Sequence[tuple[str, "_Unpacked"]]) -> bytes:
         """A turn's blob, its prompt stored after what it shares with the earlier turn it shares the most with."""
@@ -322,6 +332,7 @@ class TurnStore:
             "links": [{"type": link.type, "source": link.source} for link in turn.links],
             "timings": dict(turn.timings),
             "sampled_with": list(turn.sampled_with),
+            "trained": turn.trained,
         }
         if turn.use != SAMPLE:
             header["use"] = turn.use

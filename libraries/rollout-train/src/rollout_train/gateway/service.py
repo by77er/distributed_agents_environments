@@ -249,6 +249,7 @@ class Gateway:
                 "seconds": round(time.monotonic() - began, 4),
             },
             sampled_with=tuple(getattr(sampler, "sampled_with", TOKEN_LEVEL)),
+            trained=grant.trained,
         )
 
     async def score(self, grant: Grant, request: ScoreRequest) -> Reply:

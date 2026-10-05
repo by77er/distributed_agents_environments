@@ -123,6 +123,7 @@ rk1.KID.PAYLOAD.SIGNATURE
 | `fence` | `[scope, number]`: the fence the turns are appended under |
 | `temperature`, `top_p` | how the binding samples |
 | `thinking`, `answer` | the thinking and answer room the binding gives (`SamplingParameters.thinking_tokens`, `answer_tokens`), in place of the channel's own; absent: the channel's |
+| `trained` | `false` for a slot that is not trained (a judge, a fixed opponent: `RecordedModel.trained`); absent: trained |
 | `expires` | seconds since the epoch. A key is taken up to `leeway` (30 s) after it, for clocks that differ |
 
 `SIGNATURE` is the HMAC-SHA256 of `rk1.KID.PAYLOAD` under the secret named `KID`. A
@@ -152,14 +153,15 @@ Every turn is two things ([`TurnStore`](../../guide/reference.md#turnstore)):
   - what it was sampled with (`sampled_with`): of `token_exact`, `sampled_logprobs` and `honours_sampling`, what its
     sampler can do. Every engine and server a channel samples from does all three, and a turn whose blob does not
     say is read back as sampled with all three;
+  - whether its slot is trained (`trained`, from the key): false for a judge's or a fixed opponent's turn;
   - the reply: the parsed message, how it finished, usage;
   - the links its harness declared;
   - timings: when it started, how long each generation took, and the whole turn;
   - for a scoring turn, its use (`score`) and its scores ([scoring tokens](#scoring-tokens)).
 - **A ledger record** naming the blob, appended under the request id to the table of the program's run,
   `runs/RUN/turns/RUN_ID`, under the fence the key names. Besides the blob it says the slot, the episode and
-  attempt, the checkpoint and depth, how many prompt tokens and sampled tokens the turn has, when it was recorded, and
-its use where it is not a sample.
+  attempt, the checkpoint and depth, how many prompt tokens and sampled tokens the turn has, when it was recorded,
+  its use where it is not a sample, and `trained: false` for a turn of a slot that is not trained.
 
 The ledger record is what makes a turn count: a blob that no record names is never read.
 

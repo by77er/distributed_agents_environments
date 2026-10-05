@@ -9,7 +9,8 @@ earlier prompt exactly (a client's retry) replaces it.
 
 A segment also says what its turns were sampled with (`sampled_with`: the capabilities every one of them had, of
 `TOKEN_LEVEL`). A segment is trained on with an importance weight only if its tokens are the exact ones sampled and
-their behaviour logprobs are known (`BEHAVIOUR`).
+their behaviour logprobs are known (`BEHAVIOUR`), and only if its slot is trained (`trained`: a judge's segments are
+kept and never trained on).
 
 `segments_of` applies the rule to turns in the order they were sampled. It is a pure function of the turns: the
 gateway's turn store reads a session's turns back and exports them with it.
@@ -51,6 +52,9 @@ class Segment:
     """The channel that sampled them. The spans' `version`s are the depths of the checkpoints it served."""
     sampled_with: tuple[str, ...] = TOKEN_LEVEL
     """What every one of its turns was sampled with, of `TOKEN_LEVEL`."""
+    trained: bool = True
+    """Whether it may be trained on: false for a segment of a slot that is not trained (a judge's, a fixed
+    opponent's), which is kept for what it shows and what it cost, and never trained on."""
 
     @property
     def sampled(self) -> int:

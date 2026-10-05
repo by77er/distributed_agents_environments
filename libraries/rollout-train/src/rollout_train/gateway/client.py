@@ -176,6 +176,7 @@ class GatewayEndpoints:
             top_p=binding.sampling.top_p,
             thinking=binding.sampling.thinking_tokens,
             answer=binding.sampling.answer_tokens,
+            trained=binding.trained,
         )
         return self.keyring.mint(granted(grant, self.lifetime))
 

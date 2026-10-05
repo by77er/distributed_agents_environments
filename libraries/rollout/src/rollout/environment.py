@@ -34,6 +34,7 @@ __all__ = [
     "Start",
     "binding_for",
     "drawn",
+    "first_program",
     "held_out",
     "start_key",
     "train_start",
@@ -155,10 +156,16 @@ def binding_for(
     channel: str,
     tools: Mapping[str, ToolBinding] | None = None,
     pools: Mapping[str, PoolBinding] | None = None,
+    slots: Mapping[str, str] | None = None,
 ) -> RunBinding:
-    """How an environment's runs are served: every model slot of its program from `channel`, each of its imports from
-    the tool set of its own name, or where `tools` says, and each kind of sandbox from the pool of its own name, or
-    where `pools` says. (A program says which slots, imports and sandboxes it has once it is given a row: the
-    environment's first.)"""
-    first = with_row(environment.program, environment.start(environment.rows()[0], random.Random(0)))
-    return bind(first, channel, tools=tools, pools=pools)
+    """How an environment's runs are served: each model slot of its program from the channel `slots` names for it,
+    else from `channel`; each of its imports from the tool set of its own name, or where `tools` says; and each kind of
+    sandbox from the pool of its own name, or where `pools` says. (A program says which slots, imports and sandboxes it
+    has once it is given a row: the environment's first.)"""
+    return bind(first_program(environment), channel, slots=slots, tools=tools, pools=pools)
+
+
+def first_program(environment: Environment) -> ProgramReference:
+    """The environment's program given its first row's start (seed 0): what says which slots, imports and sandboxes
+    its runs have."""
+    return with_row(environment.program, environment.start(environment.rows()[0], random.Random(0)))

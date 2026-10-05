@@ -42,6 +42,8 @@ class RecordedModel(ContractModel):
 
     channel: str
     sampling: SamplingParameters = SamplingParameters()
+    trained: bool = True
+    """Whether its turns may be trained on: the slot's declaration (`ModelSlot.trained`). Every turn records it."""
 
 
 class RecordedEndpoints(Protocol):
@@ -197,18 +199,23 @@ def bind(
     reference: ProgramReference,
     channel: str,
     *,
+    slots: Mapping[str, str] | None = None,
     tools: Mapping[str, ToolBinding] | None = None,
     pools: Mapping[str, PoolBinding] | None = None,
 ) -> RunBinding:
-    """A binding that serves every model slot of a program from one recorded channel, each of its imports from the
-    tool set registered under the import's own name (or as `tools` says), and each kind of sandbox it declares from
-    the pool registered under the kind's name (or as `pools` says)."""
+    """A binding that serves each model slot of a program from the recorded channel `slots` names for it, else from
+    `channel` (each recorded as trained or not, as the slot declares), each of its imports from the tool set registered
+    under the import's own name (or as `tools` says), and each kind of sandbox it declares from the pool registered
+    under the kind's name (or as `pools` says)."""
     program = instantiate(reference)
-    recorded = ModelBinding(recorded=RecordedModel(channel=channel))
+    models = {
+        slot: ModelBinding(recorded=RecordedModel(channel=(slots or {}).get(slot, channel), trained=declared.trained))
+        for slot, declared in program.model_slots().items()
+    }
     imports = {name: (tools or {}).get(name) or ToolBinding(local=name) for name in program.imports()}
     kinds = {spec.kind for spec in program.sandboxes().values()}
     served = {kind: (pools or {}).get(kind) or PoolBinding(local=kind) for kind in sorted(kinds)}
-    return RunBinding(models=dict.fromkeys(program.model_slots(), recorded), imports=imports, pools=served)
+    return RunBinding(models=models, imports=imports, pools=served)
 
 
 def with_row(reference: ProgramReference, row: JsonValue) -> ProgramReference:

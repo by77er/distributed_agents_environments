@@ -8,7 +8,7 @@ grouped by module, alphabetically. Types and defaults appear as written in the s
 
 - **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`Capacity`](#capacity), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`InvalidObservation`](#invalidobservation), [`Lease`](#lease), [`LeaseRefused`](#leaserefused), [`Leases`](#leases), [`Memory`](#memory), [`MemoryLeases`](#memoryleases), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Mount`](#mount), [`Network`](#network), [`NoCapacity`](#nocapacity), [`Observation`](#observation), [`Pool`](#pool), [`PoolBinding`](#poolbinding), [`Process`](#process), [`Program`](#program), [`ProgramReference`](#programreference), [`Provider`](#provider), [`Reach`](#reach), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Sandbox`](#sandbox), [`SandboxLimits`](#sandboxlimits), [`SandboxLost`](#sandboxlost), [`SandboxPool`](#sandboxpool), [`SandboxSpec`](#sandboxspec), [`Scratch`](#scratch), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`with_row`](#with_row)
 - **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#conflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleLink`](#samplelink), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
-- **[`rollout.environment`](#rolloutenvironment)** — What a run trains on and an eval measures: rows, starts, eval data, what results say. [`binding_for`](#binding_for), [`Description`](#description), [`drawn`](#drawn), [`Environment`](#environment), [`held_out`](#held_out), [`Row`](#row), [`Start`](#start), [`start_key`](#start_key), [`train_start`](#train_start)
+- **[`rollout.environment`](#rolloutenvironment)** — What a run trains on and an eval measures: rows, starts, eval data, what results say. [`binding_for`](#binding_for), [`Description`](#description), [`drawn`](#drawn), [`Environment`](#environment), [`first_program`](#first_program), [`held_out`](#held_out), [`Row`](#row), [`Start`](#start), [`start_key`](#start_key), [`train_start`](#train_start)
 - **[`rollout.curriculum`](#rolloutcurriculum)** — Which row to train on next, and gates on evals. [`Curriculum`](#curriculum), [`curriculum_of`](#curriculum_of), [`GroupResult`](#groupresult), [`solved_share`](#solved_share)
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
@@ -103,12 +103,13 @@ The task loop: a task and an agent.
 *function* · `libraries/rollout/src/rollout/harness/runner.py`
 
 ```python
-def bind(reference: ProgramReference, channel: str, *, tools: Mapping[str, ToolBinding] | None = None, pools: Mapping[str, PoolBinding] | None = None) -> RunBinding
+def bind(reference: ProgramReference, channel: str, *, slots: Mapping[str, str] | None = None, tools: Mapping[str, ToolBinding] | None = None, pools: Mapping[str, PoolBinding] | None = None) -> RunBinding
 ```
 
-A binding that serves every model slot of a program from one recorded channel, each of its imports from the
-tool set registered under the import's own name (or as `tools` says), and each kind of sandbox it declares from
-the pool registered under the kind's name (or as `pools` says).
+A binding that serves each model slot of a program from the recorded channel `slots` names for it, else from
+`channel` (each recorded as trained or not, as the slot declares), each of its imports from the tool set registered
+under the import's own name (or as `tools` says), and each kind of sandbox it declares from the pool registered
+under the kind's name (or as `pools` says).
 
 ### `Blobs`
 
@@ -508,9 +509,13 @@ One model sample: what a slot's model was sent and what it replied.
 class ModelSlot
 ```
 
-A model the task declares. The agent acts through `policy`; other slots (a simulated user, an opponent) are
-sampled by the task itself. What serves each slot, and whether it is recorded for training, is the run's binding's
-to say.
+A model the task declares. The agent acts through `policy`; other slots (a simulated user, an opponent, a
+judge) are sampled by the task itself. What serves each slot is the run's binding's to say.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `trained` | `bool` | `True` | Whether a run may train on the slot's turns. A slot that is not (a judge, a fixed opponent) is recorded like any other, and a run binds it to a channel by name (`slots.SLOT`). |
+| `judge` | `bool` | `False` | Whether the slot judges what other slots did. A judge is never trained, and a run binds it to a channel that serves the run's own checkpoints only when it says so (`self_judging`). |
 
 ### `Mount`
 
@@ -730,6 +735,7 @@ A channel served through the gateway, which records every sample.
 |---|---|---|---|
 | `channel` | `str` | required |  |
 | `sampling` | `SamplingParameters` | `SamplingParameters()` |  |
+| `trained` | `bool` | `True` | Whether its turns may be trained on: the slot's declaration (`ModelSlot.trained`). Every turn records it. |
 
 ### `register`
 
@@ -1940,13 +1946,13 @@ What a run trains on and an eval measures: rows, starts, eval data, what results
 *function* · `libraries/rollout/src/rollout/environment.py`
 
 ```python
-def binding_for(environment: Environment, channel: str, tools: Mapping[str, ToolBinding] | None = None, pools: Mapping[str, PoolBinding] | None = None) -> RunBinding
+def binding_for(environment: Environment, channel: str, tools: Mapping[str, ToolBinding] | None = None, pools: Mapping[str, PoolBinding] | None = None, slots: Mapping[str, str] | None = None) -> RunBinding
 ```
 
-How an environment's runs are served: every model slot of its program from `channel`, each of its imports from
-the tool set of its own name, or where `tools` says, and each kind of sandbox from the pool of its own name, or
-where `pools` says. (A program says which slots, imports and sandboxes it has once it is given a row: the
-environment's first.)
+How an environment's runs are served: each model slot of its program from the channel `slots` names for it,
+else from `channel`; each of its imports from the tool set of its own name, or where `tools` says; and each kind of
+sandbox from the pool of its own name, or where `pools` says. (A program says which slots, imports and sandboxes it
+has once it is given a row: the environment's first.)
 
 ### `Description`
 
@@ -1998,6 +2004,17 @@ class Environment(Protocol)
 - `def start(self, row: Row, rng: random.Random) -> JsonValue` — The parameters of one start of `row` (a seed drawn with `rng`, say): what every run of a group is given.
 - `def evals(self) -> Mapping[str, Sequence[Start]]` — Its eval data: named lists of starts, never drawn for training. Each is frozen as a suite of its name the
   first time it is played (`rollout_train.evals`). `drawn` derives one from rows and seeds.
+
+### `first_program`
+
+*function* · `libraries/rollout/src/rollout/environment.py`
+
+```python
+def first_program(environment: Environment) -> ProgramReference
+```
+
+The environment's program given its first row's start (seed 0): what says which slots, imports and sandboxes
+its runs have.
 
 ### `held_out`
 
@@ -2420,7 +2437,7 @@ class Episode
 
 **Methods**
 
-- `@property def reward(self) -> float` — The mean of the slots' rewards (a team that is rewarded together has one reward).
+- `@property def reward(self) -> float` — The mean of the trained slots' rewards (a team that is rewarded together has one reward).
 - `@property def trainable(self) -> bool`
 - `@property def solved(self) -> bool` — Whether the program said its task was solved (`info["solved"]`).
 - `@property def saturated(self) -> bool` — Whether the program said nothing was left to earn (`info["saturated"]`).
@@ -2636,6 +2653,7 @@ What one model slot's rollout leaves to train on: its segments, and its rewards.
 |---|---|---|---|
 | `segments` | `list[Segment]` | required |  |
 | `rewards` | `Mapping[str, float]` | required | By key; a program that assigns one reward uses the key `default`. |
+| `trained` | `bool` | `True` | Whether its slot is trained: false for a judge's or a fixed opponent's, whose turns are kept and never trained on (`Segment.trained`), and whose rewards, if any, are not the episode's. |
 
 **Methods**
 
@@ -4125,6 +4143,7 @@ A piece of a session's trajectory: tokens that only grew, as the policy saw and 
 | `logprobs` | `list[float]` | required | Behavior logprobs of the tokens inside the spans, in order. |
 | `channel` | `str` | `''` | The channel that sampled them. The spans' `version`s are the depths of the checkpoints it served. |
 | `sampled_with` | `tuple[str, ...]` | `TOKEN_LEVEL` | What every one of its turns was sampled with, of `TOKEN_LEVEL`. |
+| `trained` | `bool` | `True` | Whether it may be trained on: false for a segment of a slot that is not trained (a judge's, a fixed opponent's), which is kept for what it shows and what it cost, and never trained on. |
 
 **Methods**
 
@@ -4391,6 +4410,7 @@ What a key lets its holder do: sample for one model slot of one attempt, until i
 | `top_p` | `float` | `1.0` |  |
 | `thinking` | `int \| None` | `None` | Tokens of thinking per turn, and of answer after it, in place of the channel's own (the binding's: an eval's, say); none: the channel's. |
 | `answer` | `int \| None` | `None` |  |
+| `trained` | `bool` | `True` | Whether its turns may be trained on: false for a slot that is not trained (a judge, a fixed opponent). |
 
 **Methods**
 
@@ -4536,6 +4556,7 @@ One turn, as the gateway sampled and recorded it.
 | `sampled_with` | `tuple[str, ...]` | `TOKEN_LEVEL` | What it was sampled with, of `TOKEN_LEVEL`: what its sampler could do (a turn recorded without saying was sampled with all of them). |
 | `use` | `str` | `SAMPLE` | `sample`, or `score`: the logprobs the channel gave the prompt's tokens (`scores`), with nothing sampled. |
 | `scores` | `Scores \| None` | `None` | A scoring turn's scores. |
+| `trained` | `bool` | `True` | Whether it may be trained on: false for a turn of a slot that is not trained (a judge, a fixed opponent). |
 
 **Methods**
 
@@ -4573,8 +4594,8 @@ cache.
   `fence` was taken again.
 - `async def turns(self, run: str, run_id: str) -> list[TurnRecord]` — A program's run's turns, in the order they were recorded.
 - `async def sessions(self, run: str, run_id: str, *, accepted_only: bool = False) -> dict[str, list[Segment]]` — What each model slot of a program's run exports, by slot (`segments_of` its samples: scoring turns are left
-  out). With `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from
-  it.
+  out). The segments of a slot that is not trained are kept, marked so (`Segment.trained`). With
+  `accepted_only`, what a compaction attempt sampled is trained on only if its harness went on from it.
 
 ### `unaccepted`
 

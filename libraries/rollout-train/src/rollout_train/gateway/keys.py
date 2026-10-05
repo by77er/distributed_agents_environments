@@ -1,9 +1,9 @@
 """Signed keys: a harness's API key that says, by itself, which session it samples for.
 
 Whoever plays an attempt (an episode runner, a sandbox's lease) mints a key per model slot: a `Grant` naming the run,
-the episode and attempt, the program's run and the slot, the channel, how to sample, the fence its turns are recorded
-under, and when it expires, signed with HMAC-SHA256. The gateway verifies a key with nothing but the secret: no lookup,
-no session kept anywhere.
+the episode and attempt, the program's run and the slot, the channel, how to sample, whether the slot's turns may be
+trained on, the fence its turns are recorded under, and when it expires, signed with HMAC-SHA256. The gateway verifies
+a key with nothing but the secret: no lookup, no session kept anywhere.
 
     rk1.KID.PAYLOAD.SIGNATURE
 
@@ -62,6 +62,8 @@ class Grant:
     """Tokens of thinking per turn, and of answer after it, in place of the channel's own (the binding's: an eval's,
     say); none: the channel's."""
     answer: int | None = None
+    trained: bool = True
+    """Whether its turns may be trained on: false for a slot that is not trained (a judge, a fixed opponent)."""
 
     @property
     def session_id(self) -> str:
@@ -81,6 +83,7 @@ class Grant:
             "top_p": self.top_p,
             **({"thinking": self.thinking} if self.thinking is not None else {}),
             **({"answer": self.answer} if self.answer is not None else {}),
+            **({} if self.trained else {"trained": False}),
         }
 
     @classmethod
@@ -99,6 +102,7 @@ class Grant:
             top_p=float(data.get("top_p", 1.0)),
             thinking=int(data["thinking"]) if data.get("thinking") is not None else None,
             answer=int(data["answer"]) if data.get("answer") is not None else None,
+            trained=bool(data.get("trained", True)),
         )
 
 

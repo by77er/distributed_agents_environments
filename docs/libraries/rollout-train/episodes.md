@@ -37,7 +37,9 @@ Rewards are summed by model slot and by key.
 - A reward on an observation goes to the slot `policy`, under the key `default`: it is the reward of the agent the
   task loop drives.
 - `Trajectory.reward` is the slot's reward under the key `default`. `Episode.reward` is the mean of that over the
-  episode's slots, so a team that is rewarded together, each slot the same, has that reward.
+  episode's trained slots, so a team that is rewarded together, each slot the same, has that reward. A slot that is
+  not trained (a judge, a fixed opponent: `Trajectory.trained` is false) keeps its segments, marked untrained, and
+  counts in what the episode sampled, but not in its reward.
 
 The [monitor](monitor.md) sums rewards with the same function (`rewards`), so the page and the trainer agree.
 

@@ -44,6 +44,9 @@ class Trajectory:
     segments: list[Segment]
     rewards: Mapping[str, float]
     """By key; a program that assigns one reward uses the key `default`."""
+    trained: bool = True
+    """Whether its slot is trained: false for a judge's or a fixed opponent's, whose turns are kept and never trained
+    on (`Segment.trained`), and whose rewards, if any, are not the episode's."""
 
     @property
     def reward(self) -> float:
@@ -71,12 +74,9 @@ class Episode:
 
     @property
     def reward(self) -> float:
-        """The mean of the slots' rewards (a team that is rewarded together has one reward)."""
-        return (
-            sum(trajectory.reward for trajectory in self.trajectories.values()) / len(self.trajectories)
-            if self.trajectories
-            else 0.0
-        )
+        """The mean of the trained slots' rewards (a team that is rewarded together has one reward)."""
+        trained = [trajectory for trajectory in self.trajectories.values() if trajectory.trained]
+        return sum(trajectory.reward for trajectory in trained) / len(trained) if trained else 0.0
 
     @property
     def trainable(self) -> bool:
@@ -150,7 +150,7 @@ async def loaded(record: Record, blobs: Blobs) -> Episode:
     packed = await blobs.read(record.trajectories)
     segments = _SEGMENTS.validate_json(await asyncio.to_thread(lzma.decompress, packed))
     trajectories = {
-        slot: Trajectory(segments.get(slot, []), trajectory.rewards)
+        slot: replace(trajectory, segments=segments.get(slot, []))
         for slot, trajectory in record.episode.trajectories.items()
     }
     return replace(record.episode, trajectories=trajectories)
@@ -167,7 +167,7 @@ async def events_of(record: Record, blobs: Blobs) -> list[RunEvent]:
 def _without_segments(episode: Episode) -> Episode:
     return replace(
         episode,
-        trajectories={slot: Trajectory([], trajectory.rewards) for slot, trajectory in episode.trajectories.items()},
+        trajectories={slot: replace(trajectory, segments=[]) for slot, trajectory in episode.trajectories.items()},
     )
 
 
@@ -221,7 +221,9 @@ def assemble(
                 pass
     assigned = rewards(payloads)
     trajectories = {
-        slot: Trajectory(segments.get(slot, []), assigned.get(slot, {}))
+        slot: Trajectory(
+            segments.get(slot, []), assigned.get(slot, {}), all(each.trained for each in segments.get(slot, []))
+        )
         for slot in dict.fromkeys([*segments, *assigned])
     }
     run_id = events[0].run_id if events else ""
