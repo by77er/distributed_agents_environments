@@ -18,7 +18,7 @@ import pytest
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.cluster import load
-from rollout_train.inference import Generation, NotLoaded, RemoteChannel
+from rollout_train.inference import NotLoaded, RemoteChannel
 from rollout_train.inference.hosts import HostPausable, HostServer, HostSpec, host_spec, started
 from rollout_train.inference.remote import ENGINES, Unreachable
 from rollout_train.ledger import Fence, FileLedger
@@ -76,19 +76,20 @@ async def hosts(
     stores: Stores,
     count: int = 1,
     *,
-    spec: HostSpec = SCRIPTED,
+    spec: HostSpec | Sequence[HostSpec] = SCRIPTED,
     bound: Sequence[tuple[str, str]] = (("r", "policy"),),
     every: float = 0.1,
 ) -> AsyncGenerator[list[Any]]:
-    """`count` engine hosts (replicas of what they serve: by default `policy` of run `r`), looking every `every`
-    seconds; ended after."""
+    """`count` engine hosts (replicas of what they serve: by default `policy` of run `r`), each of `spec` (or of its
+    own, given one each), looking every `every` seconds; ended after."""
     import ray
 
     tag = uuid.uuid4().hex[:8]
+    specs = [spec] * count if isinstance(spec, HostSpec) else list(spec)
     handles = [
         started(
-            f"host-{tag}-{index}", spec, stores.ledger_at, stores.blobs_at, bound=bound, replica=(index, count),
-            directory=str(stores.tmp_path / "scratch"), every=every, beating=0.2,
+            f"host-{tag}-{index}", specs[index], stores.ledger_at, stores.blobs_at, bound=bound,
+            replica=(index, count), directory=str(stores.tmp_path / "scratch"), every=every, beating=0.2,
         )
         for index in range(count)
     ]  # fmt: skip
@@ -104,6 +105,10 @@ async def until(condition: Callable[[], Awaitable[bool]], seconds: float = 20.0)
     while not await condition():
         assert time.monotonic() < deadline, "it did not come to pass"
         await asyncio.sleep(0.05)
+
+
+async def _exists(path: Path) -> bool:
+    return await asyncio.to_thread(path.exists)
 
 
 async def holds(handle: Any) -> set[str]:
@@ -209,27 +214,32 @@ async def test_full_weights_load_replica_by_replica_and_a_turn_caught_by_a_load_
     tmp_path: Path, local_ray: LocalRay
 ) -> None:
     stores = Stores(tmp_path)
-    loading = HostSpec("rollout_train.testing:scripted_engine", MODEL, {"loading": 1.0})
+    gates = [tmp_path / "gates" / name for name in ("one", "two")]  # (each replica's loads, let go one by one)
+    for gate in gates:
+        gate.mkdir(parents=True)
+        (gate / "1").touch()  # (the first checkpoint's load goes at once)
+    gated = [HostSpec("rollout_train.testing:scripted_engine", MODEL, {"gate": str(gate)}) for gate in gates]
     first = await stores.served("r", kind="full")
-    async with hosts(stores, 2, spec=loading) as (one, two):
+    async with hosts(stores, 2, spec=gated) as (one, two):
         await until(lambda: _holding(one, first.id))
         await until(lambda: _holding(two, first.id))
         assert MODEL not in await holds(one)  # (full weights in place of the model's own)
         second = await stores.served("r", parent=first, kind="full")
-        seen: list[tuple[bool, bool]] = []
-        turns: list[asyncio.Task[Any]] = []
         server = HostServer(two, "two")
-        while not seen or not all(seen[-1]):
-            now = (second.id in await holds(one), second.id in await holds(two))
-            seen.append(now)
-            if now == (True, False):  # the second replica serves the checkpoint before until it loads the newest
-                turns.append(asyncio.create_task(server.generate([65], adapter=first.id, **OPTIONS)))
-            await asyncio.sleep(0.05)
-        assert (True, False) in seen and (False, True) not in seen  # (one at a time: the first, then the second)
-        ended = await asyncio.gather(*turns, return_exceptions=True)
-        assert {type(each) for each in ended} <= {Generation, NotLoaded}
-        assert any(isinstance(each, Generation) and each.model == first.id for each in ended)  # (before its load)
-        assert any(isinstance(each, NotLoaded) for each in ended)  # (caught by its load: sampled again elsewhere)
+        await until(lambda: _exists(gates[0] / "loading-2"))  # the first replica loads the newest...
+        before = await server.generate([65], adapter=first.id, **OPTIONS)
+        assert before.model == first.id  # (...while the second serves the checkpoint before, waiting its turn)
+        assert not (gates[1] / "loading-2").exists() and second.id not in await holds(two)
+        (gates[0] / "2").touch()
+        await until(lambda: _holding(one, second.id))
+        await until(lambda: _exists(gates[1] / "loading-2"))  # then the second loads it: its turns are held back
+        caught = asyncio.create_task(server.generate([65], adapter=first.id, **OPTIONS))
+        await asyncio.sleep(0.2)
+        assert not caught.done() and second.id not in await holds(two)
+        (gates[1] / "2").touch()
+        with pytest.raises(NotLoaded):  # (caught by its load: sampled again elsewhere)
+            await caught
+        await until(lambda: _holding(two, second.id))
         reply = await server.generate([65], adapter=second.id, **OPTIONS)
         assert reply.model == second.id
 

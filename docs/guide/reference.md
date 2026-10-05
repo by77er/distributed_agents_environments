@@ -4954,9 +4954,10 @@ class System
   environment whose eval data it is) and the checkpoint that plays it, or the base model (`model`, one a launcher
   alive offers with the profile; none: the profile's): a suite by name plays the version its name points to now,
   which the launch then names by id. A training run says the evals it makes (`_checked_evals`). Raises `Taken`
-  for what cannot be asked for (a name taken or no name, a setting the profile does not have, no word of the
-  evals, a checkpoint and a base model both), `KeyError` for what no launcher offers or a checkpoint no reference
-  says.
+  for what cannot be asked for (a name taken or no name, a training run of a profile that names no trainer, a
+  setting the profile does not have, no word of the evals, a checkpoint and a base model both), `KeyError` for
+  what no launcher offers (a published environment is offered with the profiles that play it) or a checkpoint no
+  reference says.
 - `async def environments(self) -> dict[str, Any]` — Every environment the system knows of, by `module:name` (`rollout_train.monitor.environments.listed`): those
   the launchers alive offer, those runs were started on and those suites' versions play; each with a readable
   `name`, the versions of it seen (in runs' starts and suites' entries), whether a launcher alive offers it
@@ -7156,8 +7157,8 @@ def sample_request(messages: list[Message], effect_id: str = 'r_1:0:0', *, sessi
 def scripted_engine(model: str, **options: Any) -> ScriptedEngine
 ```
 
-An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start, and `loading` is
-how many seconds its full weights take to load.
+An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start, and `gate` (a
+directory) holds its loads of full weights back until a test lets each go (`ScriptedEngine`).
 
 ### `scripted_top`
 
@@ -7179,8 +7180,9 @@ class ScriptedEngine
 ```
 
 Answers each generate with the next scripted (text, finish reason), or with `always` once the script is
-spent; logprobs are -0.5 per token. Scores each token at -0.25. Keeps what it was asked and told. Full weights take
-`loading` seconds to load.
+spent; logprobs are -0.5 per token. Scores each token at -0.25. Keeps what it was asked and told. With `gate` (a
+directory), its `N`th load of full weights (from 1) writes `loading-N` there and waits until a file `N` is there
+too.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -7189,7 +7191,7 @@ spent; logprobs are -0.5 per token. Scores each token at -0.25. Keeps what it wa
 
 **Methods**
 
-- `def __init__(self, tokenizer: Tokenizer, script: Sequence[tuple[str, str]] = (), *, always: Sequence[tuple[str, str]] = (), loading: float = 0.0) -> None`
+- `def __init__(self, tokenizer: Tokenizer, script: Sequence[tuple[str, str]] = (), *, always: Sequence[tuple[str, str]] = (), gate: Path | None = None) -> None`
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, top: int = 0) -> Generation`
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None) -> Scores` — Each token scored at -0.25, its `top` most likely being itself and the tokens after it (`scripted_top`).
 - `async def load_adapter(self, name: str, path: str) -> None`

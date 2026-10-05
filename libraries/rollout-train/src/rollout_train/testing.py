@@ -5,6 +5,7 @@ profile can be tried without a model or a GPU."""
 import asyncio
 import json
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, cast
 
 from rollout.contracts import (
@@ -47,8 +48,9 @@ SECRETS = [("tests", "a-secret-that-only-tests-sign-with")]
 
 class ScriptedEngine:
     """Answers each generate with the next scripted (text, finish reason), or with `always` once the script is
-    spent; logprobs are -0.5 per token. Scores each token at -0.25. Keeps what it was asked and told. Full weights take
-    `loading` seconds to load."""
+    spent; logprobs are -0.5 per token. Scores each token at -0.25. Keeps what it was asked and told. With `gate` (a
+    directory), its `N`th load of full weights (from 1) writes `loading-N` there and waits until a file `N` is there
+    too."""
 
     max_model_len = 32_768
     processes: Sequence[int] = ()
@@ -59,10 +61,11 @@ class ScriptedEngine:
         script: Sequence[tuple[str, str]] = (),
         *,
         always: Sequence[tuple[str, str]] = (),
-        loading: float = 0.0,
+        gate: Path | None = None,
     ) -> None:
         self.tokenizer = tokenizer
-        self.loading = loading
+        self.gate = gate
+        self.loads = 0
         self.script = list(script)
         self.always = list(always)
         self.prompts: list[list[int]] = []
@@ -112,7 +115,11 @@ class ScriptedEngine:
         self.told.append(f"remove {name}")
 
     async def load_weights(self, path: str) -> None:
-        await asyncio.sleep(self.loading)
+        self.loads += 1
+        if self.gate is not None:
+            await asyncio.to_thread((self.gate / f"loading-{self.loads}").touch)
+            while not await asyncio.to_thread((self.gate / str(self.loads)).exists):  # noqa: ASYNC110 (a file lets it go)
+                await asyncio.sleep(0.01)
         self.told.append(f"weights {path}")
 
     async def sleep(self) -> None:
@@ -264,12 +271,13 @@ STARTED: list[ScriptedEngine] = []
 
 
 def scripted_engine(model: str, **options: Any) -> ScriptedEngine:
-    """An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start, and `loading` is
-    how many seconds its full weights take to load."""
+    """An engine whose policy says yes and no in turn; `fails=true` makes one that cannot start, and `gate` (a
+    directory) holds its loads of full weights back until a test lets each go (`ScriptedEngine`)."""
     if options.get("fails"):
         raise RuntimeError("no such device")
     always = [("yes\n", "stop"), ("no\n", "stop")]
-    engine = ScriptedEngine(cast(Tokenizer, Characters()), always=always, loading=float(options.get("loading", 0.0)))
+    gate = Path(str(options["gate"])) if options.get("gate") else None
+    engine = ScriptedEngine(cast(Tokenizer, Characters()), always=always, gate=gate)
     engine.told.append(f"started {model} {sorted(options.items())}")
     STARTED.append(engine)
     return engine
