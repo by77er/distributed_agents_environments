@@ -55,9 +55,10 @@ ray:
     cpus: "4"
     resources: {requests: {cpu: "1", memory: 2Gi}, limits: {memory: 4Gi}}
 
-# Each launcher offers the profiles under files/profiles/PROFILES and the environments it names, beats as
-# launcher/launcher-NAME/NAME, and submits the runs it claims to the Ray cluster, each asking for `gpus`. It runs in the
-# Python environment that can import its environments.
+# Each launcher offers the profiles under files/profiles/PROFILES and the environments it names, and the environments
+# imported from git (each run on one a Ray job in its own runtime environment); it beats as launcher/launcher-NAME/NAME,
+# and submits the runs it claims to the Ray cluster, each asking for `gpus`. It runs in the Python environment that can
+# import the environments it names.
 launchers:
   minecraft:
     python: /opt/rollout/venv/bin/python
@@ -91,7 +92,8 @@ gateway:
   host: gateway.localhost
   resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
 
-# Each monitor serves the page over a run's directory (its ledger, and every run in that ledger) or a ledger's URL.
+# Each monitor serves the page over a run's directory (its ledger, and every run in that ledger) or a ledger's URL, and
+# imports environments from git with the cluster config's blob store and Ray cluster.
 monitors:
   main:
     where: runs/curriculum-9   # under state.path

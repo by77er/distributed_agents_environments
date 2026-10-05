@@ -1,5 +1,6 @@
 # The monitors: each serves the page over a run's directory on the state volume (its ledger and every run in it),
-# behind a Service and an Ingress through Traefik; and an Ingress for Ray's dashboard.
+# behind a Service and an Ingress through Traefik, and imports environments from git with the cluster config's blob
+# store and Ray cluster (whose job server it reaches with the cluster's token); and an Ingress for Ray's dashboard.
 {{- range $name, $monitor := .Values.monitors }}
 ---
 apiVersion: apps/v1
@@ -17,8 +18,10 @@ spec:
         - name: monitor
           image: {{ include "rollout.image" $ }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
-          command: [rollout, monitor, "{{ $.Values.state.path }}/{{ $monitor.where }}", --host, 0.0.0.0, --port, "8765"]
-          env: {{- include "rollout.env" $ | nindent 12 }}
+          command: [rollout, monitor, "{{ $.Values.state.path }}/{{ $monitor.where }}", --host, 0.0.0.0, --port, "8765", --cluster]
+          env:
+            {{- include "rollout.env" $ | nindent 12 }}
+            {{- include "rollout.rayClientEnv" $ | nindent 12 }}
           ports: [{containerPort: 8765, name: http}]
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10}
           volumeMounts: {{- include "rollout.volumeMounts" $ | nindent 12 }}

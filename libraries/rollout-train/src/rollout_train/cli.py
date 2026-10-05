@@ -1243,6 +1243,9 @@ def main() -> None:
     monitoring.add_argument("where", help="a run's directory, a ledger's directory, or a database's URL")
     monitoring.add_argument("--host", default="127.0.0.1")
     monitoring.add_argument("--port", type=int, default=8765)
+    monitoring.add_argument(
+        "--cluster", **_cluster_option("import environments from git with this cluster config's Ray and blob store")
+    )
     ledgers = commands.add_parser("ledger", help="work with ledgers")
     ledger_commands = ledgers.add_subparsers(dest="ledger_command", required=True)
     copying = ledger_commands.add_parser("copy", help="copy a ledger into a database (SQLite or Postgres)")
@@ -1518,8 +1521,10 @@ def main() -> None:
 
         if arguments.command == "monitor":
             from rollout_train.monitor.app import create_app
+            from rollout_train.publishing import Importer
 
-            app = create_app(arguments.where)
+            importer = Importer.of(_cluster_of(arguments.cluster)) if arguments.cluster is not None else None
+            app = create_app(arguments.where, importer=importer)
         else:
             from rollout.harness.remote import serve
 

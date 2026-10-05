@@ -1,18 +1,21 @@
-// The environments: every one the system knows of (offered by a launcher alive, trained on, or played by a suite), and
-// one environment's page: what it says of itself where it loads on the monitor's machine (its version, description,
-// rows, eval data and curriculum), each row with what the training runs played of it, its runs, its suites and the
-// evals of them at its entry, and its newest check; with the forms that start a run on it and make a suite of it.
+// The environments: every one the system knows of (offered by a launcher alive, trained on, played by a suite, or
+// imported from git, with its source and what its check found), with the form that imports one; and one environment's
+// page: what it says of itself where it loads on the monitor's machine (its version, description, rows, eval data and
+// curriculum; a published one's as its import's check recorded it, with its source), each row with what the training
+// runs played of it, its runs, its suites and the evals of them at its entry, and its newest check; with the forms that
+// start a run on it and make a suite of it.
 
 import { Fragment, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useEnvironmentPage, useEnvironments, useSystem } from "../api/queries";
-import type { EnvironmentInfo } from "../api/types";
+import { useEnvironmentPage, useEnvironments, useImports, useSystem } from "../api/queries";
+import type { EnvironmentInfo, PublishedSource } from "../api/types";
 import { CheckpointTag } from "../components/checkpoints";
+import { ImportForm } from "../components/environments";
 import { shareText } from "../components/evals";
 import { SuiteForm } from "../components/suites";
 import { Card, Empty, Head, Mark, Share, Spec, Specs, Table } from "../components/ui";
 import { Ago } from "../layout/runs";
-import { bySubject, checkFound, rangeText, rowCounts, rowTotals, solvedShare, versionsText } from "../lib/environments";
+import { bySubject, checkFound, checkText, rangeText, rowCounts, rowTotals, shortVersion, solvedShare, sourceText, versionsText } from "../lib/environments";
 import { figure } from "../lib/format";
 import { runKind } from "../lib/model";
 import { environmentPlace, environmentsPlace, evalPlace, launchOn, runPlace, suitePlace } from "../lib/places";
@@ -20,11 +23,21 @@ import { versionTag } from "../lib/suites";
 
 export function Environments() {
   const { data: known } = useEnvironments();
+  const { data: imports } = useImports();
+  const navigate = useNavigate();
+  const [importing, setImporting] = useState(false);
   if (!known) return <Empty>Reading the environments…</Empty>;
   const offered = known.filter(each => each.offered).length;
+  const able = imports?.importing ?? true;
+  const action = (
+    <button type="button" className="action" onClick={() => setImporting(!importing)} disabled={!able && !importing}
+      title={able ? undefined : "this monitor was started without a cluster config to import with (rollout monitor --cluster)"}>
+      {importing ? "Close" : "Import from git"}
+    </button>
+  );
   return (
     <>
-      <Head title="Environments">
+      <Head title={<span className="head-with-action">Environments{action}</span>}>
         {known.length ? (
           <Specs>
             <Spec label="environments">{known.length}</Spec>
@@ -32,21 +45,24 @@ export function Environments() {
           </Specs>
         ) : null}
       </Head>
+      {importing ? <ImportForm onDone={version => navigate(environmentPlace(version.reference))} onCancel={() => setImporting(false)} /> : null}
       {known.length ? (
         <Table
-          heads={[["environment"], ["offered"], ["versions"], ["runs", "n"], ["suites", "n"], ["last used"]]}
+          heads={[["environment"], ["offered"], ["versions"], ["source"], ["check"], ["runs", "n"], ["suites", "n"], ["last used"]]}
           keys={known.map(each => each.environment)}
           rows={known.map(each => [
-            <span><b>{each.name}</b> <small className="mono faint">{each.environment}</small></span>,
+            <span><b>{each.name}</b> <small className="mono faint">{each.published ? each.published.entry_point : each.environment}</small></span>,
             each.offered ? <Mark state="running">offered</Mark> : <span className="faint">no</span>,
             each.versions.join(", ") || "–",
+            each.published ? <span className="mono" title={each.published.source}>{sourceText(each.published)} <span className="faint">@ {each.published.commit.slice(0, 7)}</span></span> : <span className="faint">–</span>,
+            each.published ? <span className={each.published.passed ? "t-good" : "t-bad"}>{checkText(each.published.check)}</span> : <span className="faint">–</span>,
             each.runs?.length ?? 0,
             each.suites?.length ?? 0,
             each.used ? <><Ago at={each.used} /> ago</> : "–",
           ])}
           to={known.map(each => environmentPlace(each.environment))}
         />
-      ) : <Empty>No environment yet: none is offered by a launcher, trained on, or played by a suite.</Empty>}
+      ) : <Empty>No environment yet: none is offered by a launcher, trained on, played by a suite, or imported.</Empty>}
     </>
   );
 }
@@ -57,7 +73,7 @@ export function Environment({ name }: { name: string }) {
   const [making, setMaking] = useState(false);
   if (error && !found) return <Empty>No environment {name} is known here. <Link to={environmentsPlace} className="linkish">Every environment</Link></Empty>;
   if (!found) return <Empty>Reading the environment…</Empty>;
-  const description = found.description, curriculum = found.curriculum;
+  const description = found.description, curriculum = found.curriculum, published = found.published;
   const actions = (
     <>
       <Link to={launchOn(found.environment)} className="action">New run</Link>
@@ -68,7 +84,15 @@ export function Environment({ name }: { name: string }) {
     <>
       <Head title={<span className="head-with-action">{found.name}{actions}</span>}>
         <Specs>
-          <Spec label="module:name"><span className="mono">{found.environment}</span></Spec>
+          {published ? (
+            <>
+              <Spec label="source"><span className="mono" title={published.source}>{sourceText(published)}</span></Spec>
+              <Spec label="commit"><span className="mono" title={published.commit}>{published.commit.slice(0, 12)}</span>{published.ref ? ` · ${published.ref}` : ""}</Spec>
+              <Spec label="entry point"><span className="mono">{published.entry_point}</span></Spec>
+              <Spec label="version"><span className="mono" title={published.version}>{shortVersion(published.version)}</span></Spec>
+              <Spec label="imported"><Ago at={published.imported} /> ago</Spec>
+            </>
+          ) : <Spec label="module:name"><span className="mono">{found.environment}</span></Spec>}
           <Spec label="offered" kind={found.offered ? "good" : ""}>{found.offered ? "yes" : "no launcher alive offers it"}</Spec>
           {found.loads ? null : <Spec label="here" kind="warm"><span title={found.error ?? undefined}>does not load</span></Spec>}
           <Spec label={found.loads ? "version" : "versions seen"}>{versionsText(found).map((version, index) => (
@@ -88,7 +112,25 @@ export function Environment({ name }: { name: string }) {
       <Runs found={found} />
       <Scores found={found} />
       <Check found={found} />
+      {published ? <Imported published={published} /> : null}
     </>
+  );
+}
+
+function Imported({ published }: { published: PublishedSource }) {
+  return (
+    <Card title="Import check" note={checkText(published.check)}>
+      <Table
+        heads={[["check"], [""], ["said"]]}
+        keys={published.check.map(each => each.check)}
+        rows={published.check.map(each => [
+          <span className="mono">{each.check}</span>,
+          each.passed ? (each.flagged ? { text: "flagged", kind: "t-warm" } : { text: "ok", kind: "t-good" }) : { text: "failed", kind: "t-bad" },
+          each.said,
+        ])}
+      />
+      {published.dependencies.length ? <p className="muted small mono">{published.dependencies.join(" · ")}</p> : null}
+    </Card>
   );
 }
 

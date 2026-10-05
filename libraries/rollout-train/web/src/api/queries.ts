@@ -4,7 +4,7 @@
 
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { readJson } from "./client";
-import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, Episode, EvalSubjects, Evals, FeedRun, Group, KnownEnvironment, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, SubjectHistory, SubjectKind, System } from "./types";
+import type { Bookmark, CheckpointEvals, Entry, EnvironmentInfo, EnvironmentVersion, Episode, EvalSubjects, Evals, FeedRun, Group, ImportAsked, Imports, KnownEnvironment, Launch, LaunchAsked, Launches, Lineage, Machines, Path, RunSettings, Statistics, SubjectHistory, SubjectKind, System } from "./types";
 import { type Known, knownOf } from "../lib/model";
 import { setServerTime } from "../lib/now";
 
@@ -26,6 +26,7 @@ export const topics = {
   history: (kind: SubjectKind, id: string): Topic => ({ topic: `history/${kind}/${id}`, key: ["history", kind, id], path: `api/evals/${kind}/${encodeURIComponent(id)}` }),
   environments: (): Topic => ({ topic: "environments", key: ["environments"], path: "api/environments" }),
   environment: (name: string): Topic => ({ topic: `environment/${name}`, key: ["environment", name], path: `api/environments/${encodeURIComponent(name)}` }),
+  imports: (): Topic => ({ topic: "imports", key: ["imports"], path: "api/environments/imports" }),
   checkpoints: (): Topic => ({ topic: "checkpoints", key: ["checkpoints"], path: "api/checkpoints" }),
   checkpointEvals: (id: string): Topic => ({ topic: `checkpoint-evals/${id}`, key: ["checkpoint-evals", id], path: `api/checkpoints/${encodeURIComponent(id)}/evals` }),
   path: (id: string): Topic => ({ topic: `path/${id}`, key: ["path", id], path: `api/checkpoints/${encodeURIComponent(id)}/path` }),
@@ -141,6 +142,23 @@ export const useEnvironments = () =>
     refetchInterval: 15_000,
     queryFn: async ({ signal }) => (await readJson<{ environments: KnownEnvironment[] }>(topics.environments().path, signal)).environments,
   });
+
+/** The imports from git the monitor made, each with its stage; read every second while `watching` (an import is under
+ * way here). */
+export const useImports = (watching = false) =>
+  useQuery({
+    queryKey: topics.imports().key,
+    refetchInterval: watching ? 1000 : 30_000,
+    queryFn: ({ signal }) => readJson<Imports>(topics.imports().path, signal),
+  });
+
+/** Import an environment from git: the monitor fetches, checks and records it, and answers with the version once it is
+ * recorded (one imported before, the same source, is answered at once), or with why it was refused. */
+export const useImport = () =>
+  useWrite(
+    async (body: ImportAsked) => asked<{ version: EnvironmentVersion; existing: boolean }>("api/environments/import", "POST", body),
+    [topics.environments(), topics.imports(), topics.launches()],
+  );
 
 /** Make a suite, or its next version (which its name then points to). */
 export const useSaveSuite = (name: string) =>

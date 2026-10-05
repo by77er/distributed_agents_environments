@@ -8,7 +8,11 @@ A topic is a thing the page shows, by name:
 - `launches`: the runs asked for, and the launchers alive with what each offers (`System.launches`);
 - `evals`: the suites and the evals that played them (`System.evals`);
 - `environments`: every environment the system knows of (`System.environments`);
-- `environment/MODULE:NAME`: one environment's page (`System.environment`);
+- `environment/MODULE:NAME`: one environment's page (`System.environment`; a published one's is
+  `environment/NAME@VERSION`);
+- `environment-versions`, `environment-version/VERSION`: the published environments' versions, and one
+  (`System.environment_versions`, `System.environment_version`);
+- `imports`: the imports from git this monitor made, each with its stage (`System.imports`);
 - `feeds`: every episode in the runs' feeds, summarised (`System.feeds`);
 - `statistics`: every run in figures (`System.statistics`);
 - `checkpoints`: the checkpoints as a graph (`System.lineage`);
@@ -120,6 +124,12 @@ class Hub:
             return await system.environments()
         if topic.startswith("environment/"):
             return await system.environment(topic.removeprefix("environment/"))
+        if topic == "environment-versions":
+            return await system.environment_versions()
+        if topic.startswith("environment-version/"):
+            return await system.environment_version(topic.removeprefix("environment-version/"))
+        if topic == "imports":
+            return await system.imports()
         if topic == "feeds":
             return await asyncio.to_thread(system.feeds)
         if topic == "statistics":

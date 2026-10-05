@@ -38,6 +38,7 @@ function watched(place: Place, system: System | undefined): Topic[] {
     found.push(topics.history(place.subject, place.id), ...(place.subject === "checkpoint" ? [topics.path(id)] : []));
   }
   if (place.page === "environments") found.push(topics.environments());
+  if (place.kind === "environments") found.push(topics.imports());
   if (place.kind === "environment") found.push(topics.environment(place.environment));
   return found;
 }

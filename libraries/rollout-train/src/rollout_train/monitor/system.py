@@ -72,6 +72,8 @@ from rollout_train.monitor.machines import kind_of, machines
 from rollout_train.monitor.scores import CHECKPOINT, evals_in, evals_of, history_of, path_of, subjects_in, suites_in
 from rollout_train.monitor.statistics import newest, solved_of, statistics, unreported
 from rollout_train.presence import STALE, Beat, alive, presence_of
+from rollout_train.published import EnvironmentVersion, environment_versions_of, is_published
+from rollout_train.publishing import Importer, Refused, Source, publish
 from rollout_train.record import (
     ENDINGS,
     ENDS,
@@ -151,6 +153,8 @@ FRESH = 5.0
 """Seconds what a monitor elsewhere said is kept before it is asked again."""
 UNANSWERED = 30.0
 """Seconds a monitor elsewhere that did not answer is left before it is asked again."""
+IMPORTS = 20
+"""Imports a monitor keeps word of, the newest."""
 RELAYED = "x-rollout-monitor-relayed"
 """A header on what one monitor asks another: the one asked answers from its own machine only (so two monitors that
 each take a run to be the other's never ask each other in turn)."""
@@ -164,10 +168,12 @@ class System:
         *,
         ledger: Ledger | None = None,
         client: httpx.Client | None = None,
+        importer: Importer | None = None,
     ) -> None:
         """Over a run's `directory` (its ledger, as `rollout_train.ledger.of_run` finds it: every run that shares
         it), or over a `ledger` alone. `feed` reads the directory's feed (by default its `feed`). `client` asks the
-        monitors on other machines for their runs' episodes."""
+        monitors on other machines for their runs' episodes. `importer` is where environments imported from git go
+        (`import_environment`); none: this monitor imports none."""
         if directory is None and ledger is None:
             raise ValueError("a run's directory or a ledger")
         self.directory = directory.resolve() if directory is not None else None
@@ -196,6 +202,10 @@ class System:
         """The environments the suites' forms named, loaded once each."""
         self._reading: dict[str, asyncio.Future[Any]] | None = None
         """What was read within a reading (`one_reading`), by what it is."""
+        self._importer = importer
+        self._versions = environment_versions_of(self._ledger)
+        self._imports: list[dict[str, Any]] = []
+        """The imports this monitor made since it started, newest first (the newest `IMPORTS`): each with its stage."""
 
     @property
     def ledger(self) -> str:
@@ -389,12 +399,25 @@ class System:
         if number not in (None, 1):
             raise Taken(f"there is no version {said!r} of a suite")
         try:
-            data = (await self._loaded(asked.environment)).evals()
+            data = await self._eval_data(asked.environment)
         except KeyError:  # (an environment that does not load here: its launcher's run finds out)
             return [asked.environment]
         if name not in data:
             raise Taken(f"there is no suite {name!r}, and {asked.environment} has no eval data of that name")
         return [asked.environment]
+
+    async def _eval_data(self, environment: str) -> Mapping[str, Any]:
+        """An environment's eval data, by name: a published one's as its version recorded it, a built-in one's where
+        it loads here. Raises `KeyError` where it does neither."""
+        if is_published(environment):
+            version = await self._version(environment)
+            if version is None:
+                raise KeyError(f"there is no published environment {environment}")
+            return cast(Mapping[str, Any], version.description.get("evals") or {})
+        return (await self._loaded(environment)).evals()
+
+    async def _version(self, reference: str) -> EnvironmentVersion | None:
+        return await self._versions.get(reference) if self._versions is not None else None
 
     async def _loaded(self, environment: str) -> Environment:
         """An environment, by `module:name`, loaded in this process once. Raises `KeyError` where it does not load."""
@@ -417,19 +440,79 @@ class System:
         in this process (its version, rows, eval data, description and curriculum; else why it does not load) and what
         the ledger has of it (each row played, its runs, suites, evals and newest check). None where it neither loads
         nor is known."""
-        try:
-            said, error = await asyncio.to_thread(described, await self._loaded(environment)), None
-        except KeyError as failed:
-            said, error = None, str(failed.args[0])
+        if is_published(environment):  # (what it says of itself, as its check found it)
+            version = await self._version(environment)
+            said: dict[str, Any] | None = dict(version.description) if version is not None else None
+            error = None if version is not None else f"there is no published environment {environment}"
+        else:
+            try:
+                said, error = await asyncio.to_thread(described, await self._loaded(environment)), None
+            except KeyError as failed:
+                said, error = None, str(failed.args[0])
         return await asyncio.to_thread(page_of, await self._environments_read(), environment, said, error)
 
+    async def environment_versions(self) -> dict[str, Any]:
+        """Every published environment's version the ledger keeps (`rollout_train.published`), the newest imported
+        first."""
+        found = await self._versions.all() if self._versions is not None else []
+        return {"versions": [each.to_json() for each in found], "importing": self._importer is not None}
+
+    async def environment_version(self, reference: str) -> dict[str, Any] | None:
+        """A published environment's version, by its id or `NAME@VERSION`; none where the ledger keeps no such one."""
+        found = await self._version(reference)
+        return found.to_json() if found is not None else None
+
+    async def imports(self) -> dict[str, Any]:
+        """The imports this monitor made since it started, newest first: each with what it imports, its stage
+        (`fetching`, `reading`, `packing`, `storing`, `checking`, `recording`, then `done` or `refused`), when it began
+        and ended, and the version it made or why it was refused."""
+        return {"imports": [dict(each) for each in self._imports], "importing": self._importer is not None}
+
+    async def import_environment(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        """Import an environment from git (`rollout_train.publishing.publish`): `url`, and optionally `ref`,
+        `subdirectory` and `entry_point`. Returns the version (`version`) and whether it was there already
+        (`existing`). Raises `Taken` where this monitor imports nothing or the body says no URL, `Refused` saying why
+        the import cannot be made."""
+        if self._importer is None or self._versions is None:
+            raise Taken(
+                "this monitor imports no environment: start it with a cluster config (`rollout monitor WHERE "
+                "--cluster`) that names a Ray job server and a blob store, over a ledger that keeps published versions"
+            )
+        said = {key: str(body.get(key) or "").strip() for key in ("url", "ref", "subdirectory", "entry_point")}
+        if not said["url"]:
+            raise Taken("say the git URL to import from")
+        source = Source(said["url"], said["ref"] or None, said["subdirectory"], said["entry_point"] or None)
+        noted: dict[str, Any] = {**said, "id": f"import-{len(self._imports)}-{time.time_ns()}", "stage": "fetching"}
+        noted |= {"started": round(time.time(), 1), "ended": None, "error": None, "version": None}
+        self._imports[:] = [noted, *self._imports][:IMPORTS]
+
+        def stage(name: str) -> None:
+            noted["stage"] = name
+
+        importer = self._importer
+        try:
+            made = await publish(
+                source, versions=self._versions, blobs=importer.blobs, jobs=importer.jobs, scratch=importer.scratch,
+                said=stage,
+            )  # fmt: skip
+        except Refused as refused:
+            noted |= {"stage": "refused", "error": str(refused), "ended": round(time.time(), 1)}
+            raise
+        except Exception as error:  # (anything else is why it was refused too: said so, then raised)
+            noted |= {"stage": "refused", "error": f"{type(error).__name__}: {error}", "ended": round(time.time(), 1)}
+            raise
+        noted |= {"stage": "done", "version": made.version.reference, "ended": round(time.time(), 1)}
+        return {"version": made.version.to_json(), "existing": made.existing}
+
     async def _environments_read(self) -> Read:
-        """What the environments' sources read: the tables, what the launchers alive offer, and the registry's names."""
+        """What the environments' sources read: the tables, what the launchers alive offer, the registry's names, and
+        the published versions."""
         offered = {
             str(each) for beat in await self._beats() if beat.about.get("kind") == LAUNCHER and alive(beat)
             for each in cast(list[Any], beat.about.get("environments") or [])
         }  # fmt: skip
-        return Read(await self._tables(), frozenset(offered), await self._names())
+        published = await self._versions.all() if self._versions is not None else []
+        return Read(await self._tables(), frozenset(offered), await self._names(), tuple(published))
 
     async def save_suite(self, name: str, body: Mapping[str, Any]) -> Suite:
         """Make a suite, or its next version, as the page's forms say it (`rollout_train.evals.make_suite`,

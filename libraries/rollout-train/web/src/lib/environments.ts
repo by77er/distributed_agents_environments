@@ -1,16 +1,28 @@
-// Environments as the page says them: by a readable name, with `module:name` beside it where it matters; and what an
-// environment's page works out from what the monitor says of it: each row's share solved and the rows together, its
-// evals by who played them, and what its newest check found.
+// Environments as the page says them: by a readable name, with `module:name` (a published one's `NAME@VERSION`) beside
+// it where it matters; what an environment's page works out from what the monitor says of it: each row's share solved
+// and the rows together, its evals by who played them, and what its newest check found; and a published one's source,
+// its check, and an import's stage.
 
-import type { CheckGroup, Description, EnvironmentInfo, EnvironmentRow, EnvironmentScore, KnownEnvironment } from "../api/types";
+import type { CheckGroup, Description, EnvironmentInfo, EnvironmentRow, EnvironmentScore, Finding, KnownEnvironment, PublishedSource } from "../api/types";
 
 /** Names an environment's object is often given, which say nothing of it. */
 const GENERIC = new Set(["environment", "env", "environments", "main"]);
 
+/** A published environment's `NAME@VERSION`: its name and version; none for a built-in one's `module:name`. */
+export function publishedParts(environment: string): { name: string; version: string } | null {
+  const found = /^([^:@]+)@([0-9a-f]{64})$/.exec(environment);
+  return found ? { name: found[1], version: found[2] } : null;
+}
+
+/** A version's id, in the few characters the monitor shows of it. */
+export const shortVersion = (version: string): string => version.slice(0, 12);
+
 /** An environment's `module:name`, in a word: its object's name, or its package's where that name says nothing (as the
- * monitor names it). */
+ * monitor names it); a published one's `NAME@VERSION` with the version's first few characters. */
 export function readable(environment: string | null | undefined): string {
   if (!environment) return "–";
+  const published = publishedParts(environment);
+  if (published) return `${published.name}@${shortVersion(published.version)}`;
   const [module, attribute] = environment.split(":");
   if (attribute && !GENERIC.has(attribute.toLowerCase())) return attribute;
   return module.split(".")[0] || environment;
@@ -88,3 +100,24 @@ export const rangeText = (description: Description): string => {
 /** The versions of an environment to say: the one it loads as first, then the others seen. */
 export const versionsText = (found: Pick<EnvironmentInfo, "version" | "versions">): string[] =>
   [...new Set([...(found.version ? [found.version] : []), ...found.versions])];
+
+/** Where a published environment's source came from, in a line: its repository (without the scheme or `.git`), and its
+ * subdirectory there. */
+export const sourceText = (published: Pick<PublishedSource, "source" | "subdirectory">): string =>
+  `${published.source.replace(/^[a-z+]+:\/\//, "").replace(/\.git$/, "")}${published.subdirectory ? `/${published.subdirectory}` : ""}`;
+
+/** What a check found, in a few words: how many checks passed, and how many of those with something to look at. */
+export function checkText(findings: Finding[]): string {
+  const passed = findings.filter(each => each.passed).length;
+  const flagged = findings.filter(each => each.passed && each.flagged).length;
+  if (passed < findings.length) return `${findings.length - passed} of ${findings.length} failed`;
+  return `${passed} passed${flagged ? `, ${flagged} flagged` : ""}`;
+}
+
+/** What an import is doing, by its stage. */
+export const STAGES: Record<string, string> = {
+  fetching: "fetching", reading: "reading", packing: "packing", storing: "storing", checking: "checking on Ray",
+  recording: "recording", done: "imported", refused: "refused",
+};
+
+export const stageText = (stage: string | null | undefined): string => (stage ? STAGES[stage] ?? stage : "starting");

@@ -837,9 +837,74 @@ export interface Path {
   suites: { suite: string; environments: string[]; name?: string; number?: number; label?: string }[];
 }
 
-/** An environment the system knows of: offered by a launcher alive, started on by a run, or played by a suite. */
+/** One finding of a check: which check, whether it passed, what it said, and whether it passed with something to look
+ * at. */
+export interface Finding {
+  check: string;
+  passed: boolean;
+  said: string;
+  flagged?: boolean;
+}
+
+/** Where a published environment's source came from and what its check found. */
+export interface PublishedSource {
+  /** The version's id: the SHA-256 of its source's zip. */
+  version: string;
+  source: string;
+  ref: string | null;
+  commit: string;
+  subdirectory: string;
+  entry_point: string;
+  imported: number;
+  check: Finding[];
+  passed: boolean;
+  dependencies: string[];
+}
+
+/** A version of an environment imported from git, as the ledger keeps it. */
+export interface EnvironmentVersion {
+  /** `NAME@VERSION`: how launches and runs name it. */
+  reference: string;
+  name: string;
+  version: string;
+  source: string;
+  ref: string | null;
+  commit: string;
+  subdirectory: string;
+  entry_point: string;
+  check: Finding[];
+  imported: number;
+}
+
+/** What an import from git asks for. */
+export interface ImportAsked {
+  url: string;
+  ref: string;
+  subdirectory: string;
+  entry_point: string;
+}
+
+/** An import the monitor made, with where it is: `fetching`, `reading`, `packing`, `storing`, `checking`, `recording`,
+ * then `done` (with the version it made) or `refused` (with why). */
+export interface ImportGoing extends ImportAsked {
+  id: string;
+  stage: string;
+  started: number;
+  ended: number | null;
+  error: string | null;
+  version: string | null;
+}
+
+export interface Imports {
+  imports: ImportGoing[];
+  /** Whether this monitor imports at all (it was started with a cluster config). */
+  importing: boolean;
+}
+
+/** An environment the system knows of: offered by a launcher alive, started on by a run, played by a suite, or
+ * imported from git. */
 export interface KnownEnvironment {
-  /** As `module:name`. */
+  /** As `module:name`; a published one as `NAME@VERSION`. */
   environment: string;
   /** In a word. */
   name: string;
@@ -852,6 +917,8 @@ export interface KnownEnvironment {
   suites?: string[];
   /** When a run (a training run, an eval or a check) last started on it. */
   used?: number | null;
+  /** For one imported from git: where its source came from and what its check found. */
+  published?: PublishedSource | null;
 }
 
 /** What its results say of an episode: the range its reward falls in, whether it says solved and saturated, and what
@@ -953,6 +1020,8 @@ export interface EnvironmentInfo {
     ended: { how: string; at: number; detail?: string | null } | null;
     groups: CheckGroup[];
   } | null;
+  /** For one imported from git: where its source came from and what its check found. */
+  published?: PublishedSource | null;
 }
 
 /** A training run's settings, by dotted key: fixed ones, changeable ones as it started, those its newest step used,

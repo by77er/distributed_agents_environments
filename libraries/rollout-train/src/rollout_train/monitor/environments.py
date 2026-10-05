@@ -1,17 +1,19 @@
 """Environments from the system's point of view: every environment it knows of (`listed`), and what one is and what
 was done with it (`page_of`).
 
-An environment is known by `module:name` from several sources (`SOURCES`), each a function from what the monitor
-read (`Read`) to what it saw of environments (`Sighting`s): the launchers alive that offer one (`offered`), the runs
-started on one (`started`: training runs, evals' runs and checks), and the suites whose versions play one
-(`in_suites`). `listed` folds every sighting of an environment into one line of the list; a new source is a function
-added to `SOURCES`.
+An environment is known by `module:name` (a published one by `NAME@VERSION`, `rollout_train.published`) from several
+sources (`SOURCES`), each a function from what the monitor read (`Read`) to what it saw of environments
+(`Sighting`s): the launchers alive that offer one (`offered`), the runs started on one (`started`: training runs,
+evals' runs and checks), the suites whose versions play one (`in_suites`), and the published versions the ledger keeps
+(`published`). `listed` folds every sighting of an environment into one line of the list, a published one's with where
+its source came from and what its check found (`source_of`); a new source is a function added to `SOURCES`.
 
 An environment's page (`page_of`) is what it says of itself where it loads in the monitor's process (`described`: its
-version, description, rows, eval data and curriculum) beside what the ledger has of it: each row's groups and
-episodes in the training runs on it (matched by the row's key), those runs, the suites with a version that plays it,
-every eval of such a version with its score at this environment's entry, and its newest check (`rollout env check`
-with a profile: a run of its own, whose groups each say whether every episode scored the same).
+version, description, rows, eval data and curriculum; a published one's as its check recorded it) beside what the
+ledger has of it: each row's groups and episodes in the training runs on it (matched by the row's key), those runs, the
+suites with a version that plays it, every eval of such a version with its score at this environment's entry, and its
+newest check (`rollout env check` with a profile: a run of its own, whose groups each say whether every episode scored
+the same).
 """
 
 from collections.abc import Callable, Iterable, Mapping
@@ -25,6 +27,8 @@ from rollout.environment import Environment
 from rollout_train.check import CHECK
 from rollout_train.evals import EVAL, parsed, started_version, subject_table, suites_among, versions_in
 from rollout_train.monitor.scores import evals_in
+from rollout_train.published import EnvironmentVersion, short
+from rollout_train.published import parsed as published_parts
 from rollout_train.record import ENDS, GROUPS, RESULTS, STARTS, named_runs, newest_record, table
 
 GENERIC = {"environment", "env", "environments", "main"}
@@ -32,7 +36,10 @@ GENERIC = {"environment", "env", "environments", "main"}
 
 
 def readable(environment: str) -> str:
-    """An environment's `module:name`, in a word: its object's name, or its package's where that name says nothing."""
+    """An environment's `module:name`, in a word: its object's name, or its package's where that name says nothing; a
+    published one's `NAME@VERSION` with the version's first few characters."""
+    if (said := published_parts(environment)) is not None:
+        return f"{said[0]}@{short(said[1])}"
     module, _, attribute = environment.partition(":")
     if attribute and attribute.lower() not in GENERIC:
         return attribute
@@ -47,6 +54,7 @@ class Read:
     tables: Mapping[str, Mapping[str, JsonValue]]
     offered: frozenset[str] = frozenset()
     names: Mapping[str, Any] = field(default_factory=dict[str, Any])
+    published: tuple[EnvironmentVersion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -104,8 +112,29 @@ def in_suites(read: Read) -> Iterable[Sighting]:
     ]
 
 
-SOURCES: tuple[Source, ...] = (offered, started, in_suites)
+def published(read: Read) -> Iterable[Sighting]:
+    """The published environments' versions the ledger keeps, each with the version it says it is, when imported."""
+    return [Sighting(each.reference, version=_said_version(each), at=None) for each in read.published]
+
+
+SOURCES: tuple[Source, ...] = (offered, started, in_suites, published)
 """Where the system knows environments from."""
+
+
+def _said_version(version: EnvironmentVersion) -> str | None:
+    said = version.description.get("version")
+    return str(said) if said is not None else None
+
+
+def source_of(version: EnvironmentVersion) -> dict[str, Any]:
+    """Where a published version's source came from, and what its check found: its URL, ref, commit, subdirectory and
+    entry point, when it was imported, its findings, and whether every one passed."""
+    return {
+        "source": version.source, "ref": version.ref, "commit": version.commit, "subdirectory": version.subdirectory,
+        "entry_point": version.entry_point, "imported": version.imported, "check": list(version.check),
+        "passed": all(bool(each.get("passed")) for each in version.check), "dependencies": list(version.dependencies),
+        "version": version.version,
+    }  # fmt: skip
 
 
 def listed(read: Read, sources: Iterable[Source] = SOURCES) -> list[dict[str, Any]]:
@@ -116,6 +145,7 @@ def listed(read: Read, sources: Iterable[Source] = SOURCES) -> list[dict[str, An
     for source in sources:
         for sighting in source(read):
             seen.setdefault(sighting.environment, []).append(sighting)
+    imported = {each.reference: each for each in read.published}
     lines: list[dict[str, Any]] = []
     for environment, sightings in seen.items():
         times = [each.at for each in sightings if each.at is not None]
@@ -128,6 +158,7 @@ def listed(read: Read, sources: Iterable[Source] = SOURCES) -> list[dict[str, An
                 "runs": sorted({each.run for each in sightings if each.run}),
                 "suites": sorted({each.suite for each in sightings if each.suite}),
                 "used": max(times) if times else None,
+                "published": source_of(imported[environment]) if environment in imported else None,
             }
         )
     return sorted(lines, key=lambda each: (each["name"], each["environment"]))
@@ -240,6 +271,7 @@ def page_of(
         "suites": _suites(read, environment),
         "scores": _scores(read, environment),
         "check": check,
+        "published": known["published"] if known else None,
     }
 
 

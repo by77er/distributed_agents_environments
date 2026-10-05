@@ -20,6 +20,7 @@ from rollout_train.layout import LEDGER
 from rollout_train.ledger import FENCES, LOCATION, FileLedger
 from rollout_train.monitor.stream import BEAT, MISSING, Hub, Reading
 from rollout_train.monitor.system import RELAYED, System
+from rollout_train.publishing import Importer, Refused
 from rollout_train.registry import Taken
 
 STATIC = Path(__file__).with_name("static")
@@ -28,21 +29,21 @@ KEEPALIVE = 15.0
 """Seconds between the stream's keep-alive comments while nothing changes."""
 
 
-def watched(where: str | Path) -> System:
+def watched(where: str | Path, importer: Importer | None = None) -> System:
     """What a monitor over `where` reads: a database's URL (`sqlite:///…`, `postgresql://…`) or a ledger's directory of
     files, every run in it; or a run's directory (`rollout_train.layout`), its ledger and every run that shares it,
-    with the directory's own logs and feed."""
+    with the directory's own logs and feed. `importer`: where environments imported from git go."""
     if "://" in str(where):
         from rollout_train.database import DatabaseLedger
 
-        return System(ledger=DatabaseLedger(str(where)))
+        return System(ledger=DatabaseLedger(str(where)), importer=importer)
     path = Path(where).expanduser()
     if (path / FENCES).exists() and not (path / LOCATION).exists() and not (path / LEDGER).is_dir():
-        return System(ledger=FileLedger(path))
-    return System(path)
+        return System(ledger=FileLedger(path), importer=importer)
+    return System(path, importer=importer)
 
 
-def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
+def create_app(where: str | Path, *, beat: float = BEAT, importer: Importer | None = None) -> Starlette:
     """Serves the page and what it asks for, over a ledger or a run's directory (`watched`):
 
     - `/`: the page (`STATIC`), and `/assets/...` its scripts and styles;
@@ -59,6 +60,12 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
       `/api/environments/{name}` one environment's page: its rows, eval data and curriculum where it loads here, what
       was played of each row, its runs, suites, evals and newest check (`System.environment`; 404 for one neither
       known nor loading);
+    - `/api/environments/versions`: the published environments' versions (`System.environment_versions`), and
+      `/api/environments/versions/{version}` one, by its id or `NAME@VERSION` (`System.environment_version`); `POST
+      /api/environments/import` (`{"url", "ref", "subdirectory", "entry_point"}`) imports one from git, the monitor's
+      importer (`importer`, from its cluster config) making it, and answers with the version once it is recorded, or
+      422 with why it was refused (`System.import_environment`); `/api/environments/imports` the imports this monitor
+      made, each with its stage (`System.imports`);
     - `/api/launches`: the runs asked for and the launchers alive (GET); `POST` asks for a run or an eval
       (`System.launch`), `POST /api/launches/{id}/stop` stops one;
     - `/api/groups/{run}/{number}`: one group, its episodes, its step and its outcome (`System.group`);
@@ -87,7 +94,7 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
     names (`System._source`); what one monitor asks another, the other answers from its own machine (`RELAYED`),
     directly and in full. It reads, and writes names (a run's, bookmarks, suites') and suites' versions; the runs' own
     processes write the rest."""
-    system = watched(where)
+    system = watched(where, importer)
     hub = Hub(system, beat)
 
     def answered(request: Request, reading: Reading) -> Response:
@@ -198,6 +205,8 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         """Make one change to the registry, and have every page read what it shows afresh."""
         try:
             done = await change()
+        except Refused as error:
+            return JSONResponse({"error": str(error)}, status_code=422)
         except Taken as error:
             return JSONResponse({"error": str(error)}, status_code=409)
         except KeyError as error:
@@ -262,6 +271,29 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
 
     async def environment(request: Request) -> Response:
         return answered(request, await hub.read(f"environment/{request.path_params['name']}"))
+
+    async def environment_versions(request: Request) -> Response:
+        return answered(request, await hub.read("environment-versions"))
+
+    async def environment_version(request: Request) -> Response:
+        return answered(request, await hub.read(f"environment-version/{request.path_params['version']}"))
+
+    async def imports(request: Request) -> Response:
+        return answered(request, await hub.read("imports"))
+
+    async def import_environment(request: Request) -> Response:
+        try:
+            body: Any = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "say what to import, as JSON: url, ref, subdirectory, entry_point"}, 400)
+
+        async def change() -> Any:
+            return await system.import_environment(cast(dict[str, Any], body))
+
+        hub.forget()  # (its stages are read as it goes)
+        return await written(change)
 
     async def launches(request: Request) -> Response:
         if request.method == "GET":
@@ -330,6 +362,10 @@ def create_app(where: str | Path, *, beat: float = BEAT) -> Starlette:
         Route("/api/evals/{kind:str}/{reference:path}", history),
         Route("/api/suites/{name}", suite, methods=["POST"]),
         Route("/api/environments", environments),
+        Route("/api/environments/import", import_environment, methods=["POST"]),
+        Route("/api/environments/imports", imports),
+        Route("/api/environments/versions", environment_versions),
+        Route("/api/environments/versions/{version}", environment_version),
         Route("/api/environments/{name}", environment),
         Route("/api/launches/{id}/stop", stop, methods=["POST"]),
         Route("/api/groups/{run}/{number:int}", group),

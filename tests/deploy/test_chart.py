@@ -136,3 +136,14 @@ def test_a_launcher_offers_the_gridworld_with_its_profile_on_the_gpu(rendered: l
     assert command[command.index("--profiles") + 1] == "/etc/rollout/profiles/gridworld"
     assert command[command.index("--environment") + 1] == "gridworld.environment:environment"
     assert command[command.index("--gpus") + 1] == "1" and "--ray" in command
+
+
+def test_every_monitor_imports_with_the_cluster_config_and_reaches_ray_with_its_token(
+    rendered: list[dict[str, Any]],
+) -> None:
+    monitors = containers_of(rendered, "monitor")
+    assert len(monitors) == 2
+    for monitor in monitors:
+        assert monitor["command"][-1] == "--cluster"
+        names = {each["name"] for each in monitor["env"]}
+        assert {"ROLLOUT_CLUSTER", "RAY_AUTH_MODE", "RAY_AUTH_TOKEN", "AWS_ACCESS_KEY_ID"} <= names

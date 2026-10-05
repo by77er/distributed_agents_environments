@@ -183,7 +183,7 @@ def test_the_list_folds_every_sources_sightings() -> None:
     found = {each["environment"]: each for each in listed(Read({}), [packages, runs])}
     assert found[WORDS] | {"name": None} == {
         "environment": WORDS, "name": None, "versions": ["1", "2"], "offered": False, "runs": ["a", "b"], "suites": [],
-        "used": 9.0,
+        "used": 9.0, "published": None,
     }  # fmt: skip
     assert (found["pkg:maze"]["name"], found["pkg:maze"]["versions"], found["pkg:maze"]["used"]) == (
         "maze",
