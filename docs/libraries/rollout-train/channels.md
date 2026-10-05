@@ -125,9 +125,22 @@ run's `serving` table, under its fence and before it publishes to engines of its
 | `model`, `sequence` | the model the line began from, by name, and the longest turn the trainer can train on, which every runner applies |
 | `max_lag` | how many checkpoints behind this a sample may be: 0 for an eval, which plays its checkpoint and no other |
 
-`wanted(ledger, run, channel)` is what a channel should serve now: its record of the greatest depth, as a channel
-never goes back; `serving_of(ledger, run, channel)` is every record of it. `record_serving(ledger, run, serving,
-fence)` appends one; one written before changes nothing.
+`wanted(ledger, run, channel)` is what a channel should serve now: the record of the greatest depth it serves, as a
+channel never goes back; `serving_of(ledger, run, channel)` is every record it serves. `record_serving(ledger, run,
+serving, fence)` appends one; one written before changes nothing.
+
+Whose records a channel serves is its mode, which the run's start records in its run settings
+(`channels.NAME.mode`; `source_of`):
+
+| Mode | Serves |
+|---|---|
+| the trained channel, or none said | its own records |
+| `follows`, with `follows` and `lag` | the followed channel's records but its newest `lag` (deepest last), under its own name: the followed channel's checkpoint `lag` records back, and the base model until the followed channel has more than `lag` |
+| `fixed`, with `checkpoint` (an id) | that checkpoint, at its depth, with `max_lag` 0 |
+| `fixed`, with none | its own records, which nothing writes: the base model |
+
+So whatever follows a channel (a `Follower`, the engines of a run or a pool, Tinker's sampler) and whatever samples it
+(a `RemoteChannel`) serves a following or a pinned channel with nothing more than its run and its name.
 
 A `Follower` (`rollout_train.following`) keeps runs' channels serving what each run says: every two seconds it
 reads `wanted` for each, and for a channel that serves something older reads the files from the blob store (hard

@@ -10,18 +10,27 @@ Whatever serves the channel, on any machine, reads `wanted` and loads what it sa
 whatever samples it elsewhere reads it too, to ask for that checkpoint by name, or for one close enough to it
 (`rollout_train.inference.remote`). A channel never goes back: what a channel should serve now is its record of the
 greatest depth.
+
+**A channel's mode** is in the run's start (its run settings, `channels.NAME.mode`), and says whose records it serves
+(`source_of`, `serving_of`):
+
+- the trained channel, and a channel whose mode says nothing: its own records;
+- `follows`, with `follows` and `lag`: the followed channel's records, `lag` records behind its newest (the base model
+  until it has more than `lag`), under its own name;
+- `fixed` on a checkpoint (`channels.NAME.checkpoint`, by id): that checkpoint, at its depth, from the start; `fixed`
+  on none: its own records, which nothing writes, so the base model.
 """
 
 import time
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from pydantic import JsonValue, TypeAdapter
 
-from rollout_train.checkpoints import Manifest
+from rollout_train.checkpoints import Manifest, checkpoints_in
 from rollout_train.ledger import Fence, Ledger
-from rollout_train.record import table
+from rollout_train.record import recorded_settings, table
 
 SERVING = "serving"
 """A run's table of what its channels should serve, keyed `NAME/CHECKPOINT` (`NAME/base` for the base model)."""
@@ -89,8 +98,54 @@ async def record_serving(ledger: Ledger, run: str, serving: Serving, fence: Fenc
     return await ledger.append(table(run, SERVING), key, serving.to_json(), fence)
 
 
-async def serving_of(ledger: Ledger, run: str, channel: str) -> list[Serving]:
-    """Every checkpoint a run has said its channel serves, once each, in the order they were written."""
+@dataclass(frozen=True)
+class Source:
+    """Whose serving records a run's channel serves, as its start says (none of the three: its own)."""
+
+    follows: str | None = None
+    """The channel it follows, by name within the run."""
+    lag: int = 0
+    """How many records behind the followed channel's newest."""
+    checkpoint: str | None = None
+    """The checkpoint a fixed channel serves, by id."""
+
+
+async def source_of(ledger: Ledger, run: str, channel: str) -> Source:
+    """Whose records a run's channel serves: what the run's newest start says of its mode (its run settings); its own,
+    where the start says nothing (a run recorded before run settings, the trained channel, a channel without a
+    mode)."""
+    settings = await recorded_settings(ledger, run) or {}
+    if settings.get("kind", "train") == "train" and settings.get("trainer.channel", "policy") == channel:
+        return Source()
+    prefix = f"channels.{channel}."
+    mode, follows, checkpoint = (settings.get(prefix + key) for key in ("mode", "follows", "checkpoint"))
+    if mode == "follows" and isinstance(follows, str):
+        return Source(follows=follows, lag=int(settings.get(prefix + "lag") or 0))
+    if mode == "fixed" and isinstance(checkpoint, str):
+        return Source(checkpoint=checkpoint)
+    return Source()
+
+
+async def serving_of(ledger: Ledger, run: str, channel: str, *, seen: Collection[str] = ()) -> list[Serving]:
+    """Every checkpoint a run's channel serves, once each, in the order they were written: its own records; for a
+    channel that follows another, that channel's records but the newest `lag` (deepest last); for one fixed on a
+    checkpoint, that checkpoint (`source_of`). Raises `ValueError` for a channel that follows itself, by way of
+    others, or is fixed on a checkpoint that does not exist or was released."""
+    source = await source_of(ledger, run, channel)
+    if source.follows is not None:
+        if source.follows in {*seen, channel}:
+            raise ValueError(f"channel {channel} of run {run} follows itself, by way of {source.follows}")
+        followed = await serving_of(ledger, run, source.follows, seen={*seen, channel})
+        followed.sort(key=lambda each: each.depth)
+        kept = followed[: max(0, len(followed) - source.lag)]
+        return [replace(each, channel=channel) for each in kept]
+    if source.checkpoint is not None:
+        return [await _pinned(ledger, channel, source.checkpoint)]
+    return await recorded_for(ledger, run, channel)
+
+
+async def recorded_for(ledger: Ledger, run: str, channel: str) -> list[Serving]:
+    """Every checkpoint a run has written down that its channel serves, once each, in the order they were written."""
     return [
         Serving.from_json(record)
         for record in (await ledger.read(table(run, SERVING))).values()
@@ -98,9 +153,22 @@ async def serving_of(ledger: Ledger, run: str, channel: str) -> list[Serving]:
     ]
 
 
+async def _pinned(ledger: Ledger, channel: str, id: str) -> Serving:
+    """What a channel fixed on a checkpoint serves: the checkpoint's weights, at its depth, over the full checkpoint
+    it was trained over, if it was; turns sample it alone (`max_lag` 0)."""
+    every = {each.id: each for each in await checkpoints_in(ledger)}
+    checkpoint = every.get(id)
+    if checkpoint is None or checkpoint.weights is None:
+        raise ValueError(
+            f"channel {channel} is fixed on {id}, which {'was released' if checkpoint else 'is no checkpoint'}"
+        )
+    over = checkpoint.base if checkpoint.kind != "full" and checkpoint.base in every else None
+    return Serving(channel, checkpoint.id, checkpoint.depth, checkpoint.kind, checkpoint.weights, over=over, max_lag=0)
+
+
 async def wanted(ledger: Ledger, run: str, channel: str) -> Serving | None:
-    """What a run's channel should serve now: its record of the greatest depth (the newest among equals); None if the
-    run has said nothing of it."""
+    """What a run's channel should serve now: the record of the greatest depth it serves (`serving_of`; the newest
+    among equals); None if there is none (the base model)."""
     found: Serving | None = None
     for each in await serving_of(ledger, run, channel):
         if found is None or each.depth >= found.depth:

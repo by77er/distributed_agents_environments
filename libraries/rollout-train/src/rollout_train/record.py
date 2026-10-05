@@ -158,6 +158,16 @@ def newest_record(records: Mapping[str, JsonValue]) -> dict[str, Any]:
     return mapping(records[max(records, key=int)]) if records else {}
 
 
+async def recorded_settings(ledger: Ledger, run: str) -> dict[str, Any] | None:
+    """The run settings a run's newest start records (`rollout_train.run_settings.recorded`), fixed and changeable as
+    one mapping of dotted keys; none where it records none."""
+    recorded = newest_record(await ledger.read(table(run, STARTS))).get("run_settings")
+    if not isinstance(recorded, dict):
+        return None
+    parts = cast(dict[str, Any], recorded)
+    return {**mapping(parts.get("fixed")), **mapping(parts.get("changeable"))}
+
+
 def mapping(record: JsonValue) -> dict[str, Any]:
     """A record as an object (empty for one that is no object)."""
     return cast(dict[str, Any], record) if isinstance(record, dict) else {}
