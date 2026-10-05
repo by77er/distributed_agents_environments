@@ -1378,3 +1378,15 @@ The user settled the design's open questions on 2026-10-04:
   the environment's code runs in a Python environment of its own. That last step runs on Ray's runtime environments
   (`working_dir` and `uv`) now, and on the environment worker later, behind the same versions
   ([published environments, as built](#published-environments-as-built)).
+- **There is no launcher service; a run claims what it needs.** The monitor's API and the CLI start a run through one
+  function that submits its job directly: a RayJob custom resource on Kubernetes (the monitor's service account may
+  create them), the Ray job API on one machine. The run's driver is the authority over its resources: it resolves its
+  settings against the cluster config, validates them again, claims adapter slots in shared pools by compare-and-set
+  on the pool's bindings in the ledger, asks Ray for its trainer, runners and engines (the autoscaler adds workers),
+  and starts what lives outside Ray (RunPod pods) through the provider's API. A run that cannot get what it needs yet
+  waits, its reason shown (pending resources, a full pool), or fails with the reason recorded. What the form offers
+  comes from the cluster config and live heartbeats (pools' free slots, free GPUs), and validation at ask time
+  refuses what can never run. The launches table is the record of what was asked and the job it became. Shared
+  pools stay long-lived, declared in the cluster config and deployed with the chart. Quotas and fair share across
+  users, when needed, come from Kueue on Kubernetes rather than a service of ours.
+
