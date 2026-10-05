@@ -75,6 +75,30 @@ class S3BlobStore:
     async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None:
         await asyncio.to_thread(self._delete, self._key(reference.sha256), unused_for)
 
+    async def with_extension(self, reference: BlobReference, extension: str) -> str:
+        """The URI of a copy of a blob's object named by its key and `extension` (`s3://BUCKET/KEY.zip`), made inside
+        the bucket the first time it is asked for: for readers that tell an archive by its name, as Ray does a runtime
+        environment's `working_dir`. Raises `FileNotFoundError` where the store does not have the blob."""
+        key = self._key(reference.sha256)
+        await asyncio.to_thread(self._copied, key, f"{key}{extension}", reference.size)
+        return f"s3://{self.bucket}/{key}{extension}"
+
+    def _copied(self, key: str, target: str, size: int) -> None:
+        from botocore.exceptions import ClientError
+
+        try:
+            if int(self.client.head_object(Bucket=self.bucket, Key=target)["ContentLength"]) == size:
+                return
+        except ClientError as error:
+            if not _not_found(error):
+                raise
+        try:
+            self.client.copy_object(Bucket=self.bucket, Key=target, CopySource={"Bucket": self.bucket, "Key": key})
+        except ClientError as error:
+            if _not_found(error):
+                raise FileNotFoundError(f"s3://{self.bucket}/{key}") from error
+            raise
+
     def _key(self, digest: str) -> str:
         return f"{self.prefix}{digest[:2]}/{digest}"
 

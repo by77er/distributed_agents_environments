@@ -5,6 +5,7 @@
 import os
 import shutil
 import socket
+import sys
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -22,10 +23,12 @@ no room for a directory of the process's own above it."""
 
 def isolated() -> None:
     """Keep this process's Ray to a cluster of its own: `RAY_ADDRESS` unset (nothing joins a cluster by it), workers
-    run in this environment (`RAY_ENABLE_UV_RUN_RUNTIME_ENV=0`, as `ray_cluster.prepare` sets), and no token (the
-    session's cluster asks for none, whatever `prepare` would say). Ray reads these once, when it is imported, so the
-    session's conftest calls this before anything imports it."""
+    run in this environment (`RAY_ENABLE_UV_RUN_RUNTIME_ENV=0`, as `ray_cluster.prepare` sets) and its jobs find its
+    interpreter as `python` (as a node of the platform's image does: its virtual environment first on `PATH`), and no
+    token (the session's cluster asks for none, whatever `prepare` would say). Ray reads these once, when it is
+    imported, so the session's conftest calls this before anything imports it."""
     os.environ.pop("RAY_ADDRESS", None)
+    os.environ["PATH"] = os.pathsep.join([str(Path(sys.executable).parent), os.environ.get("PATH", "")])
     os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"
     os.environ["RAY_AUTH_MODE"] = "disabled"
 

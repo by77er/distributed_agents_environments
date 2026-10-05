@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from rollout_train.presets import Presets
     from rollout_train.registry import Registry
 
-__all__ = ["FILES", "Stores", "ledger_url", "location", "opened"]
+__all__ = ["FILES", "Stores", "blobs_at", "ledger_url", "location", "opened"]
 
 FILES = "rollout.harness.blobs:FileBlobStore"
 """The store of files in a directory (`{"kind": FILES, "directory": …}`)."""
@@ -71,6 +71,15 @@ def ledger_url(cluster: "Cluster", environ: Mapping[str, str] | None = None) -> 
     return url
 
 
+def blobs_at(cluster: "Cluster") -> dict[str, JsonValue]:
+    """Where a cluster's blob store is (its `[blobs]`), as `opened` opens it: a directory of files made absolute."""
+    settings = dict(cluster.blobs.settings)
+    if cluster.blobs.kind == "files":
+        directory = Path(str(settings["directory"])).expanduser().absolute()
+        return {"kind": FILES, "directory": str(directory)}
+    return {"kind": cluster.blobs.kind, **settings}
+
+
 @dataclass(frozen=True)
 class Stores:
     """The ledger and the blob store, opened, and where the blob store is (`location`: as any process opens it, for a
@@ -88,12 +97,7 @@ class Stores:
         from rollout_train.database import DatabaseLedger
 
         ledger = DatabaseLedger(ledger_url(cluster, environ))
-        settings = dict(cluster.blobs.settings)
-        if cluster.blobs.kind == "files":
-            directory = Path(str(settings["directory"])).expanduser().absolute()
-            where: dict[str, JsonValue] = {"kind": FILES, "directory": str(directory)}
-        else:
-            where = {"kind": cluster.blobs.kind, **settings}
+        where = blobs_at(cluster)
         return cls(ledger, opened(where), where)
 
     @property

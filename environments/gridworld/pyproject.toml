@@ -7,6 +7,9 @@ dependencies = [
     "rollout",
 ]
 
+[project.entry-points."rollout.environments"]  # what an import from git takes (docs/guide/publishing.md)
+gridworld = "gridworld.environment:environment"
+
 [tool.uv.sources]
 rollout = { workspace = true }
 
