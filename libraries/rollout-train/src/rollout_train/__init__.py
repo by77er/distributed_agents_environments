@@ -5,11 +5,12 @@
 - `Ledger`, `FileLedger` (`ledger`): append-only tables and fences, the only state the loop has.
 - `Checkpoints`, `Checkpoint`, `Manifest`, `Retention` (`checkpoints`): the graph of checkpoints, each saying where it
   came from, and their files in a blob store.
-- `Algorithm`, `Batch`, `Grpo`, `Preferences`, `algorithm_for` (`algorithm`): what the loop asks of an algorithm,
-  weighted segments of a group by the objective's advantage components, and a group's pairs or labelled examples.
-- `Trainer`, `Weighted`, `Pair`, `Labelled`, `Budget`, `Files`, `Step`, `StepFailed` (`trainer`): what a trainer is
-  and what it trains on; `Changeable`, one that takes some of its settings between steps. `Colocated`: the wrapper for
-  one that shares its accelerator with the engines. Its objective is declared in `objectives`.
+- `Algorithm`, `Batch`, `Grpo`, `Preferences`, `Distillations`, `algorithm_for` (`algorithm`): what the loop asks of an
+  algorithm, weighted segments of a group by the objective's advantage components, a group's pairs or labelled
+  examples, and its segments with their teachers' scores. Teacher routing and scoring are in `distillation`.
+- `Trainer`, `Weighted`, `Pair`, `Labelled`, `Distilled`, `Budget`, `Files`, `Step`, `StepFailed` (`trainer`): what a
+  trainer is and what it trains on; `Changeable`, one that takes some of its settings between steps. `Colocated`: the
+  wrapper for one that shares its accelerator with the engines. Its objective is declared in `objectives`.
 - `Result`, `results`, `Trained`, `trained` (`record`): how each group of a run went, and what was done with it.
 - `evaluate`, `make_suite`, `edit_suite`, `suite_entry`, `suite_for`, `suite_of`, `Suite`, `SuiteEntry`, `Schedule`
   (`evals`): a suite, an eval configuration of one or more environments kept in versions, an eval that plays one
@@ -20,7 +21,15 @@
   `Follower` (`following`): keeps a process's channels serving it, wherever the process runs.
 """
 
-from rollout_train.algorithm import Algorithm, Batch, Grpo, Preferences, algorithm_for, group_advantages
+from rollout_train.algorithm import (
+    Algorithm,
+    Batch,
+    Distillations,
+    Grpo,
+    Preferences,
+    algorithm_for,
+    group_advantages,
+)
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention
 from rollout_train.colocated import Colocated
 from rollout_train.datasets import Dataset, dataset_of, make_dataset
@@ -40,7 +49,18 @@ from rollout_train.ledger import Fence, Fenced, FileLedger, Ledger
 from rollout_train.loop import train
 from rollout_train.record import Result, Trained, results, trained
 from rollout_train.serving import Serving, record_serving, wanted
-from rollout_train.trainer import Budget, Changeable, Files, Labelled, Pair, Step, StepFailed, Trainer, Weighted
+from rollout_train.trainer import (
+    Budget,
+    Changeable,
+    Distilled,
+    Files,
+    Labelled,
+    Pair,
+    Step,
+    StepFailed,
+    Trainer,
+    Weighted,
+)
 
 __all__ = [
     "Algorithm",
@@ -51,6 +71,8 @@ __all__ = [
     "Checkpoints",
     "Colocated",
     "Dataset",
+    "Distillations",
+    "Distilled",
     "Fence",
     "Fenced",
     "FileLedger",

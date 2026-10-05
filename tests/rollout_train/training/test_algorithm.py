@@ -2,12 +2,14 @@
 
 import random
 import statistics
+from dataclasses import replace
 from typing import Any
 
 import pytest
 
 from rollout_train import Budget, Grpo, group_advantages
 from rollout_train.algorithm import (
+    Distillations,
     Preferences,
     advantages_of,
     algorithm_for,
@@ -19,10 +21,10 @@ from rollout_train.algorithm import (
     spread,
     within,
 )
-from rollout_train.objectives import PRESETS, Advantage
-from rollout_train.recorder import TOKEN_LEVEL, Segment, Span
+from rollout_train.objectives import PRESETS, Advantage, resolved
+from rollout_train.recorder import TOKEN_LEVEL, Segment, Span, TeacherScores
 from rollout_train.rollouts import Episode, Outcome, Trajectory
-from rollout_train.trainer import Labelled, Pair
+from rollout_train.trainer import Distilled, Labelled, Pair
 
 
 def episode(
@@ -139,3 +141,46 @@ def test_a_groups_best_episode_is_preferred_to_its_worst() -> None:
     # Within a budget of segments: a pair holds both sides'.
     pairs = [Pair((segment,) * 3, (segment,) * 3) for segment in group[0].trajectories["ada"].segments * 5]
     assert len(within(pairs, 30, random.Random(0))) == 5 and len(within(pairs, None, random.Random(0))) == 10
+
+
+def scored(found: Episode, top: int = 0) -> Episode:
+    """The episode with every segment scored by a teacher (its top `top` tokens at each sampled one)."""
+    scores = TeacherScores("teacher", [-1.0, -2.0], [[5] * top, [6] * top] if top else [],
+                           [[-0.1] * top, [-0.2] * top] if top else [])  # fmt: skip
+    trajectories = {
+        slot: replace(trajectory, segments=[replace(each, teacher=scores) for each in trajectory.segments])
+        for slot, trajectory in found.trajectories.items()
+    }
+    return replace(found, trajectories=trajectories)
+
+
+def test_a_distillation_trains_on_every_segment_of_one_episode_with_its_teachers_scores() -> None:
+    algorithm = algorithm_for(PRESETS["mopd"].objective)
+    assert isinstance(algorithm, Distillations) and algorithm.group_size == 1
+    made = algorithm.batch([scored(episode(0.0))], Budget(), random.Random(0))
+    assert len(made.items) == 4 and all(isinstance(each, Distilled) and each.advantage == 0.0 for each in made.items)
+    assert made.items[0].source == "train/1/1/ada/0" and made.items[0].scores.teacher == "teacher"
+    assert len(algorithm.batch([scored(episode(0.0))], Budget(segments=2), random.Random(0)).items) == 2
+    unscored = algorithm.batch([episode(1.0)], Budget(), random.Random(0))
+    assert not unscored.items and unscored.skipped == "turns of channel `policy` were not scored by a teacher"
+    top = algorithm_for(PRESETS["mopd_top_k"].objective)
+    short = top.batch([scored(episode(0.0))], Budget(), random.Random(0))
+    assert short.skipped == "teacher `teacher` gave no top tokens, and the objective reads 64"
+    assert len(top.batch([scored(episode(0.0), top=3)], Budget(), random.Random(0)).items) == 4
+    failed = replace(episode(0.0), outcome=Outcome.FAILED)
+    assert algorithm.batch([failed], Budget(), random.Random(0)).skipped == "0 of 1 episodes completed"
+    inexact = scored(episode(0.0, sampled_with=("sampled_logprobs",)))
+    assert "without their exact tokens" in str(algorithm.batch([inexact], Budget(), random.Random(0)).skipped)
+
+
+def test_a_policy_gradient_with_a_distillation_term_keeps_every_segment_with_its_advantage() -> None:
+    objective = resolved("default", {"distillation.coefficient": 0.5})
+    algorithm = algorithm_for(objective)
+    assert isinstance(algorithm, Grpo) and algorithm.distills and algorithm.group_size == 4
+    group = [scored(episode(1.0, number=1)), scored(episode(0.0, number=2)), scored(episode(0.0, number=3))]
+    made = algorithm.batch(group, Budget(), random.Random(0))
+    assert len(made.items) == 12 and all(isinstance(each, Distilled) for each in made.items)
+    assert sorted({round(each.advantage, 3) for each in made.items}) == [-0.333, 0.667]
+    same = algorithm.batch([scored(episode(1.0, number=n)) for n in (1, 2)], Budget(), random.Random(0))
+    assert len(same.items) == 8 and {each.advantage for each in same.items} == {0.0}  # (the teacher still trains)
+    assert algorithm.batch([episode(1.0), episode(0.0)], Budget(), random.Random(0)).skipped is not None

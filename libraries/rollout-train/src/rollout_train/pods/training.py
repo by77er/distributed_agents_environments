@@ -52,7 +52,7 @@ from rollout_train.checkpoints import Checkpoints, Manifest, kept
 from rollout_train.pods.environment import listening, public_address, required, serial, serial_file, served, stores
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.presence import beating, presence_of
-from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, Item, Labelled, Pair, Trainer, Weighted
+from rollout_train.trainer import STATE, WEIGHTS, Changeable, Distilled, Files, Item, Labelled, Pair, Trainer, Weighted
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -111,7 +111,7 @@ class StepState:
 _ASKED = TypeAdapter(StepAsked)
 _MADE = TypeAdapter(StepMade)
 _STATE = TypeAdapter(StepState)
-_BATCH = TypeAdapter(list[Weighted | Pair | Labelled])
+_BATCH = TypeAdapter(list[Distilled | Weighted | Pair | Labelled])
 
 
 def batch_bytes(batch: Sequence[Item]) -> bytes:

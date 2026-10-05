@@ -19,10 +19,16 @@
   `Pair` whose shared context is the start (for a multi-turn episode, the start's first observation: each side's
   later turns differ, and only the tokens the policy sampled count); or, for labelled examples (KTO), each episode
   scoring above the group's mean is desirable and each below it undesirable.
+- **Distillation** (`Distillations`, for the distillation family): every trained segment of a group's completed
+  episodes, with the teacher's scores it carries (`Segment.teacher`, `rollout_train.distillation`), as a `Distilled`
+  item; nothing is compared, so a group is one episode by default. A policy gradient with a distillation term
+  (`distillation.coefficient`) makes `Distilled` items with their episode's advantage (`Grpo` with `distills`), and
+  keeps the segments of a group whose advantages are all zero. A group with a segment no teacher scored, or without the
+  top-k tokens the objective reads, trains nothing, and its result says why (`unscored`).
 - **What cannot be trained on**: a segment whose turns were sampled without their exact tokens or their behaviour
-  logprobs (`Segment.lacks`). A policy gradient trains on no group with a turn sampled without its exact tokens, nor,
-  with an importance correction, without its behaviour logprobs, and the group's result says why; a preference loss
-  and a likelihood read neither (`needs_of`).
+  logprobs (`Segment.lacks`). A policy gradient or a distillation trains on no group with a turn sampled without its
+  exact tokens, nor, with an importance correction, without its behaviour logprobs, and the group's result says why; a
+  preference loss and a likelihood read neither (`needs_of`).
 """
 
 import random
@@ -33,10 +39,10 @@ from typing import Generic, Protocol, TypeVar
 
 from pydantic import JsonValue
 
-from rollout_train.objectives import LIKELIHOOD, PREFERENCE, Advantage, Objective
+from rollout_train.objectives import DISTILLATION, LIKELIHOOD, PREFERENCE, Advantage, Objective
 from rollout_train.recorder.segments import Segment
 from rollout_train.rollouts import Episode
-from rollout_train.trainer import Budget, Item, Labelled, Pair, Weighted, segments_of
+from rollout_train.trainer import Budget, Distilled, Item, Labelled, Pair, Weighted, segments_of
 
 Each = TypeVar("Each", bound=Item, covariant=True, default=Item)
 """The kind of item a batch holds."""
@@ -153,7 +159,8 @@ def unweighable(segments: Sequence[Segment], needs: Sequence[str] = tuple(_LACKI
 
 def needs_of(objective: Objective) -> tuple[str, ...]:
     """What a segment's turns must have been sampled with for `objective` to train on them: exact tokens for a policy
-    gradient, and behaviour logprobs too for one with an importance correction; nothing for the other families."""
+    gradient or a distillation, and behaviour logprobs too for one with an importance correction; nothing for the other
+    families."""
     if objective.family in (PREFERENCE, LIKELIHOOD):
         return ()
     return tuple(_LACKING) if objective.needs_behaviour else ("token_exact",)
@@ -192,9 +199,37 @@ def side_of(episode: Episode) -> tuple[Segment, ...]:
     )
 
 
+def unscored(segments: Sequence[Segment], top_k: int = 0) -> str | None:
+    """Why some of `segments` cannot be distilled, if they cannot: no teacher scored them, or the teacher gave no top-k
+    tokens where the objective reads `top_k` of them."""
+    missing = sorted({segment.channel or "unnamed" for segment in segments if segment.teacher is None})
+    if missing:
+        return f"turns of channel {', '.join(f'`{each}`' for each in missing)} were not scored by a teacher"
+    if top_k:
+        short = sorted(
+            {s.teacher.teacher for s in segments if s.teacher is not None and s.sampled and not s.teacher.top}
+        )
+        if short:
+            named = ", ".join(f"`{each}`" for each in short)
+            return f"teacher {named} gave no top tokens, and the objective reads {top_k}"
+    return None
+
+
+def trained_segments(episode: Episode) -> list[tuple[str, Segment]]:
+    """An episode's segments that are trained, each with where it is from (`RUN/GROUP/EPISODE/SLOT/INDEX`)."""
+    return [
+        (f"{episode.run}/{episode.group}/{episode.number}/{slot}/{index}", segment)
+        for slot, trajectory in episode.trajectories.items()
+        for index, segment in enumerate(trajectory.segments)
+        if segment.trained  # (a judge's turns, or a fixed opponent's, are never trained on)
+    ]
+
+
 @dataclass(frozen=True)
 class Grpo:
-    """Weighted segments, each with its episode's advantage (for the policy-gradient and likelihood families)."""
+    """Weighted segments, each with its episode's advantage (for the policy-gradient and likelihood families); with
+    `distills`, distilled segments, each with its teacher's scores and its episode's advantage (a policy gradient with
+    a distillation term)."""
 
     group_size: int = 4
     tie_break: bool = True
@@ -202,30 +237,66 @@ class Grpo:
     advantage: Advantage = DEFAULT_ADVANTAGE
     needs: tuple[str, ...] = tuple(_LACKING)
     """What every segment's turns must have been sampled with (`needs_of`)."""
+    distills: bool = False
+    """Whether the objective has a distillation term: every segment is kept, a group whose advantages are all zero (or
+    that the filter skips) too, since the teacher's scores train on it all the same."""
+    top_k: int = 0
+    """For `distills`: the teacher's top tokens the objective reads at each sampled position."""
 
-    def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Weighted]:
+    def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Weighted | Distilled]:
         """The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
-        its episode's advantage; none, if one of them cannot be weighed (`unweighable`)."""
+        its episode's advantage; none, if one of them cannot be weighed (`unweighable`) or, with `distills`, has no
+        teacher's scores (`unscored`)."""
         good = [episode for episode in group if episode.trainable]
         if len(good) < 2:
             return Batch(skipped=f"{len(good)} of {len(group)} episodes completed")
         scores, notes = scores_of(good, self.tie_break)
         advantages = advantages_of(scores, self.advantage)
-        if advantages is None:
+        if advantages is None and not self.distills:
             return Batch(skipped="every episode scored the same", notes=notes)
-        if not any(advantages):
+        advantages = advantages if advantages is not None else [0.0] * len(good)
+        if not any(advantages) and not self.distills:
             return Batch(skipped="every advantage is zero", notes=notes)
-        weighted = [
-            Weighted(segment, advantage, f"{episode.run}/{episode.group}/{episode.number}/{slot}/{index}")
+        kept = [
+            (source, segment, advantage)
             for episode, advantage in zip(good, advantages, strict=True)
-            if advantage != 0.0
-            for slot, trajectory in episode.trajectories.items()
-            for index, segment in enumerate(trajectory.segments)
-            if segment.trained  # (a judge's turns, or a fixed opponent's, are never trained on)
+            if advantage != 0.0 or self.distills
+            for source, segment in trained_segments(episode)
         ]
-        if (why := unweighable([each.segment for each in weighted], self.needs)) is not None:
+        if (why := unweighable([segment for _, segment, _ in kept], self.needs)) is not None:
             return Batch(skipped=why, notes=notes)
-        return Batch(spread(weighted, budget.segments, rng), notes=notes)
+        if not self.distills:
+            return Batch(spread([Weighted(s, a, source) for source, s, a in kept], budget.segments, rng), notes=notes)
+        if (why := unscored([segment for _, segment, _ in kept], self.top_k)) is not None:
+            return Batch(skipped=why, notes=notes)
+        distilled = [Distilled(s, s.teacher, a, source) for source, s, a in kept if s.teacher is not None]
+        return Batch(spread(distilled, budget.segments, rng), notes=notes)
+
+
+@dataclass(frozen=True)
+class Distillations:
+    """Distilled segments: every trained segment of a group's completed episodes, with the teacher's scores it carries
+    (for the distillation family). Nothing is compared, so a group is one episode by default (MOPD's one rollout per
+    prompt), and its reward is not read."""
+
+    group_size: int = 1
+    top_k: int = 0
+    """The teacher's top tokens the objective reads at each sampled position."""
+    needs: tuple[str, ...] = ("token_exact",)
+    """What every segment's turns must have been sampled with (`needs_of`)."""
+
+    def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Distilled]:
+        """The trained segments of the group's completed episodes, each with its teacher's scores; none, if one of
+        them cannot be trained on (`unweighable`) or has no teacher's scores (`unscored`)."""
+        good = [episode for episode in group if episode.trainable]
+        if not good:
+            return Batch(skipped=f"0 of {len(group)} episodes completed")
+        kept = [each for episode in good for each in trained_segments(episode)]
+        segments = [segment for _, segment in kept]
+        if (why := unweighable(segments, self.needs) or unscored(segments, self.top_k)) is not None:
+            return Batch(skipped=why)
+        distilled = [Distilled(s, s.teacher, 0.0, source) for source, s in kept if s.teacher is not None and s.sampled]
+        return Batch(spread(distilled, budget.segments, rng))
 
 
 @dataclass(frozen=True)
@@ -263,8 +334,12 @@ class Preferences:
         return Batch(within(items, budget.segments, rng), notes=notes)
 
 
-def algorithm_for(objective: Objective, group_size: int = 4) -> Grpo | Preferences:
-    """The algorithm that makes the batch items an objective's family takes."""
+def algorithm_for(objective: Objective, group_size: int | None = None) -> Grpo | Preferences | Distillations:
+    """The algorithm that makes the batch items an objective's family takes, comparing `group_size` episodes of one
+    start (none: 4, and 1 for a distillation, which compares nothing)."""
+    if objective.family == DISTILLATION:
+        return Distillations(group_size or 1, top_k=objective.needs_top, needs=needs_of(objective))
     if objective.family == PREFERENCE:
-        return Preferences(group_size, labelled=objective.labelled)
-    return Grpo(group_size, advantage=objective.advantage, needs=needs_of(objective))
+        return Preferences(group_size or 4, labelled=objective.labelled)
+    return Grpo(group_size or 4, advantage=objective.advantage, needs=needs_of(objective),
+                distills=objective.distills, top_k=objective.needs_top)  # fmt: skip
