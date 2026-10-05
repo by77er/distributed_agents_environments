@@ -55,7 +55,7 @@ def shared(tmp_path: Path) -> tuple[Checkpoints, FilePresence]:
 
 
 def routed(checkpoints: Checkpoints, *servers: str, **route: Any) -> GatewayEndpoints:
-    """A runner's recorder, whose channel `policy` is sampled on `servers` as `route` says."""
+    """Endpoints over a gateway in this process, whose channel `policy` is sampled on `servers` as `route` says."""
     channel = Route(cast(Renderer, PlainRenderer()), MODEL, servers, **route)
     routes = Routes({"policy": channel}, checkpoints.ledger, every=0.05, patience=0.5)
     return gateway_endpoints(ledger=checkpoints.ledger, blobs=checkpoints.blobs, routes=routes)
