@@ -150,6 +150,37 @@ reached through the gateway, so every judge call is recorded, counted in spend, 
 - **Evals:** judge-scored environments are ordinary suite entries, so a suite can mix verifiable and judged scores,
   each reported on its own.
 
+### What is built
+
+- **A judge is a model slot that is not trained.** A program declares it `ModelSlot(trained=False, judge=True)`; the
+  binding, the slot's key and every turn record it (`trained`), its segments are kept in the episode marked untrained,
+  counted in what the episode sampled and shown in the monitor's episode view, and the algorithm and datasets never
+  train on them. An episode's reward is its trained slots'.
+- **Each slot samples the channel the run binds it to** (`slots.SLOT`; `rollout_train.slots`). The channel serves a
+  fixed model (the base model, or a pinned checkpoint) or follows another channel `lag` serving records behind
+  (`rollout_train.serving.source_of`), whatever serves it: a gateway's `ChannelDirectory` builds every channel a run's
+  start names over its providers' servers, followers load what a following or pinned channel serves, and a run over a
+  profile binds its slots to the profile's channels.
+- **Validation** refuses an untrained slot left unbound, a judge's channel without a provider or a model, a provider
+  that does not offer the model, a judge bound to the trained channel or one following it without `self_judging`, and
+  a `follows` channel that names no channel of the run.
+- **Rubric scores**, in the [judging environment](../products/judging.md): versioned rubrics in the environment's
+  code, a strictly read JSON verdict asked for again once, the normalized score as the reward, and the judge asked
+  twice and averaged on request. The result records the rubric's version, every reply and the score.
+
+### What remains
+
+- **Comparisons** of two transcripts, asked both ways round, ranking a group's episodes (Bradley–Terry) or feeding
+  the preference family as pairs; they wait for that family.
+- **Judges that build datasets**: comparisons and scores kept as preference or SFT data.
+- **Caching** answers by a hash of the transcript and the rubric.
+- **Sampling settings a rubric asks for** (a judge at temperature 0, say), checked against what the provider honours.
+- **Spend limits** that count a judge's paid tokens: its turns are recorded with their token counts, and
+  `estimated_spend` still estimates the trained channel's alone.
+- **Channels built from a run's start beyond vLLM's API**: the directory serves providers whose servers answer vLLM's
+  API at the cluster config's endpoints; a judge on Tinker's sampler or a frontier API through it waits for the
+  gateway's samplers of those kinds.
+
 ## Order of work
 
 1. **The composable objective.** Build the declaration, the shared torch package, and the presets. Make the
@@ -157,7 +188,7 @@ reached through the gateway, so every judge call is recorded, counted in spend, 
    `reinforce`. Wire `objective.preset` and component overrides into the run settings and validation.
 2. **The preference family**: `dpo`, `ipo`, `simpo`, `kto`, `orpo`, with pairs from a group's best and worst
    episodes and from datasets. Use the adapter-off reference for LoRA.
-3. **Judges**: judge channels, rubric scores and comparisons, and comparisons feeding preferences and group
-   rankings.
+3. **Judges**: judge channels and rubric scores (built: [what is built](#what-is-built)), then comparisons, and
+   comparisons feeding preferences and group rankings.
 4. **Distillation**: prompt logprobs in `VllmEngine` (built: scoring through the engines and the gateway), then
    on-policy distillation, then off-policy distillation with teacher datasets.

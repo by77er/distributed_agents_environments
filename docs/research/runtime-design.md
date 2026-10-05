@@ -1223,6 +1223,13 @@ beside the profile-era `settings`, which the monitor and resuming still read; 16
   runs' windows, with `--max-cpu-loras` as the cache above it: the inference image takes both from
   `VLLM_MAX_LORAS` and `VLLM_MAX_CPU_LORAS`. The session's Ray has one GPU in its accounting, so hosts' shares are
   scheduled in tests as on a GPU node.
+- **11, in part** (channels from a run's start, for judges): `rollout_train.gateway.directory.ChannelDirectory` builds
+  every channel a run's newest start names as a `RemoteChannel` over its providers' servers, when a key of the run is
+  first shown, and `/v1/models?run=RUN` lists them for a runner whose gateway is elsewhere. It knows providers by name
+  with their servers (`Provided`; `ChannelDirectory.of(cluster, ledger)` takes those whose servers answer vLLM's API at
+  their endpoints), not by Serve or actor handles. A channel's mode is read where its serving records are
+  (`rollout_train.serving.serving_of`), so a `follows` channel and a pinned one are served by every follower and
+  sampler unchanged. Tinker's and an API's samplers are still to come.
 
 ### What the acceptance run needs from each step
 
