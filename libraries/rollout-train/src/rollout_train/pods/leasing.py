@@ -17,7 +17,8 @@ while the run waits for it. The pod is ready for the run once its lease has that
 which and why (`PodsDidNotStart`).
 
 **Renewing** (`Pods.renewing`). Every `RENEW` seconds the run stamps each lease (`renewed`, writing where RunPod says
-its pod is reached into a lease that does not say it yet) and its time on each pod; a lease another took (a reaper that
+its pod is reached into a lease that does not say it, or says another place: a pod started again, or given another
+image in place, may be mapped to another public port) and its time on each pod; a lease another took (a reaper that
 found it stale) ends the run (`LeaseLost`). What the pods cost the run since the last renewal is told to `spent`, so a
 run's `limits.spend` counts its pods.
 
@@ -442,7 +443,8 @@ class Pods:
 
     async def _addressed(self, lease: PodLease) -> PodLease:
         """The lease with where RunPod says its pod is reached (`https://IP:PORT`), asked of RunPod's API now and
-        written into the lease once it says; the lease as it was while it does not (or where the pod has no id)."""
+        written into the lease where it says another than the lease does; the lease as it was while it says none, says
+        the same, or the pod has no id."""
         if lease.id is None:
             return lease
         try:
@@ -451,8 +453,10 @@ class Pods:
             log.info("RunPod did not say where pod %s is: %s", lease.pod, error)
             return lease
         address = pod.address(PORT)
-        if address is None:
+        if address is None or address == lease.address:
             return lease
+        if lease.address is not None:
+            log.info("pod %s is reached at %s now, not %s", lease.pod, address, lease.address)
         return await self.store.put(replace(lease, address=address), expect=lease.version)
 
     async def _say(self, waits: Sequence[str]) -> None:
@@ -468,8 +472,10 @@ class Pods:
             there = await self.store.get(pod)
             if there is None or there.run != self.run:
                 raise LeaseLost(f"pod {pod} is no longer held by run {self.run} (its lease went stale and was reaped)")
-            if there.address is None:  # (a lease written before RunPod said where its pod is reached)
-                there = await self._addressed(there)
+            try:
+                there = await self._addressed(there)  # (none yet, or another public port since)
+            except Conflict:
+                continue  # (changed meanwhile: the next renewal looks again)
             try:
                 self.leases[pod] = await self.store.put(replace(there, renewed=now), expect=there.version)
             except Conflict:

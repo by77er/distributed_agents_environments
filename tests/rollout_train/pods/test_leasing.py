@@ -113,6 +113,22 @@ def pods_of(run: str, cluster: Cluster, ledger: DatabaseLedger, fake: FakeRunPod
 NEED = PodNeed("pods", "inference", 1, "m", "policy")
 
 
+async def test_a_renewal_follows_a_pod_runpod_maps_to_another_port(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    # (a pod given another image in place, or started again, may come back on another public port)
+    ledger, fake, _ = world
+    pods = pods_of("run_1", cluster_of(tmp_path), ledger, fake)
+    (lease,) = await pods.claim([NEED])
+    assert lease.address == "https://203.0.113.7:40123" and lease.id is not None
+    fake.pods[lease.id]["portMappings"] = {"8443": 40999}
+    await pods.renewed()
+    store = pod_leases_of(ledger)
+    assert store is not None
+    assert (await store.get(lease.pod)).address == "https://203.0.113.7:40999"  # type: ignore[union-attr]
+    await pods.release()
+
+
 async def test_a_run_starts_a_pod_renews_it_and_releases_it_warm(
     tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
 ) -> None:
