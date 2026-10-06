@@ -17,7 +17,7 @@ do not edit by hand.
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#rollout_trainrolloutsplan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Labelled`](#labelled), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Keeps`](#keeps), [`Labelled`](#labelled), [`Ledger`](#ledger), [`Made`](#made), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Remote`](#remote), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`StateLost`](#statelost), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#rollout_traininferencescores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.inference.api`](#rollout_traininferenceapi)** — Channels on hosted APIs: by message, never trained on, spend counted. [`ApiChannel`](#apichannel), [`ATTEMPTS`](#attempts), [`Hosted`](#hosted), [`HostedEndpoint`](#hostedendpoint), [`priced`](#priced)
@@ -2880,7 +2880,9 @@ class Checkpoint
 | `kind` | `str` | `'lora'` | What its weights are: `lora` (an adapter over its base) or `full` (all of a model's weights). |
 | `run` | `str \| None` | `None` | The run that made it, by id. |
 | `step` | `int \| None` | `None` | The run's step that made it (none for a checkpoint made outside a run's steps, such as by imitation). |
-| `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. |
+| `state` | `Manifest \| None` | `None` | What a trainer goes on from: the optimizer's state, say. While `state_complete` is false, only what was kept with the weights (the name a trainer gave what it holds, and what the step did). |
+| `state_complete` | `bool` | `True` | Whether `state` is all the trainer left: false while the trainer is still keeping the rest (`Checkpoints.completed`), and for good if it never kept it. |
+| `state_seconds` | `float \| None` | `None` | How long the trainer took to keep the rest of the state after the step returned, for a state completed so. |
 | `batch` | `BlobReference \| None` | `None` | What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage. |
 | `metrics` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` |  |
 | `dataset` | `str \| None` | `None` | The dataset it was trained on, by id (`rollout_train.datasets`), if a supervised step on one made it: its parents after the first are then the checkpoints that sampled the dataset's examples. |
@@ -2911,12 +2913,17 @@ Every checkpoint, in a ledger, and their files in a blob store.
   builds on, if it is an adapter over one; None for an adapter over a model. Raises `ValueError` if that
   checkpoint was released.
 - `async def head(self, run: str) -> Checkpoint | None` — The newest checkpoint a run made, if it made one.
-- `async def add(self, fence: Fence, id: str, *, weights: Path, run: str | None, base: str | None = None, kind: str = 'lora', step: int | None = None, state: Path | None = None, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None, dataset: str | None = None, supervision: str | None = None) -> Checkpoint` — Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
-  Its base is what its weights build on (`_base`): for an adapter over a full checkpoint, that checkpoint (by
-  id); for a merge (full weights from an adapter), the `base` it names; else its first parent's base, or `base`
-  for a checkpoint made from the base model. The append is what
-  makes the checkpoint exist: a writer that dies before it has made nothing, and one that repeats it (the same id,
-  decided before) gets the checkpoint that is there.
+- `async def add(self, fence: Fence, id: str, *, weights: Path | Manifest, run: str | None, base: str | None = None, kind: str = 'lora', step: int | None = None, state: Path | Manifest | None = None, state_complete: bool = True, parents: Sequence[str] = (), batch: BlobReference | None = None, metrics: Mapping[str, float] | None = None, dataset: str | None = None, supervision: str | None = None) -> Checkpoint` — Append the checkpoint that names its files, under `fence` (the run's that makes it): `weights` and `state`
+  are manifests of files in the blob store, or directories on this machine, whose files are kept first. A state
+  the trainer is still keeping is added incomplete (`state_complete` false: what was kept with the weights), and
+  completed once it is kept (`completed`). Its base is what its weights build on (`_base`): for an adapter over a
+  full checkpoint, that checkpoint (by id); for a merge (full weights from an adapter), the `base` it names; else
+  its first parent's base, or `base` for a checkpoint made from the base model. The append is what makes the
+  checkpoint exist: a writer that dies before it has made nothing, and one that repeats it (the same id, decided
+  before) gets the checkpoint that is there.
+- `async def completed(self, fence: Fence, id: str, state: Manifest, *, seconds: float | None = None) -> Checkpoint` — Complete a checkpoint's trainer state, kept after it was added: `state` is the whole state (what was kept
+  with the weights among it), and `seconds` how long keeping the rest took. Appended under `fence` (the run's
+  that made it); a checkpoint completed before stays as it was.
 - `async def thin(self, fence: Fence, run: str, retention: 'Retention', keep: Collection[str] = ()) -> list[str]` — Delete the files (weights and trainer state) of the checkpoints `run` made that `retention` does not keep,
   nor `keep` (what is served, what is bookmarked, what another run starts from), and return their ids. A
   release is appended to the ledger before its blobs are deleted, and a blob is deleted only if nothing still
@@ -3200,6 +3207,25 @@ a distillation term).
   its episode's advantage; none, if one of them cannot be weighed (`unweighable`) or, with `distills`, has no
   teacher's scores (`unscored`).
 
+### `Keeps`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Keeps(Protocol)
+```
+
+A trainer that can keep the full state of its steps in a blob store itself, after each step returns, so a step's
+weights are kept and served while its state is still being kept (`rollout_lora`'s, with its processes kept between
+steps). Its steps say which they keep so (`Step.keeping`).
+
+**Methods**
+
+- `def keep_in(self, blobs: Mapping[str, JsonValue]) -> None` — Keep its steps' full state from now on in the blob store at this location (`rollout_train.stores.opened`),
+  rather than in `into/state` before a step returns.
+- `async def kept(self, into: str) -> Manifest` — The files it kept of the full state of the step that wrote into `into` (by its name), by their paths within
+  the state, once they are kept. Raises `StateLost` if they never will be.
+
 ### `Labelled`
 
 *class* · `libraries/rollout-train/src/rollout_train/trainer.py`
@@ -3241,6 +3267,24 @@ class Ledger(Protocol)
 - `async def read_all(self, *, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]` — Every table that has records, by name, each as `read` reads it; but the tables whose names hold
   `leaving_out`.
 - `async def fences(self) -> dict[str, int]` — The newest fence of every scope that has been taken.
+
+### `Made`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Made
+```
+
+What a step of a trainer elsewhere made (`Remote`), kept in the blob store: its metrics, the new weights, and the
+state, whole or (`complete` false) only what was kept with the weights so far.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `metrics` | `Mapping[str, float]` | required |  |
+| `weights` | `Manifest` | required |  |
+| `state` | `Manifest \| None` | `None` |  |
+| `complete` | `bool` | `True` |  |
 
 ### `make_dataset`
 
@@ -3333,6 +3377,24 @@ async def record_serving(ledger: Ledger, run: str, serving: Serving, fence: Fenc
 
 Write down, under the run's fence, that its channel serves `serving` from now on; False if it was written
 before (a loop started again serves what it served).
+
+### `Remote`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Remote(Protocol)
+```
+
+A trainer on another machine, whose steps' files go through the blob store (`rollout_train.pods.RemoteTrainer`):
+given its parent as the checkpoint, it says what it made as manifests (`Made`), so nothing is read to the loop's
+machine. The rest of a step's state may be kept after `made` returns (`Made.complete` false): `state` waits for
+it.
+
+**Methods**
+
+- `async def made(self, batch: Sequence[Item], *, seed: int, parent: Checkpoint | None, into: str) -> Made` — `Trainer.step`, from `parent`'s files in the blob store, making the checkpoint `into` (its id).
+- `async def state(self, into: str) -> Manifest` — The whole state of the step that made `into`, once it is kept. Raises `StateLost` if it never will be.
 
 ### `Resident`
 
@@ -3478,6 +3540,17 @@ That a run's channel serves a checkpoint from now on (or, with no checkpoint, th
 - `def to_json(self) -> dict[str, JsonValue]`
 - `@classmethod def from_json(cls, data: Mapping[str, Any]) -> 'Serving'`
 
+### `StateLost`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class StateLost(Exception)
+```
+
+A step's full state will never be kept: its checkpoint stays incomplete, and a step from it needs the trainer
+that holds it.
+
 ### `Step`
 
 *class* · `libraries/rollout-train/src/rollout_train/trainer.py`
@@ -3489,6 +3562,7 @@ class Step
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `metrics` | `Mapping[str, float]` | required |  |
+| `keeping` | `bool` | `False` | Whether the trainer keeps the rest of the step's state itself after returning (`Keeps.kept`): `into/state` then holds only what it wrote before it returned. |
 
 ### `StepFailed`
 
@@ -5109,8 +5183,9 @@ A run being built from its settings, and what it started: everything the loop of
   the run's channel, asking Ray for its share of a GPU and its CPU in its bundle of the run's placement group.
 - `def binding(self, environment: Environment) -> Any` — How an environment's episodes are played: each slot from the channel the settings bind it to (the run's
   channel unless said), each import and pool where the cluster serves it.
-- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int` — Serve a checkpoint on a channel: on engines in this process (Tinker's), loaded now; elsewhere, its engine
-  hosts and servers follow the run's serving record, and this returns the version given.
+- `async def publish(self, channel: str, adapter: str, files: Fetched, version: int | None = None, *, full: bool = False) -> int` — Serve a checkpoint on a channel: on engines in this process (Tinker's), its files read here and loaded now;
+  elsewhere, its engine hosts and servers follow the run's serving record and read the files themselves, and this
+  returns the version given.
 - `async def bridged(self, checkpoint: Checkpoint, fence: Fence) -> Manifest` — The files the trained channel's engines load for a checkpoint, made by its bridges as Ray tasks.
 - `def chosen(self, formats: frozenset[str]) -> tuple[Bridge, ...]` — The bridges that make what the run's channel's first provider loads from checkpoints in `formats` (none
   where the files are served as they are); `ValueError` where none does.
@@ -6501,7 +6576,12 @@ steps, with their values now. The pod is reached as `connection` says
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def describe(self) -> dict[str, Any]` — What the pod says its trainer is: its kind, model, `weights`, `budget`, and the settings it takes between
   steps.
-- `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
+- `async def made(self, batch: Sequence[Item], *, seed: int, parent: Checkpoint | None, into: str) -> Made` — A step from `parent`'s files where they are, in the blob store, making the checkpoint `into` (its id): what
+  the pod kept, as manifests, its state whole or (`complete` false) only what was kept with the weights so far.
+- `async def state(self, into: str) -> Manifest` — The whole state of the step that made `into`, once the pod has kept it; `StateLost` where it never will (the
+  pod says keeping it failed, or no longer knows the step).
+- `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step` — The step, its parent's files kept in the blob store from disk, and the files it made fetched into `into`
+  once its state is all kept.
 - `async def aclose(self) -> None` — Close the client it made (one it was given is its giver's).
 
 ### `STARTING`
@@ -7560,7 +7640,9 @@ Pairs refused on purpose, with the reason a run is told.
 def verbatim(weights: Path, into: Path, context: Context) -> dict[str, JsonValue]
 ```
 
-The provider loads the trainer's files as they are: each is linked (or copied) into `into`.
+The provider loads the trainer's files as they are: each is linked (or copied) into `into`. A chain notes what
+this bridge makes as the checkpoint's own manifest without running it (the same files are the same blobs); it is the
+task for a caller that has the files on disk.
 
 ## `rollout_train.objectives`
 
@@ -9514,7 +9596,7 @@ new weights on one (what a loop is given to publish with), and `gateway` is what
 **Methods**
 
 - `def __init__(self, *channels: Channel) -> None`
-- `async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int`
+- `async def publish(self, channel: str, adapter: str, files: Callable[[], Awaitable[str]], version: int | None = None, *, full: bool = False) -> int`
 - `def gateway(self, ledger: Ledger, blobs: Blobs) -> GatewayEndpoints` — A gateway in this process over the channels, recording in `ledger` and `blobs`: one for each place the
   ledger is, so that a runner made first and an episode runner made after it over the same place share it (the
   runs it admits are the runs the runner plays).
@@ -9717,7 +9799,8 @@ more than one (`rollout_lora.sharded`). `colocated` says it shares its GPU with 
 while it steps: then each step's processes end after it, and give the engine back the memory. Otherwise they are
 kept between steps: a step from the checkpoint the last one made goes on from what they hold
 (`rollout_train.trainer.Resident`). Every step leaves the files a later one starts from (the full state every
-`state_every` steps).
+`state_every` steps): in `into/state` before it returns, or, told a blob store (`keep_in`), kept there by the
+processes after it returns (`kept`), its weights served meanwhile.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -9730,6 +9813,9 @@ kept between steps: a step from the checkpoint the last one made goes on from wh
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `@property def holding(self) -> str | None` — What its processes hold between steps (none beside an engine, where they end after each step).
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
+- `def keep_in(self, blobs: Mapping[str, JsonValue]) -> None` — Have the processes keep each step's full state in the blob store at this location after the step returns
+  (where they are kept between steps: beside an engine they end after each step, and write it before).
+- `async def kept(self, into: str) -> Manifest` — What the processes kept of the full state of the step that wrote into `into`, once they all have.
 - `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
 - `def close(self) -> None` — End its processes, and what they hold (the next step starts them again).
 
