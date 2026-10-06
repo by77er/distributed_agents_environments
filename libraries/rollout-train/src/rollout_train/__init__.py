@@ -9,7 +9,8 @@
   algorithm, weighted segments of a group by the objective's advantage components, a group's pairs or labelled
   examples, and its segments with their teachers' scores. Teacher routing and scoring are in `distillation`.
 - `Trainer`, `Weighted`, `Pair`, `Labelled`, `Distilled`, `Budget`, `Files`, `Step`, `StepFailed` (`trainer`): what a
-  trainer is and what it trains on; `Changeable`, one that takes some of its settings between steps. `Colocated`: the
+  trainer is and what it trains on; `Changeable`, one that takes some of its settings between steps; `Resident`, one
+  that keeps its policy in memory between steps. `Colocated`: the
   wrapper for one that shares its accelerator with the engines. Its objective is declared in `objectives`.
 - `Result`, `results`, `Trained`, `trained` (`record`): how each group of a run went, and what was done with it.
 - `evaluate`, `make_suite`, `edit_suite`, `suite_entry`, `suite_for`, `suite_of`, `Suite`, `SuiteEntry`, `Schedule`
@@ -56,6 +57,7 @@ from rollout_train.trainer import (
     Files,
     Labelled,
     Pair,
+    Resident,
     Step,
     StepFailed,
     Trainer,
@@ -84,6 +86,7 @@ __all__ = [
     "Manifest",
     "Pair",
     "Preferences",
+    "Resident",
     "Result",
     "Retention",
     "Schedule",

@@ -4,7 +4,9 @@
 LoRA on its linear layers.
 
 `Policy.logprobs` computes the logprobs of sampled tokens. It runs the transformer over the whole sequence but the
-output layer (the vocabulary projection, the largest activation by far) only at the positions being scored.
+output layer (the vocabulary projection, the largest activation by far) only at the positions being scored. Both run
+in one call of a `Scorer`, the module a sharded policy shards as its root (`rollout_lora.sharded`): what lies outside
+its decoder layers (the output layer, the last norm) is gathered once a call, however many chunks of rows it scores.
 `Policy.logprobs_and_entropy` adds each position's entropy, `Policy.logprobs_among` the logprobs of given tokens at
 each position (a teacher's top-k, for distillation); `Policy.reference` gives the logprobs of the model trained over,
 the adapter switched off.
@@ -17,7 +19,7 @@ On a 16 GB card that is the difference between turns of 5,000 tokens and turns o
 import json
 import struct
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -149,6 +151,37 @@ def scored_among(
     return torch.cat([part[0] for part in parts]), torch.cat([part[1] for part in parts])
 
 
+class Scorer(nn.Module):
+    """A model's last hidden states and the output layer's scores at given positions, in one call (`forward`): what
+    a policy computes of a sequence."""
+
+    def __init__(self, model: nn.Module) -> None:
+        super().__init__()
+        self.model = model
+
+    def forward(
+        self,
+        ids: torch.Tensor,
+        embedded: torch.Tensor | None,
+        positions: Sequence[int],
+        entropy: bool = False,
+        candidates: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """`scored_with_entropy` (or `scored_among`, given `candidates`) over the decoder's last hidden states of `ids`
+        (or of their rows `embedded`, where the embeddings are read from a file)."""
+        inner = body(self.model)
+        found = inner(input_ids=ids) if embedded is None else inner(inputs_embeds=embedded)
+        hidden = found.last_hidden_state[0]
+        if candidates is not None:
+            return scored_among(self.model, hidden, ids, positions, candidates)
+        return scored_with_entropy(self.model, hidden, ids, positions, entropy=entropy)
+
+
+def layers_of(model: nn.Module) -> list[nn.Module]:
+    """The decoder's layers, in order."""
+    return list(cast(nn.ModuleList, body(model).layers))
+
+
 @dataclass
 class Policy:
     model: nn.Module
@@ -157,28 +190,27 @@ class Policy:
     alpha: float
     embedding: FileEmbedding | None = None
     """The token embeddings, if they are read from the checkpoint file rather than held on the GPU."""
+    scorer: Scorer = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.scorer = Scorer(self.model)
 
     @classmethod
-    def load(
-        cls,
-        checkpoint: str,
-        *,
-        rank: int,
-        alpha: float,
-    ) -> "Policy":
-        """The checkpoint on the GPU with a new adapter, its layers checkpointed for the backward pass."""
+    def load(cls, checkpoint: str, *, rank: int, alpha: float, device: str = "cuda") -> "Policy":
+        """The checkpoint on `device` (the GPU; the CPU, for a policy to shard) with a new adapter, its layers
+        checkpointed for the backward pass."""
         from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, CompressedTensorsConfig
 
         where = str(local(checkpoint))
         if multimodal(checkpoint):
-            options: dict[str, Any] = {"dtype": torch.bfloat16, "device_map": {"": "cuda"}}
+            options: dict[str, Any] = {"dtype": torch.bfloat16, "device_map": {"": device}}
             if quantized(checkpoint):
                 options["quantization_config"] = CompressedTensorsConfig(run_compressed=True)
             model = cast(nn.Module, AutoModelForImageTextToText.from_pretrained(where, **options))  # pyright: ignore[reportUnknownMemberType]
             replace_compressed_linears(model)
         else:
             model = cast(
-                nn.Module, AutoModelForCausalLM.from_pretrained(where, dtype=torch.bfloat16, device_map={"": "cuda"})
+                nn.Module, AutoModelForCausalLM.from_pretrained(where, dtype=torch.bfloat16, device_map={"": device})
             )  # pyright: ignore[reportUnknownMemberType]
         for parameter in model.parameters():
             parameter.requires_grad_(False)
@@ -210,25 +242,24 @@ class Policy:
         self, tokens: Sequence[int], positions: Sequence[int], *, entropy: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """`logprobs`, and the entropy of the policy's distribution at each of `positions`."""
-        ids, hidden = self._hidden(tokens)
-        return scored_with_entropy(self.model, hidden, ids, positions, entropy=entropy)
+        ids, embedded = self._inputs(tokens)
+        return self.scorer(ids, embedded, positions, entropy)
 
     def logprobs_among(
         self, tokens: Sequence[int], positions: Sequence[int], candidates: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """`logprobs`, and the logprobs of `candidates[i]` (a row of token ids) at the i-th of `positions`: what the
         top-k form of distillation reads at the teacher's top tokens."""
-        ids, hidden = self._hidden(tokens)
-        return scored_among(self.model, hidden, ids, positions, candidates)
+        ids, embedded = self._inputs(tokens)
+        return self.scorer(ids, embedded, positions, False, candidates)
 
-    def _hidden(self, tokens: Sequence[int]) -> tuple[torch.Tensor, torch.Tensor]:
-        """The sequence's ids, and the last hidden state at each position."""
+    def _inputs(self, tokens: Sequence[int]) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """The sequence's ids, and their embeddings where they are read from the checkpoint file."""
         device = next(iter(self.model.buffers())).device
         ids = torch.tensor([list(tokens)], device=device)
         if self.embedding is None:
-            return ids, body(self.model)(input_ids=ids).last_hidden_state[0]
-        embedded = self.embedding(tokens, device).unsqueeze(0).requires_grad_(True)  # (for checkpointing)
-        return ids, body(self.model)(inputs_embeds=embedded).last_hidden_state[0]
+            return ids, None
+        return ids, self.embedding(tokens, device).unsqueeze(0).requires_grad_(True)  # (for checkpointing)
 
     def reference(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
         """`logprobs` under the reference: the model trained over, the adapter switched off (no gradient)."""

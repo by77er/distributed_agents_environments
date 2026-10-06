@@ -16,7 +16,7 @@ only when asked (`LoraSettings.frozen_reference`).
 import json
 import shutil
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,7 +24,7 @@ import torch
 from torch import nn
 
 from rollout_lora.models import COPIED, local, multimodal
-from rollout_lora.policy import body, scored_among, scored_with_entropy
+from rollout_lora.policy import Scorer
 
 
 @dataclass
@@ -34,19 +34,31 @@ class FullPolicy:
     """Where it was loaded from: a model's name or directory, or a full checkpoint's files."""
     frozen: nn.Module | None = None
     """The reference, if it holds one: a frozen copy of the model trained over, in bfloat16."""
+    scorer: Scorer = field(init=False)
+    frozen_scorer: Scorer | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.scorer = Scorer(self.model)
+        self.frozen_scorer = Scorer(self.frozen) if self.frozen is not None else None
 
     @classmethod
     def load(
-        cls, checkpoint: str, *, gradient_checkpointing: bool = True, reference: str | None = None
+        cls,
+        checkpoint: str,
+        *,
+        gradient_checkpointing: bool = True,
+        reference: str | None = None,
+        device: str = "cuda",
     ) -> "FullPolicy":
-        """The policy from `checkpoint`, and with `reference` (a model's name or directory) a frozen copy of it."""
+        """The policy from `checkpoint` on `device` (the GPU; the CPU, for a policy to shard), and with `reference`
+        (a model's name or directory) a frozen copy of it."""
         from transformers import AutoModelForCausalLM
 
         if multimodal(checkpoint):
             raise ValueError(f"{checkpoint} is an image-text model: full weights are trained on text models only")
         model = cast(
             nn.Module,
-            AutoModelForCausalLM.from_pretrained(str(local(checkpoint)), dtype=torch.float32, device_map={"": "cuda"}),
+            AutoModelForCausalLM.from_pretrained(str(local(checkpoint)), dtype=torch.float32, device_map={"": device}),
         )
         for parameter in model.parameters():
             parameter.requires_grad_(True)
@@ -57,7 +69,7 @@ class FullPolicy:
             frozen = cast(
                 nn.Module,
                 AutoModelForCausalLM.from_pretrained(
-                    str(local(reference)), dtype=torch.bfloat16, device_map={"": "cuda"}
+                    str(local(reference)), dtype=torch.bfloat16, device_map={"": device}
                 ),
             )
             frozen.eval()
@@ -76,31 +88,28 @@ class FullPolicy:
         self, tokens: Sequence[int], positions: Sequence[int], *, entropy: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """`logprobs`, and the entropy of the policy's distribution at each of `positions`."""
-        device = next(iter(self.model.parameters())).device
-        ids = torch.tensor([list(tokens)], device=device)
-        with torch.autocast("cuda", dtype=torch.bfloat16):
-            hidden = body(self.model)(input_ids=ids).last_hidden_state[0]
-            return scored_with_entropy(self.model, hidden, ids, positions, entropy=entropy)
+        ids = self._ids(tokens)
+        with torch.autocast(ids.device.type, dtype=torch.bfloat16):
+            return self.scorer(ids, None, positions, entropy)
 
     def logprobs_among(
         self, tokens: Sequence[int], positions: Sequence[int], candidates: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """`logprobs`, and the logprobs of `candidates[i]` (a row of token ids) at the i-th of `positions`."""
-        device = next(iter(self.model.parameters())).device
-        ids = torch.tensor([list(tokens)], device=device)
-        with torch.autocast("cuda", dtype=torch.bfloat16):
-            hidden = body(self.model)(input_ids=ids).last_hidden_state[0]
-            return scored_among(self.model, hidden, ids, positions, candidates)
+        ids = self._ids(tokens)
+        with torch.autocast(ids.device.type, dtype=torch.bfloat16):
+            return self.scorer(ids, None, positions, False, candidates)
 
     def reference(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
         """`logprobs` under the frozen copy of the model trained over (no gradient)."""
-        if self.frozen is None:
+        if self.frozen_scorer is None:
             raise ValueError("this full-weight policy holds no reference (LoraSettings.frozen_reference)")
-        device = next(iter(self.frozen.parameters())).device
-        ids = torch.tensor([list(tokens)], device=device)
         with torch.no_grad():
-            hidden = body(self.frozen)(input_ids=ids).last_hidden_state[0]
-            return scored_with_entropy(self.frozen, hidden, ids, positions, entropy=False)[0]
+            return self.frozen_scorer(self._ids(tokens), None, positions)[0]
+
+    def _ids(self, tokens: Sequence[int]) -> torch.Tensor:
+        device = next(iter(self.model.parameters())).device
+        return torch.tensor([list(tokens)], device=device)
 
     def save(self, directory: Path) -> Path:
         """The weights (float32, in safetensors) and the model's configuration and tokenizer."""

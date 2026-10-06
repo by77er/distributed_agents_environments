@@ -120,6 +120,10 @@ WEIGHTS = "weights"
 """Under a step's directory: the new weights, as engines load them."""
 STATE = "state"
 """Under a step's directory: what the trainer goes on from, and what the step did."""
+HELD = "held.txt"
+"""In a step's state, from a trainer that keeps its policy in memory between steps (`Resident`): the name it gave what
+it holds after the step. A later step whose parent's state names what the trainer holds goes on from its memory, and
+reads none of the parent's other files."""
 
 
 class StepFailed(Exception):
@@ -145,6 +149,22 @@ def objective_of(trainer: object) -> Objective:
     """The objective a trainer trains with: its `objective`, else the `default` preset."""
     found = getattr(trainer, "objective", None)
     return found if isinstance(found, Objective) else DEFAULT
+
+
+@runtime_checkable
+class Resident(Protocol):
+    """A trainer that keeps its policy and optimizer in memory between steps (a trainer on several GPUs): a step from
+    the checkpoint it made last goes on from them. Its steps still leave every file a later step needs, so any trainer
+    can take any step."""
+
+    @property
+    def holding(self) -> str | None:
+        """The name it gave what it holds (written to that step's state as `HELD`); none while it holds nothing."""
+        ...
+
+    def close(self) -> None:
+        """End what it keeps running (its processes, and what they hold)."""
+        ...
 
 
 @runtime_checkable

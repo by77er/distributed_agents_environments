@@ -6,7 +6,7 @@ import contextlib
 import json
 import math
 import re
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -92,18 +92,35 @@ def load_adapter(model: nn.Module, directory: Path) -> int:
     return filled
 
 
-def save_adapter(model: nn.Module, directory: Path, *, base_model: str, rank: int, alpha: float) -> Path:
-    """Write the adapter in PEFT's layout: `adapter_config.json` and `adapter_model.safetensors`."""
-    directory.mkdir(parents=True, exist_ok=True)
+def adapter_tensors(
+    model: nn.Module, whole: Callable[[torch.Tensor], torch.Tensor] = lambda tensor: tensor
+) -> dict[str, torch.Tensor]:
+    """The adapter's tensors by PEFT's names, on the CPU, each made `whole` first (gathered from its shards, where
+    the model is sharded: every process gathers each in the same order)."""
     tensors: dict[str, torch.Tensor] = {}
-    targets: set[str] = set()
     for name, module in model.named_modules():
         if isinstance(module, LoraLinear):
             # Full precision: each training step resumes from this file, and updates are far smaller than
             # bfloat16 resolves. Engines cast to their own dtype when they load it.
-            tensors[f"base_model.model.{name}.lora_A.weight"] = module.lora_A.weight.detach().cpu().contiguous()
-            tensors[f"base_model.model.{name}.lora_B.weight"] = module.lora_B.weight.detach().cpu().contiguous()
-            targets.add(name.rsplit(".", 1)[-1])
+            for part, layer in (("lora_A", module.lora_A), ("lora_B", module.lora_B)):
+                tensors[f"base_model.model.{name}.{part}.weight"] = whole(layer.weight.detach()).cpu().contiguous()
+    return tensors
+
+
+def save_adapter(
+    model: nn.Module,
+    directory: Path,
+    *,
+    base_model: str,
+    rank: int,
+    alpha: float,
+    tensors: dict[str, torch.Tensor] | None = None,
+) -> Path:
+    """Write the adapter in PEFT's layout: `adapter_config.json` and `adapter_model.safetensors` (its `tensors`, as
+    `adapter_tensors` gives them, where they were gathered already)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    tensors = adapter_tensors(model) if tensors is None else tensors
+    targets = {name.rsplit(".", 1)[-1] for name, module in model.named_modules() if isinstance(module, LoraLinear)}
     save_file(tensors, str(directory / "adapter_model.safetensors"))
     config = {
         "peft_type": "LORA",
