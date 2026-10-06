@@ -1,17 +1,24 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
-"""The trainers on several processes, on the CPU (gloo): a tiny random Qwen3 model, its steps taken by two resident
-processes (`rollout_lora.resident.Workers`, under torchrun) and by the step on one process, give the same losses and
-weights; a step from the checkpoint the processes made last goes on from what they hold; steps on one process and on
-several go on from each other's files; and a full-weight trainer's sharded state is read back by another number of
-processes. (On the CPU nothing is cast to bfloat16 by the sharding, so the two differ only by the order sums are added
-in; the GPU's mixed precision is `test_sharded_on_gpu.py`'s.)"""
+"""The trainers' processes on the CPU (gloo): a tiny random Qwen3 model, its steps taken by two resident processes
+(`rollout_lora.resident.Workers`, under torchrun) and by the step on one process, give the same losses and weights; a
+step from the checkpoint the processes made last goes on from what they hold, and one after they were ended goes on
+from the parent's full state, or is refused where the parent left it out; steps on one process and on several go on
+from each other's files; a full-weight trainer's sharded state is read back by another number of processes; one
+process kept between steps goes on from memory, and one beside an engine ends after each step; what the processes
+hold is dropped before another parent is loaded; an adapter's units sharded on one process step bitwise as the policy
+does, and its gradients reduced once a minibatch are those reduced after each pass. (On the CPU full weights are not
+cast to bfloat16 by the sharding, so the two differ only by the order sums are added in; the GPU's mixed precision is
+`test_sharded_on_gpu.py`'s.)"""
 
 import asyncio
+import gc
 import json
 import os
 import random
+import signal
 import subprocess
 import sys
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -24,8 +31,8 @@ from rollout_lora.layers import load_adapter
 from rollout_lora.policy import Policy
 from rollout_lora.resident import Workers
 from rollout_lora.settings import LoraSettings
-from rollout_lora.sharded import SHARDS
-from rollout_lora.workers import OPTIMIZER, SEED
+from rollout_lora.trainer import LoraTrainer
+from rollout_lora.workers import OPTIMIZER, SEED, SHARDS, Asked
 from rollout_objectives.step import PolicyStep
 from rollout_train import Weighted
 from rollout_train.recorder import Segment, Span
@@ -173,15 +180,50 @@ def test_every_weight_on_two_processes_steps_as_on_one_and_its_state_is_read_by_
     for name, parameter in policy.model.named_parameters():
         torch.testing.assert_close(served[name], parameter.detach().to(torch.bfloat16), rtol=1e-2, atol=1e-3)
 
-    # Three processes read the full state two wrote (its float32 weights and the optimizer's), and go on as one does.
+    # Three processes read the full state two wrote (its float32 weights and the optimizer's), and go on as one does;
+    # the first step's state, which left the full state out, they refuse: no process holds it.
     parent = Files(weights, tmp_path / "second" / "state")
     workers = Workers(tiny, settings, "full", 3, device="cpu")
     try:
         third = asyncio.run(workers.step(given, seed=2, parent=parent, into=tmp_path / "third"))
+        with pytest.raises(StepFailed, match="no full state"):
+            asyncio.run(workers.step(given, seed=1, parent=made, into=tmp_path / "again"))
+        assert workers.holding is not None  # (refused before the processes were asked: they hold the third step)
     finally:
         workers.close()
     assert third["loaded_from_files"] == 1.0
     close(stepping.step(given, seed=2), third, COMPARED)
+
+
+def test_every_weight_goes_on_from_its_full_state_after_its_processes_end(tiny: str, tmp_path: Path) -> None:
+    # (as after a failed step, a lease released or a restart: new processes take the second step from the first's files)
+    changed: dict[str, Any] = {**SETTINGS, "learning_rate": 1e-4, "warmup_updates": 4}
+    settings = LoraSettings(**changed)
+    policy = FullPolicy.load(tiny, device="cpu")
+    torch.manual_seed(1)
+    given = batch(policy.logprobs)
+    workers = Workers(tiny, settings, "full", 2, device="cpu")
+    try:
+        first = asyncio.run(workers.step(given, seed=0, parent=None, into=tmp_path / "first"))
+    finally:
+        workers.close()
+    assert first["full_state"] == 1.0 and (tmp_path / "first" / "state" / SHARDS).is_dir()  # (every step, by default)
+    assert first["warmup_updates"] == 4.0
+    workers = Workers(tiny, settings, "full", 2, device="cpu")
+    try:
+        parent = Files(tmp_path / "first" / "weights", tmp_path / "first" / "state")
+        second = asyncio.run(workers.step(given, seed=1, parent=parent, into=tmp_path / "second"))
+    finally:
+        workers.close()
+    alone = PolicyStep(policy, settings)
+    alone.step(given, seed=0)
+    going = PolicyStep(policy, settings, fresh=False, optimizer_given=alone.optimizer).step(given, seed=1)
+    assert second["loaded_from_files"] == 1.0 and second["warmup_updates"] == 0.0  # (its optimizer went on)
+    close(going, second, COMPARED)
+    served = {key: each for file in (tmp_path / "second" / "weights").glob("*.safetensors")
+              for key, each in load_file(str(file)).items()}  # fmt: skip
+    for name, parameter in policy.model.named_parameters():
+        torch.testing.assert_close(served[name], parameter.detach().to(torch.bfloat16), rtol=1e-2, atol=1e-3)
 
 
 def test_a_step_that_fails_in_the_processes_ends_them_and_the_next_starts_them_again(tiny: str, tmp_path: Path) -> None:
@@ -220,6 +262,119 @@ def test_every_weight_with_a_frozen_reference_on_two_processes_steps_as_on_one(t
     following = PolicyStep(policy, settings, fresh=False, optimizer_given=alone.optimizer)
     close(following.step(given, seed=1), second, (*COMPARED, "kl_penalty"))
     assert second["kl_penalty"] > 0  # (the second step's policy has moved from its reference)
+
+
+def test_one_process_kept_goes_on_from_memory_and_one_beside_an_engine_ends_after_each_step(
+    tiny: str, tmp_path: Path
+) -> None:
+    assert LoraTrainer(tiny, gpus=1)._process.kept  # pyright: ignore[reportPrivateUsage]  (a GPU to itself)
+    assert not LoraTrainer(tiny, gpus=1, colocated=True)._process.kept  # pyright: ignore[reportPrivateUsage]
+    settings = LoraSettings(**SETTINGS)
+    torch.manual_seed(SEED)
+    policy = Policy.load(tiny, rank=settings.rank, alpha=settings.alpha, device="cpu")
+    torch.manual_seed(1)
+    given = batch(policy.logprobs)
+    found: dict[bool, list[dict[str, float]]] = {}
+    for kept in (True, False):
+        workers = Workers(tiny, settings, "lora", 1, device="cpu", kept=kept)
+        here = tmp_path / str(kept)
+        try:
+            first = asyncio.run(workers.step(given, seed=0, parent=None, into=here / "first"))
+            running = workers._process is not None  # pyright: ignore[reportPrivateUsage]
+            assert (workers.holding is not None) == kept and running == kept
+            made = Files(here / "first" / "weights", here / "first" / "state")
+            second = asyncio.run(workers.step(given, seed=1, parent=made, into=here / "second"))
+        finally:
+            workers.close()
+        state = here / "second" / "state"
+        assert (state / HELD).exists() == kept and (state / OPTIMIZER).exists()
+        found[kept] = [first, second]
+    assert found[True][1]["loaded_from_files"] == 0.0 and found[False][1]["loaded_from_files"] == 1.0
+    assert found[True][0]["gpus"] == 1.0 and found[True][0]["whole_base"] == 1.0
+    from_memory = adapter(tmp_path / "True" / "second" / "weights")
+    from_files = adapter(tmp_path / "False" / "second" / "weights")
+    for key in from_memory:  # (the same step: from memory, and from the files, float32 both)
+        assert torch.equal(from_memory[key], from_files[key]), key
+    alone = PolicyStep(policy, settings)
+    close(alone.step(given, seed=0), found[True][0], COMPARED)
+    going = PolicyStep(policy, settings, fresh=False, optimizer_given=alone.optimizer)
+    close(going.step(given, seed=1), found[True][1], COMPARED)
+
+
+def test_what_the_processes_hold_is_nothing_once_torchrun_is_gone(tiny: str, tmp_path: Path) -> None:
+    settings = LoraSettings(**SETTINGS)
+    torch.manual_seed(1)
+    given = batch(Policy.load(tiny, rank=settings.rank, alpha=settings.alpha, device="cpu").logprobs)
+    workers = Workers(tiny, settings, "lora", 2, device="cpu")
+    try:
+        asyncio.run(workers.step(given, seed=0, parent=None, into=tmp_path / "first"))
+        assert workers.holding is not None
+        process = workers._process  # pyright: ignore[reportPrivateUsage]
+        assert process is not None
+        os.killpg(process.pid, signal.SIGKILL)  # (torchrun died while idle)
+        process.wait(timeout=30)
+        assert workers.holding is None
+        parent = Files(tmp_path / "first" / "weights", tmp_path / "first" / "state")
+        again = asyncio.run(workers.step(given, seed=1, parent=parent, into=tmp_path / "second"))
+    finally:
+        workers.close()
+    assert again["loaded_from_files"] == 1.0  # (new processes, from the parent's files)
+
+
+class Held:
+    """What a load holds (a policy and its optimizer, on the GPU)."""
+
+    def __init__(self) -> None:
+        self.name = ""
+
+
+def test_what_the_processes_hold_is_dropped_before_another_parent_is_loaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import rollout_lora.workers as workers
+
+    dropped: list[bool] = []
+    previous: list[weakref.ref[Held]] = []
+
+    def loaded(asked: Asked, *_: Any) -> Held:
+        dropped.append(all(each() is None for each in previous))  # (whatever was held before is gone)
+        made = Held()
+        previous.append(weakref.ref(made))
+        return made
+
+    def stepped(asked: Asked, held: Held, *_: Any) -> dict[str, float]:
+        held.name = asked.held or ""
+        (asked.into / "state").mkdir(parents=True, exist_ok=True)
+        (asked.into / "state" / HELD).write_text(held.name)
+        return {}
+
+    monkeypatch.setattr(workers, "_loaded", loaded)
+    monkeypatch.setattr(workers, "_stepped", stepped)
+
+    def freed(device: torch.device) -> None:
+        gc.collect()
+
+    monkeypatch.setattr(workers, "_freed", freed)
+    settings = LoraSettings(**SETTINGS)
+
+    def asked(name: str, parent: str | None) -> Asked:
+        files = Files(tmp_path / parent / "weights", tmp_path / parent / "state") if parent else None
+        return Asked("model", settings, "lora", [], 0, files, tmp_path / name, name)
+
+    messages: list[Any] = [("step", asked("a", None)), ("step", asked("b", "a")), ("step", asked("c", None)),
+                           ("stop", None)]  # fmt: skip
+
+    class One:
+        rank, size = 0, 1
+
+        def gathered(self, value: Any) -> list[Any]:
+            return [value]
+
+    sent: list[Any] = []
+    serve: Any = getattr(workers, "_serve")  # noqa: B009  (the processes' loop, with its loading and stepping replaced)
+    serve(lambda: messages.pop(0), sent.append, One(), torch.device("cpu"), None, 0.0)
+    assert [kind for kind, _ in sent] == ["done", "done", "done"]
+    assert dropped == [True, True]  # (loaded twice: the second step went on from memory)
 
 
 def alone(mode: str, model: str, processes: int, out: Path) -> dict[str, Any]:

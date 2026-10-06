@@ -459,6 +459,8 @@ class Run:
                     given["objective"] = self.objective or objective or objective_in(self.settings).to_json()
         if (project := provider.secrets.get("project")) is not None and (said := project.resolve()) is not None:
             given["project"] = said
+        if colocating(self.settings, self.cluster):  # (its processes end after each step: the engine's GPU back)
+            given["colocated"] = True
         asks = self.demand.asks(TRAINER) if self.demand is not None else None
         name = f"run/{self.run.id}/trainer"
         if asks is not None:

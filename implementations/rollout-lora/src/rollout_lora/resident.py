@@ -1,16 +1,23 @@
-"""A trainer's processes on several GPUs, kept between steps: `Workers` starts them under torchrun (one per GPU:
-`rollout_lora.workers`), hands each step to all of them, and ends them.
+"""A trainer's processes: `Workers` starts them under torchrun (one per GPU: `rollout_lora.workers`), hands each step
+to all of them, and ends them.
 
-The processes hold the sharded policy and optimizer from one step to the next, so a step from the checkpoint the last
-one made loads nothing (`rollout_train.trainer.Resident`; each step's state names what they hold, `HELD`). They are
-started at the first step, and again after one failed: a failure in one process leaves the others waiting at a
-collective, so a step that fails ends them all, and raises `StepFailed` with the failing process's traceback. They end
-when the trainer is closed (`close`: on a training pod, when its lease is released or another run takes it), when the
-trainer's process ends (each process ends when its connection to the trainer closes, or when its parent does), and when
-a step is cancelled.
+Kept between steps (a trainer with its GPUs to itself), the processes hold the policy and optimizer from one step to
+the next (on several GPUs, each its shard), so a step from the checkpoint the last one made loads nothing
+(`rollout_train.trainer.Resident`; each step's state names what they hold, `HELD`). They are started at the first
+step, and again after one failed: a failure in one process leaves the others waiting at a collective, so a step that
+fails ends them all, and raises `StepFailed` with the failing process's traceback. They end when the trainer is closed
+(`close`: on a training pod, when its lease is released or another run takes it), when the trainer's process ends
+(each process ends when its connection to the trainer closes, or when its parent does), and when a step is cancelled.
 
-The processes reach the trainer at a local address with a key of its own (`multiprocessing.connection`), and are sent
-each step's settings with it, so a setting changed between steps (`Changeable`) reaches every process.
+Beside an engine on the same GPU (`kept = False`), the processes end after each step, which gives the engine back the
+GPU's memory and the machine's: a trainer parked in system memory between steps, next to a sleeping engine's offloaded
+weights, can exhaust a small machine. An engine's client libraries can also change how transformers builds models in
+the process that uses them (vLLM swaps in its own configuration classes), which processes of their own avoid.
+
+A step whose parent's state left its full state out, which the processes do not hold, is refused before they are
+asked (`rollout_lora.workers.refusal`). The processes reach the trainer at a local address with a key of its own
+(`multiprocessing.connection`), and are sent each step's settings with it, so a setting changed between steps
+(`Changeable`) reaches every process.
 """
 
 import asyncio
@@ -53,10 +60,18 @@ def visible_gpus(environ: Mapping[str, str] | None = None) -> int:
 
 class Workers:
     """`count` processes stepping a trainer of `checkpoint` (`weights`: `lora` or `full`) with `settings` (the trainer
-    sets them anew between steps), on `device` (`cuda`, a GPU each; `cpu`, on gloo)."""
+    sets them anew between steps), on `device` (`cuda`, a GPU each; `cpu`, on gloo); `kept` between steps, or ended
+    after each."""
 
     def __init__(
-        self, checkpoint: str, settings: LoraSettings, weights: str, count: int, *, device: str = "cuda"
+        self,
+        checkpoint: str,
+        settings: LoraSettings,
+        weights: str,
+        count: int,
+        *,
+        device: str = "cuda",
+        kept: bool = True,
     ) -> None:
         if count < 1:
             raise ValueError("a trainer steps in one process at least")
@@ -65,16 +80,28 @@ class Workers:
         self.weights = weights
         self.count = count
         self.device = device
-        self.holding: str | None = None
-        """What the processes hold, by the name the last step gave it (none: nothing, or no processes)."""
+        self.kept = kept
+        self._holding: str | None = None
         self._process: subprocess.Popen[bytes] | None = None
         self._connections: list[Connection] = []
         self._lock = asyncio.Lock()
 
+    @property
+    def holding(self) -> str | None:
+        """What the processes hold, by the name the last step gave it (none: nothing, or no processes running)."""
+        if self._process is None or self._process.poll() is not None:
+            return None
+        return self._holding
+
     async def step(self, segments: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> dict[str, float]:
         """Train one step in every process, from `parent` (what they hold, where it is the checkpoint they made last),
         leaving the weights in `into/weights` and the state in `into/state`; the step's metrics."""
+        from rollout_lora.workers import refusal  # (here: the package does not import what torchrun runs)
+
         async with self._lock:
+            refused = refusal(parent, self.holding, self.settings.state_every)
+            if refused is not None:
+                raise StepFailed(refused)
             try:
                 if self._process is None or self._process.poll() is not None:
                     listener = self._spawn()  # (from this thread, which lasts: torchrun ends when its starter does)
@@ -83,13 +110,17 @@ class Workers:
             except asyncio.CancelledError:  # (whoever waited is gone: the processes are not left stepping for nobody)
                 self.close()
                 raise
+            finally:
+                if not self.kept:  # (their memory given back to the engine beside them)
+                    await asyncio.to_thread(self.close)
 
     def _step(self, segments: list[Item], seed: int, parent: Files | None, into: Path) -> dict[str, float]:
-        from rollout_lora.workers import Asked  # (here: the package does not import what torchrun runs)
+        from rollout_lora.workers import Asked
 
-        name = f"{into.name}:{secrets.token_hex(8)}"
-        asked = Asked(self.checkpoint, self.settings, self.weights, segments, seed, parent, into, name)
-        self.holding = None  # (until they say they made it)
+        name = f"{into.name}:{secrets.token_hex(8)}" if self.kept else None
+        every = self.settings.state_every if self.kept else 1
+        asked = Asked(self.checkpoint, self.settings, self.weights, segments, seed, parent, into, name, every)
+        self._holding = None  # (until they say they made it)
         try:
             for connection in self._connections:
                 connection.send(("step", asked))
@@ -97,7 +128,7 @@ class Workers:
             self.close()
             raise StepFailed(f"the trainer's processes could not be reached: {error}") from None
         answers = self._answers()
-        self.holding = name
+        self._holding = name
         return answers[0]
 
     def _answers(self) -> list[dict[str, float]]:
@@ -186,7 +217,7 @@ class Workers:
 
     def close(self) -> None:
         """End the processes (and what they hold)."""
-        self.holding = None
+        self._holding = None
         for connection in self._connections:
             with contextlib.suppress(OSError):
                 connection.send(("stop", None))
@@ -213,6 +244,8 @@ class Workers:
 
 
 def _signal(process: "subprocess.Popen[Any]", number: int) -> None:
-    """Signal torchrun's process group: its agent, and the processes it started."""
+    """Signal torchrun's process group: its agent, which leads a session of its own. The processes it starts are in
+    sessions of their own (torchrun starts each so), out of this group: they end when the agent does (each asks the
+    kernel to end it with its parent, `end_with_parent`), and when their connection to the trainer closes."""
     with contextlib.suppress(OSError):
         os.killpg(process.pid, number)

@@ -4,18 +4,18 @@ A step is asked for by the checkpoint it makes (`into`, the checkpoint's id), wi
 weighted segments, `batch_bytes`), its parent's files (manifests of blobs: the weights, and the trainer's state if it
 left any), and the settings the trainer takes between steps (`rollout_train.trainer.Changeable`). The service fetches
 the batch and the parent's files from the blob store, runs the step, keeps the new weights and state in the blob store,
-and answers with their manifests and the step's metrics. A step runs in a fresh process when the trainer runs each step
-so (`rollout_lora`'s trainers do).
+and answers with their manifests and the step's metrics.
 
 A step is idempotent by `into`: asked again while it runs, it is the same step; asked again after it was made, the
 answer is the one it made (kept on the pod's disk), or, where the ledger already has the checkpoint, the checkpoint's
 own files. A step that failed is taken again when it is asked for again. One step runs at a time: another asked for
 meanwhile is refused (409), and the asker tries it again later.
 
-A trainer on several GPUs keeps its processes, policy and optimizer between steps (`rollout_train.trainer.Resident`):
-where a step's parent is what it holds (the parent's state names it, `HELD`), the service fetches that one small file
-of the parent's and none of the rest. When the run that holds the pod changes, or its lease is released, the trainer
-is closed, which ends its processes and frees the GPUs.
+A trainer that keeps its processes, policy and optimizer between steps (`rollout_train.trainer.Resident`:
+`rollout_lora`'s trainers do, but beside the pod's sleeping vLLM, where each step's processes end after it): where a
+step's parent is what it holds (the parent's state names it, `HELD`), the service fetches that one small file of the
+parent's and none of the rest. When the run that holds the pod changes, or its lease is released, the trainer is
+closed, which ends its processes and frees the GPUs.
 
 - `POST /v1/steps` with a `StepAsked`: 202 and `{"state": "running"}`; 200 and the step's state if it was made; 409
   while another step runs; 400 for a request it cannot read.
@@ -30,10 +30,10 @@ is closed, which ends its processes and frees the GPUs.
 - `ROLLOUT_TRAINER_MODEL`: the model it trains.
 - `ROLLOUT_TRAINER_SETTINGS`: its settings, as a JSON object (default `{}`), until a run that holds the pod says its
   own.
-- `ROLLOUT_TRAINER_GPUS`: the GPUs it steps on (`gpus`, which `rollout_lora`'s trainers take: more than one, a process
-  per GPU under torchrun, the policy sharded over them); by default those the pod has.
+- `ROLLOUT_TRAINER_GPUS`: the GPUs it steps on (`gpus`, which `rollout_lora`'s trainers take: a process per GPU under
+  torchrun, the policy sharded over them on more than one); by default those the pod has.
 - `ROLLOUT_SLEEP_VLLM`: on a pod that serves too (`runpod-host`), `1` to have the pod's vLLM sleep while a step is
-  taken (`rollout_train.colocated`).
+  taken (`rollout_train.colocated`), and the trainer told it is `colocated`.
 - `ROLLOUT_WORK`: where steps' files and the answers of the steps made are kept (default `/workspace/rollout`).
 - `ROLLOUT_LISTEN`: where the service listens (default `127.0.0.1:8001`);
 
@@ -413,6 +413,8 @@ async def main(environ: Mapping[str, str]) -> None:
         chosen = cast(dict[str, Any], given) if isinstance(given, dict) else cast(dict[str, Any], settings)
         if gpus is not None:
             chosen = {**chosen, "gpus": gpus}
+        if sleeps:  # (beside the pod's vLLM: its processes end after each step, and give the memory back)
+            chosen = {**chosen, "colocated": True}
         trainer = made(str(said.get("implementation") or implementation), str(said.get("model") or model), chosen)
         if sleeps:
             from rollout_train.colocated import Colocated

@@ -29,9 +29,9 @@ Rank 0 writes a step's files from tensors every process gathers in the same orde
   other's files;
 - full weights, as the serving copy engines load (`write_serving_copy`): bfloat16 safetensors in files of at most
   4 GB, an index, the model's configuration and tokenizer; and, when a step writes its full state, the float32
-  weights and the optimizer's state with PyTorch's distributed checkpoint (`write_state`, under `SHARDS`: every
-  process writes its shards, a file for each tensor's, and however many processes read them take their own shares,
-  `read_state`).
+  weights and the optimizer's state with PyTorch's distributed checkpoint (`write_state`, under
+  `rollout_lora.workers.SHARDS`: every process writes its shards, a file for each tensor's, and however many processes
+  read them take their own shares, `read_state`).
 """
 
 import json
@@ -52,7 +52,6 @@ from rollout_lora.policy import Policy, layers_of
 from rollout_objectives.ranks import Ranks
 
 __all__ = [
-    "SHARDS",
     "TIMEOUT",
     "gradient_sync",
     "in_turn",
@@ -69,8 +68,6 @@ __all__ = [
     "write_state",
 ]
 
-SHARDS = "shards"
-"""Under a step's `state`: the trainer's full state, as PyTorch's distributed checkpoint writes it."""
 TIMEOUT = timedelta(hours=1)
 """How long a process waits for the others at a collective: as long as one takes to load its share of a large model,
 or rank 0 to write a step's files."""

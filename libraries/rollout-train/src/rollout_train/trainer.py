@@ -153,9 +153,10 @@ def objective_of(trainer: object) -> Objective:
 
 @runtime_checkable
 class Resident(Protocol):
-    """A trainer that keeps its policy and optimizer in memory between steps (a trainer on several GPUs): a step from
-    the checkpoint it made last goes on from them. Its steps still leave every file a later step needs, so any trainer
-    can take any step."""
+    """A trainer that keeps its policy and optimizer in memory between steps (`rollout_lora`'s, with its GPUs to
+    itself): a step from the checkpoint it made last goes on from them. Its steps still leave every file a later step
+    needs, so any trainer can take any step, unless it is told to leave its full state out of some (`rollout_lora`'s
+    `state_every`): a step from one of those needs the trainer that holds it, and fails (`StepFailed`) without it."""
 
     @property
     def holding(self) -> str | None:
