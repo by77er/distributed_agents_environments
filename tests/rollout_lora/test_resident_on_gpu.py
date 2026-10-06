@@ -19,6 +19,7 @@ import torch
 from safetensors.torch import load_file
 
 from rollout_lora.trainer import LoraTrainer
+from rollout_lora.workers import MASTER
 from rollout_train import Weighted
 from rollout_train.recorder import Segment, Span
 from rollout_train.trainer import Files, Item
@@ -59,7 +60,8 @@ def files(directory: Path) -> Files:
 
 
 def adapter(directory: Path) -> dict[str, torch.Tensor]:
-    return load_file(str(directory / "weights" / "adapter_model.safetensors"))
+    """A step's adapter in float32, as a step from it loads it (engines load its bfloat16 copy)."""
+    return load_file(str(directory / "state" / MASTER))
 
 
 def apart(one: dict[str, torch.Tensor], two: dict[str, torch.Tensor]) -> float:

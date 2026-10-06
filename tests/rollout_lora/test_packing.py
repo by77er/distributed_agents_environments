@@ -411,7 +411,7 @@ def test_two_processes_step_in_packs_as_one_does(hybrid: str, tmp_path: Path, ob
     from safetensors.torch import load_file
 
     from rollout_lora.resident import Workers
-    from rollout_lora.workers import SEED
+    from rollout_lora.workers import MASTER, SEED
 
     settings = LoraSettings(rank=4, learning_rate=1e-3, tokens_per_step=60, max_kl=None, objective=objective,
                             pack_tokens=180)  # fmt: skip
@@ -435,7 +435,7 @@ def test_two_processes_step_in_packs_as_one_does(hybrid: str, tmp_path: Path, ob
         assert two[key] == pytest.approx(one[key], rel=1e-4, abs=1e-6), key
     assert one["optimizer_steps"] > 1 and one["prefix_shared_fraction"] > 0.2 and two["packs"] >= one["packs"]
     saved, ours = (
-        load_file(str(tmp_path / "two" / "weights" / "adapter_model.safetensors")),
+        load_file(str(tmp_path / "two" / "state" / MASTER)),  # (the float32 adapter: the weights are bfloat16)
         load_file(str(tmp_path / "one" / "adapter_model.safetensors")),
     )
     for key in saved:

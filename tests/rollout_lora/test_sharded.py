@@ -32,28 +32,13 @@ from rollout_lora.policy import Policy
 from rollout_lora.resident import Workers
 from rollout_lora.settings import LoraSettings
 from rollout_lora.trainer import LoraTrainer
-from rollout_lora.workers import OPTIMIZER, SEED, SHARDS, Asked
+from rollout_lora.workers import MASTER, OPTIMIZER, SEED, SHARDS, Asked
 from rollout_objectives.step import PolicyStep
 from rollout_train import Weighted
 from rollout_train.recorder import Segment, Span
 from rollout_train.trainer import HELD, Files, Item, StepFailed
 
 SETTINGS: dict[str, Any] = {"rank": 4, "learning_rate": 1e-3, "tokens_per_step": 24, "max_kl": None}
-
-
-@pytest.fixture(scope="module")
-def tiny(tmp_path_factory: pytest.TempPathFactory) -> str:
-    """A random Qwen3 of two layers, saved as a model's directory."""
-    from transformers import Qwen3Config, Qwen3ForCausalLM
-
-    config = Qwen3Config(vocab_size=96, hidden_size=32, intermediate_size=64, num_hidden_layers=2,
-                         num_attention_heads=4, num_key_value_heads=2, head_dim=8, tie_word_embeddings=False,
-                         max_position_embeddings=256)  # fmt: skip
-    torch.manual_seed(0)
-    directory = tmp_path_factory.mktemp("tiny")
-    model: Any = Qwen3ForCausalLM(config)
-    model.to(torch.bfloat16).save_pretrained(directory)
-    return str(directory)
 
 
 def batch(score: Any) -> list[Item]:
@@ -115,14 +100,17 @@ def test_an_adapter_on_two_processes_steps_as_on_one_and_goes_on_from_what_they_
     one = PolicyStep(policy, settings, fresh=False, optimizer_given=alone.optimizer).step(given, seed=1)
     close(one, second, COMPARED)
     policy.save(tmp_path / "alone")
-    saved, ours = adapter(tmp_path / "second" / "weights"), adapter(tmp_path / "alone")
+    saved, ours = load_file(str(tmp_path / "second" / "state" / MASTER)), adapter(tmp_path / "alone")
     assert set(saved) == set(ours)
     for key in saved:
         torch.testing.assert_close(saved[key], ours[key], rtol=1e-4, atol=1e-6)
+    served = adapter(tmp_path / "second" / "weights")  # (what engines load: the same adapter, in bfloat16)
+    assert {each.dtype for each in served.values()} == {torch.bfloat16}
+    assert all(torch.equal(served[key], saved[key].to(torch.bfloat16)) for key in saved)
 
-    # A step on one process goes on from the files two wrote: the adapter, and the optimizer's state.
+    # A step on one process goes on from the files two wrote: the float32 adapter, and the optimizer's state.
     again = Policy.load(tiny, rank=settings.rank, alpha=settings.alpha, device="cpu")
-    load_adapter(again.model, tmp_path / "second" / "weights")
+    load_adapter(again.model, tmp_path / "second" / "state" / MASTER)
     going = PolicyStep(again, settings, fresh=False)
     going.optimizer.load_state_dict(torch.load(tmp_path / "second" / "state" / OPTIMIZER, weights_only=True))
     third_alone = going.step(given, seed=2)
@@ -137,7 +125,7 @@ def test_processes_that_hold_nothing_load_their_parent_and_go_on_as_one_does(tin
     given = batch(policy.logprobs)
     alone = PolicyStep(policy, settings)
     alone.step(given, seed=0)
-    policy.save(tmp_path / "first" / "weights")
+    policy.save(tmp_path / "first" / "weights")  # (a float32 adapter, and the state without its float32 copy)
     (tmp_path / "first" / "state").mkdir(parents=True)
     torch.save(alone.optimizer.state_dict(), tmp_path / "first" / "state" / OPTIMIZER)  # (as one GPU's step writes)
     parent = Files(tmp_path / "first" / "weights", tmp_path / "first" / "state")
@@ -287,13 +275,13 @@ def test_one_process_kept_goes_on_from_memory_and_one_beside_an_engine_ends_afte
         finally:
             workers.close()
         state = here / "second" / "state"
-        assert (state / HELD).exists() == kept and (state / OPTIMIZER).exists()
+        assert (state / HELD).exists() == kept and (state / OPTIMIZER).exists() and (state / MASTER).exists()
         found[kept] = [first, second]
     assert found[True][1]["loaded_from_files"] == 0.0 and found[False][1]["loaded_from_files"] == 1.0
     assert found[True][0]["gpus"] == 1.0 and found[True][0]["whole_base"] == 1.0
-    from_memory = adapter(tmp_path / "True" / "second" / "weights")
-    from_files = adapter(tmp_path / "False" / "second" / "weights")
-    for key in from_memory:  # (the same step: from memory, and from the files, float32 both)
+    from_memory = load_file(str(tmp_path / "True" / "second" / "state" / MASTER))
+    from_files = load_file(str(tmp_path / "False" / "second" / "state" / MASTER))
+    for key in from_memory:  # (the same step: from memory, and from the float32 copy, never the bfloat16 one)
         assert torch.equal(from_memory[key], from_files[key]), key
     alone = PolicyStep(policy, settings)
     close(alone.step(given, seed=0), found[True][0], COMPARED)

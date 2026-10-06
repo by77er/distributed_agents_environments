@@ -77,9 +77,11 @@ def lora_parameters(model: nn.Module) -> list[nn.Parameter]:
     return [parameter for name, parameter in model.named_parameters() if ".lora_A." in name or ".lora_B." in name]
 
 
-def load_adapter(model: nn.Module, directory: Path) -> int:
-    """Load an adapter saved by `save_adapter` into the model's LoRA layers; returns how many layers it filled."""
-    tensors = load_file(str(directory / "adapter_model.safetensors"))
+def load_adapter(model: nn.Module, source: Path) -> int:
+    """Load an adapter into the model's LoRA layers, from a directory `save_adapter` wrote or a safetensors file of its
+    tensors by PEFT's names (a step's float32 copy, `rollout_lora.workers.MASTER`); returns how many layers it
+    filled."""
+    tensors = load_file(str(source if source.is_file() else source / "adapter_model.safetensors"))
     filled = 0
     for name, module in model.named_modules():
         if isinstance(module, LoraLinear):
@@ -88,22 +90,31 @@ def load_adapter(model: nn.Module, directory: Path) -> int:
                 layer.weight.data.copy_(saved.to(layer.weight.device, layer.weight.dtype))
             filled += 1
     if filled == 0 or 2 * filled != len(tensors):
-        raise ValueError(f"the adapter in {directory} does not match the model's LoRA layers")
+        raise ValueError(f"the adapter in {source} does not match the model's LoRA layers")
     return filled
+
+
+def host_copy(tensor: torch.Tensor) -> torch.Tensor:
+    """A copy of `tensor` in host memory, which nothing done on the device changes after: pinned where it is on a GPU
+    (so the copy is fast), a copy of its own where it is on the CPU already."""
+    if tensor.device.type == "cuda":
+        copied = torch.empty(tensor.shape, dtype=tensor.dtype, pin_memory=True)
+        copied.copy_(tensor)
+        return copied
+    return tensor.detach().clone()
 
 
 def adapter_tensors(
     model: nn.Module, whole: Callable[[torch.Tensor], torch.Tensor] = lambda tensor: tensor
 ) -> dict[str, torch.Tensor]:
-    """The adapter's tensors by PEFT's names, on the CPU, each made `whole` first (gathered from its shards, where
-    the model is sharded: every process gathers each in the same order)."""
+    """The adapter's tensors by PEFT's names, as they are trained (float32), copied to host memory (`host_copy`: what
+    the training does after does not change them), each made `whole` first (gathered from its shards, where the model is
+    sharded: every process gathers each in the same order)."""
     tensors: dict[str, torch.Tensor] = {}
     for name, module in model.named_modules():
         if isinstance(module, LoraLinear):
-            # Full precision: each training step resumes from this file, and updates are far smaller than
-            # bfloat16 resolves. Engines cast to their own dtype when they load it.
             for part, layer in (("lora_A", module.lora_A), ("lora_B", module.lora_B)):
-                tensors[f"base_model.model.{name}.{part}.weight"] = whole(layer.weight.detach()).cpu().contiguous()
+                tensors[f"base_model.model.{name}.{part}.weight"] = host_copy(whole(layer.weight.detach()))
     return tensors
 
 

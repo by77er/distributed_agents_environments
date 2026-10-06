@@ -21,22 +21,42 @@ process an adapter's policy is loaded onto the GPU as it is; on several it is sh
 (`rollout_lora.sharded`). Full weights are sharded on any number, one included, so that one GPU computes as several do.
 The optimizer goes on from the parent's full state (`full_state`): `state/shards` (`SHARDS`: the
 float32 weights and the optimizer's state, read back by however many processes there are) or `state/optimizer.pt`
-(`OPTIMIZER`: an adapter's optimizer). A parent without a state starts it afresh. A parent whose state left its full
-state out is refused before any process is asked (`refusal`).
+(`OPTIMIZER`: an adapter's optimizer), and an adapter from the state's float32 copy (`MASTER`) where it has one, else
+from the weights. A parent without a state starts it afresh. A parent whose state left its full state out is refused
+before any process is asked (`refusal`).
 
-**Writing.** Rank 0 writes the weights (an adapter in PEFT's layout in float32; full weights' bfloat16 serving copy),
-`minibatches.jsonl` and, where the processes are kept, `HELD`. The full state is written every `Asked.state_every` steps
-since the processes loaded: an adapter's optimizer as `optimizer.pt` (gathered, in the layout of one process's state),
-full weights' under `shards` (every process writes its own).
+**Writing.** Rank 0 writes the weights engines load, in bfloat16 (an adapter in PEFT's layout, half the bytes of its
+float32; full weights' serving copy), `minibatches.jsonl` and, where the processes are kept, `HELD`. The full state is
+written every `Asked.state_every` steps since the processes loaded, the same files from one process as from several: an
+adapter's optimizer as `optimizer.pt` (gathered, in the layout of one process's state) and the adapter in float32 as
+`master.safetensors`; full weights' under `shards` (every process writes its own).
+
+**Keeping the full state after the step.** Told where to keep it (`Asked.keep`, a blob store's location), the processes
+copy the full state off the GPU at the end of the step, in the same order in every process (an adapter's gathered into
+rank 0's host memory, pinned; full weights' shares written by each process into its own memory with the distributed
+checkpoint, every collective done before the step answers), answer, and keep it in the blob store from host memory in a
+thread of each process's own (`_Keeper`), which reads and writes nothing on the GPU and takes part in no collective, so
+the next step trains on while it uploads. Each process says what it kept (`("kept", NAME, …)`, the step's
+directory's name; the trainer merges them, `rollout_lora.resident.Workers.kept_state`), or why it could not, after
+trying `KEEP_TRIES` times. A snapshot is taken in host memory only where every process's share together takes at most
+`HOST_SHARE` of the memory the machine has available (within its container's limit); else it is written to the pod's
+disk (`SPILLED`) and kept from there. One snapshot is kept at a time: a step's snapshot waits until the one before is
+kept, and a process that ends finishes keeping it first. Without `Asked.keep`, the full state is written into the
+step's `state` before the step answers.
 """
 
+import asyncio
 import contextlib
 import gc
+import io
 import json
+import math
 import os
+import threading
+import time
 import traceback
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from multiprocessing.connection import Client, Connection
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -48,10 +68,20 @@ from rollout_train.trainer import HELD, STATE, WEIGHTS, Files, Item
 if TYPE_CHECKING:
     import torch
 
-__all__ = ["MEMORY_MARGIN", "OPTIMIZER", "SEED", "Asked", "full_state", "main", "refusal"]
+__all__ = ["HOST_SHARE", "KEEP_TRIES", "MASTER", "MEMORY_MARGIN", "OPTIMIZER", "SEED", "SPILLED", "Asked",
+           "full_state", "main", "refusal"]  # fmt: skip
 
 OPTIMIZER = "optimizer.pt"
 """In a step's state: an adapter's optimizer's state after it (`torch.save` of its `state_dict`, by parameter index)."""
+MASTER = "master.safetensors"
+"""In a step's state, beside `OPTIMIZER`: the adapter in float32, by PEFT's names, which a step from it loads (the
+weights' copy, which engines load, is bfloat16)."""
+SPILLED = "spilled"
+"""Under a step's directory: the full state written to disk to be kept from there, where host memory cannot hold it."""
+HOST_SHARE = 0.5
+"""The most of the host memory available that the processes' snapshots of a full state take together."""
+KEEP_TRIES = 5
+"""Times a process tries to keep each file of a full state, waiting twice as long after each failure from a second."""
 MEMORY_MARGIN = 256 * 2**20
 """GPU memory left free of what was free when a process started (other programs' use moves a little)."""
 SEED = 0
@@ -79,6 +109,9 @@ class Asked:
     after it."""
     state_every: int = 1
     """Every how many steps since they loaded the processes write the full state."""
+    keep: Mapping[str, Any] | None = None
+    """Where they keep the full state after answering (a blob store's location, `rollout_train.stores.opened`); none:
+    written into `into/state` before they answer."""
 
 
 @dataclass
@@ -178,8 +211,9 @@ def _loaded(asked: Asked, ranks: Any, device: "torch.device", mesh: Any) -> _Hel
             shard_full(policy, mesh, device)
             return policy
         policy = Policy.load(asked.checkpoint, rank=settings.rank, alpha=settings.alpha, device=staged)
-        if parent is not None:
-            load_adapter(policy.model, parent.weights)
+        if parent is not None:  # (from the float32 adapter where the state has it, never the bfloat16 serving copy)
+            master = parent.state / MASTER if parent.state is not None else None
+            load_adapter(policy.model, master if master is not None and master.is_file() else parent.weights)
         if shared:
             shard_adapter(policy, mesh, device, whole_base=whole_base)
         return policy
@@ -198,11 +232,12 @@ def _loaded(asked: Asked, ranks: Any, device: "torch.device", mesh: Any) -> _Hel
     return _Held(policy, optimizer, fresh, whole_base=whole_base)
 
 
-def _stepped(asked: Asked, held: _Held, ranks: Any, device: "torch.device") -> dict[str, float]:
-    """The step taken on what the processes hold, its files written; its metrics."""
+def _stepped(asked: Asked, held: _Held, ranks: Any, device: "torch.device", keeper: "_Keeper") -> dict[str, float]:
+    """The step taken on what the processes hold, its files written (its full state kept after it, by `keeper`, where
+    the step says where); its metrics."""
     import torch
 
-    from rollout_lora.sharded import write_adapter, write_optimizer, write_serving_copy, write_state
+    from rollout_lora.sharded import write_adapter, write_serving_copy
     from rollout_objectives.step import MINIBATCHES, PolicyStep
 
     settings = asked.settings
@@ -210,22 +245,30 @@ def _stepped(asked: Asked, held: _Held, ranks: Any, device: "torch.device") -> d
         group["lr"] = settings.learning_rate
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
+    began = time.monotonic()
     stepping = PolicyStep(held.policy, settings, fresh=held.fresh, ranks=ranks, optimizer_given=held.optimizer)
     metrics: dict[str, Any] = stepping.step(asked.segments, seed=asked.seed)
+    trained, began = time.monotonic() - began, time.monotonic()
     loaded, held.loaded, held.fresh = held.loaded, False, False
     into = asked.into
+    master = None
     if asked.weights == "full":
         write_serving_copy(held.policy, into / WEIGHTS, ranks, source=asked.checkpoint)
     else:
-        write_adapter(held.policy, into / WEIGHTS, ranks)
+        master = write_adapter(held.policy, into / WEIGHTS, ranks)
+    saved, began = time.monotonic() - began, time.monotonic()
     held.since += 1
     writes_state = held.since >= asked.state_every
-    if writes_state and asked.weights == "full":
-        write_state(held.policy.model, held.optimizer, into / STATE / SHARDS, ranks)
-    elif writes_state:
-        write_optimizer(held.optimizer, into / STATE / OPTIMIZER, ranks)
+    waited, in_memory = 0.0, 0.0
     if writes_state:
+        waited = keeper.wait()  # (the state before kept first: one is kept at a time, and its memory is freed)
+        began = time.monotonic()
+        snapshot = _snapshot(asked, held, master, ranks)
+        in_memory = float(snapshot.in_memory)
+        if asked.keep is not None:
+            keeper.keep(into.name, snapshot, asked.keep)
         held.since = 0
+    copied = time.monotonic() - began if writes_state else 0.0
     if ranks.rank == 0:
         (into / STATE).mkdir(parents=True, exist_ok=True)
         (into / STATE / MINIBATCHES).write_text("".join(json.dumps(each) + "\n" for each in stepping.minibatches))
@@ -239,7 +282,182 @@ def _stepped(asked: Asked, held: _Held, ranks: Any, device: "torch.device") -> d
         "whole_base": float(held.whole_base),
         "loaded_from_files": float(loaded),
         "full_state": float(writes_state),
+        "train_seconds": round(ranks.most(trained), 3),
+        "save_adapter_seconds": round(ranks.most(saved), 3),
+        "state_wait_seconds": round(ranks.most(waited), 3),
+        "snapshot_seconds": round(ranks.most(copied), 3),
+        "snapshot_in_memory": in_memory,
     }
+
+
+@dataclass
+class _Snapshot:
+    """A step's full state, off the GPU, as one process keeps it: each of its files, by its path within the state, as
+    what makes its bytes from host memory, or as a file on disk."""
+
+    files: dict[str, Callable[[], bytes] | Path] = field(default_factory=dict[str, Callable[[], bytes] | Path])
+    in_memory: bool = False
+    """Whether it is in host memory (else on disk, or written into the step's state)."""
+    memory: str | None = None
+    """Where in the process's own memory it was written, to be freed once kept."""
+
+
+def _snapshot(asked: Asked, held: _Held, master: "dict[str, torch.Tensor] | None", ranks: Any) -> _Snapshot:
+    """The step's full state copied off the GPU, every process alike (each gathers and writes in the same order, and
+    decides alike where): into host memory where it fits and the step keeps it after (`_fits`), else onto disk (the
+    step's state, or `SPILLED` to be kept from there)."""
+    import torch
+
+    from rollout_lora.sharded import MEMORY, gathered_optimizer, state_bytes, write_state
+
+    into = asked.into
+    if asked.weights == "full":
+        shares = state_bytes(held.policy.model)
+        in_memory = asked.keep is not None and _fits(shares, ranks)
+        place = into / (STATE if asked.keep is None else SPILLED) / SHARDS
+        where = f"{MEMORY}rollout-state/{os.getpid()}/{into.name}/{SHARDS}" if in_memory else place
+        write_state(held.policy.model, held.optimizer, where, ranks)
+        if asked.keep is None:
+            return _Snapshot()
+        if in_memory:
+            return _Snapshot(_in_memory(str(where), SHARDS), in_memory=True, memory=str(where))
+        if ranks.rank != 0:  # (every process wrote its files into one directory: rank 0 keeps them all)
+            return _Snapshot()
+        return _Snapshot({f"{SHARDS}/{each.relative_to(place)}": each for each in sorted(place.rglob("*"))
+                          if each.is_file()})  # fmt: skip
+    trained = sum(4 * each.numel() for each in held.policy.parameters())  # (float32, whatever its shards)
+    optimizer = gathered_optimizer(held.optimizer, ranks)
+    in_memory = asked.keep is not None and _fits(3 * trained if ranks.rank == 0 else 0, ranks)
+    if optimizer is None or master is None:  # (rank 0 holds the adapter and its optimizer's state)
+        return _Snapshot(in_memory=in_memory)
+    if in_memory:
+        return _Snapshot({OPTIMIZER: lambda: _saved(optimizer), MASTER: lambda: _tensors(master)}, in_memory=True)
+    place = into / (STATE if asked.keep is None else SPILLED)
+    place.mkdir(parents=True, exist_ok=True)
+    torch.save(optimizer, place / OPTIMIZER)
+    (place / MASTER).write_bytes(_tensors(master))
+    return _Snapshot({OPTIMIZER: place / OPTIMIZER, MASTER: place / MASTER})
+
+
+def _saved(state: Any) -> bytes:
+    """What `torch.save` writes of `state`."""
+    import torch
+
+    buffer = io.BytesIO()
+    torch.save(state, buffer)
+    return buffer.getvalue()
+
+
+def _tensors(tensors: "dict[str, torch.Tensor]") -> bytes:
+    """Tensors by name as a safetensors file's bytes."""
+    from safetensors.torch import save
+
+    return save(tensors)
+
+
+def _in_memory(where: str, under: str) -> dict[str, Callable[[], bytes] | Path]:
+    """The files this process wrote into its memory at `where`, by their paths `under` a state."""
+    import fsspec  # pyright: ignore[reportMissingTypeStubs]
+
+    from rollout_lora.sharded import MEMORY
+
+    memory = fsspec.filesystem("memory")
+    root = "/" + where.removeprefix(MEMORY)  # (as the in-memory filesystem names its paths)
+    found: dict[str, Callable[[], bytes] | Path] = {}
+    for path in sorted(memory.find(root)):
+
+        def read(path: str = path) -> bytes:
+            return memory.cat_file(path)
+
+        found[f"{under}/{path.removeprefix(root).lstrip('/')}"] = read
+    return found
+
+
+def host_memory() -> float:
+    """Bytes of host memory this process may still take: what the machine has available, within its container's limit
+    (its cgroup's, less what it holds that cannot be reclaimed)."""
+    available = math.inf
+    with contextlib.suppress(OSError, ValueError):
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                available = int(line.split()[1]) * 1024
+    with contextlib.suppress(OSError, ValueError):
+        cgroup = Path("/sys/fs/cgroup")
+        limit = (cgroup / "memory.max").read_text().strip()
+        if limit != "max":
+            stat = dict(line.split() for line in (cgroup / "memory.stat").read_text().splitlines())
+            used = int((cgroup / "memory.current").read_text()) - int(stat.get("inactive_file", 0))
+            available = min(available, int(limit) - used)
+    return available
+
+
+def _fits(share: int, ranks: Any) -> bool:
+    """Whether every process's share of a snapshot (this one's: `share` bytes) together fits in host memory: at most
+    `HOST_SHARE` of what the machine has available. Every process calls it at once, and all decide alike."""
+    shares = ranks.gathered((share, host_memory()))
+    return sum(each for each, _ in shares) <= HOST_SHARE * min(available for _, available in shares)
+
+
+class _Keeper:
+    """Keeps a process's snapshots of steps' full state in a blob store, one at a time, each in a thread of its own,
+    and says what it kept, or why it could not (`send`, as `("kept", NAME, {"files": …, "seconds": …})` or
+    `("kept", NAME, {"error": …})`)."""
+
+    def __init__(self, send: Callable[[Any], None]) -> None:
+        self.send = send
+        self._thread: threading.Thread | None = None
+
+    def wait(self) -> float:
+        """Wait until the snapshot being kept is kept (or could not be); how long it waited, in seconds."""
+        began = time.monotonic()
+        if self._thread is not None:
+            self._thread.join()
+            self._thread = None
+        return time.monotonic() - began
+
+    def keep(self, name: str, snapshot: _Snapshot, location: Mapping[str, Any]) -> None:
+        """Keep `snapshot` (of the step that wrote into a directory called `name`) in the store at `location`, in the
+        background, once the one before is kept."""
+        self.wait()
+        self._thread = threading.Thread(target=self._kept, args=(name, snapshot, location), name="keeping", daemon=True)
+        self._thread.start()
+
+    def _kept(self, name: str, snapshot: _Snapshot, location: Mapping[str, Any]) -> None:
+        began = time.monotonic()
+        try:
+            files = asyncio.run(_put(snapshot, location)) if snapshot.files else {}
+            said: dict[str, Any] = {"files": files, "seconds": round(time.monotonic() - began, 3)}
+        except Exception as error:
+            said = {"error": f"{type(error).__name__}: {error}"[-2000:]}
+        finally:
+            if snapshot.memory is not None:  # (its memory freed, kept or not)
+                with contextlib.suppress(Exception):
+                    import fsspec  # pyright: ignore[reportMissingTypeStubs]
+
+                    fsspec.filesystem("memory").rm(snapshot.memory, recursive=True)
+        with contextlib.suppress(OSError):  # (the trainer is gone: there is no one to tell)
+            self.send(("kept", name, said))
+
+
+async def _put(snapshot: _Snapshot, location: Mapping[str, Any]) -> dict[str, Any]:
+    """Each of a snapshot's files kept in the store at `location`, tried `KEEP_TRIES` times; their references, by path,
+    as JSON."""
+    from rollout_train.stores import opened
+
+    blobs = opened(location)
+    kept: dict[str, Any] = {}
+    for path, source in snapshot.files.items():
+        data = await asyncio.to_thread(source.read_bytes) if isinstance(source, Path) else source()
+        for attempt in range(1, KEEP_TRIES + 1):
+            try:
+                kept[path] = (await blobs.put(data, "application/octet-stream")).model_dump(mode="json")
+                break
+            except Exception:
+                if attempt == KEEP_TRIES:
+                    raise
+                await asyncio.sleep(2.0 ** (attempt - 1))
+        del data
+    return kept
 
 
 def _freed(device: "torch.device") -> None:
@@ -265,28 +483,39 @@ def _bounded(device: "torch.device") -> float:
 def _serve(
     receive: Callable[[], Any], send: Callable[[Any], None], ranks: Any, device: "torch.device", mesh: Any, free: float
 ) -> None:
-    """Take the steps the trainer sends until it stops, a step fails or its connection closes."""
+    """Take the steps the trainer sends until it stops, a step fails or its connection closes; a full state being kept
+    is kept before it returns."""
+    sending = threading.Lock()
+
+    def said(message: Any) -> None:  # (the keeper's thread tells the trainer too)
+        with sending:
+            send(message)
+
+    keeper = _Keeper(said)
     held: _Held | None = None
-    while True:
-        try:
-            message = receive()
-        except EOFError:  # (the trainer is gone)
-            return
-        if message[0] != "step":
-            return
-        asked: Asked = message[1]
-        try:
-            if held is not None and not _holds(held, asked.parent):
-                held = None  # (what they hold is not the parent: dropped and freed before the parent is loaded)
-                _freed(device)
-            if held is None:
-                held = _loaded(asked, ranks, device, mesh)
-            metrics = _stepped(asked, held, ranks, device)
-            metrics["free_gpu_gib"] = min(ranks.gathered(free))  # (when the processes started)
-            send(("done", metrics if ranks.rank == 0 else {}))
-        except Exception:
-            send(("error", traceback.format_exc()))
-            return
+    try:
+        while True:
+            try:
+                message = receive()
+            except EOFError:  # (the trainer is gone)
+                return
+            if message[0] != "step":
+                return
+            asked: Asked = message[1]
+            try:
+                if held is not None and not _holds(held, asked.parent):
+                    held = None  # (what they hold is not the parent: dropped and freed before the parent is loaded)
+                    _freed(device)
+                if held is None:
+                    held = _loaded(asked, ranks, device, mesh)
+                metrics = _stepped(asked, held, ranks, device, keeper)
+                metrics["free_gpu_gib"] = min(ranks.gathered(free))  # (when the processes started)
+                said(("done", metrics if ranks.rank == 0 else {}))
+            except Exception:
+                said(("error", traceback.format_exc()))
+                return
+    finally:
+        keeper.wait()
 
 
 def main() -> None:

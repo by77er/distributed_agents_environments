@@ -18,6 +18,13 @@ A step whose parent's state left its full state out, which the processes do not 
 asked (`rollout_lora.workers.refusal`). The processes reach the trainer at a local address with a key of its own
 (`multiprocessing.connection`), and are sent each step's settings with it, so a setting changed between steps
 (`Changeable`) reaches every process.
+
+Told where to keep the full state (`keep`, a blob store's location), the processes keep each step's after answering
+it (`rollout_lora.workers`): `keeping` says which steps' state they are keeping, and `kept_state` waits for what every
+process kept of one, merged, or raises `StateLost` where one could not keep its share or the processes ended first.
+Whatever reads from the processes (a step waiting for its answers, `kept_state` waiting for a state) reads every
+message that arrives, so each is noted whoever reads it. Closing waits for the states being kept, for up to
+`KEEP_PATIENCE` seconds, before it ends the processes.
 """
 
 import asyncio
@@ -36,14 +43,16 @@ from typing import Any, cast
 
 from rollout.processes import end_with_parent
 from rollout_lora.settings import LoraSettings
-from rollout_train.trainer import Files, Item, StepFailed
+from rollout_train.trainer import Files, Item, StateLost, StepFailed
 
-__all__ = ["START_TIMEOUT", "Workers", "visible_gpus"]
+__all__ = ["KEEP_PATIENCE", "START_TIMEOUT", "Workers", "visible_gpus"]
 
 START_TIMEOUT = 600.0
 """Seconds the processes may take to start and join each other."""
 STOPPING = 10.0
 """Seconds the processes have to end once told to stop, before torchrun is ended."""
+KEEP_PATIENCE = 1800.0
+"""Seconds closing waits for the full states the processes are still keeping."""
 
 
 def visible_gpus(environ: Mapping[str, str] | None = None) -> int:
@@ -81,10 +90,21 @@ class Workers:
         self.count = count
         self.device = device
         self.kept = kept
+        self.keep: Mapping[str, Any] | None = None
+        """Where the processes keep each step's full state after answering it (a blob store's location); none: they
+        write it into the step's state before answering."""
         self._holding: str | None = None
         self._process: subprocess.Popen[bytes] | None = None
         self._connections: list[Connection] = []
         self._lock = asyncio.Lock()
+        self._reading = threading.Lock()
+        self._answered: dict[int, tuple[str, Any]] = {}
+        """What each process answered the step being taken, by rank."""
+        self._ended_ranks: set[int] = set()
+        self._keeping: dict[str, int] = {}
+        """The steps whose full state the processes keep, by their directories' names: how many processes keep it."""
+        self._reports: dict[str, dict[int, dict[str, Any]]] = {}
+        """What each process said it kept of a step's full state (or why it could not), by rank."""
 
     @property
     def holding(self) -> str | None:
@@ -119,8 +139,10 @@ class Workers:
 
         name = f"{into.name}:{secrets.token_hex(8)}" if self.kept else None
         every = self.settings.state_every if self.kept else 1
-        asked = Asked(self.checkpoint, self.settings, self.weights, segments, seed, parent, into, name, every)
+        asked = Asked(self.checkpoint, self.settings, self.weights, segments, seed, parent, into, name, every,
+                      keep=self.keep)  # fmt: skip
         self._holding = None  # (until they say they made it)
+        self._answered = {}
         try:
             for connection in self._connections:
                 connection.send(("step", asked))
@@ -129,29 +151,79 @@ class Workers:
             raise StepFailed(f"the trainer's processes could not be reached: {error}") from None
         answers = self._answers()
         self._holding = name
+        if self.keep is not None and answers[0].get("full_state") == 1.0:
+            self._keeping[into.name] = self.count
         return answers[0]
 
     def _answers(self) -> list[dict[str, float]]:
         """Every process's answer, by rank; `StepFailed` (the processes ended) when one fails or ends."""
-        pending = dict(enumerate(self._connections))
-        found: dict[int, dict[str, float]] = {}
-        while pending:
-            ready = cast(list[Connection], wait(list(pending.values()), timeout=1.0))
-            for connection in ready:
-                rank = next(index for index, each in pending.items() if each is connection)
-                try:
-                    kind, payload = cast(tuple[str, Any], connection.recv())
-                except (EOFError, OSError):
-                    kind, payload = "error", f"process {rank} ended without an answer"
+        while True:
+            for rank, (kind, payload) in sorted(self._answered.items()):
                 if kind == "error":
                     code = self._ended()
                     raise StepFailed(f"the trainer's process {rank} failed (torchrun exited {code}):\n{payload}")
-                found[rank] = cast(dict[str, float], payload)
-                del pending[rank]
-            if not ready and self._process is not None and self._process.poll() is not None:
+            if len(self._answered) == self.count:
+                return [cast(dict[str, float], self._answered[rank][1]) for rank in range(self.count)]
+            if not self._pump(1.0) and self._process is not None and self._process.poll() is not None:
                 code = self._ended()
                 raise StepFailed(f"the trainer's processes exited without an answer (torchrun exited {code})")
-        return [found[rank] for rank in range(self.count)]
+
+    def _pump(self, timeout: float) -> bool:
+        """Read what the processes send within `timeout` seconds: their answers to the step being taken, and what each
+        kept of a step's full state; whether anything arrived. A process whose connection ends answers that it
+        ended."""
+        with self._reading:
+            connections = {rank: each for rank, each in enumerate(self._connections) if rank not in self._ended_ranks}
+            if not connections:
+                time.sleep(min(timeout, 0.05))
+                return False
+            ready = cast(list[Connection], wait(list(connections.values()), timeout=timeout))
+            for connection in ready:
+                rank = next(index for index, each in connections.items() if each is connection)
+                message: tuple[Any, ...]
+                try:
+                    message = cast(tuple[Any, ...], connection.recv())
+                except (EOFError, OSError):
+                    self._ended_ranks.add(rank)
+                    message = ("error", f"process {rank} ended without an answer")
+                if message[0] == "kept":
+                    self._reports.setdefault(str(message[1]), {})[rank] = cast(dict[str, Any], message[2])
+                else:
+                    self._answered[rank] = (str(message[0]), message[1])
+            return bool(ready)
+
+    def keeping(self, name: str) -> bool:
+        """Whether the processes keep the full state of the step that wrote into a directory called `name`, after it."""
+        return name in self._keeping
+
+    def kept_state(self, name: str) -> dict[str, Any]:
+        """What every process kept of the full state of the step that wrote into a directory called `name` (its files'
+        blob references, as JSON, by their paths within the state), once all have. Raises `StateLost` where one could
+        not keep its share, or the processes ended before they all said, and `KeyError` for a step they do not keep."""
+        if name not in self._keeping:
+            raise KeyError(f"the processes keep no state of {name}")
+        try:
+            while True:
+                reports = dict(self._reports.get(name, {}))
+                if failed := [each["error"] for each in reports.values() if "error" in each]:
+                    raise StateLost(f"a trainer's process did not keep its share of the state: {failed[0]}")
+                if len(reports) >= self._keeping[name]:
+                    return {path: reference for each in reports.values() for path, reference in each["files"].items()}
+                if not self._pump(0.5) and (self._process is None or self._process.poll() is not None):
+                    raise StateLost("the trainer's processes ended before they kept the state")
+        finally:
+            self._reports.pop(name, None)
+            self._keeping.pop(name, None)
+
+    def _settle(self, patience: float) -> None:
+        """Wait, for up to `patience` seconds, while the processes keep a step's full state."""
+        given_up = time.monotonic() + patience
+        while self._process is not None and self._process.poll() is None and time.monotonic() < given_up:
+            pending = [name for name, count in list(self._keeping.items())
+                       if len(self._reports.get(name, {})) < count]  # fmt: skip
+            if not pending:
+                return
+            self._pump(0.5)
 
     def _ended(self) -> int | None:
         code = self._process.poll() if self._process is not None else None
@@ -216,7 +288,9 @@ class Workers:
         self._connections = [ranks[rank] for rank in range(self.count)]
 
     def close(self) -> None:
-        """End the processes (and what they hold)."""
+        """End the processes (and what they hold), once they have kept the full states they were keeping (for up to
+        `KEEP_PATIENCE` seconds)."""
+        self._settle(KEEP_PATIENCE)
         self._holding = None
         for connection in self._connections:
             with contextlib.suppress(OSError):
@@ -224,6 +298,7 @@ class Workers:
             with contextlib.suppress(OSError):
                 connection.close()
         self._connections = []
+        self._ended_ranks = set()
         process, self._process = self._process, None
         if process is None or process.poll() is not None:
             return

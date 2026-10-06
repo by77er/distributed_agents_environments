@@ -22,18 +22,20 @@ minibatch's units, `rollout_objectives.step`). Activations are checkpointed as o
   asked for, sharded beside it. Each pass's gradients are reduced as it ends: kept until a minibatch's last, the whole
   model's unsharded gradients would be in every process. On the CPU (gloo, for tests) full weights compute in float32.
 
-Rank 0 writes a step's files from tensors every process gathers in the same order:
+Rank 0 writes a step's files from tensors every process gathers in the same order, one process the same as several:
 
-- an adapter, in PEFT's layout in float32 (`write_adapter`), and its optimizer's state as `optimizer.pt`, in the layout
-  of one process's state (`write_optimizer`, `read_optimizer`): trainers on one GPU and on several go on from each
-  other's files;
+- an adapter, as the serving copy engines load, in PEFT's layout in bfloat16 (`write_adapter`, which gives rank 0 the
+  float32 adapter it gathered, a copy in host memory); and its optimizer's state, gathered into host memory in the
+  layout of one process's state (`gathered_optimizer`, `read_optimizer`): trainers on one GPU and on several go on from
+  each other's files;
 - full weights, as the serving copy engines load (`write_serving_copy`): bfloat16 safetensors in files of at most
   4 GB, an index, the model's configuration and tokenizer; and, when a step writes its full state, the float32
   weights and the optimizer's state with PyTorch's distributed checkpoint (`write_state`, under
-  `rollout_lora.workers.SHARDS`: every process writes its shards, a file for each tensor's, and however many processes
-  read them take their own shares, `read_state`).
+  `rollout_lora.workers.SHARDS`, on disk or in the process's memory: every process writes its shards, a file for each
+  tensor's, and however many processes read them take their own shares, `read_state`).
 """
 
+import copy
 import json
 import os
 import shutil
@@ -46,13 +48,15 @@ import torch
 from torch import nn
 
 from rollout_lora.full import FullPolicy
-from rollout_lora.layers import LoraLinear, adapter_tensors, save_adapter
+from rollout_lora.layers import LoraLinear, adapter_tensors, host_copy, save_adapter
 from rollout_lora.models import COPIED, local
 from rollout_lora.policy import Policy, layers_of
 from rollout_objectives.ranks import Ranks
 
 __all__ = [
+    "MEMORY",
     "TIMEOUT",
+    "gathered_optimizer",
     "gradient_sync",
     "in_turn",
     "joined",
@@ -60,10 +64,10 @@ __all__ = [
     "read_state",
     "shard_adapter",
     "shard_full",
+    "state_bytes",
     "summed",
     "whole",
     "write_adapter",
-    "write_optimizer",
     "write_serving_copy",
     "write_state",
 ]
@@ -73,6 +77,8 @@ TIMEOUT = timedelta(hours=1)
 or rank 0 to write a step's files."""
 SERVING_FILE_BYTES = 4 * 2**30
 """The most a file of a serving copy holds."""
+MEMORY = "memory://"
+"""Where `write_state` writes into the process's own memory (an in-memory filesystem's paths begin so)."""
 
 
 def joined(device: str) -> tuple[Ranks, torch.device, Any]:
@@ -189,28 +195,32 @@ def whole(tensor: torch.Tensor) -> torch.Tensor:
     return tensor.full_tensor() if isinstance(tensor, DTensor) else tensor
 
 
-def write_adapter(policy: Policy, directory: Path, ranks: Ranks) -> None:
-    """The adapter gathered, and written by rank 0 in PEFT's layout (float32)."""
+def write_adapter(policy: Policy, directory: Path, ranks: Ranks) -> dict[str, torch.Tensor] | None:
+    """The adapter gathered, and written by rank 0 in PEFT's layout in bfloat16, what engines load; rank 0's float32
+    adapter, a copy in host memory (none in the others)."""
     tensors = adapter_tensors(policy.model, whole)
-    if ranks.rank == 0:
-        save_adapter(
-            policy.model, directory, base_model=policy.checkpoint, rank=policy.rank, alpha=policy.alpha, tensors=tensors
-        )
+    if ranks.rank != 0:
+        return None
+    served = {name: each.to(torch.bfloat16) for name, each in tensors.items()}
+    save_adapter(policy.model, directory, base_model=policy.checkpoint, rank=policy.rank, alpha=policy.alpha,
+                 tensors=served)  # fmt: skip
+    return tensors
 
 
-def write_optimizer(optimizer: torch.optim.Optimizer, path: Path, ranks: Ranks) -> None:
-    """The optimizer's state gathered, and written by rank 0 as one GPU's step writes it (`torch.save` of its
-    `state_dict`, each parameter's by its index)."""
+def gathered_optimizer(optimizer: torch.optim.Optimizer, ranks: Ranks) -> dict[str, Any] | None:
+    """The optimizer's state gathered, as one GPU's step has it (its `state_dict`, each parameter's by its index), a
+    copy in rank 0's host memory (none in the others): what the steps after do does not change it."""
     said = optimizer.state_dict()
     state: dict[int, dict[str, Any]] = {}
     for index in sorted(said["state"]):
-        state[index] = {
-            key: whole(value).detach().cpu() if isinstance(value, torch.Tensor) else value
-            for key, value in said["state"][index].items()
-        }
-    if ranks.rank == 0:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"state": state, "param_groups": said["param_groups"]}, path)
+        state[index] = {}
+        for key, value in said["state"][index].items():
+            gathered = whole(value).detach() if isinstance(value, torch.Tensor) else value  # (every process gathers)
+            if ranks.rank == 0:
+                state[index][key] = host_copy(gathered) if isinstance(gathered, torch.Tensor) else gathered
+    if ranks.rank != 0:
+        return None
+    return {"state": state, "param_groups": copy.deepcopy(said["param_groups"])}
 
 
 def read_optimizer(optimizer: torch.optim.Optimizer, path: Path, parameters: Sequence[nn.Parameter]) -> None:
@@ -293,16 +303,31 @@ def _described(directory: Path, source: str, model: nn.Module) -> None:
             shutil.copy2(found / name, directory / name)
 
 
-def write_state(model: nn.Module, optimizer: torch.optim.Optimizer, directory: Path, ranks: Ranks) -> None:
+def state_bytes(model: nn.Module) -> int:
+    """How many bytes this process's shares of a full-weight trainer's full state take: its trained weights and Adam's
+    two moments of each, in float32."""
+    from torch.distributed.tensor import DTensor
+
+    trained = [each for each in model.parameters() if each.requires_grad]
+    return sum(3 * 4 * (each.to_local() if isinstance(each, DTensor) else each).numel() for each in trained)
+
+
+def write_state(model: nn.Module, optimizer: torch.optim.Optimizer, where: Path | str, ranks: Ranks) -> None:
     """The trainer's full state (the model's trained weights and the optimizer's state), every process writing its
-    shards, a file for each tensor's (so no file is larger than a share of one tensor)."""
+    shards, a file for each tensor's (so no file is larger than a share of one tensor): into a directory, or, where
+    `where` begins with `MEMORY`, into the process's own memory (each its own files, rank 0 the checkpoint's metadata
+    too). Every process calls it at once (the processes agree on the files as they write)."""
+    from torch.distributed.checkpoint._fsspec_filesystem import FsspecWriter  # (into memory, through fsspec's)
     from torch.distributed.checkpoint.filesystem import FileSystemWriter
     from torch.distributed.checkpoint.state_dict import StateDictOptions, get_state_dict
     from torch.distributed.checkpoint.state_dict_saver import save
 
     options = StateDictOptions(ignore_frozen_params=True)
     model_state, optimizer_state = get_state_dict(model, optimizer, options=options)
-    writer = FileSystemWriter(str(directory), single_file_per_rank=False)
+    if str(where).startswith(MEMORY):
+        writer: Any = FsspecWriter(str(where), single_file_per_rank=False, sync_files=False)
+    else:
+        writer = FileSystemWriter(str(where), single_file_per_rank=False)
     save({"model": model_state, "optimizer": optimizer_state}, storage_writer=writer, process_group=ranks.group)
 
 

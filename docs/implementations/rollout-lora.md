@@ -105,7 +105,8 @@ A step is told where its files go (`into`) and leaves:
 
 | Path under `into` | Holds |
 |---|---|
-| `weights/` | The adapter, in PEFT's layout (`adapter_config.json`, `adapter_model.safetensors`), which vLLM loads as it is, in float32: the next step starts from this file, and updates are smaller than bfloat16 resolves. Full weights: the serving copy, in bfloat16 |
+| `weights/` | What engines load, in bfloat16: the adapter in PEFT's layout (`adapter_config.json`, `adapter_model.safetensors`), which vLLM loads as it is, half the bytes of its float32; full weights' serving copy |
+| `state/master.safetensors` | An adapter in float32, by PEFT's names (every `state_every` steps, beside its optimizer's state): what a step from it loads, since updates are smaller than bfloat16 resolves |
 | `state/optimizer.pt` | An adapter's optimizer's state after the step (every `state_every` steps), in one process's layout whatever the number of GPUs |
 | `state/shards/` | Full weights' full state (every `state_every` steps): the float32 weights and the optimizer's state, as PyTorch's distributed checkpoint writes them, a file for each tensor's shard, read back by however many processes there are |
 | `state/minibatches.jsonl` | What each minibatch of the step did: segments, tokens, loss, clipped share, Kullback-Leibler (KL) divergence estimate, learning rate, gradient norm |
@@ -113,10 +114,33 @@ A step is told where its files go (`into`) and leaves:
 
 A step's full state is what a later step goes on from as the trainer that made it would: any `LoraTrainer` (or
 `FullTrainer`), on any number of GPUs, kept or not, takes any step from a checkpoint that has it, which is every
-checkpoint while `state_every` is 1. A checkpoint given without its state (a supervised step's by default) starts the
-optimizer afresh from its weights: an adapter's in float32, full weights' from their bfloat16 serving copy. A run keeps each step's files as a
-[checkpoint](../libraries/rollout-train/checkpoints.md), named by its id, whose parent is the checkpoint the step began
-from.
+checkpoint while `state_every` is 1. The full state is one format whatever the number of GPUs: an adapter's float32
+copy and optimizer's state as one process holds them, full weights' shards as the distributed checkpoint writes them. A
+checkpoint given without its state (a supervised step's by default) starts the optimizer afresh from its weights, in
+bfloat16. A run keeps each step's files as a [checkpoint](../libraries/rollout-train/checkpoints.md), named by its id,
+whose parent is the checkpoint the step began from.
+
+### Keeping the state after the step
+
+Told a blob store (`keep_in`, as a training pod tells a trainer whose processes are kept: `rollout_train.trainer.Keeps`),
+the processes write `weights/`, `held.txt` and `minibatches.jsonl` before they answer, and keep the full state in the
+blob store after: the pod keeps the weights and answers, and the run serves them while the state is being kept
+([checkpoints](../libraries/rollout-train/checkpoints.md#a-training-pods-checkpoints)). Every process copies the state
+off the GPU at the end of the step, in the same order:
+
+| Weights | The snapshot |
+|---|---|
+| An adapter | Every process gathers the adapter and the optimizer's state (on one GPU, nothing to gather); rank 0 copies them into pinned host memory, and serializes and keeps `master.safetensors` and `optimizer.pt` from there |
+| Full weights | Every process writes its shares with the distributed checkpoint into its own memory (fsspec's in-memory filesystem), the checkpoint's metadata in rank 0's; each keeps its own files |
+
+Every collective is done before the step answers: the keeping runs in a thread of each process's own, which reads and
+writes nothing on the GPU, so the next step trains while it uploads. One snapshot is kept at a time: a step's snapshot
+waits until the one before is kept (`state_wait_seconds`), and a process finishes keeping its snapshot before it ends
+(`close()` waits up to `KEEP_PATIENCE`, 30 minutes). A snapshot is taken in host memory only where every process's
+share together takes at most half the memory the machine has available, within its container's limit; else
+(full weights of a large model) it is written to the pod's disk (`spilled/`) and kept from there. Each file is tried
+five times, waiting 1, 2, 4 and 8 seconds between; a state not kept so is said (`StateLost`), and its checkpoint stays
+incomplete. Beside an engine the processes end after each step, and write the state before they answer.
 
 ## Processes
 
@@ -133,7 +157,7 @@ are kept between steps depends on whether the trainer shares its GPU:
 | Part | What it does |
 |---|---|
 | Loading | Torch's generator is seeded alike first (`SEED`): a new adapter is the same in every process and every trainer. On one process an adapter's policy is loaded onto the GPU as it is; on several each process loads it onto the CPU and shards it onto its GPU, the processes taking turns, so the machine holds one unsharded copy at a time. Full weights are sharded on any number ([several GPUs](#several-gpus)). What the processes held is dropped, and its memory freed, before another parent is loaded |
-| Going on | A step whose parent's `state/held.txt` names what the processes hold goes on from their memory and reads none of its files (a training pod fetches only that file). Otherwise they load the parent: the adapter or the weights, and the optimizer's state from `state/shards/` or `state/optimizer.pt`; a parent without a state starts the optimizer afresh. A parent whose state left the full state out (`state_every` above 1), and which the processes do not hold, is refused with `StepFailed` before any process is asked: going on would start its optimizer afresh, and full weights from their bfloat16 copy |
+| Going on | A step whose parent's `state/held.txt` names what the processes hold goes on from their memory and reads none of its files (a training pod fetches only that file). Otherwise they load the parent: the adapter (from `state/master.safetensors` where the state has it, else from the weights) or the weights, and the optimizer's state from `state/shards/` or `state/optimizer.pt`; a parent without a state starts the optimizer afresh. A parent whose state left the full state out (`state_every` above 1), and which the processes do not hold, is refused with `StepFailed` before any process is asked: going on would start its optimizer afresh, and full weights from their bfloat16 copy |
 | Learning rate | The settings' on every step, whatever the saved optimizer state carries |
 | Failures | A failure in one process leaves the others waiting at a collective: the step raises [`StepFailed`](../guide/reference.md#stepfailed) with its traceback, and every process is ended; the next step starts others and loads its parent |
 | Ending | `close()` ends the processes (a training pod closes its trainer when its lease is released or another run takes the pod); they also end when the trainer's process does, when their connection to it closes, and when a step is cancelled. What they hold is nothing once torchrun has ended (`holding`) |
@@ -141,7 +165,10 @@ are kept between steps depends on whether the trainer shares its GPU:
 
 A step's metrics add `gpus`, `whole_base`, `loaded_from_files` (1 where the processes loaded the parent's files rather
 than going on from memory) and `full_state` (1 where the step wrote the trainer's full state); `peak_gpu_gib` is the
-largest of any process's, `free_gpu_gib` the least.
+largest of any process's, `free_gpu_gib` the least. Where its seconds went: `train_seconds` (the policy step),
+`save_adapter_seconds` (gathering and writing the weights engines load), `state_wait_seconds` (waiting for the state
+before to be kept) and `snapshot_seconds` (copying the full state off the GPU, or writing it), the longest of any
+process's; `snapshot_in_memory` is 1 where the snapshot was taken in host memory.
 
 ## Several GPUs
 
@@ -154,7 +181,7 @@ On more than one GPU of a machine, each process holds its shard of the policy an
 | Precision | An adapter is kept and computed in float32 and its frozen model in bfloat16, as on one GPU: sharded on one process, its step is bitwise the step on the policy as it is (on the CPU). Full weights' units are gathered in bfloat16, on one GPU as on several, so the forward and backward passes run in bfloat16 (the residual stream and the norms too). Gradients are reduced in float32 (`MixedPrecisionPolicy`), and activations checkpointed as on one GPU |
 | Reductions | An adapter whose frozen model is whole on each GPU reduces its gradients once a minibatch, in its last pass (`gradient_sync`): the passes before keep theirs in each process, in float32. Elsewhere each pass reduces its own: full weights' gradients kept to a minibatch's last pass would be on every GPU unsharded |
 | The step | `rollout_objectives.step.PolicyStep` shared among the processes ([a step on several GPUs](rollout-objectives.md#a-step-on-several-gpus)): every process makes the same plan and the same packs, each computes its share of each pass's packs (balanced by their count, then their tokens), and the gradients are summed, so the update is the one a single GPU makes of the same minibatch. The policy's `idle` passes keep a process with fewer packs in step with the others, and its `clip_gradients` clips by the norm over every shard |
-| Files | Rank 0 writes the step's files from tensors every process gathers in the same order: the adapter in PEFT's layout (float32) or the full weights' serving copy; `state/optimizer.pt` for an adapter and `state/shards/` (every process writes its shards) for full weights, every `state_every` steps since the processes loaded; `state/minibatches.jsonl`, and `state/held.txt` where the processes are kept, every step |
+| Files | Rank 0 writes the step's files from tensors every process gathers in the same order: the adapter in PEFT's layout in bfloat16 or the full weights' serving copy; `state/master.safetensors` and `state/optimizer.pt` for an adapter and `state/shards/` (every process writes its shards) for full weights, every `state_every` steps since the processes loaded; `state/minibatches.jsonl`, and `state/held.txt` where the processes are kept, every step. The full state is the same files on one GPU as on several, kept after the step as one process keeps it ([keeping the state](#keeping-the-state-after-the-step)) |
 | Failures | A step shared among processes does not leave out a minibatch that runs out of memory: the step fails |
 
 What each GPU needs is estimated by `rollout_train.memory` (the check's `memory` rule, [validation](../guide/cluster.md#validation)),
@@ -312,5 +339,11 @@ the processes again; one process kept between steps and one ended after each, th
 hold is nothing once torchrun is gone, and is dropped before another parent is loaded; an adapter's float32 units
 sharded on one process step bitwise as the policy does, its gradients reduced once a minibatch are those reduced
 after each pass, and full weights sharded on one process drop a minibatch that runs out of memory part way through its
-backward pass with nothing of it left in the next minibatch's gradient (`sharded_alone.py`, under torchrun). `test_resident_on_gpu.py` (`-m live`) takes a kept process's
-steps on one GPU against fresh processes'. A step on several GPUs (NCCL) is taken only where a machine has them.
+backward pass with nothing of it left in the next minibatch's gradient (`sharded_alone.py`, under torchrun).
+`test_keeping.py` keeps the full state after the step, on one process and on two: what is kept, through a store whose
+uploads take a second each while the next step trains, is bitwise what the step wrote before answering; two processes
+go on from the float32 copy bitwise as from memory; full weights' shares kept from each process's memory are read back
+by three; an upload refused twice is kept on the third try, and one never kept raises `StateLost`; a snapshot host
+memory cannot hold is written to disk and kept from there; and a training service over a `LoraTrainer` answers with the
+bfloat16 weights and completes the state after. `test_resident_on_gpu.py` (`-m live`) takes a kept process's steps on
+one GPU against fresh processes'. A step on several GPUs (NCCL) is taken only where a machine has them.
