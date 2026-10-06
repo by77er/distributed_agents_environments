@@ -120,8 +120,8 @@ async def test_a_runs_channel_samples_its_leased_pod_at_its_leases_address_over_
     (follower,) = stand_ins.followers
     assert follower.held == ("run_1", "policy") and follower.ready
     await pods.release()
-    for _ in range(100):  # (the follower sees its lease idle, and stops saying it is ready)
-        if not follower.ready:
+    for _ in range(100):  # (the follower sees its lease idle: it holds nothing, and says it is not ready)
+        if follower.held is None and not follower.ready:
             break
         await asyncio.sleep(0.05)
     assert follower.held is None and not follower.ready and await servers() == []
