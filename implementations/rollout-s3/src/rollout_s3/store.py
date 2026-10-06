@@ -20,6 +20,7 @@ its own key: the cluster's bucket and an R2 bucket, say. With a custom endpoint,
 
 import asyncio
 import os
+import time
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any
@@ -36,6 +37,10 @@ __all__ = ["REFRESH_AFTER", "S3BlobStore"]
 REFRESH_AFTER = 60.0
 """Seconds after which a put that finds a blob sets its time again: one put a minute of a blob much put (an image every
 episode stores) costs a copy, not every one."""
+READ_TIMEOUT = 120.0
+"""Seconds a read of a response may wait for its next bytes (botocore's default is 60)."""
+READS = 5
+"""Times an object's body is read before a stalled or cut-off read fails."""
 
 
 class S3BlobStore:
@@ -159,15 +164,30 @@ class S3BlobStore:
         return (now - head["LastModified"]).total_seconds()
 
     def _get(self, key: str) -> bytes:
-        from botocore.exceptions import ClientError
+        """The object's bytes, read whole. The client's retries cover the request, not reading its body after: a body
+        that stalls or is cut off is read again from the start, up to `READS` times, waiting longer before each."""
+        from botocore.exceptions import (
+            ClientError,
+            ConnectionClosedError,
+            IncompleteReadError,
+            ReadTimeoutError,
+            ResponseStreamingError,
+        )
 
-        try:
-            response = self.client.get_object(Bucket=self.bucket, Key=key)
-        except ClientError as error:
-            if _not_found(error):
-                raise FileNotFoundError(f"s3://{self.bucket}/{key}") from error
-            raise
-        return response["Body"].read()
+        for attempt in range(1, READS + 1):
+            try:
+                response = self.client.get_object(Bucket=self.bucket, Key=key)
+            except ClientError as error:
+                if _not_found(error):
+                    raise FileNotFoundError(f"s3://{self.bucket}/{key}") from error
+                raise
+            try:
+                return response["Body"].read()
+            except (ReadTimeoutError, ResponseStreamingError, IncompleteReadError, ConnectionClosedError):
+                if attempt == READS:
+                    raise
+                time.sleep(min(2.0 ** (attempt - 1), 30.0))
+        raise AssertionError("unreachable")
 
 
 def _credentials(key_env: str | None, secret_env: str | None) -> tuple[str, str] | None:
@@ -195,6 +215,7 @@ def _client(endpoint_url: str | None, region: str | None, credentials: tuple[str
         request_checksum_calculation="when_required",
         response_checksum_validation="when_required",
         retries={"mode": "standard", "max_attempts": 5},
+        read_timeout=READ_TIMEOUT,
     )
     key, secret = credentials if credentials is not None else (None, None)
     client: S3Client = boto3.client(  # pyright: ignore[reportUnknownMemberType]
