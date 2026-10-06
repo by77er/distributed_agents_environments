@@ -799,6 +799,10 @@ def memory_of(run: "_Run", gpus: int | None = None) -> tuple[TrainerMemory, floa
     if gpu is None:
         return None
     segment = run.setting("trainer.segment_tokens")
+    longest = segment if isinstance(segment, int) else trainer.segment_tokens
+    pack = run.setting("trainer.pack_tokens")  # (a pass holds a pack of this many, or one segment longer)
+    if isinstance(pack, int):
+        longest = max(pack, longest or 0)
     rank = run.setting("trainer.rank")
     whole = run.setting("trainer.whole_base")
     estimate = trainer_memory(
@@ -806,7 +810,7 @@ def memory_of(run: "_Run", gpus: int | None = None) -> tuple[TrainerMemory, floa
         weights=weights,
         gpus=gpus if gpus is not None else has,
         rank=rank if isinstance(rank, int) else 32,
-        segment_tokens=segment if isinstance(segment, int) else trainer.segment_tokens,
+        segment_tokens=longest,
         frozen_reference=run.setting("trainer.frozen_reference") is True,
         whole_base=whole if isinstance(whole, bool) else None,
         gpu_gib=gpu,

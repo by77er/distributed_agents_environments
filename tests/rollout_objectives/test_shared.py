@@ -1,6 +1,7 @@
 """A step shared among processes moves the policy as one process does: the same batch, two steps of each objective's
-case (`shared.py`), on one process and on two (FSDP2 over gloo, on the CPU), give the same losses, minibatches,
-gradient norms and weights. And a minibatch's segments are shared out balanced by their tokens."""
+case (`shared.py`), one segment at a time and in packs, on one process and on two (FSDP2 over gloo, on the CPU), give
+the same losses, minibatches, gradient norms and weights. And a minibatch's passes are shared out balanced by their
+count, then their tokens."""
 
 import json
 import subprocess
@@ -16,9 +17,10 @@ from tests.rollout_objectives import shared as toy
 HERE = Path(__file__).parent
 
 
-def test_segments_are_shared_out_balanced_by_their_tokens() -> None:
+def test_passes_are_shared_out_balanced_by_their_count_then_their_tokens() -> None:
     found = shares([900, 100, 400, 500, 300, 200], 2)
-    assert found == [[0, 4], [1, 2, 3, 5]]  # (900 + 300 against 100 + 400 + 500 + 200)
+    assert found == [[0, 1, 4], [2, 3, 5]]  # (three passes each: 900 + 300 + 100 against 500 + 400 + 200)
+    assert [len(each) for each in shares([8000, *[500] * 16], 2)] == [8, 9]  # (not 1 against 16, taken together)
     assert shares([5, 5, 5], 4) == [[0], [1], [2], []]  # (one process with none: it takes idle passes)
     assert shares([], 2) == [[], []]
     assert sorted(each for share in shares([7, 3, 9, 1, 4], 3) for each in share) == [0, 1, 2, 3, 4]  # (each once)
@@ -55,17 +57,23 @@ def _close(one: Any, two: Any, where: str) -> None:
 
 
 def key_free(where: str) -> bool:
-    """Whether a metric is the step's to compare (its wall-clock seconds are not)."""
-    return not where.endswith(("seconds", "start_seconds"))
+    """Whether a metric is the step's to compare (its wall-clock seconds and rates are not)."""
+    return not where.endswith(("seconds", "start_seconds", "per_second"))
 
 
+@pytest.mark.parametrize("packing", [False, True])
 @pytest.mark.parametrize("case", ["default", "stopped", "gspo", "dr_grpo", "grpo", "reinforce", "sft", "dpo", "kto"])
-def test_a_step_shared_by_two_processes_is_the_step_one_process_takes(case: str, shared: dict[str, Any]) -> None:
+def test_a_step_shared_by_two_processes_is_the_step_one_process_takes(
+    case: str, packing: bool, shared: dict[str, Any]
+) -> None:
     model, frozen = toy.models()
-    policy = toy.ToyPolicy(model, frozen)
+    policy = toy.ToyPolicy(model, frozen, packing=packing)
     one: dict[str, Any] = {**toy.steps(case, policy, Ranks()), "weights": toy.whole(model)}
-    two = shared[case]
+    two = shared[f"{case}+packed" if packing else case]
     _close(one, two, case)
+    assert one["metrics"][0]["packed"] == float(packing)
+    if packing:
+        assert one["metrics"][0]["prefix_shared_fraction"] > 0 and two["metrics"][0]["packs"] > 1
     if case == "stopped":
         assert one["metrics"][0]["stopped_at_max_kl"] == 1.0  # (both stopped the pass at the same minibatch)
     assert one["metrics"][0]["optimizer_steps"] >= 1

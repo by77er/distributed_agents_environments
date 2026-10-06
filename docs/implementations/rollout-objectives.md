@@ -22,6 +22,7 @@ libraries; it is installed with either the `gpu` or the `tinker` extra.
 | `settings` | `StepSettings`: a step's settings, which the LoRA, full-weight and Tinker trainers take alike. Importing it does not load torch |
 | `terms` | The loss of one weighted segment (`policy_gradient`, `likelihood`) or of preference items (`pair`, `labelled`), the importance weight, the Kullback-Leibler (KL) divergence estimators, aggregation, and what a minibatch's terms add up to (`SUMS`, `tally`) |
 | `distillation` | The loss of one distilled segment (`distillation`, and `distilled` for either family): the policy-gradient form, the top-k divergences (`top_k_divergence`), and a policy gradient's distillation term |
+| `packing` | `Pack`: segments laid out in one row of a model's input, a prefix several share once; `packs`, segments cut into packs (`grouped`, then `packed`) |
 | `step` | `PolicyStep`, a step over a batch on a local policy; `Plan`, which items a step takes and in which minibatches; `metrics` and `line`, a step's and a minibatch's statistics |
 
 ## Settings
@@ -37,6 +38,8 @@ libraries; it is installed with either the `gpu` or the `tinker` extra.
 | `warmup_updates` | When a step's optimizer starts afresh, its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` (0: none) |
 | `segment_tokens` | The longest segment a step can hold (`None`: any) |
 | `segments_per_step` | How many segments a step can afford (`None`: any number) |
+| `pack_tokens` | The most tokens one forward and backward pass runs: segments are packed into rows of up to this many (`None`: `segment_tokens`, or 8,192 where that is none, what the trainer's memory estimate allows for). A segment longer than it has a pack of its own |
+| `share_prefixes` | Whether segments of a pack that start with the same tokens share them (`True`) |
 | `objective` | The objective: an `Objective`, a preset's name, or a table of `preset` and component overrides. A run's `objective.*` settings give it |
 
 A trainer's own settings can also name the objective by `ratio`, `clip_low`, `clip_high`, `segment_clip_low`,
@@ -146,23 +149,30 @@ same importance weight and with no KL penalty of its own.
 (with a gradient), `reference(tokens, positions)` when the objective reads the reference,
 `logprobs_and_entropy(tokens, positions)` when it has an entropy bonus, and `logprobs_among(tokens, positions,
 candidates)` (the sampled tokens' logprobs and those of a row of candidate tokens at each position, with a gradient) for
-the top-k form of distillation. Which items, and with what advantages, is the
-[algorithm's](../libraries/rollout-train/training.md) business.
+the top-k form of distillation. A policy that runs packs (`PackingPolicy`: `packing` true, as the LoRA and full-weight
+policies are on the models `rollout_lora.packing` readies) gives the same of every segment of a pack in one pass:
+`packed(pack, entropy=..., candidates=...)` and `packed_reference(pack)`; any other is run one segment at a time.
+Which items, and with what advantages, is the [algorithm's](../libraries/rollout-train/training.md) business.
 
 1. **The plan** (`Plan.of`). Items with a segment longer than `segment_tokens`, or with nothing sampled (a pair with a
    side that sampled nothing), are left out and counted. The rest are shuffled with the step's `seed` and cut into
    minibatches of about `tokens_per_step` sampled tokens; a last minibatch of less than half that joins the one
-   before. With `passes` above 1, each further pass shuffles them anew.
+   before. With `passes` above 1, each further pass shuffles them anew. What would fail the step (an item of the
+   wrong kind for the objective, a behaviour logprob that is not finite where an importance correction reads it) is
+   raised here, before anything is computed.
 2. **Where the step starts.** For a policy gradient, a distillation or a preference loss, every sampled token's
-   logprob on the weights the step starts from (old), without a gradient, and the reference's where it is read. A
-   behaviour logprob that is not finite fails the step only where an importance correction reads it. A segment that
-   does not fit the GPU here is left out and counted.
-3. **Each minibatch.** A weighted or distilled segment's loss is computed and its gradient accumulated one segment at a
+   logprob on the weights the step starts from (old), without a gradient, and the reference's where it is read. The
+   first minibatch of a policy gradient or a distillation runs on those weights, so its segments' old is what it
+   computes itself (with a gradient, detached) rather than a pass of their own; the result is the same. A behaviour
+   logprob that is not finite fails the step only where an importance correction reads it. A pack that does not fit
+   the GPU here runs again a segment at a time, and a segment that does not fit alone is left out and counted.
+3. **Each minibatch.** A weighted or distilled segment's loss is computed and its gradient accumulated a pack at a
    time (for the top-k form, with the policy's logprobs of the teacher's top-k tokens at each position). A
    preference loss is a function of each side's whole likelihood, so its gradient is taken in two parts that also
-   hold one segment's activations at a time: the loss of the logprobs computed without a gradient (on the weights the
+   hold one pack's activations at a time: the loss of the logprobs computed without a gradient (on the weights the
    minibatch steps from; before any update, old) gives each logprob's gradient, and each segment's logprobs, computed
-   again with a gradient, are moved by it. The gradient is the loss's.
+   again with a gradient, are moved by it. The gradient is the loss's. A minibatch that does not fit is dropped and
+   counted.
 4. **The stop.** Before a minibatch's optimizer step, its estimate of KL(old ‖ now) on the sampled tokens is compared
    with `max_kl`; if it is more, the pass stops without that step. The estimate is the mean over its sampled tokens of
    k3, `(r - 1) - log r` with `log r = now - old` (`moved_kl`): never below 0, and with the KL's mean on tokens sampled
@@ -172,16 +182,43 @@ the top-k form of distillation. Which items, and with what advantages, is the
 5. **The update.** Gradients are clipped to `max_gradient_norm` and AdamW steps, with no weight decay, at the
    minibatch's (warmed-up) rate.
 
+### Packs
+
+Every pass over segments (the start, the reference, each minibatch) runs them in packs (`rollout_objectives.packing`),
+as many to a pass as fit in `pack_tokens`:
+
+- **Groups.** Sorted by their tokens, neighbouring segments that start with the same tokens (at least `SHARED_PREFIX`,
+  32) are grouped under that prefix while the group fits in a pack: a turn's system prompt, tools and rules, which
+  every turn of a run repeats. Without `share_prefixes`, each segment is a group alone.
+- **Packs.** Groups are placed first-fit-decreasing by the tokens each puts in the row: its prefix once, then each
+  segment's rest.
+- **A row.** Roots first (each segment alone, or each shared prefix), then branches (each segment's rest after its
+  prefix). Positions restart at each root and go on from the prefix in a branch. Each token sees only the tokens of
+  its own segment before it: a root's own, a branch's own and its prefix's. The policy (`rollout_lora.packing`)
+  keeps them apart in each kind of layer: softmax attention runs over each run on its own, and Qwen3.5's gated delta
+  rule starts each root from a zero state and each branch from the state its prefix ended in.
+- **The same loss.** Each segment's logprobs are those it has alone, so its terms, their normalisation (per token,
+  segment, item or group) and the minibatch's units are the unpacked step's; a minibatch's gradient is accumulated a
+  pack at a time. A prefix's backward pass adds up every branch's gradient.
+
 ### A step on several GPUs
 
 `PolicyStep(policy, settings, ranks=Ranks(rank, size, group))` shares a step among processes, one per GPU, over a model
-sharded among them (`rollout_lora.sharded`); one process (`Ranks()`, the default) shares nothing.
+sharded among them (`rollout_lora.sharded`); one process (`Ranks()`, the default) shares nothing. The policy is a
+`SharedPolicy`: its gradients are added up across the processes, not averaged; it takes an idle pass (`idle`) and clips
+its gradient by the norm over every process's shard (`clip_gradients`, an error for a gradient outside the sharded
+model, which no process adds up).
 
 - **The same plan.** Every process takes the whole batch and makes the same plan of it, shuffled by the step's seed, so
-  they agree on every minibatch without being told.
-- **Shares balanced by tokens.** Each minibatch's segments are shared out by `rollout_objectives.ranks.shares`: the
-  longest first, each to the process with the fewest tokens so far. Where the step starts, each process computes its
-  share of every segment's start (and reference) logprobs, and the processes gather them all.
+  they agree on every minibatch without being told. What would fail the step is raised before any process waits on
+  another, by every process alike.
+- **Shares balanced by passes.** Each pass over segments is packed as on one process (the same packs, whatever the
+  number of processes, so a segment is computed alike and a prefix and its branches are one pack's), and the packs are
+  shared out by `rollout_objectives.ranks.shares`: no process takes more than its even share of them, rounded up (the
+  processes take their passes together, so the most any takes is what the pass costs), the largest first, each to the
+  process with the fewest tokens so far. A policy that runs one segment at a time shares its segments likewise. Where
+  the step starts, each process computes its packs of the segments' start (and reference) logprobs, and the processes
+  gather them all; a first minibatch's start, which its own pass computes, is gathered likewise.
 - **The same normalisation.** Each item's loss is divided by its minibatch's units counted over the whole minibatch
   (its tokens for a token mean, its segments for a segment mean, `constant_tokens` for a constant, its items for a
   preference loss), and the sharded model sums the gradients across processes rather than averaging them. The update
@@ -191,12 +228,13 @@ sharded among them (`rollout_lora.sharded`); one process (`Ranks()`, the default
   `max_kl`. A preference loss's logprobs are gathered, and every process computes the loss of the whole minibatch;
   each moves its own segments by it. The gradient's norm is that of every shard's.
 - **Idle passes.** A sharded model's layers are gathered by every process at once, so each takes as many passes as the
-  others: a process whose share is shorter takes passes of a two-token sequence (`IDLE`, its loss times zero) for the
+  others: a process with fewer packs takes the policy's idle passes (a two-token sequence, its loss times zero) for the
   rest.
-- **No minibatch left out.** A minibatch that runs out of memory fails the step (the others wait on its passes).
+- **No minibatch left out.** A minibatch or a start's pack that runs out of memory fails the step (the others wait on
+  its passes).
 
-On the CPU over gloo, two processes take two steps of each objective's case to within about 1e-15 of one process's,
-in float64 (`test_shared.py`).
+On the CPU over gloo, two processes take two steps of each objective's case, one segment at a time and in packs with a
+shared prefix, to within about 1e-15 of one process's, in float64 (`test_shared.py`).
 
 ## Metrics
 
@@ -221,6 +259,10 @@ A step returns these; a trainer adds its own (`peak_gpu_gib`, `billed_tokens`).
 | `tokens`, `segments` | Sampled tokens and segments trained on |
 | `segments_given`, `segments_too_long`, `longest_segment_tokens` | Items the batch held, how many were left out for their length, and the longest segment kept |
 | `minibatches_out_of_memory`, `start_out_of_memory` | Minibatches dropped, and items left out of the first pass |
+| `packed` | 1 where the policy ran packs, 0 where it ran one segment at a time |
+| `packs`, `pack_fill` | Passes over packs the step made (every pass over the batch counted; on several GPUs, every process's), and the mean share of `pack_tokens` their rows held |
+| `prefix_shared_fraction` | The share of the segments' tokens that shared prefixes spared computing |
+| `segment_tokens_per_second` | The segments' tokens the step ran through the model (every pass counted), a second of the step |
 | `start_seconds`, `seconds` | The first pass, and the whole step |
 
 `state/minibatches.jsonl`, which a trainer writes, has a line per minibatch stepped on (`line`): segments, tokens,
@@ -245,4 +287,8 @@ the whole vocabulary equal to the full one: GKD's JSD as TRL writes it, Hinton's
 the teacher did not score, a teacher that gave fewer than k tokens, the importance mask, a KL in the reward and in the
 loss, a policy gradient's distillation term, and the step on a toy policy, whose every distillation preset moves it
 toward its teacher on its own samples. `test_shared.py` takes each objective's case on two processes under torchrun,
-a toy model sharded with FSDP2 over gloo, against one process, and checks how segments are shared out.
+a toy model sharded with FSDP2 over gloo, one segment at a time and in packs, against one process, and checks how
+passes are shared out. `test_packing.py` covers packs' layout (first-fit-decreasing, a shared prefix once, each
+segment's tokens at its own positions), a pack that runs out of memory running again a segment at a time, and what
+fails a step raised before it computes anything; packs on real models are `tests/rollout_lora/test_packing.py`'s
+([LoRA trainer](rollout-lora.md#packs)).

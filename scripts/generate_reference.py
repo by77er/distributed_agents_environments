@@ -63,6 +63,7 @@ PUBLIC_MODULES = [
     ("rollout_objectives.settings", "A policy step's settings, which the LoRA, full-weight and Tinker trainers take."),
     ("rollout_objectives.terms", "An objective's loss composed from its components, in torch."),
     ("rollout_objectives.step", "A step over a batch on a local policy, its plan of minibatches, and its statistics."),
+    ("rollout_objectives.packing", "Many segments in one row of a model's input, a prefix several share once."),
     ("rollout_objectives.ranks", "The processes a step is shared among, one per GPU, and how a minibatch is shared."),
     ("rollout_qwen", "Renderers for the Qwen model families."),
     ("rollout_gemma", "Renderers for the Gemma model families."),

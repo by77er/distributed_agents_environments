@@ -24,7 +24,10 @@ import torch
 from torch import nn
 
 from rollout_lora.models import COPIED, local, multimodal
-from rollout_lora.policy import Scorer
+from rollout_lora.packing import prepare
+from rollout_lora.policy import Scorer, clip_gradients, idle_pass, split_scores
+from rollout_objectives.packing import Pack, Scores
+from rollout_objectives.ranks import Ranks
 
 
 @dataclass
@@ -34,6 +37,8 @@ class FullPolicy:
     """Where it was loaded from: a model's name or directory, or a full checkpoint's files."""
     frozen: nn.Module | None = None
     """The reference, if it holds one: a frozen copy of the model trained over, in bfloat16."""
+    packing: bool = False
+    """Whether it runs packs (`packed`), as `rollout_lora.policy.Policy` does."""
     scorer: Scorer = field(init=False)
     frozen_scorer: Scorer | None = field(init=False)
 
@@ -75,7 +80,8 @@ class FullPolicy:
             frozen.eval()
             for parameter in frozen.parameters():
                 parameter.requires_grad_(False)
-        return cls(model, checkpoint, frozen)
+        packing = prepare(model) and (frozen is None or prepare(frozen))
+        return cls(model, checkpoint, frozen, packing)
 
     def parameters(self) -> list[nn.Parameter]:
         return [parameter for parameter in self.model.parameters() if parameter.requires_grad]
@@ -106,6 +112,32 @@ class FullPolicy:
             raise ValueError("this full-weight policy holds no reference (LoraSettings.frozen_reference)")
         with torch.no_grad():
             return self.frozen_scorer(self._ids(tokens), None, positions)[0]
+
+    def packed(
+        self, pack: Pack, *, entropy: bool = False, candidates: Sequence[torch.Tensor] | None = None
+    ) -> list[Scores]:
+        """Each of a pack's segments' sampled tokens' logprobs (`rollout_lora.policy.Policy.packed`)."""
+        ids = self._ids(pack.tokens)
+        joined = None if candidates is None else torch.cat(list(candidates))
+        with torch.autocast(ids.device.type, dtype=torch.bfloat16):
+            found = self.scorer(ids, None, (), entropy, joined, pack)
+        return split_scores(found, pack, entropy=entropy, among=candidates is not None)
+
+    def packed_reference(self, pack: Pack) -> list[torch.Tensor]:
+        """`packed` logprobs under the frozen copy of the model trained over (no gradient)."""
+        if self.frozen_scorer is None:
+            raise ValueError("this full-weight policy holds no reference (LoraSettings.frozen_reference)")
+        with torch.no_grad():
+            found = self.frozen_scorer(self._ids(pack.tokens), None, (), False, None, pack)
+        return [each.logprobs for each in split_scores(found, pack, entropy=False, among=False)]
+
+    def idle(self, *, gradient: bool = False, reference: bool = False) -> None:
+        """An idle pass (`rollout_lora.policy.idle_pass`)."""
+        idle_pass(self, gradient=gradient, reference=reference)
+
+    def clip_gradients(self, maximum: float, ranks: Ranks) -> float:
+        """Every weight's gradient clipped (`rollout_lora.policy.clip_gradients`); its norm before."""
+        return clip_gradients(self.parameters(), maximum, ranks)
 
     def _ids(self, tokens: Sequence[int]) -> torch.Tensor:
         device = next(iter(self.model.parameters())).device

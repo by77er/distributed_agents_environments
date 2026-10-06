@@ -86,7 +86,8 @@ too), and these:
 | `whole_base` | For an adapter on several GPUs: each GPU holds the whole frozen model, gathered once (true), or its share, each layer gathered as it computes (false: a model too large for one GPU); none: whole where the model's files take at most half of the smallest GPU's memory |
 
 The step's settings (`learning_rate`, `tokens_per_step`, `max_kl`, `max_gradient_norm`, `passes`, `warmup_updates`,
-`segment_tokens`, `segments_per_step`, `objective`) are [`rollout_objectives`'](rollout-objectives.md#settings). The
+`segment_tokens`, `segments_per_step`, `pack_tokens`, `share_prefixes`, `objective`) are
+[`rollout_objectives`'](rollout-objectives.md#settings). The
 objective's components can be named by this trainer's own settings too (`ratio`, `clip_low`, `clip_high`,
 `segment_clip_low`, `segment_clip_high`, `truncate`, and `objective = "policy_gradient"` or `"likelihood"`), which say
 the `default` or `sft` preset and its components.
@@ -139,7 +140,7 @@ step's metrics.
 | Loading | Each process loads the policy onto the CPU and shards it onto its GPU, the processes taking turns, so the machine holds one unsharded copy at a time. A new adapter is drawn alike in every process (each keeps its share of the same one) |
 | Sharding | Each decoder layer is a unit of `fully_shard`; the rest of the model (the output layer, the last norm, embeddings held on the GPU) is the root's, the policy's `Scorer`, which computes the hidden states and the output layer's chunks in one call, so the output layer is gathered once a call. For an adapter, where each GPU holds the whole frozen model (`whole_base`), a layer's adapter matrices are one unit, gathered for each pass, and the frozen layers are gathered once and kept; else each layer's frozen weights are gathered with its adapter's as it computes. The frozen output layer is kept once gathered. Full weights, their gradients and Adam's moments are sharded in float32, and a frozen reference beside them |
 | Precision | Weights gathered in bfloat16 (an adapter's too), gradients reduced in float32 (`MixedPrecisionPolicy`), activations checkpointed as on one GPU |
-| The step | `rollout_objectives.step.PolicyStep` shared among the processes ([a step on several GPUs](rollout-objectives.md#a-step-on-several-gpus)): every process makes the same plan, each computes its share of each minibatch's segments, balanced by tokens, and the gradients are summed, so the update is the one a single GPU makes of the same minibatch |
+| The step | `rollout_objectives.step.PolicyStep` shared among the processes ([a step on several GPUs](rollout-objectives.md#a-step-on-several-gpus)): every process makes the same plan and the same packs, each computes its share of each pass's packs (balanced by their count, then their tokens), and the gradients are summed, so the update is the one a single GPU makes of the same minibatch. The policy's `idle` passes keep a process with fewer packs in step with the others, and its `clip_gradients` clips by the norm over every shard |
 | Files | Rank 0 writes the step's files from tensors every process gathers in the same order: the adapter in PEFT's layout (float32) or the full weights' serving copy (bfloat16 safetensors in files of at most 4 GB, an index, the configuration and tokenizer); `state/optimizer.pt` for an adapter and `state/shards/` (every process writes its shards) for full weights, every `state_every` steps since the processes loaded; `state/minibatches.jsonl` and `state/held.txt` every step |
 | Going on | A step whose parent's `state/held.txt` names what the processes hold goes on from their memory and reads none of its files (a training pod fetches only that file, [`Resident`](../guide/reference.md#resident)). Otherwise they load the parent: the adapter or the weights, and the optimizer's state from `state/shards/` (read back by however many processes there are now) or `state/optimizer.pt`; a parent with neither starts the optimizer afresh, and full weights then from the bfloat16 serving copy |
 | Failures | A failure in one process leaves the others waiting at a collective: the step raises `StepFailed` with its traceback, and every process is ended; the next step starts others and loads its parent. A step shared among processes does not leave out a minibatch that runs out of memory: the step fails |
@@ -151,7 +152,7 @@ than going on from memory) and `full_state` (1 where the step wrote the trainer'
 largest of any process's, `free_gpu_gib` the least.
 
 What each GPU needs is estimated by `rollout_train.memory` (the check's `memory` rule, [validation](../guide/cluster.md#validation)),
-in GiB a GPU for a 9B and a 4B model of Qwen3.5's shapes, segments of 8,192 tokens (the same on 80 and 96 GB cards;
+in GiB a GPU for a 9B and a 4B model of Qwen3.5's shapes, segments (and packs) of 8,192 tokens (the same on 80 and 96 GB cards;
 "no" where it is more than the card):
 
 | Model | Weights | 1 GPU | 2 | 4 | 8 |
@@ -167,7 +168,11 @@ The process may use the GPU memory that is free when it starts, less `MEMORY_MAR
 (`torch.cuda.set_per_process_memory_fraction`). Some drivers let a process spill past the card into system memory,
 where a step crawls instead of failing; the bound turns that into an out-of-memory error. A minibatch that runs out
 of memory is dropped whole, its gradient cleared, and counted in `minibatches_out_of_memory`; the pass goes on with
-the next. Segments longer than `segment_tokens` are left out before the pass and counted in `segments_too_long`.
+the next. A pack of the step's start that runs out of memory runs again a segment at a time, and an item with a
+segment that runs out alone is left out and counted in `start_out_of_memory`. Segments longer than `segment_tokens`
+are left out before the pass and counted in `segments_too_long`. A pack holds at most `pack_tokens` (by default
+`segment_tokens`), so a pass needs no more memory than the longest segment alone; the memory estimate
+(`rollout_train.memory`, [several GPUs](#several-gpus)) counts activations for the larger of the two.
 
 ## The policy
 
@@ -180,6 +185,24 @@ the next. Segments longer than `segment_tokens` are left out before the pass and
 | Left off the GPU | A vision tower is dropped. The token embedding table is memory-mapped from the checkpoint file and only a segment's rows are read |
 | Output layer | Run only at the sampled positions, `LOGIT_ROWS` at a time, each chunk recomputed in the backward pass. Peak memory is one chunk's logits, whatever the share of sampled tokens |
 | Activations | Gradient checkpointing over the transformer |
+| Packs | `Policy.packed`: every segment of a pack in one pass, the logprobs each has alone ([packs](#packs)) |
+
+## Packs
+
+`rollout_lora.packing.prepare` readies a model for packs (`rollout_objectives.packing`) where its decoder is one of
+`PACKABLE` (Llama, Qwen2, Qwen3, and Qwen3.5's text model, whose layers are softmax attention and a gated delta rule),
+and the policy says so (`packing`); any other model runs one segment at a time, and a step's `packed` metric is 0.
+`Policy.packed` and `FullPolicy.packed` run a pack's row through the decoder and the output layer in one call of the
+policy's `Scorer`, so on several GPUs a pack is one pass of the sharded model. Each layer keeps the segments apart:
+
+| Layer | In a pack |
+|---|---|
+| Softmax attention | The attention function `PACKED`: each run on its own (`scaled_dot_product_attention`, causal), a branch's queries over its prefix's keys and values and its own (causal from the bottom right). Rotary positions are each token's position in its segment. Without a pack it is transformers' `sdpa` |
+| Qwen3.5's gated delta rule | The short convolution reads, for each run, the tokens before it in its segment (zeros for a root, the prefix's last three for a branch). The recurrence runs over the roots, each from a zero state, then over the branches, each from the state its prefix ended in: on the GPU flash-linear-attention's kernel takes the runs' boundaries (`cu_seqlens`) and the branches' starting states and passes the gradient back through them; on the CPU transformers' own recurrence runs a run at a time |
+| Every other layer | Each token on its own (projections, norms, MLPs), whatever is beside it in the row |
+
+A shared prefix is computed once: its keys, values and recurrent state are those every segment under it computes
+alone, and its backward pass adds up every branch's gradient. Every model `PACKABLE` names shares prefixes.
 
 ## The step
 
@@ -206,6 +229,20 @@ One RTX 5080 (16 GB), `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rank 32.
 | Without the memory bound, under Windows | A step of 96 turns that needed more than the card ran 13 minutes without finishing and left the host 0.6 GB of free memory |
 | Allocator | `expandable_segments` saves about 0.7 GiB at the peak |
 
+Packs on the same card: one step of gridworld-like turns (a system prompt of 1,000 tokens every turn shares, an
+observation of about 500, a reply of about 600 sampled tokens; `tokens_per_step` 4,096, `objective = "default"`) from
+the same adapter, one segment at a time, in packs, and in packs with shared prefixes, after a small step each way (the
+kernels compiled and tuned):
+
+| Model | Segments | `pack_tokens` | One at a time | Packed | Packed, prefixes shared |
+|---|---|---|---|---|---|
+| Qwen3-0.6B, rank 32 | 300 | 16,384 | 130 s, 9,600 tokens/s | 108 s, 11,500 tokens/s | 67 s, 18,400 tokens/s (43% of the tokens shared) |
+| `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rank 32 | 32 | 8,000 | 95 s, 1,240 tokens/s | 78 s, 1,520 tokens/s | 51 s, 2,340 tokens/s (37% shared) |
+
+The three agree to bfloat16's rounding: the first minibatch's loss is -0.01681 each way on Qwen3-0.6B, and -0.01456 to
+-0.01457 on Qwen3.5; the step's gradient norm is within 1%. Peak memory with packs of 8,000 tokens on Qwen3.5 was
+12.1 GiB, against 8.9 GiB one segment at a time.
+
 Qwen3-0.6B, rank 8, on the same card, a step sharded with FSDP2 on one GPU (`test_sharded_on_gpu.py`) against the
 fresh process, from the same adapter and optimizer's state:
 
@@ -227,6 +264,16 @@ merging on the CPU. `test_small_on_gpu.py` runs only when asked
 adapter, takes two steps of every weight, and checks that a merged adapter gives what the adapter gave (an adapter
 that moved logprobs by 2.6 on average, merged, is 0.06 from it: bfloat16 rounds part of a small update away). Its
 steps write gigabytes, so give it `--basetemp` on disk, not `/tmp`.
+
+`test_packing.py` takes tiny random Qwen3, Llama and Qwen3.5 models on the CPU: a pack gives each segment the
+logprobs, entropies, reference logprobs and logprobs of given tokens it has alone, its prefix shared or not; changing
+one segment of a pack changes no other's (no attention, convolution or recurrent state crosses a boundary); a step in
+packs takes the losses, minibatches and gradients of a step one segment at a time for each objective family (a policy
+gradient with and without a KL to the reference and an entropy bonus, a segment ratio, a likelihood, pairs, labelled
+examples, both forms of distillation); the first minibatch's start folded into it is the start computed apart; and two
+processes (FSDP2 over gloo) step in packs, with shared prefixes, as one does. `test_packing_on_gpu.py` (`-m live`)
+takes Qwen3.5's packs on the GPU, where flash-linear-attention's kernels run: logprobs and gradients against each
+segment alone, and a step against one segment at a time.
 
 `test_sharded.py` takes the trainers' steps on two and three processes on the CPU (gloo) with a tiny random Qwen3,
 against the step on one: an adapter with its model sharded and whole, a step from files one process wrote, a

@@ -18,12 +18,12 @@ do not edit by hand.
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#rollout_trainrolloutsplan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Labelled`](#labelled), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
-- **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#scores), [`Unserved`](#unserved)
+- **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#rollout_traininferencescores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.inference.api`](#rollout_traininferenceapi)** — Channels on hosted APIs: by message, never trained on, spend counted. [`ApiChannel`](#apichannel), [`ATTEMPTS`](#attempts), [`Hosted`](#hosted), [`HostedEndpoint`](#hostedendpoint), [`priced`](#priced)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rollout_trainrecorderrendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
-- **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`HoursReached`](#hoursreached), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#run), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
+- **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`HoursReached`](#hoursreached), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#rollout_trainjobsrun), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
 - **[`rollout_train.demand`](#rollout_traindemand)** — What a run's scheduled parts need, and the placement group that reserves them together. [`BRIDGE`](#bridge), [`bridge_asks`](#bridge_asks), [`Bundle`](#bundle), [`colocating`](#colocating), [`Demand`](#demand), [`demand`](#demand), [`HEADROOM`](#headroom), [`Part`](#part), [`placed`](#placed), [`played_channel`](#played_channel), [`Pod`](#rollout_traindemandpod), [`pods`](#pods), [`requested`](#requested), [`reserve`](#reserve), [`Resources`](#resources), [`SUBMITTER`](#submitter), [`TRAINER`](#trainer)
 - **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`checkpoints_at`](#checkpoints_at), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`POD_SECURITY`](#pod_security), [`pod_security`](#pod_security), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
@@ -40,7 +40,7 @@ do not edit by hand.
 - **[`rollout_train.ledger_service`](#rollout_trainledger_service)** — The ledger over HTTP: the service, the client every role can use, pods' tokens. [`app`](#app), [`Conflict`](#rollout_trainledger_serviceconflict), [`Forbidden`](#forbidden), [`HttpLedger`](#httpledger), [`LedgerUnreachable`](#ledgerunreachable), [`PLATFORM`](#platform), [`pod_token`](#pod_token), [`Scope`](#scope), [`scope_of`](#scope_of)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
-- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`checked_with`](#checked_with), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#rollout_trainpublishingpublish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
+- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`checked_with`](#checked_with), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#rollout_trainpublishingpacked), [`Project`](#project), [`project_of`](#project_of), [`publish`](#rollout_trainpublishingpublish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteEntryFacts`](#suiteentryfacts), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
 - **[`rollout_train.memory`](#rollout_trainmemory)** — What a trainer needs of each GPU's memory, from the model's files and its GPUs. [`ALLOWANCE_GIB`](#allowance_gib), [`GPU_MEMORY_GIB`](#gpu_memory_gib), [`gpu_memory_gib`](#gpu_memory_gib), [`model_facts`](#model_facts), [`ModelFacts`](#modelfacts), [`SEGMENT_TOKENS`](#segment_tokens), [`trainer_memory`](#trainer_memory), [`TrainerMemory`](#trainermemory)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
@@ -49,7 +49,8 @@ do not edit by hand.
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
 - **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
 - **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`importance_weight`](#importance_weight), [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`moved_kl`](#moved_kl), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`TALLIED`](#tallied), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
-- **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`positions`](#positions), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`TrainablePolicy`](#trainablepolicy)
+- **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`PackingPolicy`](#packingpolicy), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`positions`](#positions), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`SharedPolicy`](#sharedpolicy), [`TrainablePolicy`](#trainablepolicy)
+- **[`rollout_objectives.packing`](#rollout_objectivespacking)** — Many segments in one row of a model's input, a prefix several share once. [`Group`](#group), [`grouped`](#grouped), [`Pack`](#pack), [`packed`](#rollout_objectivespackingpacked), [`packs`](#packs), [`Run`](#rollout_objectivespackingrun), [`sampled_positions`](#sampled_positions), [`Scores`](#rollout_objectivespackingscores), [`SHARED_PREFIX`](#shared_prefix)
 - **[`rollout_objectives.ranks`](#rollout_objectivesranks)** — The processes a step is shared among, one per GPU, and how a minibatch is shared. [`Ranks`](#ranks), [`shares`](#shares)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls)
@@ -4047,7 +4048,7 @@ servers elsewhere (`rollout_train.inference.remote.RemoteChannel`).
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Scores` — Score the tokens at positions `start` to `end` of `tokens` with the checkpoint `adapter` names
   (`Engine.score`), as `generate` samples from it.
 
-### `Scores`
+### `Scores` {#rollout_traininferencescores}
 
 *class* · `libraries/rollout-train/src/rollout_train/inference/channel.py`
 
@@ -5045,7 +5046,7 @@ async def ran(run: Run) -> None
 
 Check the run's settings again, then run it as its kind says.
 
-### `Run`
+### `Run` {#rollout_trainjobsrun}
 
 *class* · `libraries/rollout-train/src/rollout_train/jobs.py`
 
@@ -8790,7 +8791,7 @@ The requirements of `dependencies` this Python does not satisfy: each whose dist
 installed at a version its specifier leaves out, is asked for at a URL, or lacks what an extra asked for needs.
 Requirements whose markers do not hold here are left out. Raises `Refused` for one that is no requirement.
 
-### `packed`
+### `packed` {#rollout_trainpublishingpacked}
 
 *function* · `libraries/rollout-train/src/rollout_train/publishing.py`
 
@@ -9761,6 +9762,8 @@ A policy step's settings (`rollout_objectives.step`), whichever trainer takes it
 | `max_gradient_norm` | `float` | `1.0` |  |
 | `segment_tokens` | `int \| None` | `None` | The longest segment a step can hold (None: any). Longer ones are left out and counted (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training, so whoever serves the policy takes this as the longest turn to sample; the count says whether that held. |
 | `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
+| `pack_tokens` | `int \| None` | `None` | The most tokens one forward and backward pass runs: a step packs its segments into rows of up to this many (`rollout_objectives.packing`). None: `segment_tokens`, so that a pack takes no more memory than the longest segment would alone, or 8,192 where that is none (what the trainer's memory estimate allows for, `rollout_train.memory.SEGMENT_TOKENS`). A segment longer than it has a pack of its own. |
+| `share_prefixes` | `bool` | `True` | Whether segments of a pack that start with the same tokens share them: the prefix is run once, and each segment's rest after it. |
 | `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch makes more optimizer updates (a supervised step on a small dataset, say). |
 | `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every weight by about the full rate. A step that goes on from an optimizer's state is not warmed up. |
 | `objective` | `Objective \| str \| Mapping[str, Any]` | `DEFAULT` | The objective (`rollout_train.objectives`): an `Objective`, a preset's name, or a table of `preset` and component overrides (`rollout_train.objectives.objective_of`). The run's `objective.*` settings say it; `loss` is it, resolved. |
@@ -10032,6 +10035,27 @@ def minibatches[Each: Item](items: Sequence[Each], tokens_per_step: int) -> list
 The items in order, cut where a minibatch has reached `tokens_per_step` sampled tokens. A last minibatch of less
 than half that joins the one before: Adam's step is as large for a handful of tokens as for a full minibatch.
 
+### `PackingPolicy`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+class PackingPolicy(TrainablePolicy, Protocol)
+```
+
+A policy that runs a pack of segments in one pass (where `packing`): each segment's sampled tokens' logprobs
+as it gives them for the segment alone, with the entropies (`entropy`) or the logprobs of given tokens
+(`candidates`, a tensor for each segment) where asked; and under the reference, for an objective that reads it.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `packing` | `bool` | required |  |
+
+**Methods**
+
+- `def packed(self, pack: Pack, *, entropy: bool = False, candidates: Sequence[torch.Tensor] | None = None) -> list[Scores]`
+- `def packed_reference(self, pack: Pack) -> list[torch.Tensor]`
+
 ### `Plan` {#rollout_objectivesstepplan}
 
 *class* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
@@ -10107,6 +10131,25 @@ def sampled(weighted: Weighted) -> list[int]
 
 The positions of the tokens the policy sampled in a weighted segment.
 
+### `SharedPolicy`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+class SharedPolicy(TrainablePolicy, Protocol)
+```
+
+A policy sharded among the processes a step is shared among, whose gradients are added up across them (not
+their mean: each item's loss is divided by its whole minibatch's units). It takes an idle pass (`idle`: one that
+learns nothing, under the reference with `reference`, with a backward pass with `gradient`) where a process has
+fewer passes than the others, since the processes gather a sharded model's layers together; and clips its
+gradient by the norm over every process's shard (`clip_gradients`, which returns the norm before).
+
+**Methods**
+
+- `def idle(self, *, gradient: bool = False, reference: bool = False) -> None`
+- `def clip_gradients(self, maximum: float, ranks: Ranks) -> float`
+
 ### `TrainablePolicy`
 
 *class* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
@@ -10118,7 +10161,8 @@ class TrainablePolicy(Protocol)
 What the step needs of a policy (`rollout_lora.policy.Policy` is one). An objective with a KL to the reference
 or a preference loss against it needs `reference` too, one with an entropy bonus `logprobs_and_entropy`, and a
 distillation over the teacher's top-k tokens `logprobs_among` (the logprobs of given tokens at each position,
-beside the sampled ones').
+beside the sampled ones'). A policy that runs packs is a `PackingPolicy`; a step shared among processes takes a
+`SharedPolicy`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -10128,6 +10172,147 @@ beside the sampled ones').
 
 - `def parameters(self) -> list[nn.Parameter]`
 - `def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor`
+
+## `rollout_objectives.packing`
+
+Many segments in one row of a model's input, a prefix several share once.
+
+### `Group`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+class Group
+```
+
+Segments (by index) under a prefix of `shared` tokens they all start with (0 for a segment alone), and the
+tokens the group puts in a row: its prefix once, then each segment's rest.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `members` | `list[int]` | required |  |
+| `shared` | `int` | required |  |
+| `tokens` | `int` | required |  |
+
+### `grouped`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+def grouped(segments: Sequence[Segment], capacity: int, *, share: bool = True, least: int = SHARED_PREFIX) -> list[Group]
+```
+
+The segments in groups, each of which a pack holds whole. Sharing (`share`): the segments sorted by their
+tokens, and neighbours grouped under the prefix they share while it is at least `least` tokens and the group
+takes at most `capacity` tokens; else each segment alone.
+
+### `Pack`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+class Pack
+```
+
+Some of the segments a step was given (`members`: their indices in what `packs` was given), in one row.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `members` | `list[int]` | required |  |
+| `segments` | `list[Segment]` | required |  |
+| `tokens` | `list[int]` | `field(default_factory=list[int])` | The row. |
+| `positions` | `list[int]` | `field(default_factory=list[int])` | Each row token's position in its segment. |
+| `runs` | `list[Run]` | `field(default_factory=list[Run])` | The runs that make up the row, in its order: every root, then every branch. |
+| `places` | `list[list[int]]` | `field(default_factory=list[list[int]])` | For each segment, where in the row each of its tokens is. |
+
+**Methods**
+
+- `@property def length(self) -> int` — Tokens in the row.
+- `@property def segment_tokens(self) -> int` — Tokens of its segments, each counted in full (more than `length` where they share prefixes).
+- `@property def roots(self) -> int` — Tokens of the root runs (they come first in the row).
+- `def scored(self, index: int, positions: Sequence[int] | None = None) -> tuple[list[int], list[int]]` — For the `index`-th segment: the row of the hidden state before each of `positions` (the sampled tokens'
+  by default), and the token at each.
+- `@classmethod def single(cls, member: int, segment: Segment) -> 'Pack'` — One segment alone.
+- `@classmethod def laid_out(cls, segments: Sequence[Segment], groups: Sequence[Group], numbers: Sequence[int] | None = None) -> 'Pack'` — `groups` of `segments` in a row: each group's root (its prefix, or its one segment), then each shared
+  prefix's branches. Its members are the segments' indices in `segments`, or their `numbers`.
+
+### `packed` {#rollout_objectivespackingpacked}
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+def packed(segments: Sequence[Segment], groups: Sequence[Group], capacity: int) -> list[Pack]
+```
+
+`groups` of `segments` in packs of at most `capacity` tokens (a group longer than that in a pack of its own),
+placed first-fit-decreasing by their tokens.
+
+### `packs`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+def packs(segments: Sequence[Segment], capacity: int, *, share: bool = True, least: int = SHARED_PREFIX) -> list[Pack]
+```
+
+`segments` in packs of at most `capacity` tokens, sharing prefixes of at least `least` tokens if `share`
+(`grouped`, then `packed`).
+
+### `Run` {#rollout_objectivespackingrun}
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+class Run
+```
+
+Tokens that are consecutive in a pack's row, and in their segment.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `start` | `int` | required | Where in the row it starts. |
+| `length` | `int` | required |  |
+| `parent` | `int \| None` | `None` | For a branch, the index (in `Pack.runs`) of the root whose tokens come before its own; none for a root. |
+
+**Methods**
+
+- `@property def end(self) -> int`
+
+### `sampled_positions`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+def sampled_positions(segment: Segment) -> list[int]
+```
+
+The positions of the tokens the policy sampled in a segment.
+
+### `Scores` {#rollout_objectivespackingscores}
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+class Scores
+```
+
+What a policy gives of one segment of a pack.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `logprobs` | `torch.Tensor` | required | Of its sampled tokens. |
+| `entropy` | `torch.Tensor \| None` | `None` | Of the policy's distribution at each sampled position, where asked for. |
+| `among` | `torch.Tensor \| None` | `None` | The logprobs of given tokens at each sampled position (a row of them for each), where asked for. |
+
+### `SHARED_PREFIX`
+
+*constant* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+SHARED_PREFIX = 32
+```
+
+The fewest tokens a prefix holds for segments to share it in a pack.
 
 ## `rollout_objectives.ranks`
 
@@ -10166,9 +10351,11 @@ default group).
 def shares(sizes: Sequence[int], count: int) -> list[list[int]]
 ```
 
-The indices of `sizes` (a segment's tokens each) shared among `count` processes, balanced by size: the largest
-first, each to the process with the fewest tokens so far (the lower rank on a tie). Each process's indices are in
-their order in `sizes`. Every process computes the same shares from the same sizes.
+The indices of `sizes` (each a pass's tokens: a pack's, or a segment's) shared among `count` processes,
+balanced by passes, then by tokens: each process takes at most its even share of the count (rounded up, as the
+processes take their passes together), the largest first, each to the process with the fewest tokens so far of
+those with room (the lower rank on a tie). Each process's indices are in their order in `sizes`. Every process
+computes the same shares from the same sizes.
 
 ## `rollout_qwen`
 

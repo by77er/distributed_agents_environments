@@ -1,21 +1,23 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
-"""A toy policy's steps, for `test_shared.py`: each case's step on one process (`steps`), and the same steps shared
-among the processes `torchrun` starts, the model sharded with FSDP2 over gloo on the CPU (`python -m
-torch.distributed.run --nproc-per-node N shared.py OUT`: rank 0 writes what each made to OUT).
+"""A toy policy's steps, for `test_shared.py`: each case's step on one process (`steps`), one segment at a time and in
+packs, and the same steps shared among the processes `torchrun` starts, the model sharded with FSDP2 over gloo on the
+CPU (`python -m torch.distributed.run --nproc-per-node N shared.py OUT`: rank 0 writes what each made to OUT).
 
 The toy is in float64 and computes without mixed precision, so a shared step and a single one differ only by the order
 their sums are added in."""
 
 import json
+import math
 import random
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch import nn
 
+from rollout_objectives.packing import Pack, Scores
 from rollout_objectives.ranks import Ranks
 from rollout_objectives.settings import StepSettings
 from rollout_objectives.step import PolicyStep
@@ -36,6 +38,11 @@ CASES: dict[str, dict[str, Any]] = {
 }
 """Each case's settings, beside `SETTINGS`."""
 SETTINGS: dict[str, Any] = {"learning_rate": 0.05, "tokens_per_step": 14}
+PREFIX = 34
+"""Tokens every segment of a batch starts with: in packs, groups share them."""
+PACK_TOKENS = 50
+"""A pack's tokens, in the packed cases: two or three segments' after the prefix, so a minibatch takes one pack or
+two."""
 
 
 class Toy(nn.Module):
@@ -55,9 +62,13 @@ class Toy(nn.Module):
 
 
 class ToyPolicy:
-    def __init__(self, model: nn.Module, frozen: nn.Module) -> None:
+    """The toy as a policy: one segment at a time, or in packs (`packing`), each pack's row through the model in one
+    call (the toy reads each token alone, so a pack gives each segment what it has alone)."""
+
+    def __init__(self, model: nn.Module, frozen: nn.Module, *, packing: bool = False) -> None:
         self.model = model
         self.frozen = frozen
+        self.packing = packing
 
     def parameters(self) -> list[nn.Parameter]:
         return list(self.model.parameters())
@@ -68,6 +79,47 @@ class ToyPolicy:
     def reference(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
         with torch.no_grad():
             return self._scored(self.frozen, tokens, positions)
+
+    def packed(self, pack: Pack, *, entropy: bool = False, candidates: object = None) -> list[Scores]:
+        return [Scores(each) for each in self._packed(self.model, pack)]
+
+    def packed_reference(self, pack: Pack) -> list[torch.Tensor]:
+        with torch.no_grad():
+            return self._packed(self.frozen, pack)
+
+    @staticmethod
+    def _packed(model: nn.Module, pack: Pack) -> list[torch.Tensor]:
+        rows = model(torch.tensor(pack.tokens))
+        found: list[torch.Tensor] = []
+        for index in range(len(pack.segments)):
+            places, targets = pack.scored(index)
+            found.append(rows[places].gather(-1, torch.tensor(targets).unsqueeze(-1)).squeeze(-1))
+        return found
+
+    def idle(self, *, gradient: bool = False, reference: bool = False) -> None:
+        """A pass of nothing learnt, as a sharded policy takes one (`rollout_objectives.step.SharedPolicy`)."""
+        if reference:
+            self.reference([0, 0], [1])
+            return
+        with torch.set_grad_enabled(gradient):
+            found = self.logprobs([0, 0], [1])
+            if gradient:
+                (found.sum() * 0.0).backward()
+
+    def clip_gradients(self, maximum: float, ranks: Ranks) -> float:
+        """The gradient clipped by its norm over every process's shard."""
+        if not ranks.shared:
+            return float(torch.nn.utils.clip_grad_norm_(self.parameters(), maximum))
+        from torch.distributed.tensor import DTensor
+
+        gradients = [each.grad for each in self.parameters() if each.grad is not None]
+        local = sum(float(cast(DTensor, each).to_local().double().square().sum()) for each in gradients)
+        total = math.sqrt(ranks.summed([local])[0])
+        coefficient = min(1.0, maximum / (total + 1e-6))
+        if coefficient < 1.0:
+            for each in gradients:
+                each.mul_(coefficient)
+        return total
 
     @staticmethod
     def _scored(model: nn.Module, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
@@ -86,14 +138,15 @@ def models() -> tuple[Toy, Toy]:
 
 
 def batch(case: str, policy: ToyPolicy) -> list[Item]:
-    """Segments of several lengths, sampled at logprobs a little off the policy's: weighted ones, or a preference
-    loss's pairs and labelled examples of them."""
+    """Segments of several lengths after a prefix they all share, sampled at logprobs a little off the policy's:
+    weighted ones, or a preference loss's pairs and labelled examples of them."""
     rng = random.Random(1)
+    shared = [rng.randrange(VOCABULARY) for _ in range(PREFIX)]
     made: list[Segment] = []
     for index in range(7):
-        length = 4 + (index * 5) % 9
-        tokens = [rng.randrange(VOCABULARY) for _ in range(length)]
-        start = 1 + index % 3
+        length = PREFIX + 4 + (index * 5) % 9
+        tokens = shared + [rng.randrange(VOCABULARY) for _ in range(length - PREFIX)]
+        start = PREFIX + 1 + index % 3
         with torch.no_grad():
             exact = policy.logprobs(tokens, range(start, length))
         behavior = (exact + 0.05 * torch.randn(exact.shape, dtype=exact.dtype)).tolist()
@@ -105,13 +158,13 @@ def batch(case: str, policy: ToyPolicy) -> list[Item]:
     return [Weighted(each, 1.0 if index % 3 else -0.7) for index, each in enumerate(made)]
 
 
-def settings_of(case: str) -> StepSettings:
-    return StepSettings(**{**SETTINGS, **CASES[case]})
+def settings_of(case: str, *, packing: bool = False) -> StepSettings:
+    return StepSettings(**{**SETTINGS, **CASES[case]}, pack_tokens=PACK_TOKENS if packing else None)
 
 
 def steps(case: str, policy: ToyPolicy, ranks: Ranks) -> dict[str, Any]:
     """Two steps of the case on the policy: their metrics and minibatches, and the weights after them."""
-    settings = settings_of(case)
+    settings = settings_of(case, packing=policy.packing)
     stepping = PolicyStep(policy, settings, ranks=ranks)
     found: dict[str, Any] = {"metrics": [], "minibatches": []}
     for seed in range(2):
@@ -119,6 +172,12 @@ def steps(case: str, policy: ToyPolicy, ranks: Ranks) -> dict[str, Any]:
         found["minibatches"].append(list(stepping.minibatches))
         stepping = PolicyStep(policy, settings, fresh=False, ranks=ranks, optimizer_given=stepping.optimizer)
     return found
+
+
+def nothing_folded(plan: object, settings: object) -> list[Item]:
+    """In place of `rollout_objectives.step._first_minibatch`: no first minibatch's start folded into it, every start
+    computed in the step's first pass."""
+    return []
 
 
 def whole(model: nn.Module) -> dict[str, list[float]]:
@@ -140,7 +199,7 @@ def main(out: Path) -> None:
     rank, size = distributed.get_rank(), distributed.get_world_size()
     mesh = init_device_mesh("cpu", (size,))
     found: dict[str, Any] = {}
-    for case in CASES:
+    for case, packing in [(case, packing) for case in CASES for packing in (False, True)]:
         model, frozen = models()
         for layer in model.layers:
             fully_shard(layer, mesh=mesh)
@@ -149,9 +208,9 @@ def main(out: Path) -> None:
             if isinstance(module, FSDPModule):
                 module.set_gradient_divide_factor(1.0)
                 module.set_force_sum_reduction_for_comms(True)
-        policy = ToyPolicy(model, frozen)
+        policy = ToyPolicy(model, frozen, packing=packing)
         ranks = Ranks(rank, size, distributed.new_group(backend="gloo"))
-        found[case] = steps(case, policy, ranks) | {"weights": whole(model)}
+        found[f"{case}+packed" if packing else case] = steps(case, policy, ranks) | {"weights": whole(model)}
     if rank == 0:
         out.write_text(json.dumps(found))
     distributed.destroy_process_group()

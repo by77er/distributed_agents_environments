@@ -6,54 +6,67 @@ name (`rollout_objectives.terms`).
 First every sampled token's logprob is computed on the weights the step starts from, without a gradient (`old`), and
 the reference's where the objective reads it (`reference`: an adapter switched off, or a frozen copy). Then the batch's
 items (weighted segments, pairs, labelled examples or distilled segments) are taken in shuffled minibatches of about
-`tokens_per_step` sampled tokens, an optimizer step each. The pass stops early if a minibatch finds the policy further
-than `max_kl` from where the step began, by the k3 estimate of KL(old || now) on its sampled tokens
+`tokens_per_step` sampled tokens, an optimizer step each. The first minibatch runs on the weights the step starts
+from, so its segments' `old` is what it computes (with a gradient, detached), not a pass of its own (but a preference
+loss's, which computes its logprobs without a gradient first either way). The pass stops early if a minibatch finds
+the policy further than `max_kl` from where the step began, by the k3 estimate of KL(old || now) on its sampled tokens
 (`rollout_objectives.terms.moved_kl`; a likelihood step reads no `old`, and does not stop). A step takes `passes`
 passes, each shuffled anew; a fresh optimizer's rate is warmed up over its first `warmup_updates` updates. Only tokens
 the policy sampled are trained on. The numbers are `StepSettings`'; which items, and with what advantages, is the
 algorithm's business (`rollout_train.algorithm`).
 
+Every pass over segments runs them in packs (`rollout_objectives.packing`): rows of up to `pack_tokens` tokens, each
+segment seeing only itself, segments that start alike sharing their prefix (`share_prefixes`). A minibatch's gradient
+is accumulated a pack at a time. A policy that runs packs says so (`PackingPolicy`: `packing`, `packed`); any other
+runs one segment at a time, and the step's metrics say which (`packed`).
+
 A preference loss is a function of each side's whole log-likelihood, so a minibatch's gradient is taken in two parts,
-which hold one segment's activations at a time: the loss of the logprobs computed without a gradient (on the weights
+which hold one pack's activations at a time: the loss of the logprobs computed without a gradient (on the weights
 the minibatch steps from) gives each token's gradient, and each segment's logprobs, computed again with a gradient,
 are moved by it (`d loss / d logprobs · logprobs`, whose gradient is the loss's).
 
 `Plan` (which items, in which minibatches), `metrics` and `line` are what any trainer of this step shares
-(`rollout_tinker`'s takes it on Tinker).
+(`rollout_tinker`'s takes it on Tinker, which batches a minibatch's segments itself).
 
 A step may be shared among processes, one per GPU (`ranks`, `rollout_objectives.ranks`): each takes the same plan,
-computes its share of every minibatch's segments (`shares`, balanced by tokens) and of the logprobs the step starts
-from, and the processes gather those logprobs and add up each minibatch's sums before reading them. Every item's loss
-is divided by its minibatch's units counted over the whole minibatch, and the gradients are added up across processes
-(a sharded model's reduction is a sum), so the update is the one a single process makes of the same minibatch,
-whatever the number of processes. A process whose share is shorter than the longest takes idle passes (a two-token
+computes its share of every minibatch's segments and of the logprobs the step starts from, and the processes gather
+those logprobs and add up each minibatch's sums before reading them. The segments are grouped by the prefixes they
+share first, and the groups shared out, balanced by their tokens (`shares`); each process packs its own. Every item's
+loss is divided by its minibatch's units counted over the whole minibatch, and the gradients are added up across
+processes (a sharded model's reduction is a sum), so the update is the one a single process makes of the same
+minibatch, whatever the number of processes. A process with fewer packs than the most takes idle passes (a two-token
 sequence, its loss times zero) as many times as it lacks: a sharded model's layers are gathered by every process at
-once, so each takes as many passes as the others. A step shared this way does not leave out a minibatch that runs out
-of memory: the step fails.
+once, so each takes as many passes as the others. A step shared this way does not leave out a minibatch or a segment
+that runs out of memory: the step fails.
 """
 
+import functools
 import math
 import random
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import InitVar, dataclass, field
-from typing import Protocol
+from typing import Protocol, cast
 
 import torch
 from torch import nn
 
 from rollout_objectives.distillation import Taught, distilled
+from rollout_objectives.packing import Pack, Scores, grouped, packed
 from rollout_objectives.ranks import Ranks, shares
 from rollout_objectives.settings import StepSettings
 from rollout_objectives.terms import SUMS, Scored, Terms, labelled, moved_kl, pair, tally, terms, units
+from rollout_train.memory import SEGMENT_TOKENS
 from rollout_train.objectives import LIKELIHOOD, PREFERENCE, Objective
-from rollout_train.recorder import Segment, Span
+from rollout_train.recorder import Segment
 from rollout_train.trainer import Distilled, Item, Labelled, Pair, Weighted, segments_of
 
 __all__ = [
     "MINIBATCHES",
+    "PackingPolicy",
     "Plan",
     "PolicyStep",
+    "SharedPolicy",
     "TrainablePolicy",
     "line",
     "metrics",
@@ -65,22 +78,46 @@ __all__ = [
 
 MINIBATCHES = "minibatches.jsonl"
 """In a step's state: what each of its minibatches did, one line each (`line`)."""
-IDLE = Segment([0, 0], [Span(1, 2, 0)], [0.0])
-"""What a process whose share of a minibatch is done computes, as often as the longest share is longer than its own:
-the passes the others take, with nothing learnt."""
 
 
 class TrainablePolicy(Protocol):
     """What the step needs of a policy (`rollout_lora.policy.Policy` is one). An objective with a KL to the reference
     or a preference loss against it needs `reference` too, one with an entropy bonus `logprobs_and_entropy`, and a
     distillation over the teacher's top-k tokens `logprobs_among` (the logprobs of given tokens at each position,
-    beside the sampled ones')."""
+    beside the sampled ones'). A policy that runs packs is a `PackingPolicy`; a step shared among processes takes a
+    `SharedPolicy`."""
 
     model: nn.Module
 
     def parameters(self) -> list[nn.Parameter]: ...
 
     def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor: ...
+
+
+class PackingPolicy(TrainablePolicy, Protocol):
+    """A policy that runs a pack of segments in one pass (where `packing`): each segment's sampled tokens' logprobs
+    as it gives them for the segment alone, with the entropies (`entropy`) or the logprobs of given tokens
+    (`candidates`, a tensor for each segment) where asked; and under the reference, for an objective that reads it."""
+
+    packing: bool
+
+    def packed(
+        self, pack: Pack, *, entropy: bool = False, candidates: Sequence[torch.Tensor] | None = None
+    ) -> list[Scores]: ...
+
+    def packed_reference(self, pack: Pack) -> list[torch.Tensor]: ...
+
+
+class SharedPolicy(TrainablePolicy, Protocol):
+    """A policy sharded among the processes a step is shared among, whose gradients are added up across them (not
+    their mean: each item's loss is divided by its whole minibatch's units). It takes an idle pass (`idle`: one that
+    learns nothing, under the reference with `reference`, with a backward pass with `gradient`) where a process has
+    fewer passes than the others, since the processes gather a sharded model's layers together; and clips its
+    gradient by the norm over every process's shard (`clip_gradients`, which returns the norm before)."""
+
+    def idle(self, *, gradient: bool = False, reference: bool = False) -> None: ...
+
+    def clip_gradients(self, maximum: float, ranks: Ranks) -> float: ...
 
 
 def positions(segment: Segment) -> list[int]:
@@ -204,6 +241,53 @@ class PolicyStep:
         )
         self.minibatches: list[dict[str, float]] = []
         """What each minibatch of the last pass did, in order (`step` returns their totals)."""
+        self.packing = bool(getattr(self.policy, "packing", False))
+        """Whether the policy runs packs (else one segment at a time)."""
+        self._capacity = 1
+        self._ran = dict.fromkeys(("packs", "rows", "tokens"), 0)
+        """Of the last step, in this process: the packs it ran, their rows' tokens, and their segments' tokens."""
+
+    def _turns(self, segments: Sequence[Segment]) -> list[Pack | None]:
+        """This process's turns over `segments`: its packs (each segment by its index in `segments`), then an idle
+        turn (none) for each pack it has fewer than the most any process has. Packing, segments that share a prefix
+        are grouped, and the groups packed; else each segment is a pack of its own. The packs are the same however
+        many processes share the step (so each segment is computed alike), and shared out balanced by their count,
+        then their tokens (`shares`): no process takes more than its even share of the passes, rounded up."""
+        if self.packing:
+            groups = grouped(segments, self._capacity, share=self.settings.share_prefixes)
+            units = packed(segments, groups, self._capacity)
+        else:
+            units = [Pack.single(index, each) for index, each in enumerate(segments)]
+        if not self.ranks.shared:
+            return list(units)
+        parts = shares([unit.length for unit in units], self.ranks.size)
+        mine: list[Pack | None] = [units[index] for index in parts[self.ranks.rank]]
+        return mine + [None] * (max(len(each) for each in parts) - len(mine))
+
+    def _score(
+        self,
+        pack: Pack,
+        *,
+        entropy: bool = False,
+        candidates: Sequence[torch.Tensor] | None = None,
+    ) -> list[Scores]:
+        """Each of a pack's segments' sampled tokens' logprobs now (with their entropies, or the logprobs of
+        `candidates`, where asked)."""
+        if self.packing:
+            found = cast(PackingPolicy, self.policy).packed(pack, entropy=entropy, candidates=candidates)
+        else:
+            found: list[Scores] = []
+            for index, segment in enumerate(pack.segments):
+                if candidates is not None:
+                    logprobs, among = self._among(segment, candidates[index])
+                    found.append(Scores(logprobs, among=among))
+                else:
+                    logprobs, entropies = self._scored(segment, entropy=entropy)
+                    found.append(Scores(logprobs, entropy=entropies))
+        self._ran["packs"] += 1
+        self._ran["rows"] += pack.length
+        self._ran["tokens"] += pack.segment_tokens
+        return found
 
     def _scored(self, segment: Segment, *, entropy: bool = False) -> tuple[torch.Tensor, torch.Tensor | None]:
         """A segment's sampled tokens' logprobs now, and their positions' entropies if asked for."""
@@ -224,46 +308,45 @@ class PolicyStep:
         found, among = scoring(segment.tokens, positions(segment), candidates)
         return found, among
 
-    def _reference(self, segment: Segment) -> torch.Tensor:
-        scoring = getattr(self.policy, "reference", None)
-        if scoring is None:
-            raise ValueError("the objective reads the reference model, and this policy has none")
-        return scoring(segment.tokens, positions(segment)).detach()
+    def _logprobs(self, pack: Pack) -> list[torch.Tensor]:
+        return [each.logprobs for each in self._score(pack)]
+
+    def _reference(self, pack: Pack) -> list[torch.Tensor]:
+        """Each of a pack's segments' sampled tokens' logprobs under the reference."""
+        if self.packing:
+            found = [each.detach() for each in cast(PackingPolicy, self.policy).packed_reference(pack)]
+        else:
+            scoring = getattr(self.policy, "reference", None)
+            if scoring is None:
+                raise ValueError("the objective reads the reference model, and this policy has none")
+            found = [scoring(segment.tokens, positions(segment)).detach() for segment in pack.segments]
+        self._ran["packs"] += 1
+        self._ran["rows"] += pack.length
+        self._ran["tokens"] += pack.segment_tokens
+        return found
+
+    def _idle(self, *, gradient: bool = False, reference: bool = False) -> None:
+        """A pass that keeps this process in step with the others, learning nothing (`SharedPolicy.idle`)."""
+        cast(SharedPolicy, self.policy).idle(gradient=gradient, reference=reference)
 
     def step(self, items: Sequence[Item], *, seed: int = 0) -> dict[str, float]:
         """The logprobs the step starts from, then `passes` passes over the items in shuffled minibatches."""
         started = time.monotonic()
         settings, objective = self.settings, self.settings.loss
         plan = Plan.of(items, settings, seed)
+        self._validate(plan)
         self.policy.model.train()
+        longest = max((len(each.tokens) for each in plan.segments), default=1)
+        self._capacity = max(settings.pack_tokens or settings.segment_tokens or SEGMENT_TOKENS, longest)
+        self._ran = dict.fromkeys(self._ran, 0)
 
         # Where the step starts: each sampled token's logprob on these weights, where it was sampled, and the
         # reference's.
         old: dict[int, torch.Tensor] = {}
         behaviors: dict[int, torch.Tensor] = {}
         references: dict[int, torch.Tensor] = {}
-        start_out_of_memory = 0
-        if objective.family != LIKELIHOOD and self.ranks.shared:
-            self._start_shared(plan, old, behaviors, references)
-        elif objective.family != LIKELIHOOD:
-            with torch.no_grad():
-                for item in list(plan.items):
-                    try:
-                        for segment in segments_of(item):
-                            if id(segment) in old:
-                                continue
-                            behavior = torch.tensor(segment.logprobs)
-                            if objective.needs_behaviour and not bool(torch.isfinite(behavior).all()):
-                                raise ValueError("a sampled token has no behavior logprob")  # (one NaN: every weight)
-                            found = self.policy.logprobs(segment.tokens, positions(segment))
-                            old[id(segment)] = found.detach()
-                            behaviors[id(segment)] = behavior.to(found.device)
-                            if objective.needs_reference:
-                                references[id(segment)] = self._reference(segment)
-                    except torch.OutOfMemoryError:  # (left out of the step, and counted)
-                        torch.cuda.empty_cache()
-                        start_out_of_memory += 1
-                        plan.items.remove(item)
+        reads_old = objective.family != LIKELIHOOD
+        start_out_of_memory = self._start(plan, old, behaviors, references) if reads_old else 0
         started_pass = time.monotonic()
 
         totals = dict.fromkeys(SUMS, 0.0)
@@ -273,6 +356,10 @@ class PolicyStep:
         stopped = False
         self.minibatches = []
         for batch in plan.minibatches(settings):
+            if reads_old and gradient_norms:  # (an item whose first minibatch ran out of memory has no start)
+                batch = [item for item in batch if all(id(each) in old for each in segments_of(item))]
+            if not batch:
+                continue
             if objective.family == PREFERENCE:
                 units = float(len(batch))
             else:
@@ -281,7 +368,7 @@ class PolicyStep:
             try:
                 if objective.family == PREFERENCE:
                     distance = self._preference(
-                        batch, units, old, references, sums, settings, updated=bool(gradient_norms)
+                        batch, units, old, behaviors, references, sums, settings, updated=bool(gradient_norms)
                     )
                 else:
                     distance = self._weighted(batch, units, old, behaviors, references, sums)
@@ -309,6 +396,8 @@ class PolicyStep:
             self.minibatches.append({**line(sums, units, rate), "gradient_norm": norm})
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
+        seconds = time.monotonic() - started
+        packs_run, rows, tokens = self.ranks.summed([float(self._ran[key]) for key in ("packs", "rows", "tokens")])
         return {
             **metrics(
                 totals,
@@ -325,212 +414,242 @@ class PolicyStep:
             "gradient_norm": sum(gradient_norms) / max(len(gradient_norms), 1),  # before clipping, mean over steps
             "minibatches_out_of_memory": float(out_of_memory),
             "start_out_of_memory": float(start_out_of_memory),
-            "seconds": time.monotonic() - started,
+            # How the step ran its segments (every process's, where it is shared): in packs or one at a time, how many
+            # passes over packs it made (every pass over the batch counted), how full their rows were, the share of
+            # the segments' tokens shared prefixes spared, and the segments' tokens it ran through the model a second.
+            "packed": float(self.packing),
+            "packs": packs_run,
+            "pack_fill": rows / max(packs_run * self._capacity, 1.0),
+            "prefix_shared_fraction": 1.0 - rows / max(tokens, 1.0),
+            "segment_tokens_per_second": tokens / max(seconds, 1e-9),
+            "seconds": seconds,
         }
+
+    def _validate(self, plan: Plan) -> None:
+        """What would fail the step, raised before it computes anything: every process holds the same plan, so all of
+        them raise alike, before any of them waits on another."""
+        objective = self.settings.loss
+        for item in plan.items:
+            if objective.family == PREFERENCE:
+                if not isinstance(item, Pair | Labelled):
+                    raise ValueError("a preference loss is of pairs or labelled examples, not of weighted segments")
+            elif not (isinstance(item, Distilled) or (isinstance(item, Weighted) and not objective.distills)):
+                takes = "distilled segments" if objective.distills else "weighted segments"
+                raise ValueError(f"a {objective.family} loss is of {takes}, not {type(item).__name__} items")
+        if objective.needs_distribution and objective.needs_entropy:
+            raise ValueError("an entropy bonus beside the top_k form of distillation is not computed")
+        if objective.needs_behaviour and objective.family != LIKELIHOOD:
+            for segment in plan.segments:
+                if not all(math.isfinite(each) for each in segment.logprobs):
+                    raise ValueError("a sampled token has no behavior logprob")  # (one NaN: every weight)
+        if self.ranks.shared:
+            for needed in ("idle", "clip_gradients"):
+                if getattr(self.policy, needed, None) is None:
+                    raise ValueError(f"a step shared among processes needs a sharded policy's `{needed}`")
+
+    def _start(
+        self,
+        plan: Plan,
+        old: dict[int, torch.Tensor],
+        behaviors: dict[int, torch.Tensor],
+        references: dict[int, torch.Tensor],
+    ) -> int:
+        """Each sampled token's logprob on the weights the step starts from (`old`), but those of the first
+        minibatch's segments, which it computes itself; and the reference's where the objective reads it. An item a
+        pack of which runs out of memory, and that runs out again a segment at a time, is left out of the plan; how
+        many were. Shared, each process computes its packs, and every process gathers every segment's."""
+        segments = plan.segments
+        folded = {id(each) for item in _first_minibatch(plan, self.settings) for each in segments_of(item)}
+        failed: set[int] = set()
+        with torch.no_grad():
+            starting = [each for each in segments if id(each) not in folded]
+            for index, found in self._computed(starting, self._logprobs, self._idle, failed).items():
+                _started(starting[index], found, old, behaviors)
+            if self.settings.loss.needs_reference:
+                kept = [each for each in segments if id(each) not in failed]
+                idle = functools.partial(self._idle, reference=True)
+                for index, found in self._computed(kept, self._reference, idle, failed).items():
+                    references[id(kept[index])] = found
+        left_out = [item for item in plan.items if any(id(each) in failed for each in segments_of(item))]
+        plan.items = [item for item in plan.items if not any(id(each) in failed for each in segments_of(item))]
+        return len(left_out)
+
+    def _computed(
+        self,
+        segments: Sequence[Segment],
+        compute: Callable[[Pack], list[torch.Tensor]],
+        idle: Callable[[], None],
+        failed: set[int] | None = None,
+    ) -> dict[int, torch.Tensor]:
+        """`compute` (without a gradient, each pack's segments' tensors) over this process's turns of `segments` (and
+        `idle` for an idle one), each segment's tensor by its index in `segments`; gathered from every process, where
+        the step is shared. With `failed`, a pack that runs out of memory is run again a segment at a time, and a
+        segment that runs out alone is added to it (by its `id`); else running out of memory fails the call."""
+        found: dict[int, torch.Tensor] = {}
+        for pack in self._turns(segments):
+            if pack is None:
+                idle()
+                continue
+            try:
+                found.update(zip(pack.members, compute(pack), strict=True))
+                continue
+            except torch.OutOfMemoryError:  # (left out of the step, and counted)
+                if failed is None or self.ranks.shared:
+                    raise
+                torch.cuda.empty_cache()
+            for member, segment in zip(pack.members, pack.segments, strict=True):
+                try:
+                    found[member] = compute(Pack.single(member, segment))[0]
+                except torch.OutOfMemoryError:
+                    torch.cuda.empty_cache()
+                    failed.add(id(segment))
+        return self._gathered(found) if self.ranks.shared else found
+
+    def _gathered(self, found: Mapping[int, torch.Tensor]) -> dict[int, torch.Tensor]:
+        """Every process's `found` tensors (by a segment's index), on this process's device."""
+        merged: dict[int, torch.Tensor] = {}
+        for part in self.ranks.gathered({index: each.detach().cpu() for index, each in found.items()}):
+            merged.update(part)
+        device = next(iter(self.policy.parameters())).device
+        return {index: each.to(device) for index, each in merged.items()}
 
     def _weighted(
         self,
         batch: Sequence[Item],
         units: float,
-        old: Mapping[int, torch.Tensor],
-        behaviors: Mapping[int, torch.Tensor],
+        old: dict[int, torch.Tensor],
+        behaviors: dict[int, torch.Tensor],
         references: Mapping[int, torch.Tensor],
         sums: dict[str, float],
     ) -> float:
-        """A minibatch of weighted segments' gradient, accumulated (this process's share of it, where the step is
-        shared, and its sums added up across processes); how far it found the policy from the step's start (per
-        token)."""
+        """A minibatch of weighted segments' gradient, accumulated a pack at a time (this process's packs of it, where
+        the step is shared, and its sums added up across processes); how far it found the policy from the step's
+        start (per token). A segment with no `old` yet is on the weights the step starts from (the first
+        minibatch's): what it computes is its `old`."""
         objective = self.settings.loss
-        mine, longest = self._share([sum(len(each.tokens) for each in segments_of(item)) for item in batch])
-        for item in [batch[index] for index in mine]:
-            if isinstance(item, Distilled):
-                found = self._distilled(item, old, behaviors, references)
-            elif isinstance(item, Weighted) and not objective.distills:
-                segment = item.segment
-                logprobs, entropy = self._scored(segment, entropy=objective.needs_entropy)
-                key = id(segment)
-                found = terms(
-                    objective, logprobs, item.advantage, old.get(key), behaviors.get(key), references.get(key), entropy
-                )
-            else:
-                takes = "distilled segments" if objective.distills else "weighted segments"
-                raise ValueError(f"a {objective.family} loss is of {takes}, not {type(item).__name__} items")
-            (found.loss / units).backward()
-            tally(sums, found, objective)
-        for _ in range(longest - len(mine)):
-            self._idle(gradient=True)
+        segmented = [cast(Weighted | Distilled, item) for item in batch]  # (`_validate` said so)
+        candidates: list[torch.Tensor] | None = None
+        if objective.needs_distribution:
+            candidates = [cast(torch.Tensor, Taught.of(cast(Distilled, item).scores, objective.needs_top).top_tokens)
+                          for item in segmented]  # fmt: skip
+        reads_old = objective.family != LIKELIHOOD
+        lacking = reads_old and any(id(item.segment) not in old for item in segmented)
+        folded: dict[int, torch.Tensor] = {}
+        for pack in self._turns([item.segment for item in segmented]):
+            if pack is None:
+                self._idle(gradient=True)
+                continue
+            asked = None if candidates is None else [candidates[member] for member in pack.members]
+            found = self._score(pack, entropy=objective.needs_entropy, candidates=asked)
+            loss: torch.Tensor | None = None
+            for member, scores in zip(pack.members, found, strict=True):
+                item = segmented[member]
+                segment, key = item.segment, id(item.segment)
+                if reads_old and key not in old:  # (on the weights the step starts from)
+                    _started(segment, scores.logprobs, old, behaviors)
+                    folded[member] = scores.logprobs.detach()
+                if isinstance(item, Distilled):
+                    each = distilled(
+                        objective, item, scores.logprobs, old[key], behaviors.get(key), references.get(key),
+                        scores.entropy, scores.among,
+                    )  # fmt: skip
+                else:
+                    each = terms(
+                        objective, scores.logprobs, item.advantage, old.get(key), behaviors.get(key),
+                        references.get(key), scores.entropy,
+                    )  # fmt: skip
+                loss = each.loss if loss is None else loss + each.loss
+                tally(sums, each, objective)
+            if loss is not None:
+                (loss / units).backward()
         if self.ranks.shared:
+            if lacking:  # (every process keeps every segment's start, as the others computed theirs)
+                for member, found_old in self._gathered(folded).items():
+                    _started(segmented[member].segment, found_old, old, behaviors)
             keys = list(sums)
             sums.update(zip(keys, self.ranks.summed([sums[key] for key in keys]), strict=True))
         return sums["moved"] / max(sums["tokens"], 1.0)
-
-    def _distilled(
-        self,
-        item: Distilled,
-        old: Mapping[int, torch.Tensor],
-        behaviors: Mapping[int, torch.Tensor],
-        references: Mapping[int, torch.Tensor],
-    ) -> Terms:
-        """A distilled segment's terms, its logprobs computed now (and those of the teacher's top-k tokens, for the
-        top-k form)."""
-        objective = self.settings.loss
-        segment, key = item.segment, id(item.segment)
-        among: torch.Tensor | None = None
-        entropy: torch.Tensor | None = None
-        if objective.needs_distribution:
-            if objective.needs_entropy:
-                raise ValueError("an entropy bonus beside the top_k form of distillation is not computed")
-            candidates = Taught.of(item.scores, objective.needs_top).top_tokens
-            assert candidates is not None
-            logprobs, among = self._among(segment, candidates)
-        else:
-            logprobs, entropy = self._scored(segment, entropy=objective.needs_entropy)
-        start = old.get(key)
-        if start is None:
-            raise ValueError("a distillation needs each sampled token's logprob at the step's start")
-        return distilled(objective, item, logprobs, start, behaviors.get(key), references.get(key), entropy, among)
 
     def _preference(
         self,
         batch: Sequence[Item],
         units: float,
-        old: Mapping[int, torch.Tensor],
+        old: dict[int, torch.Tensor],
+        behaviors: dict[int, torch.Tensor],
         references: Mapping[int, torch.Tensor],
         sums: dict[str, float],
         settings: StepSettings,
         *,
         updated: bool,
     ) -> float:
-        """A minibatch of preference items' gradient, accumulated (unless it found the policy past `max_kl`); how far
-        it found the policy from the step's start (per token)."""
+        """A minibatch of preference items' gradient, accumulated (unless it found the policy past `max_kl`) a pack
+        at a time; how far it found the policy from the step's start (per token). Its logprobs without a gradient are
+        each process's packs', gathered, where the step is shared: the loss is of every item."""
         objective = settings.loss
         segments = list({id(each): each for item in batch for each in segments_of(item)}.values())
-        mine, longest = self._share([len(each.tokens) for each in segments])
-        now: dict[int, torch.Tensor] = {}
-        with torch.no_grad():
-            shared = updated and self.ranks.shared  # (each process its share, gathered: the loss is of every item)
-            gathered = self._gathered(segments, mine, longest) if shared else {}
-            for segment in segments:  # (before any update, where the step starts is what the policy gives now)
-                if not updated:
-                    found = old[id(segment)]
-                elif shared:
-                    found = gathered[id(segment)]
-                else:
-                    found = self.policy.logprobs(segment.tokens, positions(segment))
-                now[id(segment)] = found.detach().clone().requires_grad_(True)
+        computing = [each for each in segments if updated or id(each) not in old]
+        with torch.no_grad():  # (before any update, where the step starts is what the policy gives now)
+            found = self._computed(computing, self._logprobs, self._idle)
+        computed = {id(computing[index]): each for index, each in found.items()}
+        if not updated:
+            for segment in computing:
+                _started(segment, computed[id(segment)], old, behaviors)
+        now = {
+            id(each): computed.get(id(each), old[id(each)]).detach().clone().requires_grad_(True) for each in segments
+        }
         distance = sum(float(moved_kl(old[key], now[key]).sum()) for key in now)
         tokens = sum(float(now[key].numel()) for key in now)
         found_terms = preference_terms(objective, batch, now, references)
-        for item, found in found_terms:
-            tally(sums, found, objective, segments=float(len(segments_of(item))))
+        for item, each_terms in found_terms:
+            tally(sums, each_terms, objective, segments=float(len(segments_of(item))))
         sums["moved"], sums["tokens"] = distance, tokens  # (each segment once, however many items hold it)
         distance /= max(tokens, 1.0)
         if settings.max_kl is not None and distance > settings.max_kl:
             return distance
-        total = torch.stack([found.loss for _, found in found_terms]).sum()
+        total = torch.stack([each.loss for _, each in found_terms]).sum()
         (total / units).backward()
-        for segment in [segments[index] for index in mine]:
+        moving: list[Segment] = []
+        for segment in segments:
             gradient = now[id(segment)].grad
-            if gradient is None or not bool(gradient.any()):
-                if self.ranks.shared:  # (the others take their passes: this one takes one too)
-                    self._idle(gradient=True)
+            if gradient is not None and bool(gradient.any()):
+                moving.append(segment)
+        for pack in self._turns(moving):
+            if pack is None:
+                self._idle(gradient=True)
                 continue
-            logprobs = self.policy.logprobs(segment.tokens, positions(segment))
-            (logprobs * gradient.to(logprobs.dtype)).sum().backward()
-        for _ in range(longest - len(mine)):
-            self._idle(gradient=True)
+            moved: torch.Tensor | None = None
+            for segment, logprobs in zip(pack.segments, self._logprobs(pack), strict=True):
+                gradient = cast(torch.Tensor, now[id(segment)].grad)
+                part = (logprobs * gradient.to(logprobs.dtype)).sum()
+                moved = part if moved is None else moved + part
+            if moved is not None:
+                moved.backward()
         return distance
 
-    def _start_shared(
-        self,
-        plan: Plan,
-        old: dict[int, torch.Tensor],
-        behaviors: dict[int, torch.Tensor],
-        references: dict[int, torch.Tensor],
-    ) -> None:
-        """Where a shared step starts: each process computes its share of the segments' logprobs (and the
-        reference's), and every process gathers them all."""
-        objective = self.settings.loss
-        segments = plan.segments
-        for segment in segments:  # (every process checks every segment, so that all of them stop alike)
-            if objective.needs_behaviour and not bool(torch.isfinite(torch.tensor(segment.logprobs)).all()):
-                raise ValueError("a sampled token has no behavior logprob")
-        mine, longest = self._share([len(each.tokens) for each in segments])
-        found: dict[int, tuple[torch.Tensor, torch.Tensor | None]] = {}
-        with torch.no_grad():
-            for index in mine:
-                segment = segments[index]
-                logprobs = self.policy.logprobs(segment.tokens, positions(segment)).detach().cpu()
-                reference = self._reference(segment).cpu() if objective.needs_reference else None
-                found[index] = (logprobs, reference)
-            for _ in range(longest - len(mine)):
-                self._idle(gradient=False, reference=objective.needs_reference)
-        merged: dict[int, tuple[torch.Tensor, torch.Tensor | None]] = {}
-        for part in self.ranks.gathered(found):
-            merged.update(part)
-        device = self._device()
-        for index, segment in enumerate(segments):
-            logprobs, reference = merged[index]
-            old[id(segment)] = logprobs.to(device)
-            behaviors[id(segment)] = torch.tensor(segment.logprobs).to(device)
-            if reference is not None:
-                references[id(segment)] = reference.to(device)
-
-    def _gathered(self, segments: Sequence[Segment], mine: Sequence[int], longest: int) -> dict[int, torch.Tensor]:
-        """The segments' logprobs now, each process computing its share (`mine`) and gathering the rest, by the
-        segment's `id`."""
-        found = {each: self.policy.logprobs(segments[each].tokens, positions(segments[each])).cpu() for each in mine}
-        for _ in range(longest - len(mine)):
-            self._idle(gradient=False)
-        merged: dict[int, torch.Tensor] = {}
-        for part in self.ranks.gathered(found):
-            merged.update(part)
-        device = self._device()
-        return {id(segment): merged[index].to(device) for index, segment in enumerate(segments)}
-
-    def _share(self, sizes: Sequence[int]) -> tuple[list[int], int]:
-        """This process's share of a minibatch's segments (by index, of `sizes`, each one's tokens), and the longest
-        share's length: every one of them, alone."""
-        if not self.ranks.shared:
-            return list(range(len(sizes))), len(sizes)
-        found = shares(sizes, self.ranks.size)
-        return found[self.ranks.rank], max(len(each) for each in found)
-
-    def _idle(self, *, gradient: bool, reference: bool = False) -> None:
-        """A pass that keeps this process in step with the others (`IDLE`): with a gradient, its loss times zero."""
-        if gradient:
-            (self.policy.logprobs(IDLE.tokens, positions(IDLE)).sum() * 0.0).backward()
-            return
-        with torch.no_grad():
-            self.policy.logprobs(IDLE.tokens, positions(IDLE))
-            if reference:
-                self._reference(IDLE)
-
-    def _device(self) -> torch.device:
-        return next(iter(self.policy.parameters())).device
-
     def _clipped(self, maximum: float) -> float:
-        """The gradient's norm before clipping, after scaling it to at most `maximum` (as `clip_grad_norm_` does).
-        Shared, each process holds a shard of each gradient (a sharded model's), and their squares are added up."""
-        parameters = self.policy.parameters()
-        if not self.ranks.shared:
-            return float(torch.nn.utils.clip_grad_norm_(parameters, maximum))
-        from torch.distributed.tensor import DTensor
+        """The gradient's norm before clipping, after scaling it to at most `maximum` (as `clip_grad_norm_` does):
+        the policy's own clip where it has one (a sharded policy's, over every process's shard)."""
+        clipping = getattr(self.policy, "clip_gradients", None)
+        if clipping is not None:
+            return float(cast(SharedPolicy, self.policy).clip_gradients(maximum, self.ranks))
+        return float(torch.nn.utils.clip_grad_norm_(self.policy.parameters(), maximum))
 
-        gradients = [each.grad for each in parameters if each.grad is not None]
-        norms: list[torch.Tensor] = []  # (each in its gradient's dtype, as clip_grad_norm_ takes them)
-        for gradient in gradients:
-            if isinstance(gradient, DTensor):
-                norms.append(torch.linalg.vector_norm(gradient.to_local()))
-            elif self.ranks.rank == 0:  # (one every process holds whole: counted once)
-                norms.append(torch.linalg.vector_norm(gradient))
-        local = float(torch.stack(norms).double().square().sum()) if norms else 0.0
-        total = math.sqrt(self.ranks.summed([local])[0])
-        coefficient = min(1.0, maximum / (total + 1e-6))
-        if coefficient < 1.0:
-            for gradient in gradients:
-                gradient.mul_(coefficient)
-        return total
+
+def _first_minibatch(plan: Plan, settings: StepSettings) -> list[Item]:
+    """The items of a plan's first minibatch, which runs on the weights the step starts from: none for a preference
+    loss, whose minibatch computes its logprobs without a gradient before it computes them with one, so that its
+    start is a pass however it is computed."""
+    if settings.loss.family == PREFERENCE:
+        return []
+    return (minibatches(plan.items, settings.tokens_per_step) or [[]])[0]
+
+
+def _started(
+    segment: Segment, logprobs: torch.Tensor, old: dict[int, torch.Tensor], behaviors: dict[int, torch.Tensor]
+) -> None:
+    """Keep a segment's logprobs on the weights the step starts from, and those it was sampled at."""
+    old[id(segment)] = logprobs.detach()
+    behaviors[id(segment)] = torch.tensor(segment.logprobs).to(logprobs.device)
 
 
 def _units(objective: Objective, item: Item) -> float:

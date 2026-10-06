@@ -39,6 +39,14 @@ class StepSettings:
     policy takes this as the longest turn to sample; the count says whether that held."""
     segments_per_step: int | None = None
     """How many segments a step can afford (None: any number)."""
+    pack_tokens: int | None = None
+    """The most tokens one forward and backward pass runs: a step packs its segments into rows of up to this many
+    (`rollout_objectives.packing`). None: `segment_tokens`, so that a pack takes no more memory than the longest
+    segment would alone, or 8,192 where that is none (what the trainer's memory estimate allows for,
+    `rollout_train.memory.SEGMENT_TOKENS`). A segment longer than it has a pack of its own."""
+    share_prefixes: bool = True
+    """Whether segments of a pack that start with the same tokens share them: the prefix is run once, and each
+    segment's rest after it."""
     passes: int = 1
     """Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch
     makes more optimizer updates (a supervised step on a small dataset, say)."""
