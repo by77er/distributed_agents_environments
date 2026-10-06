@@ -375,18 +375,24 @@ def _in_memory(where: str, under: str) -> dict[str, Callable[[], bytes] | Path]:
 
 def host_memory() -> float:
     """Bytes of host memory this process may still take: what the machine has available, within its container's limit
-    (its cgroup's, less what it holds that cannot be reclaimed)."""
+    (its cgroup's, version 2 or 1, less what it holds that cannot be reclaimed)."""
     available = math.inf
     with contextlib.suppress(OSError, ValueError):
         for line in Path("/proc/meminfo").read_text().splitlines():
             if line.startswith("MemAvailable:"):
                 available = int(line.split()[1]) * 1024
-    with contextlib.suppress(OSError, ValueError):
-        cgroup = Path("/sys/fs/cgroup")
-        limit = (cgroup / "memory.max").read_text().strip()
-        if limit != "max":
-            stat = dict(line.split() for line in (cgroup / "memory.stat").read_text().splitlines())
-            used = int((cgroup / "memory.current").read_text()) - int(stat.get("inactive_file", 0))
+    cgroup = Path("/sys/fs/cgroup")
+    for limit_at, used_at, stat_at, inactive in (
+        (cgroup / "memory.max", cgroup / "memory.current", cgroup / "memory.stat", "inactive_file"),
+        (cgroup / "memory" / "memory.limit_in_bytes", cgroup / "memory" / "memory.usage_in_bytes",
+         cgroup / "memory" / "memory.stat", "total_inactive_file"),
+    ):  # fmt: skip
+        with contextlib.suppress(OSError, ValueError):
+            limit = limit_at.read_text().strip()
+            if limit == "max" or int(limit) >= 2**60:  # (no limit)
+                continue
+            stat = dict(line.split() for line in stat_at.read_text().splitlines())
+            used = int(used_at.read_text()) - int(stat.get(inactive, 0))
             available = min(available, int(limit) - used)
     return available
 

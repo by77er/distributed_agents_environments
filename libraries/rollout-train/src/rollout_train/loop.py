@@ -42,7 +42,7 @@ completes it in the background once the trainer has kept the state (`Checkpoints
 long it took); a state never kept is logged as an error and noted, and its checkpoint left incomplete. The next step
 does not wait for it: it goes on from the checkpoint the step before made, which the trainer holds; a trainer that does
 not hold it waits for the state it is keeping, or refuses a state that was never kept (`StepFailed`), and never starts
-afresh. At the end of the run the loop waits for the states still being kept.
+afresh. At the end of the run the loop waits for the states still being kept, for up to `STATE_PATIENCE` seconds.
 
 **What its channel serves is written down** (`rollout_train.serving`): each time it serves a checkpoint, it appends that
 the channel serves it from now on (the base model until the first), and then publishes it to the engines in its own
@@ -142,6 +142,8 @@ FAILED_UPDATES = 3
 """Steps that may fail in a row (each is written down, and the weights stay as they were) before the loop stops."""
 PAUSE_LOOK = 1.0
 """Seconds between a paused loop's looks at whether it is still paused."""
+STATE_PATIENCE = 1800.0
+"""Seconds a loop at its end waits for the states its trainer is still keeping."""
 
 
 async def train(
@@ -640,7 +642,10 @@ async def train(
             if stepping is not None and stepping in finished:
                 done, stepping = stepping, None
                 done.result()  # (a step that failed too often stops the loop)
-        await asyncio.gather(*completions.values())  # (the run's last states, completed before it ends)
+        if completions:  # (the run's last states, completed before it ends: those that never are stay incomplete)
+            _, left = await asyncio.wait(completions.values(), timeout=STATE_PATIENCE)
+            for id in (each for each, task in completions.items() if task in left):
+                logger.error("the state of checkpoint %s was not kept in time: it stays incomplete", id)
     finally:
         for task in [*outstanding, *([stepping] if stepping else []), *completions.values()]:
             task.cancel()
