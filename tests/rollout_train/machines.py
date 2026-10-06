@@ -62,6 +62,7 @@ class Saying(ScriptedEngine):
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         word = f" {self.words[self.said % len(self.words)]}" if self.words else ""

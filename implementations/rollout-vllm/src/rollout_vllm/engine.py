@@ -28,6 +28,18 @@ def lora_rank(asked: int) -> int:
     return fits[0]
 
 
+def reasoning_arguments(reasoning: Mapping[str, str] | None, made: Any) -> dict[str, Any]:
+    """vLLM's engine arguments for a thinking format (`VllmEngine`'s `reasoning`): its reasoning parser, and a reasoning
+    config (`made`, vLLM's class) that opens with the renderer's open and forces its close. Nothing for none."""
+    if reasoning is None:
+        return {}
+    missing = [key for key in ("parser", "open", "close") if not reasoning.get(key)]
+    if missing:
+        raise ValueError(f"a thinking format names its parser, open and close: {', '.join(missing)} missing")
+    config = made(reasoning_start_str=reasoning["open"], reasoning_end_str=reasoning["close"])
+    return {"reasoning_parser": reasoning["parser"], "reasoning_config": config}
+
+
 class VllmEngine:
     def __init__(
         self,
@@ -44,9 +56,13 @@ class VllmEngine:
         quantization: str | None = None,
         seed: int = 0,
         max_logprobs: int = 20,
+        reasoning: Mapping[str, str] | None = None,
     ) -> None:
+        """`reasoning` (`parser`, vLLM's reasoning parser for the model, and `open` and `close`, the renderer's thinking
+        open and forced close) has the engine bound a generation's thinking itself (`generate`'s `thinking_budget`)."""
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
         from vllm import AsyncEngineArgs
+        from vllm.config.reasoning import ReasoningConfig
         from vllm.v1.engine.async_llm import AsyncLLM
 
         arguments = AsyncEngineArgs(
@@ -66,8 +82,11 @@ class VllmEngine:
             quantization=quantization,  # (`fp8`: a bfloat16 checkpoint's weights quantized as they load)
             seed=seed,
             max_logprobs=max_logprobs,
+            **reasoning_arguments(reasoning, ReasoningConfig),
         )
         self.model = model
+        self.bounds_thinking = reasoning is not None
+        """Whether it bounds a generation's thinking itself (`reasoning`)."""
         self.max_logprobs = max_logprobs
         """The most tokens a request may ask for at each position, with their logprobs (`top`)."""
         self.max_model_len = max_model_len
@@ -88,10 +107,13 @@ class VllmEngine:
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         from vllm import SamplingParams
 
+        if thinking_budget is not None and not self.bounds_thinking:
+            raise ValueError("this engine was started without `reasoning`: it cannot bound thinking")
         params = SamplingParams(
             max_tokens=max_tokens,
             temperature=temperature,
@@ -100,6 +122,7 @@ class VllmEngine:
             logprobs=self._top(top),
             detokenize=False,
             skip_special_tokens=False,
+            thinking_token_budget=thinking_budget,
         )
         completion = (await self._final(prompt, params, adapter)).outputs[0]
         tokens = list(completion.token_ids)

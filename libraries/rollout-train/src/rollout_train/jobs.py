@@ -76,7 +76,7 @@ from rollout_train.colocated import Colocated
 from rollout_train.demand import BRIDGE, TRAINER, Demand, Resources, colocating, demand, placed, played_channel, reserve
 from rollout_train.evals import Fetched
 from rollout_train.gateway import Gateway, GatewayEndpoints, Keyring, TurnStore
-from rollout_train.inference import Channel, Limits, Route, Routes
+from rollout_train.inference import Channel, Connection, Limits, Route, Routes
 from rollout_train.inference.api import ApiChannel, Hosted
 from rollout_train.inference.channel import MAX_LAG
 from rollout_train.launching import Refused, checked, declared, ray_free
@@ -332,6 +332,24 @@ class Waiting:
 
     def add(self, name: str, handle: Any, wants: str) -> None:
         self.actors[name] = (handle, wants)
+
+
+def bounds_thinking(cluster: Cluster, channel: str, providers: Sequence[str], model: str, renderer: Any) -> bool:
+    """Whether a channel's servers bound thinking themselves: every provider's offer of the model says its
+    `reasoning` (vLLM started with a reasoning config), which must be the renderer's open and forced close."""
+    said = [offer.options.get("reasoning") if (offer := cluster.inference[name].models.get(model)) else None
+            for name in providers]  # fmt: skip
+    format = getattr(renderer, "thinking", None)
+    if not said or not all(isinstance(each, Mapping) for each in said) or format is None:
+        return False
+    for name, each in zip(providers, said, strict=True):
+        assert isinstance(each, Mapping)
+        if (each.get("open"), each.get("close")) != (format.open, format.forced_close):
+            raise ValueError(
+                f"channel {channel}: provider {name}'s reasoning opens with {each.get('open')!r} and closes with "
+                f"{each.get('close')!r}, and its renderer's with {format.open!r} and {format.forced_close!r}"
+            )
+    return True
 
 
 @dataclass
@@ -638,8 +656,9 @@ class Run:
             lag = self.settings["max_lag"] if channel == self.settings.trained else None
             routes[channel] = Route(
                 made, str(model), tuple(servers), limits, max_lag=lag if isinstance(lag, int) else MAX_LAG,
-                **({"connection": connection} if connection is not None else {}),
+                connection=connection if connection is not None else Connection(),
                 discover=self._discovered(channel, leased, str(model)) if leased else None,
+                bounds_thinking=bounds_thinking(self.cluster, channel, providers, str(model), made),
             )  # fmt: skip
         self.routes = Routes(routes, self.ledger) if routes else None
 

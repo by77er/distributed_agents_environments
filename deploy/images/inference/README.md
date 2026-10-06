@@ -33,6 +33,7 @@ Beside those every pod reads ([deploy/images](../README.md#the-variables-both-po
 | `VLLM_MAX_LORAS` | Adapters one batch may mix (default 2): at least the sum of the windows of the runs it serves, each run's `max_lag + 1` |
 | `VLLM_MAX_CPU_LORAS` | Adapters held in CPU memory above those, to load again quickly (default: vLLM's, as many as `VLLM_MAX_LORAS`) |
 | `VLLM_ARGS` | More of `vllm serve`'s options, split on spaces (`--max-model-len 8192 --gpu-memory-utilization 0.9`) |
+| `VLLM_REASONING_PARSER`, `VLLM_REASONING_CONFIG` | vLLM's reasoning parser and its reasoning config (JSON: `reasoning_start_str`, `reasoning_end_str`), so that it bounds a request's thinking (`thinking_token_budget`); from the provider's `reasoning` |
 
 ## Building
 

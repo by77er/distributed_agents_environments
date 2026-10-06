@@ -151,6 +151,7 @@ class EngineHost:
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         """Sample the checkpoint `adapter` names (None: the model), as a `CheckpointServer`; `NotLoaded` where it does
@@ -158,7 +159,7 @@ class EngineHost:
         channel = self._holding(adapter)
         return await channel.sample(
             prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
-            name=adapter, session=session, top=top,
+            name=adapter, session=session, thinking_budget=thinking_budget, top=top,
         )  # fmt: skip
 
     async def score(
@@ -341,12 +342,14 @@ class HostServer:
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         return await self._called(
             self.handle.generate.remote(
                 list(prompt), max_tokens=max_tokens, temperature=temperature, top_p=top_p,
-                stop_token_ids=list(stop_token_ids), adapter=adapter, session=session, request=request, top=top,
+                stop_token_ids=list(stop_token_ids), adapter=adapter, session=session, request=request,
+                thinking_budget=thinking_budget, top=top,
             )
         )  # fmt: skip
 

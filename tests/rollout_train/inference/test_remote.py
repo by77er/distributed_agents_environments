@@ -168,6 +168,9 @@ async def test_a_remote_engine_scores_tokens_with_prompt_logprobs_and_drops_the_
         assert all(values == [-0.5, -1.5, -2.5] for values in reply.top_logprobs)
         plain = await remote.generate([65], adapter=None, **OPTIONS)
         assert bodies[-1]["logprobs"] == 0 and "return_tokens_as_token_ids" not in bodies[-1] and not plain.top_tokens
+        assert "thinking_token_budget" not in bodies[-1]
+        await remote.generate([65], adapter=None, thinking_budget=513, **OPTIONS)  # (the server forces the close)
+        assert bodies[-1]["thinking_token_budget"] == 513
         remote.close()
 
 

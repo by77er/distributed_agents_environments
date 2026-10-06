@@ -289,7 +289,9 @@ class Gateway:
         adapter, version = await sampler.weights(request.session_id)  # (both phases sample these weights)
         phases = itertools.count(1)
 
-        async def generate(context: Sequence[int], room: int, stop: Sequence[int]) -> Generation:
+        async def generate(
+            context: Sequence[int], room: int, stop: Sequence[int], thinking: int | None = None
+        ) -> Generation:
             generation = await sampler.generate(
                 context,
                 max_tokens=room,
@@ -300,13 +302,16 @@ class Gateway:
                 session=request.session_id,
                 version=version,
                 request=f"{request.effect_id}/{attempt}/{next(phases)}",
+                thinking_budget=thinking,
             )
             if generation.model is not None and adapter is not None and generation.model != adapter:
                 raise Unserved(f"{generation.model} answered for {adapter}")  # (its tokens would be misstamped)
             return generation
 
         limits = limits_of(sampler.limits, grant.thinking, grant.answer)
-        turn = await sample_turn(request, sampler.renderer, limits, sampler.context_limit, generate)
+        turn = await sample_turn(
+            request, sampler.renderer, limits, sampler.context_limit, generate, bounds_thinking=sampler.bounds_thinking
+        )
         held = getattr(sampler, "held", None) or getattr(sampler, "model", None)
         return TurnRecord(
             effect_id=request.effect_id,

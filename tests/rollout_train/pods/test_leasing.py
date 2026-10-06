@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from pydantic import JsonValue
 
-from rollout_train.cluster import Cluster, parsed
+from rollout_train.cluster import Cluster, ClusterError, parsed
 from rollout_train.database import DatabaseLedger
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.pods.leases import HELD, IDLE, DatabasePodLeases, PodLease, pod_leases_of
@@ -30,7 +30,9 @@ from tests.rollout_runpod.fake import KEY, FakeRunPod
 ENVIRON = {"ROLLOUT_LEDGER_TOKEN": LEDGER_TOKEN, "RUNPOD_API_KEY": KEY}
 
 
-def cluster_of(directory: Path, **more: Any) -> Cluster:
+def cluster_of(
+    directory: Path, options: str = 'max_lora_rank = 32, args = "--max-model-len 8192"', **more: Any
+) -> Cluster:
     table = {"idle_stop": 600, "start_timeout": 20, "max_pods": 2, "price": 0.5, **more}
     said = "\n".join(f"{key} = {json.dumps(value)}" for key, value in table.items())
     return parsed(
@@ -53,7 +55,7 @@ regions = ["EU-RO-1"]
 {said}
 [inference.pods.models."m"]
 context = 8192
-options = {{ max_lora_rank = 32, args = "--max-model-len 8192" }}
+options = {{ {options} }}
 """)
     )
 
@@ -130,6 +132,23 @@ async def test_a_renewal_follows_a_pod_runpod_maps_to_another_port(
     assert store is not None
     assert (await store.get(lease.pod)).address == "https://203.0.113.7:40999"  # type: ignore[union-attr]
     await pods.release()
+
+
+async def test_a_pod_whose_provider_says_its_thinking_starts_vllm_bounding_it(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    ledger, fake, _ = world
+    reasoning = 'reasoning = { parser = "qwen3", open = "<think>", close = "\\n</think>\\n\\n" }'
+    cluster = cluster_of(tmp_path, f'max_lora_rank = 32, args = "--max-model-len 8192", {reasoning}')
+    pods = pods_of("run_1", cluster, ledger, fake)
+    await pods.claim([NEED])
+    (body,) = fake.created_bodies()
+    assert body["env"]["VLLM_REASONING_PARSER"] == "qwen3"
+    config = json.loads(body["env"]["VLLM_REASONING_CONFIG"])
+    assert config == {"reasoning_start_str": "<think>", "reasoning_end_str": "\n</think>\n\n"}
+    await pods.release()
+    with pytest.raises(ClusterError, match="reasoning is a table of parser"):
+        cluster_of(tmp_path, 'reasoning = { parser = "qwen3", open = "<think>" }')
 
 
 async def test_a_run_starts_a_pod_renews_it_and_releases_it_warm(

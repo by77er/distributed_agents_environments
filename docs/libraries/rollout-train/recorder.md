@@ -69,6 +69,17 @@ Where a budget is set:
    trained on. A model that opens no block and answers at once is not closed.
 3. A second phase samples the answer, unless the turn already ended.
 
+Where the channel's engines bound thinking themselves (`Sampler.bounds_thinking`: vLLM started with a reasoning config,
+the provider's `reasoning`) and the prompt opens the thinking (Qwen3.5), the turn is one generation: the engine is told
+how many tokens it may think after the prompt's open (`thinking_budget`, the prompt's own tokens after it counted),
+forces the renderer's close there and samples the answer on. It is the same turn without sampling the prompt and the
+thinking a second time, which the second phase does:
+
+- The forced tokens are masked as in phases. Where the last token sampled begins the close (a newline before
+  `</think>`), the engine forces only the rest, and only that is masked.
+- An answer longer than its budget is cut at it, where the second phase would have stopped.
+- An engine that does not close the thinking with the renderer's close at the budget fails the turn (`RuntimeError`).
+
 - A request's cap counts every token of the reply: the answer's room comes first, then the forced close, and thinking
   gets what is left, down to none (the block is then closed before it starts).
 - A model whose thinking was closed for it may go on thinking and close the block again itself. The last close

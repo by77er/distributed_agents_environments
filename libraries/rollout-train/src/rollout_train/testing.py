@@ -58,6 +58,7 @@ class ScriptedEngine:
     too."""
 
     max_model_len = 32_768
+    bounds_thinking = False
     processes: Sequence[int] = ()
 
     def __init__(
@@ -91,6 +92,7 @@ class ScriptedEngine:
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         self.prompts.append(list(prompt))

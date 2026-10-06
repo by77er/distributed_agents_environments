@@ -34,6 +34,7 @@ class Held:
     name of the one asked for."""
 
     max_model_len = 4096
+    bounds_thinking = False
 
     def __init__(self, address: str, model: str) -> None:
         self.address, self.model = address, model
@@ -53,6 +54,7 @@ class Held:
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         name = adapter or self.model

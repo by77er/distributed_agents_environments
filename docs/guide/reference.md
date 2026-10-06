@@ -3861,10 +3861,11 @@ class Channel
 **Methods**
 
 - `@property def context_limit(self) -> int` — The longest turn the channel takes, and what it tells programs.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, top: int = 0) -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
+- `@property def bounds_thinking(self) -> bool` — Whether every one of its engines bounds thinking itself.
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, thinking_budget: int | None = None, top: int = 0) -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
   beginnings are cached. `version` and `request` (the version the caller stamps the tokens with, and a name for
   the request) are for samplers elsewhere: this process's own callers read what it publishes.
-- `async def sample(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], name: str | None, session: str = '', top: int = 0) -> Generation` — Sample what is served under `name` (a checkpoint's id, or the model's name; None: the model), as a server
+- `async def sample(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], name: str | None, session: str = '', thinking_budget: int | None = None, top: int = 0) -> Generation` — Sample what is served under `name` (a checkpoint's id, or the model's name; None: the model), as a server
   elsewhere is asked (`rollout_train.inference.remote.CheckpointServer`): `NotLoaded` where it is not served here
   once a load in progress has ended (a turn caught by a full checkpoint's load is sampled again). The answer
   names what sampled it.
@@ -3917,7 +3918,7 @@ host actor).
 
 - `async def models(self, within: float = 2.0) -> dict[str, Any]` — The checkpoints it holds, by name (each a card as vLLM's `/v1/models` lists it); `Unreachable` if it does
   not answer `within` seconds.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, top: int = 0) -> Generation` — Sample from the checkpoint `adapter` names (None: the model it started with); `NotLoaded` where it does not
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, thinking_budget: int | None = None, top: int = 0) -> Generation` — Sample from the checkpoint `adapter` names (None: the model it started with); `NotLoaded` where it does not
   hold it, `Unreachable` where it does not answer. The answer names what sampled it (`Generation.model`). With
   `top`, each sampled token comes with the `top` most likely tokens there (`Engine.generate`).
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', request: str | None = None) -> Scores` — Score tokens with the checkpoint `adapter` names (`Engine.score`), refused as `generate` refuses. The answer
@@ -3963,10 +3964,13 @@ One replica serving a model: in this process, or a client of a server elsewhere.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `max_model_len` | `int` | required | The longest sequence (prompt and completion) it accepts. |
+| `bounds_thinking` | `bool` | required | Whether it bounds a generation's thinking itself (`generate`'s `thinking_budget`): it forces the thinking's close once the budget is spent, and samples on. |
 
 **Methods**
 
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, top: int = 0) -> Generation` — Sample a completion of `prompt` from `adapter` (None: the weights it holds). With `top`, each sampled
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, thinking_budget: int | None = None, top: int = 0) -> Generation` — Sample a completion of `prompt` from `adapter` (None: the weights it holds). With `thinking_budget` (an
+  engine that `bounds_thinking`), at most that many tokens after the last thinking open of `prompt` and the
+  completion, those of the prompt counted, before it forces the thinking's close. With `top`, each sampled
   token comes with the `top` most likely tokens there and their logprobs.
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None) -> Scores` — The logprobs `adapter` gives the tokens at positions `start` to `end` (None: to the end) of `tokens`, each
   given those before it, with the `top` most likely tokens at each. Nothing is sampled.
@@ -4049,7 +4053,7 @@ go: `rollout_train.pods.routing.LeasedServers`), beside those given.
 
 **Methods**
 
-- `def __init__(self, name: str, renderer: 'Renderer', limits: Limits, *, model: str, servers: Sequence['str | CheckpointServer'], wanted: Callable[[], Awaitable[Sequence[Serving]]], max_lag: int = MAX_LAG, connection: Connection | None = None, every: float | None = None, patience: float = 300.0, discover: Callable[[], Awaitable[Sequence['CheckpointServer']]] | None = None) -> None`
+- `def __init__(self, name: str, renderer: 'Renderer', limits: Limits, *, model: str, servers: Sequence['str | CheckpointServer'], wanted: Callable[[], Awaitable[Sequence[Serving]]], max_lag: int = MAX_LAG, connection: Connection | None = None, every: float | None = None, patience: float = 300.0, discover: Callable[[], Awaitable[Sequence['CheckpointServer']]] | None = None, bounds_thinking: bool = False) -> None`
 - `@property def limits(self) -> Limits` — The limits it was given; the longest turn the trainer can train on, as the run says, unless they say one.
 - `@property def context_limit(self) -> int`
 - `@property def bound(self) -> int` — How many checkpoints behind what the channel should serve a sample may be.
@@ -4065,7 +4069,7 @@ go: `rollout_train.pods.routing.LeasedServers`), beside those given.
 - `async def reaches(self) -> bool` — Whether a server would take a turn now.
 - `async def weights(self, session: str) -> tuple[str | None, int]` — The checkpoint a session's next turn samples from (None: the base model) and the version its tokens are
   stamped with: its depth.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, top: int = 0) -> Generation` — Sample on the session's server, from the checkpoint `adapter` names. `Unserved` if the server does not have
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, thinking_budget: int | None = None, top: int = 0) -> Generation` — Sample on the session's server, from the checkpoint `adapter` names. `Unserved` if the server does not have
   it any more (`NotLoaded`), answers for another, or does not answer (`Unreachable`).
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Scores` — Score tokens on the session's server with the checkpoint `adapter` names, refused as `generate` is: every
   token scored is counted as a token in, and none as a token out.
@@ -4095,9 +4099,9 @@ under a name of their own by the server: `load_weights` refuses.
 
 **Methods**
 
-- `def __init__(self, model: str = '', *, address: str, connection: Connection | None = None, client: httpx.AsyncClient | None = None, max_model_len: int | None = None) -> None`
+- `def __init__(self, model: str = '', *, address: str, connection: Connection | None = None, client: httpx.AsyncClient | None = None, max_model_len: int | None = None, bounds_thinking: bool = False) -> None`
 - `async def models(self, within: float = 2.0) -> dict[str, Any]` — The models the server has (`/v1/models`), by name; `Unreachable` if it does not answer `within` seconds.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, top: int = 0) -> Generation` — Complete the prompt's tokens with the model `adapter` names (the base model for none): the tokens sampled,
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, thinking_budget: int | None = None, top: int = 0) -> Generation` — Complete the prompt's tokens with the model `adapter` names (the base model for none): the tokens sampled,
   the logprob of each, how it ended, and the model the server says sampled it. With `top`, the `top` most likely
   tokens at each, by id (`return_tokens_as_token_ids`).
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', request: str | None = None) -> Scores` — The logprobs the model `adapter` names (the base model for none) gives the tokens at positions `start` to
@@ -4133,6 +4137,7 @@ host's `HostServer`), how far behind a sample may be (`max_lag`), and how URLs a
 | `max_lag` | `int` | `MAX_LAG` |  |
 | `connection` | `Connection` | `field(default_factory=Connection)` |  |
 | `discover` | `Callable[[str], Callable[[], Awaitable[Sequence['CheckpointServer']]]] \| None` | `None` | Given a run, what its channel asks at each look for servers that come and go (RunPod's pods). |
+| `bounds_thinking` | `bool` | `False` | Whether its servers bound a generation's thinking themselves (`Engine.bounds_thinking`). |
 
 ### `Routes`
 
@@ -4171,9 +4176,10 @@ servers elsewhere (`rollout_train.inference.remote.RemoteChannel`).
 - `@property def renderer(self) -> 'Renderer'`
 - `@property def limits(self) -> Limits`
 - `@property def context_limit(self) -> int`
+- `@property def bounds_thinking(self) -> bool` — Whether its engines bound a generation's thinking themselves (`Engine.bounds_thinking`).
 - `async def weights(self, session: str) -> tuple[str | None, int]` — The adapter (the checkpoint) a session's next turn samples from (None: the weights the engines hold), and
   the version its tokens are stamped with.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, top: int = 0) -> Generation` — Sample from the checkpoint `adapter` names, stamped `version`; `Unserved` where it is not served (or the
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, thinking_budget: int | None = None, top: int = 0) -> Generation` — Sample from the checkpoint `adapter` names, stamped `version`; `Unserved` where it is not served (or the
   server is gone). `request` names the request, for whatever logs it. With `top`, each sampled token comes with
   the `top` most likely tokens there (`Engine.generate`).
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', version: int | None = None, request: str | None = None) -> Scores` — Score the tokens at positions `start` to `end` of `tokens` with the checkpoint `adapter` names
@@ -4244,7 +4250,7 @@ is its index among the replicas of what it serves, and how many there are. It ke
 - `async def models(self) -> dict[str, Any]` — What it holds, by name, each as a card of vLLM's `/v1/models`: the model it was started with (unless full
   weights replaced it), each adapter (its `parent` the model), each full checkpoint, with the depth each was
   published as.
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, top: int = 0) -> Generation` — Sample the checkpoint `adapter` names (None: the model), as a `CheckpointServer`; `NotLoaded` where it does
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, thinking_budget: int | None = None, top: int = 0) -> Generation` — Sample the checkpoint `adapter` names (None: the model), as a `CheckpointServer`; `NotLoaded` where it does
   not hold it (once a load in progress has ended).
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', request: str | None = None) -> Scores` — Score tokens with the checkpoint `adapter` names (None: the model), as a `CheckpointServer`, refused as
   `generate` is.
@@ -4304,7 +4310,7 @@ each call is an actor call. A host that does not answer (it died, or is starting
 
 - `def __init__(self, handle: Any, address: str) -> None`
 - `async def models(self, within: float = 2.0) -> dict[str, Any]`
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, top: int = 0) -> Generation`
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', request: str | None = None, thinking_budget: int | None = None, top: int = 0) -> Generation`
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None, session: str = '', request: str | None = None) -> Scores`
 - `def close(self) -> None`
 
@@ -4545,10 +4551,12 @@ ignored (`r"qwen3\.5"`: `Qwen/Qwen3.5-9B`, `cyankiwi/Qwen3.5-9B-AWQ-4bit`).
 *function* · `libraries/rollout-train/src/rollout_train/recorder/sampling.py`
 
 ```python
-async def sample_turn(request: SampleRequest, renderer: 'Renderer', limits: Limits, context_limit: int, generate: Generate) -> SampledTurn
+async def sample_turn(request: SampleRequest, renderer: 'Renderer', limits: Limits, context_limit: int, generate: Generate, *, bounds_thinking: bool = False) -> SampledTurn
 ```
 
-Sample one reply to `request`. Raises `ContextOverflow` when the prompt leaves no room to answer.
+Sample one reply to `request`; in one generation where the engine bounds thinking itself (`bounds_thinking`) and
+the prompt opens the thinking. Raises `ContextOverflow` when the prompt leaves no room to answer, and
+`RuntimeError` where an engine that bounds thinking did not close it with the renderer's close at its budget.
 
 ### `Segment`
 
@@ -9726,12 +9734,13 @@ too.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `max_model_len` |  | `32768` |  |
+| `bounds_thinking` |  | `False` |  |
 | `processes` | `Sequence[int]` | `()` |  |
 
 **Methods**
 
 - `def __init__(self, tokenizer: Tokenizer, script: Sequence[tuple[str, str]] = (), *, always: Sequence[tuple[str, str]] = (), gate: Path | None = None) -> None`
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, top: int = 0) -> Generation`
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, thinking_budget: int | None = None, top: int = 0) -> Generation`
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None) -> Scores` — Each token scored at -0.25, its `top` most likely being itself and the tokens after it (`scripted_top`).
 - `async def load_adapter(self, name: str, path: str) -> None`
 - `async def remove_adapter(self, name: str) -> None`
@@ -9797,8 +9806,9 @@ class VllmEngine
 
 **Methods**
 
-- `def __init__(self, model: str, *, gpu_memory_utilization: float = 0.72, max_model_len: int = 8192, max_num_seqs: int = 32, max_num_batched_tokens: int = 4096, max_lora_rank: int = 32, max_loras: int = 2, language_model_only: bool = True, speculative: Mapping[str, Any] | None = None, quantization: str | None = None, seed: int = 0, max_logprobs: int = 20) -> None`
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, top: int = 0) -> Generation`
+- `def __init__(self, model: str, *, gpu_memory_utilization: float = 0.72, max_model_len: int = 8192, max_num_seqs: int = 32, max_num_batched_tokens: int = 4096, max_lora_rank: int = 32, max_loras: int = 2, language_model_only: bool = True, speculative: Mapping[str, Any] | None = None, quantization: str | None = None, seed: int = 0, max_logprobs: int = 20, reasoning: Mapping[str, str] | None = None) -> None` — `reasoning` (`parser`, vLLM's reasoning parser for the model, and `open` and `close`, the renderer's thinking
+  open and forced close) has the engine bound a generation's thinking itself (`generate`'s `thinking_budget`).
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, thinking_budget: int | None = None, top: int = 0) -> Generation`
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None) -> Scores` — The logprobs the model (or `adapter`) gives the tokens at positions `start` to `end` of `tokens`, each given
   those before it, and the `top` most likely tokens at each: vLLM's prompt logprobs of `tokens` up to `end`, with
   one token generated (vLLM generates at least one) and dropped. The scores are of the model's own distribution
@@ -11026,7 +11036,7 @@ as `TinkerTrainer` takes it.
 **Methods**
 
 - `def __init__(self, model: str, *, max_model_len: int = 32768, project: str | None = None, service: 'Service | str | None' = None) -> None`
-- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, top: int = 0) -> Generation`
+- `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, thinking_budget: int | None = None, top: int = 0) -> Generation`
 - `async def score(self, tokens: Sequence[int], *, start: int, end: int | None = None, top: int = 0, adapter: str | None) -> Scores`
 - `async def load_adapter(self, name: str, path: str) -> None` — Sample from the sampler checkpoint that the pointer in `path` (a version's weights) names.
 - `async def remove_adapter(self, name: str) -> None`

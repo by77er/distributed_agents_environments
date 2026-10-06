@@ -42,6 +42,7 @@ An engine host makes `VllmEngine(model, max_model_len=context, **options, max_lo
 | `quantization` | vLLM's quantization of a checkpoint as it loads: `fp8` turns a bfloat16 checkpoint's linear layers into FP8 (the embeddings and the output layer stay bfloat16). Off unless given |
 | `seed` | The engine's sampling seed |
 | `max_logprobs` | The most tokens a request may ask for at each position with their logprobs (`top`), as vLLM caps them: 20 unless given. An engine host started from a cluster's `vllm` provider is given the provider's `max_logprobs`, the top-k it declares |
+| `reasoning` | `parser`, `open` and `close`: vLLM's reasoning parser for the model and the renderer's thinking open and forced close, as its reasoning config, so that the engine bounds a request's thinking itself (`Engine.bounds_thinking`, `thinking_budget`). Off unless given |
 
 The engine always loads the model as bfloat16, with LoRA and sleep mode enabled.
 

@@ -411,6 +411,11 @@ class Pods:
             env["VLLM_ARGS"] = args
             if offer is not None and offer.max_lora_rank is not None:
                 env["VLLM_MAX_LORA_RANK"] = str(offer.max_lora_rank)
+            if offer is not None and isinstance(reasoning := offer.options.get("reasoning"), Mapping):
+                env["VLLM_REASONING_PARSER"] = str(reasoning["parser"])
+                env["VLLM_REASONING_CONFIG"] = json.dumps(
+                    {"reasoning_start_str": reasoning["open"], "reasoning_end_str": reasoning["close"]}
+                )
             if lease.role == HOST and table.sleep:
                 env["ROLLOUT_SLEEP_VLLM"] = "1"
         if lease.role in (TRAINER, HOST):

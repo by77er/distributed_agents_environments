@@ -31,12 +31,18 @@ if [ "${ROLLOUT_SLEEP_VLLM:-}" = 1 ]; then
     sleeping=(--enable-sleep-mode)
 fi
 
+# A thinking format (the provider's `reasoning`): vLLM bounds a request's thinking itself (`thinking_token_budget`).
+reasoning_options=()
+if [ -n "${VLLM_REASONING_PARSER:-}" ]; then
+    reasoning_options=(--reasoning-parser "$VLLM_REASONING_PARSER" --reasoning-config "$VLLM_REASONING_CONFIG")
+fi
+
 start certificates /opt/rollout/bin/pki.sh renew
 start envoy envoy --config-path "${ENVOY_CONFIG:-/etc/envoy/envoy.yaml}" --log-level "${ENVOY_LOG_LEVEL:-warn}" \
     --concurrency "${ENVOY_CONCURRENCY:-4}" # (by default Envoy runs a worker per hardware thread the machine has, not the pod)
 start vllm vllm serve "$ROLLOUT_MODEL" --host 127.0.0.1 --port 8000 \
     --enable-lora --max-lora-rank "${VLLM_MAX_LORA_RANK:-32}" "${lora_options[@]}" "${sleeping[@]}" \
-    --logprobs-mode processed_logprobs "${vllm_options[@]}"
+    --logprobs-mode processed_logprobs "${reasoning_options[@]}" "${vllm_options[@]}"
 start trainer /opt/rollout/venv/bin/python -m rollout_train.pods.training
 # (the follower says the pod is ready once vLLM serves what the run says and the training service holds its trainer)
 export ROLLOUT_TRAINER_URL=${ROLLOUT_TRAINER_URL:-http://127.0.0.1:8001}

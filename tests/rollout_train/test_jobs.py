@@ -253,3 +253,27 @@ async def test_a_driver_says_each_progress_noted_in_a_line_and_in_its_runners_be
     assert len(beaten) == 1  # (beaten at once, then not again for PROGRESS_BEAT seconds)
     stepping.on_note({"kind": "progress", "step": 3, "progress": None})
     assert stepping.latest is None and capsys.readouterr().out == ""
+
+
+def test_a_channels_servers_bound_thinking_where_every_provider_says_the_renderers_thinking() -> None:
+    import tomllib
+
+    from rollout_train.cluster import parsed
+    from rollout_train.jobs import bounds_thinking
+    from rollout_train.recorder.renderers import ThinkingFormat
+
+    said = 'reasoning = { parser = "qwen3", open = "<think>", close = "\\n</think>\\n\\n" }'
+    other = 'reasoning = { parser = "qwen3", open = "<think>", close = "</think>" }'
+    tables = "".join(
+        f'[inference.{name}]\nkind = "vllm-servers"\nauth = "none"\n'
+        f'addresses = ["http://127.0.0.1:{8000 + ord(name)}"]\n'
+        f'[inference.{name}.models."m"]\ncontext = 8192\noptions = {{ {options} }}\n'
+        for name, options in (("a", said), ("b", said), ("c", ""), ("d", other))
+    )
+    cluster = parsed(tomllib.loads(f'name = "test"\n[ledger]\nurl = "sqlite:///ledger.db"\n{tables}'))
+    renderer = SimpleNamespace(thinking=ThinkingFormat("<think>", "</think>", True, "\n</think>\n\n"))
+    assert bounds_thinking(cluster, "policy", ["a", "b"], "m", renderer)
+    assert not bounds_thinking(cluster, "policy", ["a", "c"], "m", renderer)  # (one says no thinking)
+    assert not bounds_thinking(cluster, "policy", ["a"], "m", SimpleNamespace(thinking=None))
+    with pytest.raises(ValueError, match="provider d's reasoning"):
+        bounds_thinking(cluster, "policy", ["a", "d"], "m", renderer)

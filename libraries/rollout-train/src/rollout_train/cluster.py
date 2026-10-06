@@ -617,6 +617,15 @@ def _inference(name: str, described: dict[str, Any], tls: Tls | None) -> Inferen
             raise ClusterError(
                 f'{where}.models."{model}" options: max_logprobs is the provider\'s ({where} max_logprobs)'
             )
+        reasoning = options.get("reasoning")
+        if reasoning is not None and (
+            not isinstance(reasoning, dict) or sorted(reasoning) != ["close", "open", "parser"]
+            or not all(isinstance(each, str) and each for each in reasoning.values())
+        ):  # fmt: skip
+            raise ClusterError(
+                f'{where}.models."{model}" options: reasoning is a table of parser (vLLM\'s reasoning parser), '
+                "open and close (the renderer's thinking open and forced close)"
+            )
         cost = _numbers(offer.take("cost", {}))
         if cost is None:
             raise ClusterError(f'{where}.models."{model}" cost is a table of dollars per million tokens (or per hour)')

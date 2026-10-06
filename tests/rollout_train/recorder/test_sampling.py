@@ -15,7 +15,7 @@ from rollout_train.inference import Generation, Limits
 from rollout_train.recorder.renderers import Renderer, ThinkingFormat
 from rollout_train.recorder.sampling import MINIMUM_ANSWER, sample_turn
 from rollout_train.run_settings import key_of
-from rollout_train.testing import PlainRenderer, plain_channel
+from rollout_train.testing import Characters, PlainRenderer, plain_channel
 
 LIMIT = 1000
 
@@ -42,7 +42,9 @@ class Scripted:
         self.replies = list(replies)
         self.rooms: list[int] = []
 
-    async def __call__(self, context: Sequence[int], room: int, stop: Sequence[int]) -> Generation:
+    async def __call__(
+        self, context: Sequence[int], room: int, stop: Sequence[int], thinking: int | None = None
+    ) -> Generation:
         self.rooms.append(room)
         text = self.replies.pop(0)
         tokens = [ord(each) for each in text][:room]
@@ -150,6 +152,90 @@ async def test_a_prompt_that_leaves_less_than_the_least_answer_is_refused() -> N
     small = Scripted("answer\n")  # a request that caps its output below the least answer needs only its cap
     await sampled(Opened(), Limits(), small, cap=10, limit=PROMPT + 20)
     assert small.rooms == [10]
+
+
+class Prompted(Opened):
+    """Thinking the prompt opens with `<` and one token more (as Qwen3.5's `<think>` and a newline), closed with `>`,
+    and closed by force with `|>|`."""
+
+    thinking = ThinkingFormat(open="<", close=">", prompt_opens=True, forced_close="|>|")  # type: ignore[assignment]
+
+    def render(self, messages: Sequence[Any], tools: Sequence[Any]) -> list[int]:
+        return [*super().render(messages, tools), *self.encode("<~")]
+
+
+class Bounding:
+    """An engine that bounds thinking itself, as vLLM with a reasoning config does: it samples `thought` until it
+    closes (`>`) or as many tokens after the context's last open as it is told it may; then forces `close` (what the
+    sampled tokens already began of it, only the rest) and samples `answer`, all cut to the room and at a stop."""
+
+    def __init__(self, thought: str, answer: str, close: str = "|>|") -> None:
+        self.thought, self.answer, self.close = thought, answer, close
+        self.calls: list[tuple[int, int | None]] = []
+
+    async def __call__(
+        self, context: Sequence[int], room: int, stop: Sequence[int], thinking: int | None = None
+    ) -> Generation:
+        self.calls.append((room, thinking))
+        assert thinking is not None
+        opened = len(context) - 1 - max(index for index, token in enumerate(context) if token == ord("<"))
+        allowed = thinking - opened
+        if ">" in self.thought[:allowed]:
+            text = self.thought[: self.thought.index(">") + 1] + self.answer
+            forced = 0
+        else:
+            sampled = self.thought[:allowed]
+            begun = next(size for size in range(len(self.close), -1, -1) if sampled.endswith(self.close[:size]))
+            text = sampled + self.close[begun:] + self.answer
+            forced = len(self.close) - begun
+        tokens = [ord(each) for each in text][:room]
+        if stops := [index for index, token in enumerate(tokens) if token in stop]:
+            tokens = tokens[: stops[0] + 1]
+        logprobs = [-0.5] * len(tokens)
+        if forced:
+            for index in range(allowed, allowed + forced):
+                if index < len(logprobs):
+                    logprobs[index] = 0.0  # (vLLM's processed logprob of a forced token)
+        stopped = bool(tokens) and tokens[-1] in stop
+        return Generation(tokens, logprobs, "stop" if stopped else "length")
+
+
+async def bounded(engine: Bounding, limits: Limits) -> Any:
+    return await sample_turn(request(), cast(Renderer, Prompted()), limits, LIMIT, engine, bounds_thinking=True)
+
+
+async def test_an_engine_that_bounds_thinking_samples_the_turn_in_one_generation_with_its_forced_close_masked() -> None:
+    engine = Bounding("x" * 100, "abcdefgh")
+    turn = await bounded(engine, Limits(thinking=30, answer=5))
+    assert engine.calls == [(30 + 3 + 5, 1 + 30)]  # (the thinking, the close, the answer; the prompt's `~` counted)
+    assert Characters().decode(turn.completion) == "x" * 30 + "|>|" + "abcde"  # (the answer cut at its budget)
+    assert turn.mask == [True] * 30 + [False] * 3 + [True] * 5 and len(turn.phases) == 1
+    assert all(math.isnan(each) for each in turn.logprobs[30:33]) and turn.logprobs[33:] == [-0.5] * 5
+    assert turn.result.finish_reason is FinishReason.LENGTH
+
+    closed = await bounded(Bounding("short>", "ok\n"), Limits(thinking=30, answer=5))  # closed in time
+    assert Characters().decode(closed.completion) == "short>ok\n" and all(closed.mask)
+    assert closed.result.finish_reason is FinishReason.STOP
+
+    begun = await bounded(Bounding("x" * 29 + "|" + "x" * 50, "ok\n"), Limits(thinking=30, answer=5))
+    assert Characters().decode(begun.completion) == "x" * 29 + "|" + ">|" + "ok\n"  # (it forced only the rest)
+    assert begun.mask == [True] * 30 + [False] * 2 + [True] * 3
+
+    room = Bounding("x" * 100, "y" * 2000)  # with no answer budget, the answer takes what the turn has left
+    turn = await bounded(room, Limits(thinking=30))
+    assert room.calls == [(LIMIT - PROMPT - 2, 1 + 30)] and len(turn.completion) == LIMIT - PROMPT - 2
+
+
+async def test_an_engine_that_forces_another_close_than_the_renderers_fails_the_turn() -> None:
+    with pytest.raises(RuntimeError, match="did not force the renderer's thinking close"):
+        await bounded(Bounding("x" * 100, "ok\n", close="#"), Limits(thinking=30, answer=5))
+
+
+async def test_thinking_the_model_opens_itself_is_sampled_in_phases_whatever_the_engine() -> None:
+    generate = Scripted("<" + "x" * 100, "answer\n")
+    turn = await sample_turn(request(), cast(Renderer, Opening()), Limits(thinking=30), LIMIT, generate,
+                             bounds_thinking=True)  # fmt: skip
+    assert len(generate.rooms) == 2 and turn.mask.count(False) == 1
 
 
 def test_a_contract_without_both_budgets_offers_the_whole_context() -> None:

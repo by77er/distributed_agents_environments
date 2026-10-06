@@ -17,6 +17,7 @@ class Slow:
     """An engine that takes a moment, and keeps what it was asked and told."""
 
     max_model_len = 8192
+    bounds_thinking = False
     processes: Sequence[int] = ()
 
     def __init__(self, seconds: float = 0.1, tokens: int = 1) -> None:

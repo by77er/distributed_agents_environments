@@ -28,6 +28,7 @@ class EchoEngine:
     `delay` seconds first."""
 
     max_model_len = 32_768
+    bounds_thinking = False
     processes: Sequence[int] = ()
 
     def __init__(self, delay: float = 0.0) -> None:
@@ -44,6 +45,7 @@ class EchoEngine:
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         self.prompts.append(list(prompt))

@@ -102,6 +102,7 @@ class CheckpointServer(Protocol):
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         """Sample from the checkpoint `adapter` names (None: the model it started with); `NotLoaded` where it does not
@@ -231,9 +232,12 @@ class RemoteEngine:
         connection: Connection | None = None,
         client: httpx.AsyncClient | None = None,
         max_model_len: int | None = None,
+        bounds_thinking: bool = False,
     ) -> None:
         self.model = model
         self.address = address.rstrip("/")
+        self.bounds_thinking = bounds_thinking
+        """Whether the server was started with its reasoning config, so that it bounds thinking (`generate`)."""
         https_only(self.address, connection)
         self._http = client or (connection or Connection()).client()
         self._owned = client is None
@@ -260,6 +264,7 @@ class RemoteEngine:
         adapter: str | None,
         session: str = "",
         request: str | None = None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         """Complete the prompt's tokens with the model `adapter` names (the base model for none): the tokens sampled,
@@ -280,6 +285,8 @@ class RemoteEngine:
         }
         if top:
             body["return_tokens_as_token_ids"] = True
+        if thinking_budget is not None:  # (the server forces its reasoning config's close once it is spent)
+            body["thinking_token_budget"] = thinking_budget
         choice = await self._completed(body, session, request)
         listed: list[Any] = choice.get("token_ids") or []
         tokens = [int(token) for token in listed]
@@ -458,6 +465,7 @@ class RemoteChannel:
         every: float | None = None,
         patience: float = 300.0,
         discover: Callable[[], Awaitable[Sequence["CheckpointServer"]]] | None = None,
+        bounds_thinking: bool = False,
     ) -> None:
         if not servers and discover is None:
             raise ValueError(f"channel {name!r} has no server")
@@ -465,6 +473,8 @@ class RemoteChannel:
         self.renderer = renderer
         self.model = model
         self.max_lag = max_lag
+        self.bounds_thinking = bounds_thinking
+        """Whether its servers bound a generation's thinking themselves (vLLM started with its reasoning config)."""
         self._limits = limits
         self._wanted_now = wanted
         self._every = EVERY if every is None else every
@@ -473,7 +483,9 @@ class RemoteChannel:
         self._engines: dict[str, CheckpointServer] = {
             each.address: each
             for each in (
-                RemoteEngine(model, address=server, client=self._http) if isinstance(server, str) else server
+                RemoteEngine(model, address=server, client=self._http, bounds_thinking=bounds_thinking)
+                if isinstance(server, str)
+                else server
                 for server in servers
             )
         }
@@ -586,6 +598,7 @@ class RemoteChannel:
         session: str = "",
         version: int | None = None,
         request: str | None = None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         """Sample on the session's server, from the checkpoint `adapter` names. `Unserved` if the server does not have
@@ -594,7 +607,7 @@ class RemoteChannel:
         async def asked(server: CheckpointServer) -> Generation:
             return await server.generate(
                 prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
-                adapter=adapter, session=session, request=request, top=top,
+                adapter=adapter, session=session, request=request, thinking_budget=thinking_budget, top=top,
             )  # fmt: skip
 
         generation = await self._asked(asked, adapter, session)
@@ -693,6 +706,8 @@ class Route:
     connection: Connection = field(default_factory=Connection)
     discover: Callable[[str], Callable[[], Awaitable[Sequence["CheckpointServer"]]]] | None = None
     """Given a run, what its channel asks at each look for servers that come and go (RunPod's pods)."""
+    bounds_thinking: bool = False
+    """Whether its servers bound a generation's thinking themselves (`Engine.bounds_thinking`)."""
 
 
 class Routes:
@@ -723,6 +738,7 @@ class Routes:
                 channel, route.renderer, route.limits, model=route.model, servers=route.servers, wanted=wanted,
                 max_lag=route.max_lag, connection=route.connection, every=self._every, patience=self._patience,
                 discover=route.discover(run) if route.discover is not None else None,
+                bounds_thinking=route.bounds_thinking,
             )  # fmt: skip
         return self._channels[key]
 

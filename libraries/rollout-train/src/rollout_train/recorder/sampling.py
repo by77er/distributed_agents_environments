@@ -15,6 +15,12 @@ within the request's own cap (`max_output_tokens`) where it gives one. The budge
   so never trained on) and a second phase samples the answer: `Limits.answer` tokens, or with no answer budget,
   whatever room is left. Where the model opens its thinking itself (Qwen3) rather than the prompt, the first phase also
   has room to open it, and the close is forced only if it did.
+- **A budget set, on an engine that bounds thinking itself** (`bounds_thinking`: vLLM with its reasoning config) and
+  thinking the prompt opens: one generation, the engine told how many tokens of thinking it may sample after the
+  prompt's open (`thinking`), which then forces the renderer's close and samples the answer on. The same turn as two
+  phases, without sampling the prompt and the thinking again: the close is forced at the same place (where the engine
+  forced only its end, after a sampled token that begins it, only that end), and an answer longer than its budget is
+  cut there, as the second phase would have stopped it.
 
 The answer's room is reserved first: `Limits.answer`, or with no answer budget, `MINIMUM_ANSWER` tokens (both within
 the request's cap). A prompt that leaves less than that, and room for a forced close, is refused (`ContextOverflow`).
@@ -38,9 +44,12 @@ program compacts rather than receives a reply cut off by the context's end. A to
 
 
 class Generate(Protocol):
-    """Sample a continuation of `context`: at most `room` tokens, stopping at any of `stop`."""
+    """Sample a continuation of `context`: at most `room` tokens, stopping at any of `stop`; with `thinking`, at most
+    that many tokens after the context's last thinking open before the engine forces the thinking's close."""
 
-    async def __call__(self, context: Sequence[int], room: int, stop: Sequence[int]) -> Generation: ...
+    async def __call__(
+        self, context: Sequence[int], room: int, stop: Sequence[int], thinking: int | None = None
+    ) -> Generation: ...
 
 
 @dataclass(frozen=True)
@@ -57,9 +66,17 @@ class SampledTurn:
 
 
 async def sample_turn(
-    request: SampleRequest, renderer: "Renderer", limits: Limits, context_limit: int, generate: Generate
+    request: SampleRequest,
+    renderer: "Renderer",
+    limits: Limits,
+    context_limit: int,
+    generate: Generate,
+    *,
+    bounds_thinking: bool = False,
 ) -> SampledTurn:
-    """Sample one reply to `request`. Raises `ContextOverflow` when the prompt leaves no room to answer."""
+    """Sample one reply to `request`; in one generation where the engine bounds thinking itself (`bounds_thinking`) and
+    the prompt opens the thinking. Raises `ContextOverflow` when the prompt leaves no room to answer, and
+    `RuntimeError` where an engine that bounds thinking did not close it with the renderer's close at its budget."""
     prompt = renderer.render(request.context.append, request.tools)
     thinking = renderer.thinking
     cap = request.max_output_tokens
@@ -94,6 +111,40 @@ async def sample_turn(
         logprobs.extend(generation.logprobs)
         return generation.finish_reason
 
+    async def thought_and_answered(budget: int) -> None:
+        """Thinking, its close where the engine forced it, and the answer, in one generation (`bounds_thinking`)."""
+        assert thinking is not None
+        close = renderer.encode(thinking.forced_close)
+        opened = _after_open(prompt, renderer.encode(thinking.open))
+        after = answer if answer is not None else room - budget - closing
+        started = time.monotonic()
+        generation = await generate(prompt, budget + closing + after, stops, thinking=opened + budget)
+        phases.append(time.monotonic() - started)
+        tokens, sampled = generation.tokens, generation.logprobs
+        ends = set(renderer.thinking_end_token_ids())
+        natural = next((index for index, token in enumerate(tokens[:budget]) if token in ends), None)
+        if natural is not None or len(tokens) <= budget:  # closed in time, or stopped while thinking: all sampled
+            cut, forced = (natural + 1 if natural is not None else len(tokens)), 0
+        else:
+            begun = next((size for size in range(len(close)) if tokens[budget - size : budget] == close[:size]
+                          and tokens[budget : budget + len(close) - size] == close[size:]), None)  # fmt: skip
+            if begun is None:
+                raise RuntimeError("the engine did not force the renderer's thinking close at the thinking's budget")
+            cut, forced = budget, len(close) - begun
+        completion.extend(tokens[:cut])
+        mask.extend([True] * cut)
+        logprobs.extend(sampled[:cut])
+        completion.extend(tokens[cut : cut + forced])
+        mask.extend([False] * forced)
+        logprobs.extend([math.nan] * forced)
+        if completion and completion[-1] in stops:
+            return
+        left = answer if answer is not None else room - len(completion)
+        replied = tokens[cut + forced :][:left]  # (an answer past its budget: the second phase would have stopped it)
+        completion.extend(replied)
+        mask.extend([True] * len(replied))
+        logprobs.extend(sampled[cut + forced :][: len(replied)])
+
     async def answering() -> None:
         """The answer, unless the turn already ended: its budget, or everything the turn has left."""
         if completion and completion[-1] in stops:
@@ -106,7 +157,9 @@ async def sample_turn(
         opening = 0 if thinking.prompt_opens else len(renderer.encode(thinking.open))
         budget = room - closing - needed - opening  # thinking may take what the answer leaves
         budget = max(0, budget if limits.thinking is None else min(limits.thinking, budget))
-        if thinking.prompt_opens:
+        if thinking.prompt_opens and bounds_thinking and budget > 0:
+            await thought_and_answered(budget)
+        elif thinking.prompt_opens:
             spent = budget == 0  # with no room to think, the block the prompt opened is closed at once
             if budget > 0:
                 spent = await phase(prompt, budget, [*renderer.thinking_end_token_ids(), *stops]) == "length"
@@ -138,3 +191,11 @@ async def sample_turn(
         ),
     )
     return SampledTurn(result, prompt, completion, mask, logprobs, phases)
+
+
+def _after_open(prompt: Sequence[int], opening: Sequence[int]) -> int:
+    """How many of the prompt's tokens follow its last thinking open (`ValueError` where it opens none)."""
+    for start in range(len(prompt) - len(opening), -1, -1):
+        if list(prompt[start : start + len(opening)]) == list(opening):
+            return len(prompt) - start - len(opening)
+    raise ValueError("the prompt does not open the thinking its renderer says it opens")

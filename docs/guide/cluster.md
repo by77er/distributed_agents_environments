@@ -153,7 +153,11 @@ from), a `cost` table (dollars per million tokens by class: `input`, `cached_inp
 engines are started with; `max_lora_rank` is the highest adapter rank it loads, and a training run's engines are
 started with room for its own adapters only, `trainer.rank` times the bridge's rank factor, since a larger rank costs
 cache; vLLM takes the next rank it accepts (1, 8, 16, 32, 64, 128, 256, 320 or 512); a hosted API's model says what it
-takes, [below](#hosted-apis)).
+takes, [below](#hosted-apis)). A vLLM model's `reasoning` (`{ parser = "qwen3", open = "<think>", close =
+"\n</think>\n\n" }`: vLLM's reasoning parser for the model, and the renderer's thinking open and forced close) starts
+its servers with a reasoning config, so that they bound a turn's thinking themselves and a turn is one request
+([the recorder](../libraries/rollout-train/recorder.md)); a run whose channel's renderer opens and closes its thinking
+otherwise fails as it starts. A channel's servers bound thinking only where every one of its providers says so.
 
 A trainer's `cost` is dollars per million tokens trained (`train`, every token of each trained segment: its prompts and
 what was sampled) or per `hour`. Where the price depends on the model, `costs` gives each model its own table

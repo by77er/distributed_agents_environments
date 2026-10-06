@@ -79,6 +79,9 @@ class Engine(Protocol):
 
     max_model_len: int
     """The longest sequence (prompt and completion) it accepts."""
+    bounds_thinking: bool
+    """Whether it bounds a generation's thinking itself (`generate`'s `thinking_budget`): it forces the thinking's
+    close once the budget is spent, and samples on."""
 
     async def generate(
         self,
@@ -89,9 +92,12 @@ class Engine(Protocol):
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
-        """Sample a completion of `prompt` from `adapter` (None: the weights it holds). With `top`, each sampled
+        """Sample a completion of `prompt` from `adapter` (None: the weights it holds). With `thinking_budget` (an
+        engine that `bounds_thinking`), at most that many tokens after the last thinking open of `prompt` and the
+        completion, those of the prompt counted, before it forces the thinking's close. With `top`, each sampled
         token comes with the `top` most likely tokens there and their logprobs."""
         ...
 
@@ -172,6 +178,11 @@ class Sampler(Protocol):
     @property
     def context_limit(self) -> int: ...
 
+    @property
+    def bounds_thinking(self) -> bool:
+        """Whether its engines bound a generation's thinking themselves (`Engine.bounds_thinking`)."""
+        ...
+
     async def weights(self, session: str) -> tuple[str | None, int]:
         """The adapter (the checkpoint) a session's next turn samples from (None: the weights the engines hold), and
         the version its tokens are stamped with."""
@@ -189,6 +200,7 @@ class Sampler(Protocol):
         session: str = "",
         version: int | None = None,
         request: str | None = None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         """Sample from the checkpoint `adapter` names, stamped `version`; `Unserved` where it is not served (or the
@@ -252,6 +264,11 @@ class Channel:
         accepted = min(engine.max_model_len for engine in self.engines)
         return min(accepted, self.limits.sequence or accepted)
 
+    @property
+    def bounds_thinking(self) -> bool:
+        """Whether every one of its engines bounds thinking itself."""
+        return all(engine.bounds_thinking for engine in self.engines)
+
     async def generate(
         self,
         prompt: Sequence[int],
@@ -264,6 +281,7 @@ class Channel:
         session: str = "",
         version: int | None = None,
         request: str | None = None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         """Sample from one of the engines: the same one for a session every time, where its prompts' shared
@@ -271,7 +289,7 @@ class Channel:
         the request) are for samplers elsewhere: this process's own callers read what it publishes."""
         return await self._sampled(
             prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
-            adapter=lambda: adapter, session=session, top=top,
+            adapter=lambda: adapter, session=session, thinking_budget=thinking_budget, top=top,
         )  # fmt: skip
 
     async def sample(
@@ -284,6 +302,7 @@ class Channel:
         stop_token_ids: Sequence[int],
         name: str | None,
         session: str = "",
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         """Sample what is served under `name` (a checkpoint's id, or the model's name; None: the model), as a server
@@ -292,7 +311,7 @@ class Channel:
         names what sampled it."""
         generation = await self._sampled(
             prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
-            adapter=lambda: self.resolved(name), session=session, top=top,
+            adapter=lambda: self.resolved(name), session=session, thinking_budget=thinking_budget, top=top,
         )  # fmt: skip
         return replace(generation, model=name or self.model)
 
@@ -349,6 +368,7 @@ class Channel:
         adapter: Callable[[], str | None],
         session: str,
         top: int,
+        thinking_budget: int | None = None,
     ) -> Generation:
         """Sample on the session's engine from the adapter `adapter` says, asked once the gate is open (what a load in
         progress left)."""
@@ -356,7 +376,7 @@ class Channel:
         async def asked(engine: Engine, chosen: str | None) -> Generation:
             return await engine.generate(
                 prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
-                adapter=chosen, top=top,
+                adapter=chosen, thinking_budget=thinking_budget, top=top,
             )  # fmt: skip
 
         generation = await self._asked(asked, adapter, session)

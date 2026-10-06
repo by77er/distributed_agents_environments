@@ -46,6 +46,8 @@ class TinkerEngine:
     ) -> None:
         self.model = model
         self.max_model_len = max_model_len
+        self.bounds_thinking = False
+        """Tinker's sampler does not bound thinking: a turn's thinking and its answer are phases of their own."""
         self._service = service_of(service, project)
         self._base: Sampler | None = None
         self._adapters: dict[str, Sampler] = {}
@@ -61,10 +63,13 @@ class TinkerEngine:
         top_p: float,
         stop_token_ids: Sequence[int],
         adapter: str | None,
+        thinking_budget: int | None = None,
         top: int = 0,
     ) -> Generation:
         if top:
             raise NotImplementedError(UNCHECKED)
+        if thinking_budget is not None:
+            raise NotImplementedError("Tinker's sampler does not bound thinking: thinking is a phase of its own")
         self._paid()
         parameters = SamplingParams(
             max_tokens=max_tokens,
