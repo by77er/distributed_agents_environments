@@ -233,7 +233,7 @@ minutes, every half second):
 | The driver (loop, gateway, runner) | 0.11, 0.22, 0.48; 0.12, 0.27, 0.99 | 1.4 GiB; 1.4 GiB | 0.5 CPU, 2 GiB |
 | The engine host (with vLLM's engine core) | 1.07, 1.18, 1.31; 1.07, 1.20, 2.92 | 4.0 GiB; 4.9 GiB | 1 CPU |
 | The trainer | 1.0 while it steps, 0.01 between steps | 2.2 GiB while it steps | 1 CPU |
-| The `verbatim` bridge | about 1 for under a second in a fresh worker | 0.57 GiB | 0.5 CPU, 1 GiB |
+| The bridge's bundle | a bridge that writes files, as a Ray task (the `verbatim` bridge is noted in the driver, with no task) | as the bridge declares | 0.5 CPU, 1 GiB for a chain of `verbatim` |
 | Ray's own processes | 0.04, 0.06; 0.04, 0.08 | 0.5 GiB | `HEADROOM`: 0.25 CPU, 2 GiB |
 | The pod that submits a RayJob's job | 0.06 over the job | 130 MiB | `SUBMITTER`: 0.1 CPU, 256 MiB |
 

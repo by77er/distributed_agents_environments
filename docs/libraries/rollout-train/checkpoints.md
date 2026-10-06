@@ -39,7 +39,8 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
 
 ## Checkpoints
 
-- **A checkpoint is made by its append.** `add` keeps the checkpoint's files in the blob store and then appends the
+- **A checkpoint is made by its append.** `add` takes the checkpoint's files as manifests of the blob store (a trainer
+  elsewhere kept them there) or as directories on this machine, whose files it keeps first, and appends the
   checkpoint to the ledger's `checkpoints` table, under the fence of the run that makes it. A writer that dies before the
   append has made nothing. The training loop decides a step's checkpoint id before the trainer is called (the step's
   `makes`), so a step taken again after a crash adds the same id and gets the checkpoint that is there.
@@ -77,6 +78,34 @@ files = await checkpoints.files(head.weights, cache / head.id)         # on any 
   - Datasets', [episodes](episodes.md)' and batches' blobs are never deleted, and do not count as names: only
     checkpoints' files are deleted. One of them would be lost only if a released checkpoint had a file of exactly its
     bytes (a trajectory, a dataset's examples, a batch's list of segments).
+
+## A training pod's checkpoints
+
+A trainer on a training pod (`RemoteTrainer`, a `rollout_train.trainer.Remote`) keeps what it makes in the blob store
+itself, and the run's driver never reads it:
+
+- **The driver works from manifests.** A step is asked for with its parent's manifests; the pod answers with the new
+  checkpoint's, and the loop adds the checkpoint from them, serves it and thins the run's checkpoints. The
+  checkpoint's record is what shows it was made: its manifests (each file's blob, with its size and sha256), its
+  step, and when it was made. Whatever needs the files at the driver's machine reads them as it needs them: engines in
+  the driver's process as they load a checkpoint (the publisher is given a fetch, not a path), a bridge that converts
+  a format in its own task. The verbatim bridges read nothing: the files they serve are the checkpoint's own.
+- **The weights first, the state after.** The pod answers once the weights engines load (an adapter's in bfloat16,
+  about half its float32's bytes) and the small files of the state (`held.txt`, `minibatches.jsonl`) are kept. The
+  checkpoint is added with its state incomplete (`state_complete` false) and served at once, so the engines follow
+  while the trainer keeps the rest of the state (an adapter's optimizer state and float32 copy, or full weights'
+  shards) from host memory, in the background ([rollout_lora](../../implementations/rollout-lora.md#keeping-the-state-after-the-step)).
+- **A checkpoint's state is complete once it is all kept.** The loop asks the trainer for the whole state in the
+  background and appends it to `checkpoints/completed` (its manifest, when, and how long it took after the step:
+  `state_seconds`); the checkpoint reads complete from then on, and the loop notes `state` with the seconds. A state
+  that is never kept (its upload failed after its tries, or the pod ended first) is logged as an error and noted with
+  why, and its checkpoint stays incomplete. A loop started again asks for the states its checkpoints are still missing.
+- **A step needs its parent's complete state only where the trainer does not hold the parent.** The next step goes on
+  from the checkpoint the one before made, which the pod's trainer holds, without waiting for its state. A pod whose
+  trainer no longer holds the parent waits for the state it is still keeping and goes on from it whole; a state never
+  kept is refused (`StepFailed`, as a parent without its full state is), never trained on afresh, and never stepped
+  around: a run goes on only from the newest checkpoint, and the channel's depths only grow. A run started from the
+  newest checkpoint whose state is complete goes on.
 
 ## Full weights and merges
 
@@ -139,13 +168,13 @@ each bridge once per checkpoint.
 |---|---|---|
 | `none` | none | Tinker's sampler reads the checkpoint's pointer: its own files are served |
 | `peft-from-tinker` | `rollout_tinker.bridges:peft` | Tinker's archive of the sampler checkpoint downloaded and written in the layout of PEFT (parameter-efficient fine-tuning) ([rollout-tinker](../../implementations/rollout-tinker.md#serving-tinkers-adapters-here)); its settings name the service it asks |
-| `verbatim`, `full-reload` | `rollout_train.bridges:verbatim` | each file linked (or copied) as it is, so its blobs are the same |
+| `verbatim`, `full-reload` | `rollout_train.bridges:verbatim` | the checkpoint's own files, noted as what the bridge made without reading them (the same files are the same blobs) |
 | `merge-quantize` | `rollout_lora.bridges:merge_quantize` | the adapter merged into its base as full weights, which a provider that quantizes as it loads (vLLM's `quantization = "fp8"`) serves; refused for a provider model quantized beforehand |
 
 - **`bridged(checkpoints, fence, checkpoint, chain, scratch)`** runs each bridge of `chain` in this process, each from
   what the one before made (the first from the checkpoint's weights). For each it appends to `checkpoints/resharding`
   when it begins (the bridge and the host), reads the source's files to `scratch`, runs the task, keeps the files it
-  wrote in the blob store, and appends what it made to `checkpoints/resharded` (the bridge, its task, what it said, and
+  wrote in the blob store (a verbatim bridge reads and writes none), and appends what it made to `checkpoints/resharded` (the bridge, its task, what it said, and
   the manifest of the files), both keyed `CHECKPOINT@BRIDGE` under the fence of the run that made the checkpoint, so one
   checkpoint is bridged once for each format it is served in. A checkpoint bridged before is not bridged again:
   `made(ledger, checkpoint, bridge)` is what the bridge made of it, and `bridge_of(ledger, checkpoint)` the bridge that
@@ -154,11 +183,12 @@ each bridge once per checkpoint.
 - **As Ray tasks.** `on_ray(ledger_at, blobs_at, fence, checkpoint, chain)` runs each bridge as a Ray task of its own on
   the cluster the process is connected to (`rollout_train.ray_cluster.connect(address)`), asking for the CPUs and
   memory the bridge declares: the worker opens the ledger and the blob store from where they are, and works on its own
-  disk under `~/.cache/rollout/scratch/bridges`. A chain of `none` alone serves the checkpoint's own files.
+  disk under `~/.cache/rollout/scratch/bridges`. A chain of `none` alone serves the checkpoint's own files, and a
+  verbatim bridge is noted from the calling process, with no task.
 
 A run's driver chooses the bridges from the trainer's format to what the trained channel's first provider loads
-(`path`, with the channel's `bridge` setting), and runs each as a Ray task, asking for what the bridge declares or what
-the cluster config's `[bridges."NAME"]` says ([deploying](../../guide/deploying.md#ray)). The [monitor](monitor.md)'s checkpoints graph shows a checkpoint being
+(`path`, with the channel's `bridge` setting), and runs each that writes files as a Ray task, asking for what the
+bridge declares or what the cluster config's `[bridges."NAME"]` says ([deploying](../../guide/deploying.md#ray)). The [monitor](monitor.md)'s checkpoints graph shows a checkpoint being
 bridged, and what its bridges made.
 
 ## The ledger

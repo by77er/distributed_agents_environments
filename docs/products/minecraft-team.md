@@ -356,7 +356,7 @@ page.
 | Trainer | `local-lora` (`rollout_lora:LoraTrainer`) on the same checkpoint, rank 32, learning rate 5e-5, segments of up to 8,000 tokens (a peak of 12.4 GiB), 384 a step; `colocate_with = "local-vllm"`: the engine sleeps while it steps | [LoRA trainer](../implementations/rollout-lora.md) |
 | Worlds | `[sandboxes.minecraft]`: `minecraft_team.worlds:worlds`, at most six at once, in the run's driver (on the chart's cluster, four, in the pod `sandboxes-minecraft`) | [The worlds](#the-worlds), [Where sandboxes run](../research/sandbox-placement.md) |
 | Memory | `[guards]` `runs_gib` and `training_gib`: each episode runs a Paper server and its bots | [Deploying](../guide/deploying.md), [Minecraft memory](../research/minecraft-memory.md) |
-| Bridge | The LoRA trainer's files are PEFT's, which vLLM loads as they are: each checkpoint is bridged (`verbatim`) as a Ray task on the run's Ray cluster | [Bridges](../libraries/rollout-train/checkpoints.md#bridges), [Ray](../guide/deploying.md#ray) |
+| Bridge | The LoRA trainer's files are PEFT's, which vLLM loads as they are: each checkpoint is bridged (`verbatim`), its own files noted as what the engines load | [Bridges](../libraries/rollout-train/checkpoints.md#bridges), [Ray](../guide/deploying.md#ray) |
 
 `minecraft-tinker` keeps these settings where they still apply, with Tinker's trainer (`tinker-lora`, `trainer.model =
 "Qwen/Qwen3.5-9B"`) and sampler (the provider `tinker`): a learning rate of 1e-4 (Tinker's adapters are scaled half as

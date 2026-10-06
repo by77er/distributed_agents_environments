@@ -76,7 +76,7 @@ episodes = await episodes_of(ledger, blobs, "miner-1", 12, 4)          # when al
 batch = Grpo().batch(episodes, trainer.budget, rng)         # weighted segments, or why there are none
 makes = new_id()                                            # the checkpoint's id, chosen before the step
 await trainer.step(batch.segments, seed=12, parent=files, into=Path(f"checkpoints/{makes}"))  # files: `Files`
-await publish("policy", makes, f"checkpoints/{makes}/weights", 3)  # served under its id, at depth 3
+await publish("policy", makes, fetched, 3)  # served under its id, at depth 3; `fetched` reads its files if needed
 ```
 
 - A run asks for a **group** of episodes in the ledger, and **runners**, wherever they are, claim them, play them

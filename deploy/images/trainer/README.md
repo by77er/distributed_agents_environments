@@ -6,7 +6,7 @@
 |---|---|---|
 | `pki.sh renew` | | Renews the pod's certificate at about two thirds of its life, and publishes each new one for Envoy |
 | Envoy | `0.0.0.0:8443` (the pod's exposed TCP port), admin on `127.0.0.1:9901` | Ends mutual TLS; takes only the gateway's certificate; passes on `POST /v1/steps`, `GET /v1/steps/CHECKPOINT` and `GET /v1/trainer` and answers everything else 404; limits request sizes (1 MiB) and rates (20 a second, bursts of 40); times requests out; logs each request without its body |
-| The training service (`python -m rollout_train.pods.training`) | `127.0.0.1:8001` (and `/healthz`, `/readyz` there) | Takes one step at a time, each idempotent by the checkpoint it makes: fetches the batch and the parent's files from the blob store, steps, keeps the new weights and state in the blob store, answers with their manifests and the step's metrics; beats with the pod's name, identity, address and the step it is taking |
+| The training service (`python -m rollout_train.pods.training`) | `127.0.0.1:8001` (and `/healthz`, `/readyz` there) | Takes one step at a time, each idempotent by the checkpoint it makes: fetches the batch and the parent's files from the blob store, steps, keeps the new weights in the blob store and answers with their manifest and the step's metrics, while the trainer's processes keep the full state in the blob store from host memory (the answer completed once they have); beats with the pod's name, identity, address and the step it is taking |
 
 The trainers (`rollout_lora:LoraTrainer`, `rollout_lora:FullTrainer`) start a process per GPU under torchrun (`python -m
 torch.distributed.run --standalone --nproc-per-node N -m rollout_lora.workers`, the image's PyTorch), on a pod of one

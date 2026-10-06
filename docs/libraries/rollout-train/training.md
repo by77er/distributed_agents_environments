@@ -327,6 +327,16 @@ steps: `Resident`, below).
   the name it gave what it holds, which the step's `state/held.txt` says too, so a later step whose parent is that
   checkpoint goes on from memory and reads none of its files (a training pod fetches only that file); and a call that
   ends what it keeps running, which a training pod makes when its lease is released or another run takes it.
+- **`made(batch, seed=..., parent=..., into=...)`** and **`state(into)`**, where a trainer is on another machine
+  ([`Remote`](../../guide/reference.md#remote): `rollout_train.pods.RemoteTrainer`): the step from the parent
+  checkpoint's files in the blob store, giving back manifests of what it kept there ([`Made`](../../guide/reference.md#made):
+  the metrics, the weights, and the state, whole or, `complete` false, only what was kept with the weights), and the
+  whole state once it is kept. The loop records, serves and thins such a trainer's checkpoints without reading their
+  files ([a training pod's checkpoints](checkpoints.md#a-training-pods-checkpoints)).
+- **`keep_in(location)`** and **`kept(into)`**, where a trainer can keep a step's full state itself after the step
+  returns ([`Keeps`](../../guide/reference.md#keeps): `LoraTrainer` and `FullTrainer` with their processes kept, told
+  by a training pod): the blob store to keep it in, and what it kept of a step's (raising `StateLost` where it never
+  will be). Its steps say which they keep so (`Step.keeping`).
 
 [`Colocated`](../../guide/reference.md#colocated) wraps a trainer that shares an accelerator with the engines of
 some channels. For each step it holds new requests back, waits for those in flight, puts the engines to sleep,
