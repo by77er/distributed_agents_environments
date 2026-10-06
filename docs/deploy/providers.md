@@ -117,6 +117,7 @@ Beside what every provider has (`models`, `replicas`), a RunPod table says what 
 | `gpu_count` | 1 | GPUs a pod has: a trainer's pod of more steps on all of them; a host's pod has one |
 | `cloud` | `secure` | RunPod's cloud tier: `secure` or `community` |
 | `regions` | any | RunPod's data centers its pods may be in (`["US-KS-2"]`) |
+| `cuda_versions` | `["13.0"]` | The CUDA versions a pod's machine may support (RunPod's `allowedCudaVersions`): the images are built on CUDA 13, which an older NVIDIA driver refuses |
 | `price` | | Dollars an hour a pod is reckoned at before RunPod says its own: what estimates use |
 | `max_pods` | 1 | The most pods of the provider at once, across runs: a cap on what it spends |
 | `idle_stop` | 600 | Seconds a released pod stays warm before it is deleted (0: deleted when released) |

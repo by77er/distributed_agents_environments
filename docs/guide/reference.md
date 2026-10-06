@@ -7090,7 +7090,7 @@ A model a provider serves here.
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-POD_FIELDS = ('image', 'gpu_types', 'gpu_count', 'max_pods', 'idle_stop', 'start_timeout', 'cloud', 'regions', 'price', 'volume_gb', 'container_disk_gb', 'secrets', 'step_ca', 'store')
+POD_FIELDS = ('image', 'gpu_types', 'gpu_count', 'max_pods', 'idle_stop', 'start_timeout', 'cloud', 'regions', 'cuda_versions', 'price', 'volume_gb', 'container_disk_gb', 'secrets', 'step_ca', 'store')
 ```
 
 The settings of a RunPod kind's table that say what its pods are (`PodTable`).
@@ -7125,6 +7125,7 @@ What a RunPod kind's table says of its pods (`pod_table`).
 | `start_timeout` | `float` | `1200.0` | Seconds a pod may take to say it is ready for the run that holds it before it is deleted and the run fails. |
 | `cloud` | `str` | `'SECURE'` | RunPod's cloud tier: `SECURE` or `COMMUNITY`. |
 | `regions` | `tuple[str, ...]` | `()` | RunPod's data centers its pods may be in (none: any). |
+| `cuda_versions` | `tuple[str, ...]` | `('13.0',)` | The CUDA versions a pod's machine may support (RunPod's `allowedCudaVersions`): its NVIDIA driver must run what the image was built for. The pods' images are built on CUDA 13, which an older driver refuses. |
 | `price` | `float \| None` | `None` | Dollars an hour a pod is reckoned at before RunPod says its own (`costPerHr`): what estimates use. |
 | `volume_gb` | `int` | `50` |  |
 | `container_disk_gb` | `int` | `50` |  |
@@ -7141,9 +7142,6 @@ What a RunPod kind's table says of its pods (`pod_table`).
 ```python
 ROUTING = ('spill', 'weighted')
 ```
-
-How turns are shared among a channel's providers: fill the first and spill the rest over to the next, or by
-weight.
 
 ### `Routing`
 
@@ -10724,6 +10722,7 @@ A pod, as it is asked for.
 | `container_disk_gb` | `int` | `50` |  |
 | `cloud` | `str` | `'SECURE'` | `SECURE` or `COMMUNITY`. |
 | `data_centers` | `Sequence[str]` | `()` |  |
+| `cuda_versions` | `Sequence[str]` | `()` | The CUDA versions the pod's machine may support (none: any); its driver must run the image's CUDA. |
 | `interruptible` | `bool` | `False` |  |
 
 **Methods**

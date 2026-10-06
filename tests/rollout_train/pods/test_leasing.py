@@ -145,6 +145,7 @@ async def test_a_run_starts_a_pod_renews_it_and_releases_it_warm(
     assert (lease.gpu, lease.cloud) == ("NVIDIA GeForce RTX 4090", "COMMUNITY")
     (body,) = fake.created_bodies()
     env = body["env"]
+    assert body["allowedCudaVersions"] == ["13.0"]  # (a machine whose driver runs the images' CUDA 13)
     assert (body["cloudType"], body["dataCenterIds"], body["gpuTypeIds"]) == (
         "COMMUNITY", ["EU-RO-1"], ["NVIDIA GeForce RTX 4090", "NVIDIA RTX A6000"])  # fmt: skip
     assert json.loads(env["ROLLOUT_LEDGER"]) == {

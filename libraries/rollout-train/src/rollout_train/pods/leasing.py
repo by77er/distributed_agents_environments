@@ -430,6 +430,7 @@ class Pods:
             name=lease.pod, image=table.image, gpu_types=list(table.gpu_types), gpu_count=table.gpu_count, env=env,
             secrets=dict(table.secrets), sensitive=sensitive, ports=(f"{PORT}/tcp",), volume_gb=table.volume_gb,
             container_disk_gb=table.container_disk_gb, cloud=table.cloud, data_centers=list(table.regions),
+            cuda_versions=list(table.cuda_versions),
         )  # fmt: skip
 
     async def _waited(self) -> None:

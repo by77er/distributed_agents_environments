@@ -348,6 +348,9 @@ def test_a_runpod_trainer_takes_the_capabilities_of_the_trainer_it_runs() -> Non
     assert (full.capabilities.produces, full.capabilities.format) == ("full", "full")
     with pytest.raises(ClusterError, match="trainer is lora or full"):
         cluster_of(SMALL + tls + trainer.format(runs="tinker"))
+    assert lora.settings.get("cuda_versions", ("13.0",)) in (("13.0",), ["13.0"])  # (the images' CUDA, by default)
+    with pytest.raises(ClusterError, match="cuda_versions are RunPod's"):
+        cluster_of(SMALL + tls + trainer.format(runs="lora") + 'cuda_versions = ["14.0"]\n')
 
 
 TLS = '\n[tls]\nca = "~/ca.pem"\ncertificate = "~/gateway.crt"\nkey = "~/gateway.key"\n'

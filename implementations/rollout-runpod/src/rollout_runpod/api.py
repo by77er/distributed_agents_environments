@@ -74,6 +74,8 @@ class PodSpec:
     cloud: str = "SECURE"
     """`SECURE` or `COMMUNITY`."""
     data_centers: Sequence[str] = ()
+    cuda_versions: Sequence[str] = ()
+    """The CUDA versions the pod's machine may support (none: any); its driver must run the image's CUDA."""
     interruptible: bool = False
 
     def body(self) -> dict[str, Any]:
@@ -88,6 +90,8 @@ class PodSpec:
         }  # fmt: skip
         if self.data_centers:
             body["dataCenterIds"] = list(self.data_centers)
+        if self.cuda_versions:
+            body["allowedCudaVersions"] = list(self.cuda_versions)
         return body
 
 

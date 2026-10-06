@@ -99,11 +99,13 @@ pod's: `spiffe://rollout/pod/NAME`)."""
 RUNPOD = ("runpod-inference", "runpod-host", "runpod-trainer")
 """The kinds whose servers are RunPod's pods, leased by the runs that use them."""
 POD_FIELDS = (
-    "image", "gpu_types", "gpu_count", "max_pods", "idle_stop", "start_timeout", "cloud", "regions", "price",
-    "volume_gb", "container_disk_gb", "secrets", "step_ca", "store",
+    "image", "gpu_types", "gpu_count", "max_pods", "idle_stop", "start_timeout", "cloud", "regions",
+    "cuda_versions", "price", "volume_gb", "container_disk_gb", "secrets", "step_ca", "store",
 )  # fmt: skip
 """The settings of a RunPod kind's table that say what its pods are (`PodTable`)."""
 ROUTING = ("spill", "weighted")
+CUDA_VERSIONS = ("13.0", "12.9", "12.8", "12.7", "12.6", "12.5", "12.4", "12.3", "12.2", "12.1", "12.0", "11.8")
+"""The CUDA versions RunPod lets a pod ask its machine for (`allowedCudaVersions`)."""
 """How turns are shared among a channel's providers: fill the first and spill the rest over to the next, or by
 weight."""
 
@@ -701,6 +703,9 @@ class PodTable:
     """RunPod's cloud tier: `SECURE` or `COMMUNITY`."""
     regions: tuple[str, ...] = ()
     """RunPod's data centers its pods may be in (none: any)."""
+    cuda_versions: tuple[str, ...] = ("13.0",)
+    """The CUDA versions a pod's machine may support (RunPod's `allowedCudaVersions`): its NVIDIA driver must run what
+    the image was built for. The pods' images are built on CUDA 13, which an older driver refuses."""
     price: float | None = None
     """Dollars an hour a pod is reckoned at before RunPod says its own (`costPerHr`): what estimates use."""
     volume_gb: int = 50
@@ -783,10 +788,13 @@ def pod_table(kind: str, settings: Mapping[str, JsonValue]) -> PodTable:
         raise ValueError("sleep is true or false")
     if kind == "runpod-host" and whole("gpu_count", 1) > 1:
         raise ValueError("gpu_count is 1 for a host: its vLLM serves on one GPU, and its trainer steps on the same one")
+    cuda_versions = texts("cuda_versions") or ("13.0",)
+    if unknown := sorted(set(cuda_versions) - set(CUDA_VERSIONS)):
+        raise ValueError(f"cuda_versions are RunPod's ({', '.join(CUDA_VERSIONS)}), not {', '.join(unknown)}")
     return PodTable(
         image=image, gpu_types=gpu_types, gpu_count=whole("gpu_count", 1), max_pods=whole("max_pods", 1),
         idle_stop=number("idle_stop", 600.0) or 0.0, start_timeout=number("start_timeout", 1200.0, least=1.0) or 1200.0,
         cloud=cloud, regions=texts("regions"), price=number("price", None), volume_gb=whole("volume_gb", 50),
         container_disk_gb=whole("container_disk_gb", 50), secrets=table("secrets"), step_ca=step_ca, store=store,
-        memory_fraction=fraction, sleep=sleep,
+        memory_fraction=fraction, sleep=sleep, cuda_versions=cuda_versions,
     )  # fmt: skip
