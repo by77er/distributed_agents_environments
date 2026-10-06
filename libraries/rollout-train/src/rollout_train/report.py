@@ -107,7 +107,29 @@ def _update(line: Result, checkpoint: Checkpoint) -> str:
         packed = f" in {update.get('packs', 0):g} packs" if update.get("packed") else " a segment at a time"
         parts.append(f"{update['segment_tokens_per_second']:,.0f} tokens/s{packed}")
     parts.append(f"loss {update.get('loss', 0.0):.4f}")
+    if took := _seconds(checkpoint):
+        parts.append(took)
     return ", ".join(parts)
+
+
+TIMINGS = (
+    ("step_seconds", "the step"),
+    ("train_seconds", "training"),
+    ("save_adapter_seconds", "saving the weights"),
+    ("snapshot_seconds", "copying the state"),
+    ("upload_adapter_seconds", "uploading the weights"),
+)
+"""The stages a step's metrics time, and what a step's line calls each."""
+
+
+def _seconds(checkpoint: Checkpoint) -> str:
+    """Where a step's seconds went, as its metrics and its state's completion say: empty where they say nothing."""
+    said = [f"{name} {checkpoint.metrics[key]:.1f}" for key, name in TIMINGS if key in checkpoint.metrics]
+    if checkpoint.state_seconds is not None:
+        said.append(f"keeping the state {checkpoint.state_seconds:.1f} after")
+    elif not checkpoint.state_complete:
+        said.append("the state not kept yet")
+    return f"seconds: {', '.join(said)}" if said else ""
 
 
 def chart(

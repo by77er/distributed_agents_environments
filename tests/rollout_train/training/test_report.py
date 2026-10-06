@@ -1,5 +1,6 @@
 """Reporting a run: the summary in words, the chart, and the post to a webhook (on made-up groups)."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +83,18 @@ async def test_the_summary_gives_the_latest_group_what_was_done_with_it_and_each
     assert len(text) <= 2000
     assert "segments waiting for a step" in summary("run-1", lines, curriculum)  # (before its step)
     assert "no group has finished yet" in summary("empty", [], Curriculum(ROWS))
+
+
+async def test_a_step_s_line_says_where_its_seconds_went(tmp_path: Path) -> None:
+    _, lines, curriculum, steps, checkpoints = await run(tmp_path)
+    timed = {**METRICS, "step_seconds": 31.0, "train_seconds": 24.5, "save_adapter_seconds": 0.8,
+             "snapshot_seconds": 0.4, "upload_adapter_seconds": 6.2}  # fmt: skip
+    pending = replace(checkpoints[MADE], metrics=timed, state_complete=False)
+    text = summary("run-1", lines, curriculum, steps, {MADE: pending})
+    assert ("seconds: the step 31.0, training 24.5, saving the weights 0.8, copying the state 0.4, uploading the "
+            "weights 6.2, the state not kept yet") in text  # fmt: skip
+    kept = replace(pending, state_complete=True, state_seconds=14.0)
+    assert "keeping the state 14.0 after" in summary("run-1", lines, curriculum, steps, {MADE: kept})
 
 
 async def test_a_report_writes_the_summary_and_the_chart_into_the_runs_directory(tmp_path: Path) -> None:

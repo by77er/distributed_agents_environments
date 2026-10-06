@@ -5,7 +5,7 @@ scratch SQLite one; the blob store files."""
 import contextlib
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -101,6 +101,9 @@ async def test_a_pod_beats_with_its_identity_readiness_and_serial_and_never_says
         assert presence is not None
         (beat,) = await presence.beats()
         assert beat.about["kind"] == ENGINES and beat.about["follows"] == "r"  # (what every follower says)
+        (channel,) = cast(list[Any], beat.about["channels"])
+        loaded = channel["loaded"]  # (how long the checkpoint took to read from the blob store, and to load)
+        assert loaded["checkpoint"] == first.id and loaded["download_seconds"] >= 0 and loaded["load_seconds"] >= 0
         (reached,) = live(await presence.beats(), "inference")
         assert (reached.name, reached.identity) == ("inference-1", pod_identity("inference-1"))
         said: Any = beat.about["pod"]

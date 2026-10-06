@@ -17,10 +17,12 @@ of several loads a channel's new full checkpoint only once the replicas before i
 stopped beating), so the others serve the checkpoint before meanwhile.
 
 It beats like a runner (`rollout_train.presence`): its host, the runs it follows, its machine, its replica, and for
-each channel what it serves and how fast, and each engine's address and every adapter it holds, with its run, channel,
-checkpoint and depth. Where an engine can say what it holds (a vLLM server's `/v1/models`), the follower holds its
-view to that before each look: an adapter the server lost (it started again) is loaded again, and one the follower
-does not know of (loaded before the follower started again) is removed, unless a channel should serve it.
+each channel what it serves and how fast, how long it took to read the checkpoint it last loaded from the blob store and
+to load it (`loaded`: `download_seconds`, `load_seconds`), and each engine's address and every adapter it holds, with
+its run, channel, checkpoint and depth. Where an engine can say what it holds (a vLLM server's `/v1/models`), the
+follower holds its view to that before each look: an adapter the server lost (it started again) is loaded again, and
+one the follower does not know of (loaded before the follower started again) is removed, unless a channel should serve
+it.
 """
 
 import asyncio
@@ -90,6 +92,8 @@ class Follower:
         self.errors: dict[str, str] = {}
         """Why a channel could not be given what it should serve, by `RUN/CHANNEL`, until it is (and under `BINDINGS`,
         why what it serves could not be asked)."""
+        self.loaded: dict[Binding, dict[str, JsonValue]] = {}
+        """The checkpoint each channel loaded last, and how long reading its files and loading them took."""
 
     @property
     def channels(self) -> dict[str, Channel]:
@@ -157,6 +161,8 @@ class Follower:
             ]  # fmt: skip
             entry: dict[str, JsonValue] = {"run": run, "channel": name, "adapter": channel.serving}
             entry |= {"version": channel.version, **channel.take(), "engines": engines}
+            if (run, name) in self.loaded:
+                entry["loaded"] = self.loaded[(run, name)]
             if (key := qualified(run, name)) in self.errors:
                 entry["error"] = self.errors[key]
             listed.append(entry)
@@ -180,6 +186,7 @@ class Follower:
         now = set(await self.bindings())
         for gone in [each for each in self.bound if each not in now]:
             await self.bound.pop(gone).dropped()
+            self.loaded.pop(gone, None)
             self.errors.pop(qualified(*gone), None)
         for new in sorted(now - set(self.bound)):
             self.bound[new] = self.opened(*new)
@@ -230,8 +237,12 @@ class Follower:
             held = await self.checkpoints.files(over.weights, self.directory / over.id / WEIGHTS)
             await channel.publish(over.id, str(held), over.depth, full=True)
         place = self.directory / said.checkpoint / ("resharded" if said.layout else WEIGHTS)
+        began = time.monotonic()
         files = await self.checkpoints.files(said.files, place)
+        read, began = time.monotonic() - began, time.monotonic()
         await channel.publish(said.checkpoint, str(files), said.depth, full=said.kind == "full")
+        self.loaded[(run, name)] = {"checkpoint": said.checkpoint, "download_seconds": round(read, 3),
+                                    "load_seconds": round(time.monotonic() - began, 3)}  # fmt: skip
         return True
 
     async def _turn(self, run: str, name: str, depth: int) -> bool:
