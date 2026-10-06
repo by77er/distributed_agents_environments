@@ -163,9 +163,11 @@ Which items, and with what advantages, is the [algorithm's](../libraries/rollout
 2. **Where the step starts.** For a policy gradient, a distillation or a preference loss, every sampled token's
    logprob on the weights the step starts from (old), without a gradient, and the reference's where it is read. The
    first minibatch of a policy gradient or a distillation runs on those weights, so its segments' old is what it
-   computes itself (with a gradient, detached) rather than a pass of their own; the result is the same. A behaviour
-   logprob that is not finite fails the step only where an importance correction reads it. A pack that does not fit
-   the GPU here runs again a segment at a time, and a segment that does not fit alone is left out and counted.
+   computes itself (with a gradient, detached) rather than a pass of their own; the result is the same. Each other
+   minibatch's start is computed in the packs that minibatch's own pass makes, so that on the weights the step starts
+   from its ratios are exactly 1 (in other packs bfloat16 rounds a segment's logprobs a little differently). A
+   behaviour logprob that is not finite fails the step only where an importance correction reads it. A pack that does
+   not fit the GPU here runs again a segment at a time, and a segment that does not fit alone is left out and counted.
 3. **Each minibatch.** A weighted or distilled segment's loss is computed and its gradient accumulated a pack at a
    time (for the top-k form, with the policy's logprobs of the teacher's top-k tokens at each position). A
    preference loss is a function of each side's whole likelihood, so its gradient is taken in two parts that also

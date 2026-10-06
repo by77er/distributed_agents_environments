@@ -138,6 +138,37 @@ def test_a_step_says_how_it_ran_its_segments() -> None:
     assert metrics["packs"] == 1.0 and policy.packs == [6]
 
 
+class Recording(PackingToy):
+    """A toy that records the segments of every pack it runs, and whether with a gradient (and never runs out of
+    memory)."""
+
+    POISON = -1
+
+    def __init__(self) -> None:
+        super().__init__(alone_too=False)
+        self.ran: list[tuple[bool, tuple[int, ...]]] = []
+
+    def packed(self, pack: Pack, *, entropy: bool = False, candidates: object = None) -> list[Scores]:
+        self.ran.append((torch.is_grad_enabled(), tuple(id(each) for each in pack.segments)))
+        return super().packed(pack, entropy=entropy, candidates=candidates)
+
+
+def test_the_start_is_computed_in_the_packs_each_minibatch_makes() -> None:
+    """Each minibatch of the first pass but the first (whose start is its own pass) computes its segments in the
+    packs the step's start computed them in: on unchanged weights, bfloat16 rounds them alike, and each minibatch's
+    ratios are exactly 1."""
+    policy = Recording()
+    batch: list[Item] = [Weighted(each, 1.0) for each in turns(24, seed=4)]
+    settings = StepSettings(learning_rate=0.05, tokens_per_step=12, max_kl=None, pack_tokens=150)
+    stepping = PolicyStep(policy, settings)  # type: ignore[arg-type]
+    stepping.step(batch)
+    assert len(stepping.minibatches) > 2
+    starts = [packed for grad, packed in policy.ran if not grad]
+    passes = [packed for grad, packed in policy.ran if grad]
+    assert starts == passes[len(passes) - len(starts) :] and len(passes) > len(starts)
+    assert any(len(packed) > 1 for packed in starts)
+
+
 class Untouchable(PackingToy):
     """A policy that fails any pass: a step that calls it has computed something."""
 

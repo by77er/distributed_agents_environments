@@ -17,8 +17,10 @@ algorithm's business (`rollout_train.algorithm`).
 
 Every pass over segments runs them in packs (`rollout_objectives.packing`): rows of up to `pack_tokens` tokens, each
 segment seeing only itself, segments that start alike sharing their prefix (`share_prefixes`). A minibatch's gradient
-is accumulated a pack at a time. A policy that runs packs says so (`PackingPolicy`: `packing`, `packed`); any other
-runs one segment at a time, and the step's metrics say which (`packed`).
+is accumulated a pack at a time. The logprobs the step starts from are computed in the packs each minibatch of the
+first pass makes, so that a minibatch on the weights the step starts from finds its ratios exactly 1 (bfloat16 rounds
+a segment a little differently in other packs). A policy that runs packs says so (`PackingPolicy`: `packing`,
+`packed`); any other runs one segment at a time, and the step's metrics say which (`packed`).
 
 A preference loss is a function of each side's whole log-likelihood, so a minibatch's gradient is taken in two parts,
 which hold one pack's activations at a time: the loss of the logprobs computed without a gradient (on the weights
@@ -331,6 +333,13 @@ class PolicyStep:
         """A pass that keeps this process in step with the others, learning nothing (`SharedPolicy.idle`)."""
         cast(SharedPolicy, self.policy).idle(gradient=gradient, reference=reference)
 
+    def _segments(self, batch: Sequence[Item]) -> list[Segment]:
+        """A minibatch's segments as its passes pack them: each weighted (or distilled) item's, or every segment of
+        its preference items once."""
+        if self.settings.loss.family == PREFERENCE:
+            return list({id(each): each for item in batch for each in segments_of(item)}.values())
+        return [cast(Weighted | Distilled, item).segment for item in batch]  # (`_validate` said so)
+
     def step(self, items: Sequence[Item], *, seed: int = 0) -> dict[str, float]:
         """The logprobs the step starts from, then `passes` passes over the items in shuffled minibatches."""
         started = time.monotonic()
@@ -457,21 +466,26 @@ class PolicyStep:
         references: dict[int, torch.Tensor],
     ) -> int:
         """Each sampled token's logprob on the weights the step starts from (`old`), but those of the first
-        minibatch's segments, which it computes itself; and the reference's where the objective reads it. An item a
-        pack of which runs out of memory, and that runs out again a segment at a time, is left out of the plan; how
-        many were. Shared, each process computes its packs, and every process gathers every segment's."""
-        segments = plan.segments
+        minibatch's segments, which it computes itself; and the reference's where the objective reads it. Each of the
+        first pass's minibatches is computed in the packs its own pass makes (`_turns` of its `_segments`): bfloat16
+        rounds a segment's logprobs a little differently in different packs, and in the same packs a minibatch on the
+        weights the step starts from finds its ratios exactly 1. An item a pack of which runs out of memory, and that
+        runs out again a segment at a time, is left out of the plan; how many were. Shared, each process computes its
+        packs, and every process gathers every segment's."""
         folded = {id(each) for item in _first_minibatch(plan, self.settings) for each in segments_of(item)}
         failed: set[int] = set()
+        idle_reference = functools.partial(self._idle, reference=True)
         with torch.no_grad():
-            starting = [each for each in segments if id(each) not in folded]
-            for index, found in self._computed(starting, self._logprobs, self._idle, failed).items():
-                _started(starting[index], found, old, behaviors)
-            if self.settings.loss.needs_reference:
-                kept = [each for each in segments if id(each) not in failed]
-                idle = functools.partial(self._idle, reference=True)
-                for index, found in self._computed(kept, self._reference, idle, failed).items():
-                    references[id(kept[index])] = found
+            for batch in minibatches(plan.items, self.settings.tokens_per_step):
+                segments = self._segments(batch)
+                starting = [each for each in segments if id(each) not in folded]
+                if starting:
+                    for index, found in self._computed(starting, self._logprobs, self._idle, failed).items():
+                        _started(starting[index], found, old, behaviors)
+                if self.settings.loss.needs_reference:
+                    kept = [each for each in segments if id(each) not in failed]
+                    for index, found in self._computed(kept, self._reference, idle_reference, failed).items():
+                        references[id(kept[index])] = found
         left_out = [item for item in plan.items if any(id(each) in failed for each in segments_of(item))]
         plan.items = [item for item in plan.items if not any(id(each) in failed for each in segments_of(item))]
         return len(left_out)
@@ -537,7 +551,7 @@ class PolicyStep:
         reads_old = objective.family != LIKELIHOOD
         lacking = reads_old and any(id(item.segment) not in old for item in segmented)
         folded: dict[int, torch.Tensor] = {}
-        for pack in self._synced_last(self._turns([item.segment for item in segmented])):
+        for pack in self._synced_last(self._turns(self._segments(batch))):
             if pack is None:
                 self._idle(gradient=True)
                 continue
@@ -588,7 +602,7 @@ class PolicyStep:
         at a time; how far it found the policy from the step's start (per token). Its logprobs without a gradient are
         each process's packs', gathered, where the step is shared: the loss is of every item."""
         objective = settings.loss
-        segments = list({id(each): each for item in batch for each in segments_of(item)}.values())
+        segments = self._segments(batch)
         computing = [each for each in segments if updated or id(each) not in old]
         with torch.no_grad():  # (before any update, where the step starts is what the policy gives now)
             found = self._computed(computing, self._logprobs, self._idle)
