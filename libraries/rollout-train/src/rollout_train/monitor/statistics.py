@@ -35,6 +35,10 @@ STEP_METRICS = (
     "tokens",
     "optimizer_steps",
     "start_seconds",
+    "segment_tokens_per_second",
+    "packs",
+    "pack_fill",
+    "prefix_shared_fraction",
     "update_seconds",
     "seconds",
 )

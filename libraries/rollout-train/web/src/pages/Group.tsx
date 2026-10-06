@@ -13,7 +13,7 @@ import { asked, groupsOf, isWaiting, outcomeOf, range, reported, slotRewards, st
 import { episodePlace, groupPlace, stepPlace } from "../lib/places";
 import { Ago, Elsewhere } from "../layout/runs";
 
-const UPDATE = ["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "mean_weight", "truncated_fraction", "optimizer_steps", "tokens", "longest_segment_tokens", "peak_gpu_gib"];
+const UPDATE = ["kl_moved", "kl_floor", "loss", "clip_fraction", "mean_mismatch", "mean_weight", "truncated_fraction", "optimizer_steps", "tokens", "longest_segment_tokens", "segment_tokens_per_second", "packs", "pack_fill", "prefix_shared_fraction", "peak_gpu_gib"];
 const updatePairs = (metrics: Metrics): [string, string][] => [
   ...UPDATE.filter(key => metrics[key] !== undefined).map(key => [key.replaceAll("_", " "), figure(metrics[key])] as [string, string]),
   ["took", span(metrics.update_seconds ?? metrics.seconds)],

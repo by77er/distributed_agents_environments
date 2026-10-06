@@ -103,6 +103,9 @@ def _update(line: Result, checkpoint: Checkpoint) -> str:
     parts.append(f"mean ratio {update.get('mean_ratio', 1.0):.4f}")
     if "gradient_norm" in update:
         parts.append(f"gradient norm {update['gradient_norm']:.2f}")
+    if "segment_tokens_per_second" in update:
+        packed = f" in {update.get('packs', 0):g} packs" if update.get("packed") else " a segment at a time"
+        parts.append(f"{update['segment_tokens_per_second']:,.0f} tokens/s{packed}")
     parts.append(f"loss {update.get('loss', 0.0):.4f}")
     return ", ".join(parts)
 

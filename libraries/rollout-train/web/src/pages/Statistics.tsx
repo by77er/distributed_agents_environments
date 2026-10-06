@@ -28,6 +28,8 @@ const STEP_FIGURES: [string, string, string][] = [
   ["kl_moved", "KL moved", "from the checkpoint before"], ["kl_floor", "KL floor", "the update's noise floor"], ["clip_fraction", "Clip fraction", "of tokens clipped"],
   ["mean_mismatch", "Mean mismatch", "sampler against trainer"], ["mean_weight", "Mean weight", "the off-policy correction"], ["truncated_fraction", "Truncated fraction", "of weights truncated"],
   ["loss", "Loss", "the objective"], ["seconds", "Step time", "the update, start to end"], ["start_seconds", "Start time", "before the first optimizer step"],
+  ["segment_tokens_per_second", "Trainer tokens/s", "through the model, every pass"], ["pack_fill", "Pack fill", "of each pass's tokens"],
+  ["prefix_shared_fraction", "Prefix shared", "of the segments' tokens"],
 ];
 const done = (run: StatisticsRun) => run.groups.filter(group => group.time != null).sort((a, b) => a.time! - b.time!);
 
