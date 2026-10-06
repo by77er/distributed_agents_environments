@@ -49,7 +49,7 @@ do not edit by hand.
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
 - **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
 - **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`importance_weight`](#importance_weight), [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`moved_kl`](#moved_kl), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`TALLIED`](#tallied), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
-- **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`PackingPolicy`](#packingpolicy), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`positions`](#positions), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`SharedPolicy`](#sharedpolicy), [`TrainablePolicy`](#trainablepolicy)
+- **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`PackingPolicy`](#packingpolicy), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`SharedPolicy`](#sharedpolicy), [`TrainablePolicy`](#trainablepolicy)
 - **[`rollout_objectives.packing`](#rollout_objectivespacking)** — Many segments in one row of a model's input, a prefix several share once. [`Group`](#group), [`grouped`](#grouped), [`Pack`](#pack), [`packed`](#rollout_objectivespackingpacked), [`packs`](#packs), [`Run`](#rollout_objectivespackingrun), [`sampled_positions`](#sampled_positions), [`Scores`](#rollout_objectivespackingscores), [`SHARED_PREFIX`](#shared_prefix)
 - **[`rollout_objectives.ranks`](#rollout_objectivesranks)** — The processes a step is shared among, one per GPU, and how a minibatch is shared. [`Ranks`](#ranks), [`shares`](#shares)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
@@ -9777,7 +9777,7 @@ A policy step's settings (`rollout_objectives.step`), whichever trainer takes it
 | `max_gradient_norm` | `float` | `1.0` |  |
 | `segment_tokens` | `int \| None` | `None` | The longest segment a step can hold (None: any). Longer ones are left out and counted (`segments_too_long`): one too long would end or stall the whole step. Leaving segments out biases training, so whoever serves the policy takes this as the longest turn to sample; the count says whether that held. |
 | `segments_per_step` | `int \| None` | `None` | How many segments a step can afford (None: any number). |
-| `pack_tokens` | `int \| None` | `None` | The most tokens one forward and backward pass runs: a step packs its segments into rows of up to this many (`rollout_objectives.packing`). None: `segment_tokens`, so that a pack takes no more memory than the longest segment would alone, or 8,192 where that is none (what the trainer's memory estimate allows for, `rollout_train.memory.SEGMENT_TOKENS`). A segment longer than it has a pack of its own. |
+| `pack_tokens` | `int \| None` | `None` | The most tokens one forward and backward pass runs: a step packs its segments into rows of up to this many (`rollout_objectives.packing`). None: `segment_tokens`, so that a pack takes about the memory the longest segment would alone (a pack's activations are those of a segment as long as its row, whatever prefixes its segments share), or 8,192 where that is none (what the trainer's memory estimate allows for, `rollout_train.memory.SEGMENT_TOKENS`). A segment longer than it has a pack of its own. |
 | `share_prefixes` | `bool` | `True` | Whether segments of a pack that start with the same tokens share them: the prefix is run once, and each segment's rest after it. |
 | `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch makes more optimizer updates (a supervised step on a small dataset, say). |
 | `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every weight by about the full rate. A step that goes on from an optimizer's state is not warmed up. |
@@ -10115,16 +10115,6 @@ class PolicyStep
 
 - `def step(self, items: Sequence[Item], *, seed: int = 0) -> dict[str, float]` — The logprobs the step starts from, then `passes` passes over the items in shuffled minibatches.
 
-### `positions`
-
-*function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
-
-```python
-def positions(segment: Segment) -> list[int]
-```
-
-The positions of the tokens the policy sampled in a segment.
-
 ### `preference_terms`
 
 *function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
@@ -10160,12 +10150,20 @@ learns nothing, under the reference with `reference`, with a backward pass with 
 fewer passes than the others, since the processes gather a sharded model's layers together; and clips its
 gradient by the norm over every process's shard (`clip_gradients`, which returns the norm before). It may reduce a
 minibatch's gradient once, in its last pass (`gradient_sync`, told before each of a minibatch's gradient passes
-whether it is the last: a sharded adapter keeps the others' gradients in each process).
+whether it is the last: a sharded adapter keeps the others' gradients in each process; none: each pass reduces its
+own). After a pass that ran out of memory part way, it drops what that pass left (`recover`: a sharded model's
+gradients not yet reduced, and its state of the pass), so that the next pass starts clean; a model sharded on one
+process has it too, where the step goes on without the pass.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `gradient_sync` | `Callable[[bool], None] \| None` | required |  |
 
 **Methods**
 
 - `def idle(self, *, gradient: bool = False, reference: bool = False) -> None`
 - `def clip_gradients(self, maximum: float, ranks: Ranks) -> float`
+- `def recover(self) -> None`
 
 ### `TrainablePolicy`
 
@@ -10220,8 +10218,10 @@ def grouped(segments: Sequence[Segment], capacity: int, *, share: bool = True, l
 ```
 
 The segments in groups, each of which a pack holds whole. Sharing (`share`): the segments sorted by their
-tokens, and neighbours grouped under the prefix they share while it is at least `least` tokens and the group
-takes at most `capacity` tokens; else each segment alone.
+tokens, and each joins the group before it, under the prefix they all share, where that prefix is at least `least`
+tokens, the group takes at most `capacity` tokens, and the group with it puts fewer tokens in a row than the group
+and the segment apart (a segment that would cut a long prefix short starts a group of its own); else each segment
+alone.
 
 ### `Pack`
 
@@ -10246,7 +10246,6 @@ Some of the segments a step was given (`members`: their indices in what `packs` 
 
 - `@property def length(self) -> int` — Tokens in the row.
 - `@property def segment_tokens(self) -> int` — Tokens of its segments, each counted in full (more than `length` where they share prefixes).
-- `@property def roots(self) -> int` — Tokens of the root runs (they come first in the row).
 - `def scored(self, index: int, positions: Sequence[int] | None = None) -> tuple[list[int], list[int]]` — For the `index`-th segment: the row of the hidden state before each of `positions` (the sampled tokens'
   by default), and the token at each.
 - `@classmethod def single(cls, member: int, segment: Segment) -> 'Pack'` — One segment alone.

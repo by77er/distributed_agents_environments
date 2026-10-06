@@ -190,9 +190,11 @@ Which items, and with what advantages, is the [algorithm's](../libraries/rollout
 Every pass over segments (the start, the reference, each minibatch) runs them in packs (`rollout_objectives.packing`),
 as many to a pass as fit in `pack_tokens`:
 
-- **Groups.** Sorted by their tokens, neighbouring segments that start with the same tokens (at least `SHARED_PREFIX`,
-  32) are grouped under that prefix while the group fits in a pack: a turn's system prompt, tools and rules, which
-  every turn of a run repeats. Without `share_prefixes`, each segment is a group alone.
+- **Groups.** Sorted by their tokens, each segment joins the group before it, under the prefix they all share, where
+  that prefix is at least `SHARED_PREFIX` (32) tokens, the group fits in a pack, and the group with it puts fewer
+  tokens in the row than the two apart: a turn's system prompt, tools and rules, which every turn of a run repeats, are
+  shared, and two environments' turns that share only a chat template's header are not grouped. Without
+  `share_prefixes`, each segment is a group alone.
 - **Packs.** Groups are placed first-fit-decreasing by the tokens each puts in the row: its prefix once, then each
   segment's rest.
 - **A row.** Roots first (each segment alone, or each shared prefix), then branches (each segment's rest after its
@@ -201,7 +203,7 @@ as many to a pass as fit in `pack_tokens`:
   keeps them apart in each kind of layer: softmax attention runs each root on its own and every branch token over its
   prefix and its own branch, nothing copied for a branch, and Qwen3.5's gated delta rule starts each root from a zero
   state and each branch from the state its prefix ended in. A pack's activations are those of a segment as long as its
-  row.
+  row. A sampled token is scored from the tokens before it: one at position 0 is an error.
 - **The same loss.** Each segment's logprobs are those it has alone, so its terms, their normalisation (per token,
   segment, item or group) and the minibatch's units are the unpacked step's; a minibatch's gradient is accumulated a
   pack at a time. A prefix's backward pass adds up every branch's gradient.
@@ -220,7 +222,8 @@ each process).
   they agree on every minibatch without being told. What would fail the step is raised before any process waits on
   another, by every process alike.
 - **Shares balanced by passes.** Each pass over segments is packed as on one process (the same packs, whatever the
-  number of processes, so a segment is computed alike and a prefix and its branches are one pack's), and the packs are
+  number of processes, so a segment is computed alike and a prefix and its branches are one pack's; the price is
+  balance, since packs are shared out whole rather than made to each process's measure), and the packs are
   shared out by `rollout_objectives.ranks.shares`: no process takes more than its even share of them, rounded up (the
   processes take their passes together, so the most any takes is what the pass costs), the largest first, each to the
   process with the fewest tokens so far. A policy that runs one segment at a time shares its segments likewise. Where
@@ -296,6 +299,8 @@ loss, a policy gradient's distillation term, and the step on a toy policy, whose
 toward its teacher on its own samples. `test_shared.py` takes each objective's case on two processes under torchrun,
 a toy model sharded with FSDP2 over gloo, one segment at a time and in packs, against one process, and checks how
 passes are shared out. `test_packing.py` covers packs' layout (first-fit-decreasing, a shared prefix once, each
-segment's tokens at its own positions), a pack that runs out of memory running again a segment at a time, and what
-fails a step raised before it computes anything; packs on real models are `tests/rollout_lora/test_packing.py`'s
+segment's tokens at its own positions), a segment grouped only where that spares tokens (two environments' turns, each
+under its own prompt), a token at position 0 refused, a pack that runs out of memory running again a segment at a time,
+the start computed in each minibatch's own packs, and what fails a step raised before it computes anything; packs on
+real models are `tests/rollout_lora/test_packing.py`'s
 ([LoRA trainer](rollout-lora.md#packs)).

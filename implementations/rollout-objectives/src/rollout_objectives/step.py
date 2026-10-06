@@ -32,14 +32,15 @@ are moved by it (`d loss / d logprobs · logprobs`, whose gradient is the loss's
 
 A step may be shared among processes, one per GPU (`ranks`, `rollout_objectives.ranks`): each takes the same plan,
 computes its share of every minibatch's segments and of the logprobs the step starts from, and the processes gather
-those logprobs and add up each minibatch's sums before reading them. The segments are grouped by the prefixes they
-share first, and the groups shared out, balanced by their tokens (`shares`); each process packs its own. Every item's
-loss is divided by its minibatch's units counted over the whole minibatch, and the gradients are added up across
-processes (a sharded model's reduction is a sum), so the update is the one a single process makes of the same
-minibatch, whatever the number of processes. A process with fewer packs than the most takes idle passes (a two-token
-sequence, its loss times zero) as many times as it lacks: a sharded model's layers are gathered by every process at
-once, so each takes as many passes as the others. A step shared this way does not leave out a minibatch or a segment
-that runs out of memory: the step fails.
+those logprobs and add up each minibatch's sums before reading them. The segments are grouped by the prefixes they share
+first, then packed, and the packs shared out, balanced by their count, then their tokens (`shares`). The packs are the
+same however many processes share the step, so that each segment is computed alike on one GPU or several; the price is
+balance, since packs are shared out whole and not made to each process's measure. Every item's loss is divided by its
+minibatch's units counted over the whole minibatch, and the gradients are added up across processes (a sharded model's
+reduction is a sum), so the update is the one a single process makes of the same minibatch, whatever the number of
+processes. A process with fewer packs than the most takes idle passes (a two-token sequence, its loss times zero) as
+many times as it lacks: a sharded model's layers are gathered by every process at once, so each takes as many passes as
+the others. A step shared this way does not leave out a minibatch or a segment that runs out of memory: the step fails.
 """
 
 import functools
@@ -54,7 +55,7 @@ import torch
 from torch import nn
 
 from rollout_objectives.distillation import Taught, distilled
-from rollout_objectives.packing import Pack, Scores, grouped, packed
+from rollout_objectives.packing import Pack, Scores, grouped, packed, sampled_positions
 from rollout_objectives.ranks import Ranks, shares
 from rollout_objectives.settings import StepSettings
 from rollout_objectives.terms import SUMS, Scored, Terms, labelled, moved_kl, pair, tally, terms, units
@@ -73,7 +74,6 @@ __all__ = [
     "line",
     "metrics",
     "minibatches",
-    "positions",
     "preference_terms",
     "sampled",
 ]
@@ -131,14 +131,9 @@ class SharedPolicy(TrainablePolicy, Protocol):
     def recover(self) -> None: ...
 
 
-def positions(segment: Segment) -> list[int]:
-    """The positions of the tokens the policy sampled in a segment."""
-    return [position for span in segment.spans for position in range(span.start, span.end)]
-
-
 def sampled(weighted: Weighted) -> list[int]:
     """The positions of the tokens the policy sampled in a weighted segment."""
-    return positions(weighted.segment)
+    return sampled_positions(weighted.segment)
 
 
 def sampled_tokens(item: Item) -> int:
@@ -149,8 +144,8 @@ def sampled_tokens(item: Item) -> int:
 def _trainable(item: Item) -> bool:
     """Whether an item has tokens to train on: a segment with sampled tokens, each side of a pair with some."""
     if isinstance(item, Pair):
-        return any(positions(each) for each in item.chosen) and any(positions(each) for each in item.rejected)
-    return any(positions(each) for each in segments_of(item))
+        return any(each.sampled for each in item.chosen) and any(each.sampled for each in item.rejected)
+    return any(each.sampled for each in segments_of(item))
 
 
 @dataclass
@@ -303,11 +298,11 @@ class PolicyStep:
     def _scored(self, segment: Segment, *, entropy: bool = False) -> tuple[torch.Tensor, torch.Tensor | None]:
         """A segment's sampled tokens' logprobs now, and their positions' entropies if asked for."""
         if not entropy:
-            return self.policy.logprobs(segment.tokens, positions(segment)), None
+            return self.policy.logprobs(segment.tokens, sampled_positions(segment)), None
         scoring = getattr(self.policy, "logprobs_and_entropy", None)
         if scoring is None:
             raise ValueError("an entropy bonus needs a policy that gives each position's entropy")
-        found, entropies = scoring(segment.tokens, positions(segment))
+        found, entropies = scoring(segment.tokens, sampled_positions(segment))
         return found, entropies
 
     def _among(self, segment: Segment, candidates: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -316,7 +311,7 @@ class PolicyStep:
         scoring = getattr(self.policy, "logprobs_among", None)
         if scoring is None:
             raise ValueError("the top_k form of distillation needs a policy that gives the logprobs of given tokens")
-        found, among = scoring(segment.tokens, positions(segment), candidates)
+        found, among = scoring(segment.tokens, sampled_positions(segment), candidates)
         return found, among
 
     def _logprobs(self, pack: Pack) -> list[torch.Tensor]:
@@ -330,7 +325,7 @@ class PolicyStep:
             scoring = getattr(self.policy, "reference", None)
             if scoring is None:
                 raise ValueError("the objective reads the reference model, and this policy has none")
-            found = [scoring(segment.tokens, positions(segment)).detach() for segment in pack.segments]
+            found = [scoring(segment.tokens, sampled_positions(segment)).detach() for segment in pack.segments]
         self._ran["packs"] += 1
         self._ran["rows"] += pack.length
         self._ran["tokens"] += pack.segment_tokens

@@ -8,9 +8,10 @@ branch, so each token has the position it has in its own segment. A policy that 
 `rollout_lora.policy`) gives each segment's logprobs as one segment alone would have them.
 
 `packs` cuts segments into packs of at most `capacity` tokens: segments sorted by their tokens, neighbours sharing a
-prefix of at least `SHARED_PREFIX` tokens grouped under it while the group fits (`grouped`), then the groups placed
-first-fit-decreasing by the tokens each puts in the row (`packed`). A step shared among processes makes the same packs
-whatever their number, and shares them out (a prefix and its branches are always one pack's).
+prefix of at least `SHARED_PREFIX` tokens grouped under it while the group fits and sharing spares tokens (`grouped`),
+then the groups placed first-fit-decreasing by the tokens each puts in the row (`packed`). A step shared among
+processes makes the same packs whatever their number, and shares them out (a prefix and its branches are always one
+pack's).
 """
 
 from collections.abc import Sequence
@@ -93,16 +94,13 @@ class Pack:
         """Tokens of its segments, each counted in full (more than `length` where they share prefixes)."""
         return sum(len(each.tokens) for each in self.segments)
 
-    @property
-    def roots(self) -> int:
-        """Tokens of the root runs (they come first in the row)."""
-        return sum(run.length for run in self.runs if run.parent is None)
-
     def scored(self, index: int, positions: Sequence[int] | None = None) -> tuple[list[int], list[int]]:
         """For the `index`-th segment: the row of the hidden state before each of `positions` (the sampled tokens'
         by default), and the token at each."""
         segment, places = self.segments[index], self.places[index]
         at = sampled_positions(segment) if positions is None else positions
+        if any(position < 1 for position in at):
+            raise ValueError("a sampled token is scored from the tokens before it: none is at position 0")
         return [places[position - 1] for position in at], [segment.tokens[position] for position in at]
 
     @classmethod
@@ -166,8 +164,10 @@ def grouped(
     segments: Sequence[Segment], capacity: int, *, share: bool = True, least: int = SHARED_PREFIX
 ) -> list[Group]:
     """The segments in groups, each of which a pack holds whole. Sharing (`share`): the segments sorted by their
-    tokens, and neighbours grouped under the prefix they share while it is at least `least` tokens and the group
-    takes at most `capacity` tokens; else each segment alone."""
+    tokens, and each joins the group before it, under the prefix they all share, where that prefix is at least `least`
+    tokens, the group takes at most `capacity` tokens, and the group with it puts fewer tokens in a row than the group
+    and the segment apart (a segment that would cut a long prefix short starts a group of its own); else each segment
+    alone."""
     lengths = [len(each.tokens) for each in segments]
     if not share:
         return [Group([index], 0, lengths[index]) for index in range(len(segments))]
@@ -183,8 +183,9 @@ def grouped(
             head = segments[current.members[0]].tokens
             shared = _common(head, segments[index].tokens, current.shared)
             members = [*current.members, index]
-            if shared >= least and cost(members, shared) <= capacity:
-                current = Group(members, shared, cost(members, shared))
+            joined = cost(members, shared)
+            if shared >= least and joined <= capacity and joined < current.tokens + lengths[index]:
+                current = Group(members, shared, joined)
                 continue
             found.append(current)
         current = Group([index], lengths[index], lengths[index])

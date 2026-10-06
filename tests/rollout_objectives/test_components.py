@@ -9,8 +9,9 @@ import pytest
 import torch
 from torch import nn
 
+from rollout_objectives.packing import sampled_positions
 from rollout_objectives.settings import StepSettings
-from rollout_objectives.step import PolicyStep, positions
+from rollout_objectives.step import PolicyStep
 from rollout_objectives.terms import kl_estimate, reduced, terms, units
 from rollout_train.objectives import DEFAULT, Objective, resolved
 from rollout_train.recorder import Segment, Span
@@ -218,8 +219,9 @@ def test_a_preference_step_takes_the_gradient_of_the_whole_loss_one_segment_at_a
         made = settings.loss
         from rollout_objectives.step import preference_terms
 
-        now = {id(each): direct.logprobs(each.tokens, positions(each)) for each in (chosen, rejected, other)}
-        reference = {id(each): direct.reference(each.tokens, positions(each)) for each in (chosen, rejected, other)}
+        sides = (chosen, rejected, other)
+        now = {id(each): direct.logprobs(each.tokens, sampled_positions(each)) for each in sides}
+        reference = {id(each): direct.reference(each.tokens, sampled_positions(each)) for each in sides}
         total = torch.stack([found.loss for _, found in preference_terms(made, items, now, reference)]).sum() / 2
         total.backward()
 
@@ -247,16 +249,17 @@ def test_a_preference_step_takes_the_gradient_of_the_whole_loss_one_segment_at_a
 
 def test_a_dpo_step_prefers_the_chosen_and_kto_its_desirable() -> None:
     chosen, rejected = sampled([1, 2, 3, 4]), sampled([1, 5, 6, 7])
+    sides = (chosen, rejected)
     for preset, items in (
         ("dpo", [Pair((chosen,), (rejected,))]),
         ("simpo", [Pair((chosen,), (rejected,))]),
         ("kto", [Labelled((chosen,), True), Labelled((rejected,), False)]),
     ):
         policy = ToyPolicy()
-        before = [float(policy.logprobs(each.tokens, positions(each)).detach().sum()) for each in (chosen, rejected)]
+        before = [float(policy.logprobs(each.tokens, sampled_positions(each)).detach().sum()) for each in sides]
         stepping = PolicyStep(policy, StepSettings(objective=preset, learning_rate=0.05, max_kl=None))  # type: ignore[arg-type]
         metrics = [stepping.step(items, seed=seed) for seed in range(3)]
-        after = [float(policy.logprobs(each.tokens, positions(each)).detach().sum()) for each in (chosen, rejected)]
+        after = [float(policy.logprobs(each.tokens, sampled_positions(each)).detach().sum()) for each in sides]
         assert after[0] - after[1] > before[0] - before[1], preset
         assert metrics[0]["items"] == len(items) and metrics[0]["segments"] == 2.0
         assert metrics[-1]["preference_accuracy"] == 1.0 and metrics[-1]["loss"] < metrics[0]["loss"]

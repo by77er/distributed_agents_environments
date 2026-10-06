@@ -1,7 +1,8 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
-"""Packs: segments laid out in rows of at most a pack's tokens, a prefix several share once; and the step over them, on
-a toy policy that runs packs: a pack that runs out of memory runs again a segment at a time, and only the segment that
-runs out alone is left out."""
+"""Packs: segments laid out in rows of at most a pack's tokens, a prefix several share once, and a segment grouped under
+a prefix only where that spares tokens; and the step over them, on a toy policy that runs packs: a pack that runs out of
+memory runs again a segment at a time, and only the segment that runs out alone is left out; the logprobs the step
+starts from are computed in the packs each minibatch makes."""
 
 import random
 from collections.abc import Callable, Sequence
@@ -74,6 +75,26 @@ def test_segments_that_start_alike_share_their_prefix_once() -> None:
     assert len(small) > 1 and all(pack.length <= 120 for pack in small)
     for pack in small:
         laid_out(pack)
+
+
+def test_a_segment_joins_a_group_only_where_that_spares_tokens() -> None:
+    """Two environments' turns, each environment's prompt of 250 tokens, all starting with the same header of 32: a
+    group of both would share the header alone, and put far more tokens in the row than a group of each."""
+    rng = random.Random(0)
+    header = [5] * 32
+    prompts = (header + [7] * 218, header + [9] * 218)
+    segments = [segment(prompt + [rng.randrange(1000) for _ in range(50)]) for prompt in prompts for _ in range(10)]
+    groups = grouped(segments, 8192)
+    assert sorted((len(group.members), group.shared) for group in groups) == [(10, 250), (10, 250)]
+    assert sum(pack.length for pack in packs(segments, 8192)) == 2 * (250 + 10 * 50)
+    assert sum(pack.length for pack in packs(segments, 8192, share=False)) == 20 * 300
+
+
+def test_a_token_at_position_0_is_not_scored() -> None:
+    """It has no tokens before it to be scored from."""
+    (pack,) = packs([Segment([1, 2, 3, 4], [Span(0, 4, 0)], [-1.0] * 4)], 100)
+    with pytest.raises(ValueError, match="position 0"):
+        pack.scored(0)
 
 
 class PackingToy:
