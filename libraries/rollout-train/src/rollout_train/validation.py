@@ -9,8 +9,11 @@ suites, the names taken, the GPUs the cluster has and what it has free).
 
 A finding refuses the run unless it says it does not (`refuses`): a run that only waits (for a GPU) is told so and
 not refused. `RULES` lists the rules in the order findings are reported (docs/guide/cluster.md says
-when each refuses): settings, providers, auth, capabilities, bridge, weights, models, rank, segment, start, objective,
-evals, distillation, environment, capacity, spend, name.
+when each refuses): settings, providers, auth, capabilities, bridge, weights, models, rank, segment, memory, start,
+objective, evals, distillation, environment, capacity, spend, name.
+
+What a model's files say of its size (`rollout_train.memory.ModelFacts`) is a fact gathered beforehand too, where the
+`memory` rule can use it: a trainer that is not metered and whose GPUs' memory is known.
 """
 
 from collections.abc import Callable, Mapping
@@ -23,6 +26,7 @@ from rollout_train.bridges import AUTO, Bridge, NoBridge, path, rank_factor
 from rollout_train.cluster import Cluster, auth_problem
 from rollout_train.demand import HEADROOM, Demand, Resources, demand, played_channel, requested
 from rollout_train.distillation import routes_of
+from rollout_train.memory import ModelFacts, TrainerMemory, gpu_memory_gib, trainer_memory
 from rollout_train.objectives import DEFAULT, POLICY_GRADIENT, Objective, composed
 from rollout_train.providers import InferenceProvider, SettingSpec, TrainerProvider, settings_of
 from rollout_train.published import is_published
@@ -96,6 +100,11 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule("rank", "the adapter's rank, as the provider sees it, above its highest"),
     Rule("segment", "segments longer than the trainer or the context takes"),
+    Rule(
+        "memory",
+        "a trainer whose estimate of what each of its GPUs holds (weights, gradients, optimizer state and activations, "
+        "sharded over its GPUs) is more than a GPU's memory",
+    ),
     Rule("start", "the start does not exist, was released, or is in a format the trainer cannot start from"),
     Rule(
         "objective",
@@ -217,6 +226,8 @@ class _Run:
     environment: EnvironmentFacts | None
     ledger: LedgerFacts
     found: list[Finding] = field(default_factory=list[Finding])
+    model: ModelFacts | None = None
+    """What the trained model's files say of its size, where it was gathered."""
     trainer: TrainerProvider | None = None
     specs: tuple[SettingSpec, ...] | None = None
     chains: dict[tuple[str, str], tuple[Bridge, ...]] = field(default_factory=dict[tuple[str, str], tuple[Bridge, ...]])
@@ -274,10 +285,12 @@ def check(
     cluster: Cluster,
     environment: EnvironmentFacts | None = None,
     ledger: LedgerFacts | None = None,
+    *,
+    model: ModelFacts | None = None,
 ) -> list[Finding]:
-    """Everything wrong with a run's settings on this cluster, given what is known of its environment and the ledger;
-    empty when nothing is. A finding whose `refuses` is false is a note: the run may go."""
-    run = _Run(settings, cluster, environment, ledger or LedgerFacts())
+    """Everything wrong with a run's settings on this cluster, given what is known of its environment, the ledger and
+    the trained model's size; empty when nothing is. A finding whose `refuses` is false is a note: the run may go."""
+    run = _Run(settings, cluster, environment, ledger or LedgerFacts(), model=model)
     if settings.kind not in KINDS:
         run.refuse("settings", "kind", f"kind is one of {', '.join(KINDS)}, not {settings.kind!r}")
         return run.found
@@ -747,6 +760,77 @@ def _segment(run: _Run) -> None:
         if offer is not None and longest > offer.context:
             run.refuse("segment", "trainer.segment_tokens", f"segments of up to {longest} tokens are longer than "
                        f"{model}'s context on provider {name} ({offer.context})")  # fmt: skip
+
+
+def trainer_gpus(trainer: TrainerProvider, cluster: Cluster) -> tuple[int, float | None]:
+    """How many GPUs a trainer steps on, and each one's memory in GiB (none where it is not known): a local one's
+    `gpus` and `gpu_memory_gib`; a `runpod-trainer`'s pods' `gpu_count` and the least memory of their `gpu_types`
+    (or its `gpu_memory_gib`), a host's pods' where it takes its steps on them."""
+    from rollout_train.providers import RUNPOD, pod_table
+
+    said = trainer.settings.get("gpu_memory_gib")
+    memory = float(said) if isinstance(said, int | float) and not isinstance(said, bool) else None
+    if trainer.kind != "runpod-trainer":
+        return max(1, int(trainer.gpus)), memory
+    host = cluster.inference.get(trainer.colocate_with) if trainer.colocate_with is not None else None
+    settings = host.settings if host is not None and host.kind in RUNPOD else trainer.settings
+    try:
+        table = pod_table(host.kind if host is not None else trainer.kind, settings)
+    except ValueError:
+        return 1, memory
+    return table.gpu_count, memory if memory is not None else gpu_memory_gib(table.gpu_types)
+
+
+def memory_of(run: "_Run", gpus: int | None = None) -> tuple[TrainerMemory, float] | None:
+    """The run's trainer's estimate of each GPU (`rollout_train.memory`; on `gpus` of them, else on as many as it
+    has) and a GPU's memory in GiB, where both can be known: a trainer of its own GPUs (not metered, not sharing an
+    engine's), its GPUs' memory, the model's size."""
+    trainer, model, weights = run.trainer, run.model, run.weights
+    if trainer is None or model is None or weights not in ("lora", "full") or trainer.allocation != "scheduled":
+        return None
+    if trainer.kind not in ("lora", "full", "runpod-trainer"):
+        return None
+    if trainer.kind != "runpod-trainer" and trainer.colocate_with is not None:
+        return None  # (it shares an engine's GPU: what it has is the engine's to leave)
+    host = run.cluster.inference.get(trainer.colocate_with) if trainer.colocate_with is not None else None
+    if host is not None:
+        return None  # (on a host's pod, beside its vLLM)
+    has, gpu = trainer_gpus(trainer, run.cluster)
+    if gpu is None:
+        return None
+    segment = run.setting("trainer.segment_tokens")
+    rank = run.setting("trainer.rank")
+    whole = run.setting("trainer.whole_base")
+    estimate = trainer_memory(
+        model,
+        weights=weights,
+        gpus=gpus if gpus is not None else has,
+        rank=rank if isinstance(rank, int) else 32,
+        segment_tokens=segment if isinstance(segment, int) else trainer.segment_tokens,
+        frozen_reference=run.setting("trainer.frozen_reference") is True,
+        whole_base=whole if isinstance(whole, bool) else None,
+        gpu_gib=gpu,
+    )
+    return estimate, gpu
+
+
+def _memory(run: _Run) -> None:
+    found = memory_of(run)
+    if found is None or run.trainer is None:
+        return
+    estimate, gpu = found
+    name, model = run.trainer.name, run.settings.trainer_model
+    what = "every weight of" if run.weights == "full" else "an adapter over"
+    on = f"{estimate.gpus} GPUs" if estimate.gpus > 1 else "one GPU"
+    if estimate.total > gpu:
+        fits = [count for count in (2, 4, 8) if count > estimate.gpus and (more := memory_of(run, count)) is not None
+                and more[0].total <= gpu]  # fmt: skip
+        more = f": it would fit on {fits[0]} GPUs" if fits else ""
+        run.refuse("memory", "trainer.provider", f"the {name} trainer would need about {estimate.said()} to train "
+                   f"{what} {model} on {on} of {gpu:g} GiB{more}")  # fmt: skip
+    elif estimate.total > 0.9 * gpu:
+        run.note("memory", "trainer.provider", f"the {name} trainer would need about {estimate.said()} to train "
+                 f"{what} {model} on {on} of {gpu:g} GiB: little to spare")  # fmt: skip
 
 
 def _start(run: _Run) -> None:
@@ -1293,6 +1377,7 @@ _RULES: Mapping[str, Callable[[_Run], None]] = {
     "renderer": _renderer,
     "rank": _rank,
     "segment": _segment,
+    "memory": _memory,
     "start": _start,
     "objective": _objective,
     "evals": _evals,

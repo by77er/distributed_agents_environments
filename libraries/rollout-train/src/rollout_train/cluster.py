@@ -735,6 +735,14 @@ def _trainer(name: str, described: dict[str, Any]) -> TrainerProvider:
         fields = ("kind", "auth", "models", "segment_tokens", "gpus", "colocate_with", "cost", "costs", "allocation",
                   "concurrency", *kind.fields)  # fmt: skip
         raise ClusterError(f"{where} has no {', '.join(unknown)} (a {kind_name} trainer has {', '.join(fields)})")
+    memory = settings.get("gpu_memory_gib")
+    if memory is not None and (isinstance(memory, bool) or not isinstance(memory, int | float) or memory <= 0):
+        raise ClusterError(f"{where} gpu_memory_gib is the memory of each of its GPUs, in GiB (not {memory!r})")
+    if gpus > 1 and gpus != int(gpus):
+        raise ClusterError(f"{where} gpus above one is a whole number: a trainer steps on whole GPUs (not {gpus:g})")
+    if gpus > 1 and provider.colocate_with is not None:
+        raise ClusterError(f"{where} shares {provider.colocate_with}'s GPU (colocate_with), so it steps on one: a "
+                           "trainer on several keeps its processes and model on them between steps")  # fmt: skip
     if kind_name == "runpod-trainer":
         runs = settings.get("trainer", "lora")
         if runs not in ("lora", "full"):

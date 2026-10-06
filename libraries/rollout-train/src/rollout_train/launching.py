@@ -39,6 +39,7 @@ from rollout_train.bridges import AUTO, VERBATIM, NoBridge, format_of, path
 from rollout_train.cluster import Cluster
 from rollout_train.demand import Resources, played_channel
 from rollout_train.ledger import Ledger
+from rollout_train.memory import ModelFacts
 from rollout_train.presence import Beat, alive
 from rollout_train.presets import Presets
 from rollout_train.providers import settings_of
@@ -59,6 +60,7 @@ from rollout_train.validation import (
     completed,
     serves,
     spend_of,
+    trainer_gpus,
     weights_of,
 )
 
@@ -341,12 +343,32 @@ async def examined(
     facts = await environment_facts(str(environment) if environment else None, cluster, ledger, loaded=loaded)
     known = await ledger_facts(settings, ledger, own=own, gpus=gpus, free=free, cluster=cluster)
     return Examined(
-        check(settings, cluster, facts, known),
+        check(settings, cluster, facts, known, model=await trained_model_facts(settings, cluster)),
         facts,
         spend_of(settings, cluster, facts, known),
         weights_of(settings, cluster),
         checkpoints_at(settings, cluster),
     )
+
+
+_MODEL_FACTS: dict[str, ModelFacts] = {}
+"""The facts found of each model, kept for the process's life (a model's files do not change)."""
+
+
+async def trained_model_facts(settings: RunSettings, cluster: Cluster) -> ModelFacts | None:
+    """What the trained model's files say of its size (`rollout_train.memory.model_facts`), where the `memory` rule
+    can use it: a training run on a trainer of `lora`, `full` or `runpod-trainer` whose GPUs' memory is known."""
+    from rollout_train.memory import model_facts
+
+    trainer = cluster.trainers.get(str(settings["trainer.provider"])) if settings.kind in TRAINING else None
+    model = settings.trainer_model
+    if trainer is None or model is None or trainer.kind not in ("lora", "full", "runpod-trainer"):
+        return None
+    if trainer_gpus(trainer, cluster)[1] is None:
+        return None
+    if (found := _MODEL_FACTS.get(model)) is None and (found := await asyncio.to_thread(model_facts, model)):
+        _MODEL_FACTS[model] = found
+    return found
 
 
 def checkpoints_at(

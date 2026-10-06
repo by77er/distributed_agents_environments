@@ -518,7 +518,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_lora.settings:LoraSettings",
             auths=("none",),
             auth=Auth("none"),
-            fields=("implementation",),
+            fields=("implementation", "gpu_memory_gib"),
             not_settings={
                 **_OBJECTIVE,
                 "frozen_reference": "an adapter's reference is the model with the adapter switched off",
@@ -531,8 +531,12 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_lora.settings:LoraSettings",
             auths=("none",),
             auth=Auth("none"),
-            fields=("implementation",),
-            not_settings={**_OBJECTIVE, "rank": "a full-weight trainer has no adapter"},
+            fields=("implementation", "gpu_memory_gib"),
+            not_settings={
+                **_OBJECTIVE,
+                "rank": "a full-weight trainer has no adapter",
+                "whole_base": "every weight is trained, and sharded",
+            },
         ),
         TrainerKind(
             "tinker",
@@ -562,7 +566,7 @@ TRAINER_KINDS: Mapping[str, TrainerKind] = {
             "rollout_lora.settings:LoraSettings",
             auths=("mtls",),
             auth=Auth("mtls", identity=LEASED),
-            fields=("trainer", *POD_FIELDS),
+            fields=("trainer", "gpu_memory_gib", *POD_FIELDS),
             secrets=("api_key",),
             not_settings=_OBJECTIVE,
         ),
@@ -584,6 +588,8 @@ class TrainerProvider:
     segment_tokens: int | None = None
     """The longest segment this hardware trains on (none: any)."""
     gpus: float = 0
+    """The GPUs it steps on (a share of one, where it shares an engine's): above one, a whole number, which it steps on
+    together, the policy sharded over them. A `runpod-trainer`'s are its pods' `gpu_count`."""
     colocate_with: str | None = None
     """A `vllm` provider whose GPU it shares (that provider's engines sleep while it steps), or, for a
     `runpod-trainer`, a `runpod-host` provider whose pods take its steps beside their vLLM."""
@@ -683,6 +689,7 @@ class PodTable:
     gpu_types: tuple[str, ...]
     """RunPod's GPU type ids, in order of preference (`NVIDIA H100 80GB HBM3`)."""
     gpu_count: int = 1
+    """GPUs a pod has (a host's: one). A trainer's pod of more steps on all of them, the policy sharded over them."""
     max_pods: int = 1
     """The most pods of the provider at once, across runs: a cap on what it spends."""
     idle_stop: float = 600.0
@@ -774,6 +781,8 @@ def pod_table(kind: str, settings: Mapping[str, JsonValue]) -> PodTable:
     sleep = settings.get("sleep", False)
     if not isinstance(sleep, bool):
         raise ValueError("sleep is true or false")
+    if kind == "runpod-host" and whole("gpu_count", 1) > 1:
+        raise ValueError("gpu_count is 1 for a host: its vLLM serves on one GPU, and its trainer steps on the same one")
     return PodTable(
         image=image, gpu_types=gpu_types, gpu_count=whole("gpu_count", 1), max_pods=whole("max_pods", 1),
         idle_stop=number("idle_stop", 600.0) or 0.0, start_timeout=number("start_timeout", 1200.0, least=1.0) or 1200.0,
