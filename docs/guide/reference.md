@@ -6401,7 +6401,8 @@ step-ca (by default the one its table says, if any). `told` hears what the run w
 - `async def renewing(self, spent: Callable[[float], Awaitable[None]] | None = None) -> None` — Renew every `renew` seconds until cancelled, telling `spent` the dollars each renewal adds.
 - `async def release(self) -> None` — Release every lease it holds: each pod stays warm for its provider's `idle_stop` (deleted at once where that
   is 0), its warm time charged to the run.
-- `async def deleted(self, lease: PodLease, why: str) -> None` — Delete a lease's pod (`delete`).
+- `async def deleted(self, lease: PodLease, why: str, *, still: Callable[[PodLease], bool] | None = None) -> bool` — Delete a lease and its pod (`delete`), and hold it no more; whether it was deleted (false where it is no
+  longer the one to delete, or could not be: said).
 
 ### `PodsDidNotStart`
 
@@ -7791,7 +7792,8 @@ An objective, every component of it (those its family does not accept keep their
 - `def to_json(self) -> dict[str, JsonValue]` — What a run's start records: the preset, the family and the family's components.
 - `@classmethod def from_json(cls, said: Mapping[str, JsonValue]) -> 'Objective'` — An objective as `to_json` recorded it.
 - `def changed(self, changes: Mapping[str, JsonValue]) -> 'Objective'` — With `changes` (dotted keys, each a component that may change between steps), checked as any objective is
-  (else `ValueError`).
+  (else `ValueError`). A change to the value a component has already changes nothing, and is not checked as an
+  override (a step may be given every changeable component, at its value).
 - `@property def needs_reference(self) -> bool` — Whether its loss reads the reference's logprobs.
 - `@property def takes_importance(self) -> bool` — Whether an importance correction weighs its loss: a policy gradient's, or the policy-gradient form of
   distillation's, each a term of the sampled token (the top-k form's is a divergence over the teacher's top

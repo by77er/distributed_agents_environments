@@ -59,12 +59,16 @@ has the public image pulls only the platform's layers. `deploy/images/README.md`
 
 - **Claimed when it starts.** After its placement group is reserved, the run's driver claims its pods. It first takes a
   warm pod: one no run holds, of the same provider, image and model, taken by compare-and-set so that two runs never
-  take one pod. Else it starts one in a free slot of the provider's `max_pods`; with every slot taken, the run waits and
-  its launch says so. A pod is ready once RunPod's API has said its public address, which its lease keeps, and its beat
-  says it is ready for the run; a pod not ready within the provider's `start_timeout` (1200 seconds unless said) is
-  deleted, and the run fails saying which pod and why.
+  take one pod. Else it starts one in a free slot of the provider's `max_pods`. A slot held by a lease of the same run
+  that the run does not hold now (a resumed run's earlier start held it) is freed, its lease and pod deleted, where
+  that lease is stale or RunPod has no such pod, and the run's log says so; with every slot taken otherwise, the run
+  waits and its launch says so. A pod is ready once RunPod's API has said its public address, which its lease keeps,
+  and its beat says it is ready for the run; a pod not ready within the provider's `start_timeout` (1200 seconds unless
+  said) is deleted, and the run fails saying which pod and why.
 - **Renewed while it runs.** Every 30 seconds the run renews each lease and the time it is charged for each pod. A lease
-  not renewed for 5 minutes is stale: its run is taken to be gone (its driver died, or its cluster went away).
+  that changed between the run's read and its write is read again and renewed at its version then, while it is still
+  the run's; the run's log says so. A lease not renewed for 5 minutes is stale: its run is taken to be gone (its driver
+  died, or its cluster went away).
 - **Released when it ends,** whether it finished, was stopped, failed or reached a limit. The pod stays up, warm, for
   the provider's `idle_stop` (600 seconds unless said). The next run with the same image and model takes it with no cold
   start, and the pod is reset to that run: its lease names the new run and channel and holds a ledger token for it, the
@@ -72,8 +76,15 @@ has the public image pulls only the platform's layers. `deploy/images/README.md`
   with the new run's settings.
 - **Reaped.** `rollout pods reap` (the chart's CronJob with `runpod.reaper: true`, every minute) deletes the pods of
   idle leases past their `idle_stop`, of stale leases, and every pod RunPod lists with the cluster's tag
-  (`rollout-CLUSTER-`) that no lease names. Deleting a pod revokes its certificate. `rollout pods list` shows every
-  lease: who holds it, since when, at what price.
+  (`rollout-CLUSTER-`) that no lease names. It deletes a lease first, by compare-and-set, then its pod, and revokes
+  the pod's certificate. A lease that changed since the reaper read it is read again and deleted at its version then,
+  while it is the same lease (the same run and pod) and still stale or idle; one renewed or taken meanwhile is left with
+  its pod. A lease it could not delete is logged as an error and printed with what it did. A pod RunPod did not delete
+  is deleted by the next reap, as one no lease names. `rollout pods list` shows every lease: who holds it, since when,
+  at what price.
+
+A lease's row in the database keeps its version in the `version` column alone, the one its compare-and-set compares;
+the `lease` column holds the rest.
 
 The gateway reaches a pod at its public IP and raw TCP port over mutual TLS, and only over `https`: the run's channel
 finds its pods by their leases and beats (`rollout_train.pods.routing.LeasedServers`), at the address the lease holds,

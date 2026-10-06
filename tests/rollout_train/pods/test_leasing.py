@@ -1,7 +1,10 @@
 """Leasing RunPod's pods, against a fake of RunPod's API (nothing rented, nothing spent): a run claims pods (started, or
 taken warm), renews and releases them; a released pod stays warm and is taken by the next run with its image and model,
 reset to that run; the reaper deletes idle pods past their idle stop, stale leases' pods and pods no lease names; a pod
-not ready in time is deleted and the run told why; and what each run held is charged at the pod's price."""
+not ready in time is deleted and the run told why; and what each run held is charged at the pod's price. A lease
+changed under its run (by hand, or between a read and a compare-and-set) is still renewed, and still reaped where it is
+stale; a resumed run frees a slot its earlier start held whose pod is gone; the reaper never deletes a lease renewed
+meanwhile."""
 
 import asyncio
 import json
@@ -17,7 +20,7 @@ from pydantic import JsonValue
 from rollout_train.cluster import Cluster, parsed
 from rollout_train.database import DatabaseLedger
 from rollout_train.pods.identity import POD, pod_identity
-from rollout_train.pods.leases import HELD, IDLE, PodLease, pod_leases_of
+from rollout_train.pods.leases import HELD, IDLE, DatabasePodLeases, PodLease, pod_leases_of
 from rollout_train.pods.leasing import LeaseLost, PodNeed, Pods, PodsDidNotStart, needs_of, reap, tag_of
 from rollout_train.presence import presence_of
 from rollout_train.run_settings import RunSettings
@@ -341,3 +344,139 @@ async def test_the_queue_shows_every_pod_and_each_runs_own(
     assert pod["spent"] >= 0 and "token" not in pod
     assert [each["pod"] for each in shown["admitted"][0]["pods"]] == [lease.pod] and shown["admitted"][1]["pods"] == []
     await held.release()
+
+
+def edited_by_hand(ledger: DatabaseLedger, pod: str, **changed: Any) -> None:
+    """Change a lease's row as by hand in the database: `changed` into its `lease` column, with the version it was
+    read at in there too, and its `version` column bumped."""
+    from rollout_train.sql import fetch_one, sql
+
+    def edited(connection: Any) -> None:
+        found = fetch_one(connection, "SELECT version, lease FROM pod_leases WHERE pod = :pod", {"pod": pod})
+        assert found is not None
+        lease = {**json.loads(found[1]), "version": found[0], **changed}
+        sql(connection, "UPDATE pod_leases SET version = version + 1, lease = :lease WHERE pod = :pod",
+            {"pod": pod, "lease": json.dumps(lease)})  # fmt: skip
+
+    ledger.database.write(edited)
+
+
+async def test_a_lease_whose_version_moved_under_the_run_is_still_renewed(
+    tmp_path: Path,
+    world: tuple[DatabaseLedger, FakeRunPod, StandIns],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ledger, fake, _ = world
+    store = pod_leases_of(ledger)
+    assert store is not None
+    pods = pods_of("run_1", cluster_of(tmp_path), ledger, fake)
+    (lease,) = await pods.claim([NEED])
+    held = await store.get(lease.pod)
+    assert held is not None and held.renewed is not None
+    edited_by_hand(ledger, lease.pod, address="https://203.0.113.7:40999")  # (its row's version column moved alone)
+    edited = await store.get(lease.pod)
+    assert edited is not None and edited.version == held.version + 1  # (the column's: what a compare-and-set compares)
+    await asyncio.sleep(0.05)
+    await pods.renewed()
+    renewed = await store.get(lease.pod)
+    assert renewed is not None and renewed.renewed is not None
+    assert renewed.version == edited.version + 1 and renewed.renewed > held.renewed
+    assert renewed.address == lease.address  # (RunPod's, again)
+    put = DatabasePodLeases.put
+    raced: list[str] = []
+
+    async def racing(self: DatabasePodLeases, lease: PodLease, *, expect: int | None) -> PodLease:
+        if not raced:  # (another writer changes the lease between the run's read and its compare-and-set)
+            raced.append(lease.pod)
+            await put(self, lease, expect=expect)
+        return await put(self, lease, expect=expect)
+
+    monkeypatch.setattr(DatabasePodLeases, "put", racing)
+    with caplog.at_level("WARNING", logger="rollout_train.pods.leasing"):
+        await pods.renewed()
+    assert raced == [lease.pod] and f"the lease of pod {lease.pod} changed since run run_1 read it" in caplog.text
+    again = await store.get(lease.pod)
+    assert again is not None and again.version == renewed.version + 2 and again.run == "run_1"
+    await pods.release()
+
+
+async def test_a_stale_lease_whose_pod_is_gone_frees_its_slot_after_a_version_change_and_the_run_resumes(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, fake, _ = world
+    cluster = cluster_of(tmp_path, max_pods=1)
+    store = pod_leases_of(ledger)
+    assert store is not None
+    crashed = pods_of("run_1", cluster, ledger, fake)
+    (lease,) = await crashed.claim([NEED])  # (its driver dies: no more renewals)
+    assert lease.id is not None
+    await fake.client().terminate(lease.id)  # (its pod deleted at RunPod)
+    edited_by_hand(ledger, lease.pod, address="https://203.0.113.7:40999")
+    delete = DatabasePodLeases.delete
+    raced: list[str] = []
+
+    async def racing(self: DatabasePodLeases, pod: str, *, expect: int) -> None:
+        if not raced:  # (the lease is changed again between the reaper's read and its compare-and-set)
+            raced.append(pod)
+            edited_by_hand(ledger, pod, address="https://203.0.113.7:41000")
+        await delete(self, pod, expect=expect)
+
+    monkeypatch.setattr(DatabasePodLeases, "delete", racing)
+    await asyncio.sleep(0.1)
+    (said,) = await reap(cluster, ledger, api=lambda provider: fake.client(), ca=lambda table: None, stale=0.05)
+    assert raced == [lease.pod] and said.startswith(f"deleted {lease.pod} of pods: its lease was not renewed")
+    assert await store.all() == []  # (its slot is free)
+    resumed = pods_of("run_1", cluster, ledger, fake)
+    (started,) = await asyncio.wait_for(resumed.claim([NEED]), 5)
+    assert started.pod != lease.pod and started.slot == 0 and started.run == "run_1" and started.id in fake.pods
+    await resumed.release()
+
+
+async def test_a_resumed_run_frees_a_slot_its_earlier_start_held_whose_pod_is_gone(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns], caplog: pytest.LogCaptureFixture
+) -> None:
+    ledger, fake, _ = world
+    cluster = cluster_of(tmp_path, max_pods=1)
+    store = pod_leases_of(ledger)
+    assert store is not None
+    crashed = pods_of("run_1", cluster, ledger, fake)
+    (lease,) = await crashed.claim([NEED])
+    assert lease.id is not None
+    await fake.client().terminate(lease.id)
+    other = pods_of("run_2", cluster, ledger, fake)
+    with pytest.raises(TimeoutError):  # (another run's lease, renewed not long ago: not its to free)
+        await asyncio.wait_for(other.claim([NEED]), 0.3)
+    resumed = pods_of("run_1", cluster, ledger, fake)
+    with caplog.at_level("WARNING", logger="rollout_train.pods.leasing"):
+        (started,) = await asyncio.wait_for(resumed.claim([NEED]), 5)
+    assert f"run run_1 frees slot 0 of pods: an earlier start of run run_1 held pod {lease.pod}" in caplog.text
+    assert started.pod != lease.pod and await store.get(lease.pod) is None and started.id in fake.pods
+    await resumed.release()
+
+
+async def test_the_reaper_never_frees_a_lease_renewed_meanwhile(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, fake, _ = world
+    cluster = cluster_of(tmp_path)
+    store = pod_leases_of(ledger)
+    assert store is not None
+    pods = pods_of("run_1", cluster, ledger, fake)
+    (lease,) = await pods.claim([NEED])
+    delete = DatabasePodLeases.delete
+    raced: list[str] = []
+
+    async def racing(self: DatabasePodLeases, pod: str, *, expect: int) -> None:
+        if not raced:  # (the run renews between the reaper's read and its compare-and-set)
+            raced.append(pod)
+            await pods.renewed()
+        await delete(self, pod, expect=expect)
+
+    monkeypatch.setattr(DatabasePodLeases, "delete", racing)
+    await asyncio.sleep(0.4)
+    assert await reap(cluster, ledger, api=lambda provider: fake.client(), ca=lambda table: None, stale=0.3) == []
+    there = await store.get(lease.pod)
+    assert raced == [lease.pod] and there is not None and there.run == "run_1" and lease.id in fake.pods
+    await pods.renewed()  # (its lease is the run's yet)
+    await pods.release()

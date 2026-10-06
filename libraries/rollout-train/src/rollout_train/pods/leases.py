@@ -9,7 +9,9 @@ lease not renewed for long is stale, and the reaper deletes its pod (`rollout_tr
 
 Every change is a compare-and-set on the lease's `version`: a run takes an idle pod only if no one changed the lease
 since it read it, so two runs never take one pod (`Conflict` to the one that lost). A provider's pods have slots, 0 to
-its `max_pods` less one, and a slot holds one lease at a time, so no provider ever has more pods than `max_pods`.
+its `max_pods` less one, and a slot holds one lease at a time, so no provider ever has more leased pods than
+`max_pods`. A database keeps a lease's version in its row's `version` column alone, which its compare-and-set
+compares (`DatabasePodLeases`).
 
 **Pod time** (`PodTime`) is what a run is charged for a pod: one entry per run and pod and when it took the pod, from
 then (`since`) to its newest renewal or its release (`until`), and the warm time after its release (`idle`), until the
@@ -280,9 +282,23 @@ class FilePodLeases:
         await asyncio.to_thread(written)
 
 
+_KEYED = ("pod", "provider", "slot", "version")
+"""What a lease's row keeps in columns of its own, and its `lease` column does not: one place for each, so a row
+cannot say two versions (a compare-and-set compares the `version` column)."""
+_COLUMNS = ", ".join((*_KEYED, "lease"))
+
+
+def _lease_of(row: tuple[Any, ...]) -> PodLease:
+    """A lease from its row: its `lease` column, with its pod, provider, slot and version from their columns."""
+    pod, provider, slot, version, said = row
+    return PodLease.from_json({**json.loads(said), "pod": pod, "provider": provider, "slot": int(slot),
+                               "version": int(version)})  # fmt: skip
+
+
 class DatabasePodLeases:
     """`PodLeases` in the `pod_leases` and `pod_time` tables of a database: a row per lease (its provider and slot
-    unique) and per run's time on a pod. Stamped by the database's clock."""
+    unique) and per run's time on a pod. A lease's pod, provider, slot and version are its row's columns, the rest
+    its `lease` column. Stamped by the database's clock."""
 
     def __init__(self, database: "Database") -> None:
         self.database = database
@@ -302,34 +318,37 @@ class DatabasePodLeases:
         from rollout_train.sql import fetch_all
 
         def rows(connection: "Connection") -> list[tuple[Any, ...]]:
-            return fetch_all(connection, "SELECT lease FROM pod_leases ORDER BY pod")
+            return fetch_all(connection, f"SELECT {_COLUMNS} FROM pod_leases ORDER BY pod")
 
-        return [PodLease.from_json(json.loads(row[0])) for row in await asyncio.to_thread(self.database.read, rows)]
+        return [_lease_of(row) for row in await asyncio.to_thread(self.database.read, rows)]
 
     async def get(self, pod: str) -> PodLease | None:
         from rollout_train.sql import fetch_one
 
         def row(connection: "Connection") -> tuple[Any, ...] | None:
-            return fetch_one(connection, "SELECT lease FROM pod_leases WHERE pod = :pod", {"pod": pod})
+            return fetch_one(connection, f"SELECT {_COLUMNS} FROM pod_leases WHERE pod = :pod", {"pod": pod})
 
         found = await asyncio.to_thread(self.database.read, row)
-        return PodLease.from_json(json.loads(found[0])) if found else None
+        return _lease_of(found) if found else None
 
     async def put(self, lease: PodLease, *, expect: int | None) -> PodLease:
         from rollout_train.sql import fetch_all, fetch_one, sql
 
         def written(connection: "Connection") -> PodLease:
-            found = fetch_one(connection, "SELECT lease FROM pod_leases WHERE pod = :pod", {"pod": lease.pod})
-            there = PodLease.from_json(json.loads(found[0])) if found else None
+            found = fetch_one(connection, f"SELECT {_COLUMNS} FROM pod_leases WHERE pod = :pod", {"pod": lease.pod})
+            there = _lease_of(found) if found else None
             others = [
-                PodLease.from_json(json.loads(row[0]))
+                _lease_of(row)
                 for row in fetch_all(
-                    connection, "SELECT lease FROM pod_leases WHERE provider = :provider", {"provider": lease.provider}
+                    connection,
+                    f"SELECT {_COLUMNS} FROM pod_leases WHERE provider = :provider",
+                    {"provider": lease.provider},
                 )
             ]
             made = _written(lease, there, expect, others)
+            said = {key: value for key, value in made.to_json().items() if key not in _KEYED}
             values = {"pod": made.pod, "provider": made.provider, "slot": made.slot, "version": made.version,
-                      "lease": json.dumps(made.to_json())}  # fmt: skip
+                      "lease": json.dumps(said)}  # fmt: skip
             if expect is None:
                 sql(connection, "INSERT INTO pod_leases (pod, provider, slot, version, lease) "
                     "VALUES (:pod, :provider, :slot, :version, :lease)", values)  # fmt: skip
