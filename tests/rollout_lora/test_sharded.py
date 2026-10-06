@@ -7,7 +7,11 @@ processes. (On the CPU nothing is cast to bfloat16 by the sharding, so the two d
 in; the GPU's mixed precision is `test_sharded_on_gpu.py`'s.)"""
 
 import asyncio
+import json
+import os
 import random
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -216,3 +220,28 @@ def test_every_weight_with_a_frozen_reference_on_two_processes_steps_as_on_one(t
     following = PolicyStep(policy, settings, fresh=False, optimizer_given=alone.optimizer)
     close(following.step(given, seed=1), second, (*COMPARED, "kl_penalty"))
     assert second["kl_penalty"] > 0  # (the second step's policy has moved from its reference)
+
+
+def alone(mode: str, model: str, processes: int, out: Path) -> dict[str, Any]:
+    """What `sharded_alone.py` finds of `mode` on `processes` processes."""
+    script = Path(__file__).with_name("sharded_alone.py")
+    environ = {**os.environ, "OMP_NUM_THREADS": "1"}
+    command = [sys.executable, "-m", "torch.distributed.run", "--standalone", f"--nproc-per-node={processes}",
+               str(script), mode, model, str(out)]  # fmt: skip
+    done = subprocess.run(command, env=environ, capture_output=True, text=True, timeout=600, check=False)
+    assert done.returncode == 0, done.stderr[-3000:]
+    return json.loads(out.read_text())
+
+
+def test_an_adapters_units_sharded_on_one_process_step_bitwise_as_the_policy_does(tiny: str, tmp_path: Path) -> None:
+    found = alone("precision", tiny, 1, tmp_path / "precision.json")
+    assert found["whole"] == 0.0 and found["shared"] == 0.0  # (float32 units: what one process computes, exactly)
+    assert found["bfloat16"] > 1e-4  # (units gathered in bfloat16 would not be: the comparison sees them)
+
+
+def test_an_adapters_gradients_reduced_once_a_minibatch_are_those_reduced_after_each_pass(
+    tiny: str, tmp_path: Path
+) -> None:
+    found = alone("accumulated", tiny, 2, tmp_path / "accumulated.json")
+    assert found["reductions_once"] == 2 and found["reductions_each"] > found["reductions_once"]  # (a unit a layer)
+    assert found["apart"] <= 1e-6 * found["largest"]  # (the same sums, added up in another order)

@@ -15,7 +15,8 @@ the adapter switched off. `Policy.packed` gives the same of every segment of a p
 A step shared among processes (`rollout_objectives.ranks`) asks two more things of a sharded policy, whose gradients
 are added up across the processes (`rollout_lora.sharded.summed`), not averaged: an idle pass (`idle`, a two-token
 sequence of nothing learnt), for a process with fewer passes than the others, and the gradient's norm over every shard,
-clipped (`clip_gradients`).
+clipped (`clip_gradients`). An adapter sharded with its frozen model whole on each GPU also reduces a minibatch's
+gradient once, in its last pass (`gradient_sync`).
 
 Only what training text needs is kept on the GPU: a vision tower is dropped, and the token embedding table (as
 large as the output layer, and used only to look up a sequence's rows) is read from the checkpoint file as needed.
@@ -25,7 +26,7 @@ On a 16 GB card that is the difference between turns of 5,000 tokens and turns o
 import json
 import math
 import struct
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -303,6 +304,10 @@ class Policy:
     packing: bool = False
     """Whether it runs packs (`packed`): its model is one `rollout_lora.packing.prepare` readies for them."""
     scorer: Scorer = field(init=False)
+    gradient_sync: Callable[[bool], None] | None = field(default=None, init=False)
+    """Told before each of a minibatch's gradient passes whether it is the last, where the adapter's gradients are
+    reduced across processes once a minibatch (`rollout_lora.sharded.gradient_sync`); none: each pass reduces its
+    own."""
 
     def __post_init__(self) -> None:
         self.scorer = Scorer(self.model)

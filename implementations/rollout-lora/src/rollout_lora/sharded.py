@@ -5,27 +5,32 @@
 Each process (one per GPU: `rollout_lora.workers`) loads the policy onto the CPU and shards it, the processes taking
 turns (`in_turn`) so that the machine holds one unsharded copy at a time. Each decoder layer is a unit of its own
 (`fully_shard`), and the rest of the model (the output layer, the last norm, embeddings held on the GPU) is its root's,
-the policy's `Scorer`. A unit's weights are gathered from every GPU's shard when it computes, in bfloat16, and its
-gradients reduced to the shards in float32 (`MixedPrecisionPolicy`), added up rather than averaged (`summed`: the step
-divides each item's loss by its minibatch's units, `rollout_objectives.step`). Activations are checkpointed as on one
-GPU. On the CPU (gloo, for tests) nothing is cast.
+the policy's `Scorer`. A unit's weights are gathered from every GPU's shard when it computes, and its gradients reduced
+to the shards in float32, added up rather than averaged (`summed`: the step divides each item's loss by its
+minibatch's units, `rollout_objectives.step`). Activations are checkpointed as on one GPU.
 
-- **An adapter** (`shard_adapter`): the frozen model is sharded with the adapter's layers. Where each GPU holds the
-  whole frozen model (`LoraSettings.whole_base`), each adapter layer is a unit of its own, gathered for each pass and
-  its gradient reduced, while the frozen layers are gathered once and kept; else each layer's frozen weights are
-  gathered with its adapter's as it computes. The output layer is frozen, and kept once gathered.
-- **Every weight** (`shard_full`): the weights, their gradients and Adam's moments in float32, sharded; a frozen
-  reference, where one is asked for, sharded beside it.
+- **An adapter** (`shard_adapter`): the frozen model is sharded with the adapter. Each decoder layer's adapter layers
+  are a unit of their own, inside the layer's, kept in float32 and computed in float32 as on one GPU, gathered for
+  each pass. Where each GPU holds the whole frozen model (`LoraSettings.whole_base`), the frozen layers are gathered
+  once and kept, and the adapter's gradients are kept in each process until a minibatch's last pass, which reduces
+  them once (`gradient_sync`); else each layer's frozen weights are gathered as it computes, and each pass's gradients
+  reduced. The output layer is frozen, and kept once gathered. The frozen model is held in bfloat16, so gathering it
+  casts nothing.
+- **Every weight** (`shard_full`, on one GPU too, so that one GPU computes as several do): the weights, their
+  gradients and Adam's moments in float32, sharded, each unit's weights gathered in bfloat16 (`MixedPrecisionPolicy`:
+  the forward and backward passes in bfloat16, the residual stream and norms too); a frozen reference, where one is
+  asked for, sharded beside it. Each pass's gradients are reduced as it ends: kept until a minibatch's last, the whole
+  model's unsharded gradients would be in every process. On the CPU (gloo, for tests) full weights compute in float32.
 
 Rank 0 writes a step's files from tensors every process gathers in the same order:
 
 - an adapter, in PEFT's layout in float32 (`write_adapter`), and its optimizer's state as `optimizer.pt`, in the layout
-  a step on one GPU reads and writes (`write_optimizer`, `read_optimizer`): steps on one GPU and on several go on from
-  each other's files;
+  of one process's state (`write_optimizer`, `read_optimizer`): trainers on one GPU and on several go on from each
+  other's files;
 - full weights, as the serving copy engines load (`write_serving_copy`): bfloat16 safetensors in files of at most
   4 GB, an index, the model's configuration and tokenizer; and, when a step writes its full state, the float32
-  weights and the optimizer's state with PyTorch's distributed checkpoint (`write_state`, under `SHARDS`: every process
-  writes its shards, a file for each tensor's, and however many processes read them take their own shares,
+  weights and the optimizer's state with PyTorch's distributed checkpoint (`write_state`, under `SHARDS`: every
+  process writes its shards, a file for each tensor's, and however many processes read them take their own shares,
   `read_state`).
 """
 
@@ -49,6 +54,7 @@ from rollout_objectives.ranks import Ranks
 __all__ = [
     "SHARDS",
     "TIMEOUT",
+    "gradient_sync",
     "in_turn",
     "joined",
     "read_optimizer",
@@ -82,7 +88,8 @@ def joined(device: str) -> tuple[Ranks, torch.device, Any]:
     if device == "cuda":
         found = torch.device("cuda", int(os.environ.get("LOCAL_RANK", "0")))
         torch.cuda.set_device(found)
-        distributed.init_process_group("cuda:nccl,cpu:gloo", timeout=TIMEOUT, device_id=found)
+        # (NCCL set up at once on several GPUs; one never calls it, and spends none of the GPU's memory on it)
+        distributed.init_process_group("cuda:nccl,cpu:gloo", timeout=TIMEOUT, device_id=found if size > 1 else None)
     else:
         found = torch.device("cpu")
         distributed.init_process_group("gloo", timeout=TIMEOUT)
@@ -104,11 +111,20 @@ def in_turn[T](make: Callable[[], T], ranks: Ranks) -> T:
     return cast(T, made)
 
 
-def _precision(device: torch.device) -> Any:
+def _precision(device: torch.device | None = None) -> Any:
+    """Weights gathered in bfloat16 and gradients reduced in float32 (on the CPU, where `device` says it, nothing
+    cast); without a device, nothing cast, on any (an adapter's units: float32 as on one GPU)."""
     from torch.distributed.fsdp import MixedPrecisionPolicy
 
-    if device.type != "cuda":
+    if device is None or device.type != "cuda":
         return MixedPrecisionPolicy()
+    return MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+
+
+def _frozen() -> Any:
+    """An adapter's frozen units, on every device: gathered in bfloat16, as they are held (nothing is reduced)."""
+    from torch.distributed.fsdp import MixedPrecisionPolicy
+
     return MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
 
 
@@ -123,22 +139,34 @@ def summed(root: nn.Module) -> None:
 
 
 def shard_adapter(policy: Policy, mesh: Any, device: torch.device, *, whole_base: bool) -> None:
-    """Shard an adapter's policy (loaded onto the CPU) onto `device`: the frozen model whole on each GPU, or a share."""
+    """Shard an adapter's policy (loaded onto the CPU) onto `device`: the frozen model whole on each GPU, or a share;
+    each layer's adapter layers a unit of their own, in float32."""
     from torch.distributed.fsdp import FSDPModule, fully_shard
 
-    precision = _precision(device)
+    frozen = _frozen()
     for layer in layers_of(policy.model):
-        if whole_base:  # (the layer's adapter layers one unit, gathered once its first runs)
-            adapters: list[nn.Module] = [part for each in layer.modules() if isinstance(each, LoraLinear)
-                        for part in (each.lora_A, each.lora_B)]  # fmt: skip
-            fully_shard(adapters, mesh=mesh, mp_policy=precision)
-            fully_shard(layer, mesh=mesh, mp_policy=precision, reshard_after_forward=False)
+        adapters: list[nn.Module] = [part for each in layer.modules() if isinstance(each, LoraLinear)
+                                     for part in (each.lora_A, each.lora_B)]  # fmt: skip
+        fully_shard(adapters, mesh=mesh, mp_policy=_precision())  # (one unit, gathered once its first runs)
+        if whole_base:
+            fully_shard(layer, mesh=mesh, mp_policy=frozen, reshard_after_forward=False)
             cast(FSDPModule, layer).set_reshard_after_backward(False, recurse=False)
         else:
-            fully_shard(layer, mesh=mesh, mp_policy=precision)
-    fully_shard(policy.scorer, mesh=mesh, mp_policy=precision)
+            fully_shard(layer, mesh=mesh, mp_policy=frozen)
+    fully_shard(policy.scorer, mesh=mesh, mp_policy=frozen)
     cast(FSDPModule, policy.scorer).set_reshard_after_backward(False, recurse=False)  # (frozen: kept once gathered)
     summed(policy.scorer)
+    if whole_base and mesh.size() > 1:  # (only the adapter's units communicate: their reductions once a minibatch)
+        policy.gradient_sync = lambda last: gradient_sync(policy, last)
+
+
+def gradient_sync(policy: Policy, last: bool) -> None:
+    """Before one of a minibatch's gradient passes: have it reduce the adapter's gradients across processes (`last`:
+    what each process kept of the passes before, and its own), or keep them in each process, in float32 (the
+    others)."""
+    from torch.distributed.fsdp import FSDPModule
+
+    cast(FSDPModule, policy.scorer).set_requires_gradient_sync(last)
 
 
 def shard_full(policy: FullPolicy, mesh: Any, device: torch.device) -> None:

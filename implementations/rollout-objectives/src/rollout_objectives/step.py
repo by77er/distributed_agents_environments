@@ -44,7 +44,7 @@ import functools
 import math
 import random
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import InitVar, dataclass, field
 from typing import Protocol, cast
 
@@ -113,7 +113,9 @@ class SharedPolicy(TrainablePolicy, Protocol):
     their mean: each item's loss is divided by its whole minibatch's units). It takes an idle pass (`idle`: one that
     learns nothing, under the reference with `reference`, with a backward pass with `gradient`) where a process has
     fewer passes than the others, since the processes gather a sharded model's layers together; and clips its
-    gradient by the norm over every process's shard (`clip_gradients`, which returns the norm before)."""
+    gradient by the norm over every process's shard (`clip_gradients`, which returns the norm before). It may reduce a
+    minibatch's gradient once, in its last pass (`gradient_sync`, told before each of a minibatch's gradient passes
+    whether it is the last: a sharded adapter keeps the others' gradients in each process)."""
 
     def idle(self, *, gradient: bool = False, reference: bool = False) -> None: ...
 
@@ -535,7 +537,7 @@ class PolicyStep:
         reads_old = objective.family != LIKELIHOOD
         lacking = reads_old and any(id(item.segment) not in old for item in segmented)
         folded: dict[int, torch.Tensor] = {}
-        for pack in self._turns([item.segment for item in segmented]):
+        for pack in self._synced_last(self._turns([item.segment for item in segmented])):
             if pack is None:
                 self._idle(gradient=True)
                 continue
@@ -613,7 +615,7 @@ class PolicyStep:
             gradient = now[id(segment)].grad
             if gradient is not None and bool(gradient.any()):
                 moving.append(segment)
-        for pack in self._turns(moving):
+        for pack in self._synced_last(self._turns(moving)):
             if pack is None:
                 self._idle(gradient=True)
                 continue
@@ -625,6 +627,15 @@ class PolicyStep:
             if moved is not None:
                 moved.backward()
         return distance
+
+    def _synced_last(self, turns: Sequence[Pack | None]) -> Iterator[Pack | None]:
+        """A minibatch's gradient passes (`turns`), the policy told before each whether it is the last
+        (`SharedPolicy.gradient_sync`, where it has one)."""
+        syncing = cast(Callable[[bool], None] | None, getattr(self.policy, "gradient_sync", None))
+        for index, turn in enumerate(turns):
+            if syncing is not None:
+                syncing(index == len(turns) - 1)
+            yield turn
 
     def _clipped(self, maximum: float) -> float:
         """The gradient's norm before clipping, after scaling it to at most `maximum` (as `clip_grad_norm_` does):

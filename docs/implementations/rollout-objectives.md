@@ -207,7 +207,9 @@ as many to a pass as fit in `pack_tokens`:
 sharded among them (`rollout_lora.sharded`); one process (`Ranks()`, the default) shares nothing. The policy is a
 `SharedPolicy`: its gradients are added up across the processes, not averaged; it takes an idle pass (`idle`) and clips
 its gradient by the norm over every process's shard (`clip_gradients`, an error for a gradient outside the sharded
-model, which no process adds up).
+model, which no process adds up). One may reduce a minibatch's gradient once, in its last pass (`gradient_sync`, told
+before each of a minibatch's gradient passes whether it is the last: a sharded adapter keeps the others' gradients in
+each process).
 
 - **The same plan.** Every process takes the whole batch and makes the same plan of it, shuffled by the step's seed, so
   they agree on every minibatch without being told. What would fail the step is raised before any process waits on
