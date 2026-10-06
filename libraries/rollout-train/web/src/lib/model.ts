@@ -1,8 +1,8 @@
 // What the views work out from a run: its groups by number, the step a group went into, what was done with a group,
 // and the episodes a group asked for that have not started.
 
-import type { DoneLine, GroupEpisode, OpenGroup, Run, Step, Checkpoint } from "../api/types";
-import { byNumber, mean } from "./format";
+import type { DoneLine, GroupEpisode, OpenGroup, Run, Step, StepProgress, Checkpoint } from "../api/types";
+import { byNumber, mean, span } from "./format";
 
 export interface GroupEntry {
   number: number;
@@ -88,6 +88,20 @@ export function outcomeOf(line: DoneLine): { kind: string; text: string } {
   if (line.step_state === "stepping") return { kind: "violet", text: `in step ${line.step}, being taken` };
   if (line.segments) return { kind: "warm", text: "waits for the next step" };
   return { kind: line.failed && !line.rewards.length ? "bad" : "still", text: line.skipped ?? "" };
+}
+
+/** How far a step being taken has got, in parts of one line, the percentage second:
+ * `minibatch 23/58 · 41% · 5.9k tok/s · KL 0.012/0.05 · ETA 34 min`. */
+export function progressParts(progress: StepProgress): string[] {
+  const rate = progress.tokens_per_second, kl = progress.kl, max = progress.max_kl;
+  const parts = [
+    progress.phase === "minibatch" ? `minibatch ${progress.minibatch}/${progress.minibatches}` : progress.phase,
+    `${Math.min(100, Math.max(0, Math.floor(100 * progress.fraction)))}%`,
+    `${rate >= 1000 ? `${(rate / 1000).toFixed(1)}k` : Math.round(rate)} tok/s`,
+  ];
+  if (kl != null) parts.push(`KL ${+kl.toPrecision(2)}${max != null ? `/${max}` : ""}`);
+  if (progress.eta_seconds != null) parts.push(`ETA ${span(progress.eta_seconds)}`);
+  return parts;
 }
 
 export interface Waiting {

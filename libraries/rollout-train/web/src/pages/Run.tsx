@@ -2,18 +2,18 @@
 // rewards, its steps, the tasks it played, each suite's score along its line, and its settings; while it waits in the
 // queue, its place there and why. An eval's run has a page of its own (`EvalRun`).
 
-import { memo } from "react";
+import { Fragment, memo } from "react";
 import { Link } from "react-router-dom";
 import { useKnown, useLaunches, useSystem } from "../api/queries";
 import { useQueued } from "../components/queue";
 import { launchState } from "../lib/launches";
 import { RunControls } from "../components/control";
 import { Rename } from "../components/Rename";
-import type { OpenGroup, Run as RunData, Step, Checkpoint } from "../api/types";
+import type { OpenGroup, Run as RunData, Step, StepProgress, Checkpoint } from "../api/types";
 import { RewardsChart, Sized } from "../components/charts";
 import { Card, Cells, Dots, Empty, Head, Kpi, Kpis, Legend, Mark, SectionTitle, Spec, Specs, Stages, Table, Tile } from "../components/ui";
 import { byNumber, figure, mean, shareOf, span } from "../lib/format";
-import { asked, type GroupEntry, groupsOf, learnableText, madeBy, nameOf, nothingText, range, reported, runKind, stateKind, towardStep } from "../lib/model";
+import { asked, type GroupEntry, groupsOf, learnableText, madeBy, nameOf, nothingText, progressParts, range, reported, runKind, stateKind, towardStep } from "../lib/model";
 import { groupPlace, stepPlace } from "../lib/places";
 import { BaseName, CheckpointTag } from "../components/checkpoints";
 import { PathCard } from "../components/scores";
@@ -174,8 +174,21 @@ function SteppingTile({ run, step, groups }: { run: RunData; step: Step; groups:
   return (
     <Tile to={stepPlace(run.run, step.step)} className="rail violet">
       <header><b>Step {step.step}</b><span className="what">→ <span className="mono">{known.short(step.makes)}</span> · {step.segments ?? "?"} segments</span><Mark state="stepping"><Ago at={step.decided} /></Mark></header>
+      {step.progress ? <Stepped progress={step.progress} /> : null}
       <div className="members">{step.groups.map(number => <Member key={number} run={run} number={number} groups={groups} />)}</div>
     </Tile>
+  );
+}
+
+/** How far a step being taken has got: a bar, and the line its trainer last said, the percentage bold. */
+export function Stepped({ progress }: { progress: StepProgress }) {
+  return (
+    <div className="stepped">
+      <span className="track violet"><i style={{ width: `${(100 * Math.min(Math.max(progress.fraction, 0), 1)).toFixed(1)}%` }} /></span>
+      <span className="small">
+        {progressParts(progress).map((part, index) => <Fragment key={index}>{index ? " · " : ""}{index === 1 ? <b>{part}</b> : part}</Fragment>)}
+      </span>
+    </div>
   );
 }
 

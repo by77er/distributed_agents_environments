@@ -12,6 +12,29 @@ export interface Step {
   decided: number | null;
   state: "stepping" | "committed" | "failed" | string;
   error: string | null;
+  /** While it is being taken, how far it has got, as its run's driver last said in its beat. */
+  progress?: StepProgress | null;
+}
+
+/** How far a step being taken has got (rollout_train.trainer.Progress), with the step's number. */
+export interface StepProgress {
+  step: number;
+  phase: "start" | "minibatch" | string;
+  minibatch: number;
+  minibatches: number;
+  packs: number;
+  packs_total: number;
+  fraction: number;
+  seconds: number;
+  tokens_per_second: number;
+  eta_seconds: number | null;
+  loss: number | null;
+  kl: number | null;
+  max_kl: number | null;
+  clip_fraction: number | null;
+  gpu_gib: number | null;
+  peak_gpu_gib: number | null;
+  gpu_utilization: number[];
 }
 
 export interface Claim {

@@ -256,11 +256,25 @@ async def test_a_group_in_flight_is_at_the_stage_a_loop_starting_now_would_find_
     (run,) = (await system.snapshot())["runs"]
     assert run["next"] == [] and [(each["step"], each["state"]) for each in run["steps"]] == [(1, "stepping")]
     assert (run["done"][0]["step"], run["done"][0]["step_state"]) == (1, "stepping")
+    assert run["steps"][0]["progress"] is None  # (until its driver says how far it has got)
+
+    # Its driver's runner says how far the step being taken has got, in its beats.
+    presence = presence_of(ledger)
+    assert presence is not None
+    halfway: dict[str, JsonValue] = {"step": 1, "phase": "minibatch", "minibatch": 3, "minibatches": 6, "fraction": 0.5}
+    await presence.beat("run/train", {"run": "train", "places": 4, "playing": 0, "progress": halfway})
+    (run,) = (await system.snapshot())["runs"]
+    assert run["steps"][0]["progress"] == halfway
+    await presence.beat("run/train", {"run": "train", "places": 4, "playing": 0, "progress": {**halfway, "step": 2}})
+    (run,) = (await system.snapshot())["runs"]
+    assert run["steps"][0]["progress"] is None  # (another step's: not this one's)
+    await presence.beat("run/train", {"run": "train", "places": 4, "playing": 0, "progress": halfway})
 
     weights = tmp_path / "adapter.bin"
     weights.write_text("weights")
     await checkpoints.add(fence, "minerone", weights=weights, run="train", step=1)  # the step's checkpoint: it is done
     (run,) = (await system.snapshot())["runs"]
+    assert run["steps"][0]["progress"] is None  # (made: no longer being taken, whatever a beat still says)
     (done,) = run["done"]
     assert run["open"] == [] and {key: done[key] for key in ("group", "task", "failures", "adapter")} == {
         "group": 1,

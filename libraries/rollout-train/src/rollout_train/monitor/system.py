@@ -1063,6 +1063,11 @@ class System:
         beaten: dict[str, float] = {}  # each run's runners' newest beat
         ages: dict[str, float] = {}  # and how old it is, by the clock of the store that keeps them
         held = {str(run) for beat in beats if alive(beat) for run in cast(list[Any], beat.about.get("paused") or [])}
+        progress = {  # how far each run's step being taken has got, as its driver's runner says
+            str(beat.about["run"]): cast(dict[str, Any], beat.about["progress"])
+            for beat in beats
+            if alive(beat) and beat.about.get("run") and isinstance(beat.about.get("progress"), dict)
+        }
         for beat in beats:
             if beat.about.get("run"):
                 beaten[str(beat.about["run"])] = max(beaten.get(str(beat.about["run"]), 0.0), beat.at)
@@ -1085,6 +1090,10 @@ class System:
             own = {name: tables.get(table(run, name), {}) for name in RUN_TABLES}
             played[run] = _Played(run, own, fences, self._records)
             listed = _run(run, own, fences.get(run_scope(run)), made, played[run], place.feed.runs() if place else [])
+            said = progress.get(run)
+            for step in listed["steps"]:  # (only while it is being taken)
+                taking = said is not None and said.get("step") == step["step"] and step["state"] == STEPPING
+                step["progress"] = said if taking else None
             seen = self._read(
                 run, starts, found, listed["wrote"], now, noted.get(run, []), beaten.get(run), ages.get(run)
             )
