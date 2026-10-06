@@ -58,6 +58,9 @@ ENGINES = "engines"
 """The `kind` of an engine host's heartbeat (`rollout_train.following`)."""
 EVERY = 2.0
 """Seconds between asks of what a routed channel should serve and what its servers have, unless it is told otherwise."""
+CONNECTIONS = 1024
+"""Connections a client keeps to one server at most: a turn in flight holds one for as long as it samples, so fewer
+than a server's sequences would hold turns back in the client (httpx's default is 100)."""
 
 
 class Unreachable(Unserved):
@@ -159,7 +162,8 @@ class Connection:
         hooks: dict[str, list[Callable[[httpx.Request], Awaitable[None]]]] = {}
         if self.identity is not None:
             hooks["request"] = [_https_only(self.identity)]
-        return httpx.AsyncClient(timeout=timeout, headers=headers, verify=verify, event_hooks=hooks)
+        limits = httpx.Limits(max_connections=CONNECTIONS, max_keepalive_connections=CONNECTIONS)
+        return httpx.AsyncClient(timeout=timeout, headers=headers, verify=verify, event_hooks=hooks, limits=limits)
 
 
 def https_only(address: str, connection: Connection | None) -> None:
