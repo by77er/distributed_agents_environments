@@ -8,7 +8,7 @@ from typing import Protocol
 from pydantic import JsonValue
 
 from rollout_train.objectives import Objective
-from rollout_train.trainer import Changeable, Files, Item, Step, Trainer, objective_of
+from rollout_train.trainer import Changeable, Files, Item, Resident, Step, Trainer, objective_of
 
 
 class Pausable(Protocol):
@@ -44,6 +44,16 @@ class Colocated:
         if not isinstance(self._trainer, Changeable):
             raise ValueError(f"the trainer takes no settings between steps (not {', '.join(settings)})")
         self._trainer.change(settings)
+
+    @property
+    def holding(self) -> str | None:
+        """What the trainer it wraps holds between steps (`rollout_train.trainer.Resident`), if it holds anything."""
+        return self._trainer.holding if isinstance(self._trainer, Resident) else None
+
+    def close(self) -> None:
+        """End what the trainer it wraps keeps running between steps, if it keeps anything."""
+        if isinstance(self._trainer, Resident):
+            self._trainer.close()
 
     async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         started = time.monotonic()

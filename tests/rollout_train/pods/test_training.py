@@ -15,6 +15,7 @@ from pydantic import JsonValue
 
 from rollout.harness import Blobs, FileBlobStore
 from rollout_train.checkpoints import Checkpoints, kept
+from rollout_train.colocated import Colocated
 from rollout_train.database import DatabaseLedger
 from rollout_train.pods import RemoteTrainer, TrainerBusy, TrainerRefused, TrainerUnreachable
 from rollout_train.pods.training import (
@@ -26,6 +27,7 @@ from rollout_train.pods.training import (
     app,
     batch_bytes,
     batch_of,
+    closed,
 )
 from rollout_train.record import scope
 from rollout_train.recorder import Segment, Span
@@ -308,3 +310,19 @@ async def test_a_parent_the_trainer_holds_is_not_fetched_but_its_name(tmp_path: 
         [f"{STATE}/{HELD}"],  # (held: the name, and nothing else of the parent's)
         [f"{STATE}/{HELD}", f"{STATE}/optimizer.txt", f"{WEIGHTS}/adapter.txt"],
     ]
+
+
+async def test_a_trainer_beside_an_engine_says_what_it_holds_and_is_closed_through_what_wraps_it(
+    tmp_path: Path,
+) -> None:
+    holding = Holding()
+    wrapped = Colocated(holding, [])
+    async with pod(TrainerService(wrapped, checkpoints_of(tmp_path), tmp_path / "pod")) as trainer:
+        first = tmp_path / "making" / "kmnopqrstuvwxyzk"
+        await trainer.step(BATCH, seed=7, parent=None, into=first)
+        assert wrapped.holding == "kmnopqrstuvwxyzk:held"
+        second = tmp_path / "making" / "lmnopqrstuvwxyzl"
+        await trainer.step(BATCH, seed=8, parent=Files(first / WEIGHTS, first / STATE), into=second)
+    assert holding.given[1] == [f"{STATE}/{HELD}"]  # (held, as the wrapper said: the name alone was fetched)
+    closed(wrapped)
+    assert holding.closed == 1 and wrapped.holding is None
