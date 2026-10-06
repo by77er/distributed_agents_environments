@@ -163,6 +163,11 @@ are kept between steps depends on whether the trainer shares its GPU:
 | Ending | `close()` ends the processes (a training pod closes its trainer when its lease is released or another run takes the pod); they also end when the trainer's process does, when their connection to it closes, and when a step is cancelled. What they hold is nothing once torchrun has ended (`holding`) |
 | Memory | Each process may use the GPU memory free when it started, less `MEMORY_MARGIN` ([the memory bound](#the-memory-bound)) |
 
+While a step runs, rank 0 says how far it has got after each pack and each minibatch
+([`PolicyStep.progress`](rollout-objectives.md#how-far-a-step-has-got)), over its connection to the trainer, which tells
+it on from the thread that reads the processes' messages (`watch`,
+[how far a step has got](../libraries/rollout-train/training.md#how-far-a-step-has-got)).
+
 A step's metrics add `gpus`, `whole_base`, `loaded_from_files` (1 where the processes loaded the parent's files rather
 than going on from memory) and `full_state` (1 where the step wrote the trainer's full state); `peak_gpu_gib` is the
 largest of any process's, `free_gpu_gib` the least. Where its seconds went: `train_seconds` (the policy step),
@@ -310,7 +315,8 @@ alike. A step in a fresh process took 9 s, the kept process's first 7.3 s, its n
 
 `tests/rollout_lora/` needs torch and is collected only when it is installed. It covers the adapter's file format and
 the adapter switched off (the model it was added to), and the settings a trainer takes between steps (its objective's
-numbers among them); the step itself is [`rollout_objectives`'](rollout-objectives.md#tests). `test_merge.py` covers
+numbers among them), and how far a step has got as the processes say it, on one process and on two; the step itself
+is [`rollout_objectives`'](rollout-objectives.md#tests). `test_merge.py` covers
 merging on the CPU. `test_small_on_gpu.py` runs only when asked
 (`-m live`), with nothing else on the card: on Qwen3-0.6B (`ROLLOUT_SMALL_MODEL` names another) it trains an
 adapter, takes steps of every weight (its serving copy and full state written, its next step from memory, a step from

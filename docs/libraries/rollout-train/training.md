@@ -341,12 +341,17 @@ steps: `Resident`, below).
   returns ([`Keeps`](../../guide/reference.md#keeps): `LoraTrainer` and `FullTrainer` with their processes kept, told
   by a training pod): the blob store to keep it in, and what it kept of a step's (raising `StateLost` where it never
   will be). Its steps say which they keep so (`Step.keeping`).
+- **`watch(told)`**, where a trainer says how far the step it is taking has got
+  ([`Progressing`](../../guide/reference.md#progressing): `LoraTrainer`, `FullTrainer`, `TinkerTrainer` and
+  `RemoteTrainer`): what it tells each [`Progress`](../../guide/reference.md#progress) to, none to stop
+  ([how far a step has got](#how-far-a-step-has-got)).
 
 [`Colocated`](../../guide/reference.md#colocated) wraps a trainer that shares an accelerator with the engines of
 some channels. For each step it holds new requests back, waits for those in flight, puts the engines to sleep,
 steps, wakes the engines and lets requests go on. A `guard` is called once the engines are asleep and raises if the
-step should not start. It adds `waited_for_requests_seconds` and `update_seconds` to the step's metrics, and says what
-the trainer it wraps holds, and closes it, where that trainer is `Resident`.
+step should not start. It adds `waited_for_requests_seconds` and `update_seconds` to the step's metrics, says what
+the trainer it wraps holds, and closes it, where that trainer is `Resident`, and has it say how far a step has got
+where it is `Progressing`.
 
 `LoraTrainer` is the trainer this repository gives: [LoRA trainer](../../implementations/rollout-lora.md).
 
@@ -425,6 +430,37 @@ its start recorded them. Its new start records them in full, so the next resume 
 Resume refuses a run whose driver is there (it beats and its newest start has not said how it ended) and is not
 paused, one that finished, one a launch is going for already, an eval a run's schedule asked for (that run plays it),
 and a part of an eval (its eval is resumed).
+
+### How far a step has got
+
+A trainer that says how far the step it is taking has got tells what it was told to (`watch(told)`) a
+[`Progress`](../../guide/reference.md#progress) after each pack it runs and each minibatch it steps on, from whatever
+thread it learns it in:
+
+- **`phase`**: `start` (the logprobs the step starts from) or `minibatch`, with the `minibatch` being taken of the
+  step's `minibatches` (every pass's);
+- **`packs`** run of **`packs_total`** planned (every process's, where a step is shared; a call to Tinker counts as
+  one), and **`fraction`**, the share of the step's work done: each pack's tokens, three times over where it runs with
+  a gradient ([the step](../../implementations/rollout-objectives.md#how-far-a-step-has-got));
+- **`seconds`** since the step began, **`tokens_per_second`** so far, and **`eta_seconds`** left at that pace;
+- **`loss`** (the mean of the minibatches stepped on so far), **`kl`** (how far the last found the policy from where
+  the step began) against **`max_kl`**, and **`clip_fraction`**;
+- **`gpu_gib`** and **`peak_gpu_gib`** (the most any process's GPU holds), and **`gpu_utilization`** (each GPU's, in
+  percent, where NVML can say).
+
+The loop has its trainer tell it while it takes a step, and notes it to its hooks as a `progress` note once for each
+whole percent or phase it moves to, then a note with none once the trainer has returned
+([watching](rollouts.md#watching)). A run's driver says each in a line of its output and in its runner's beats
+([heartbeats](rollouts.md#heartbeats)), from which the [monitor](monitor.md)'s run page shows the step being taken:
+
+```
+step 12: minibatch 23/58 · 41% · 5.9k tok/s · KL 0.012/0.05 · ETA 34 min
+```
+
+The trainer in the run's actor (`rollout_train.jobs.TrainerActor`) keeps what it last said, and the driver asks for it
+every 2 seconds while a step runs. A training pod says it in its answer about the step (`GET /v1/steps/INTO`, while it
+runs) and in its beats; `RemoteTrainer` reads it from the answer each time it asks after the step, and tells each
+change.
 
 ## The record
 

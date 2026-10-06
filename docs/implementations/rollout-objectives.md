@@ -246,6 +246,30 @@ each process).
 On the CPU over gloo, two processes take two steps of each objective's case, one segment at a time and in packs with a
 shared prefix, to within about 1e-15 of one process's, in float64 (`test_shared.py`).
 
+### How far a step has got
+
+`PolicyStep(..., progress=told)` tells `told` a [`Progress`](../guide/reference.md#progress) after each pack and each
+minibatch stepped on, in the process of rank 0 (`StepProgress`, which a trainer that runs no packs takes too:
+`rollout_tinker`'s counts each call to Tinker as one):
+
+- **The plan.** Before the start, the step counts the packs of the start and of each minibatch of the first pass,
+  grouping and placing the segments as the passes will (`rollout_objectives.packing.binned`) without laying out their
+  rows, and as many again for each further pass. Once the start is done, it counts every pass's minibatches as they
+  were shuffled; once a minibatch is done, it counts what that minibatch ran (a preference loss's gradient pass runs
+  only the segments the loss moves, and its logprobs without a gradient come first after the first update). So
+  `packs_total` and `minibatches` can change as the step goes, and end at what it ran.
+- **The work.** `fraction` is the work done of the work planned: each pack's tokens (its row's), counted
+  `GRADIENT_WORK` (3) times where it runs with a gradient, so that the start, which runs without one, weighs what it
+  costs. `eta_seconds` is what is left at the pace so far, and `tokens_per_second` the segments' tokens run so far, a
+  second (as the metric `segment_tokens_per_second` counts them).
+- **Several processes.** The processes take their passes in step, and every process computes the same shares of each
+  pass's packs, so after each of its own passes rank 0 counts every process's packs and tokens from the shares, with no
+  collective. The processes gather each one's GPU memory and use after each minibatch (and each of the start's), and
+  `gpu_gib` and `peak_gpu_gib` are the most of any process's (rank 0's read at each report), and `gpu_utilization`
+  each one's, as NVML says (empty where it cannot be read).
+- **After each minibatch** it says the running `loss` (over the minibatches stepped on), `kl` (`kl_moved` so far) and
+  `max_kl` (none for a likelihood, which does not stop), and the `clip_fraction`.
+
 ## Metrics
 
 A step returns these; a trainer adds its own (`peak_gpu_gib`, `billed_tokens`).
@@ -296,7 +320,9 @@ truncation, the token clip and the segment ratio. `test_distillation.py` covers 
 the whole vocabulary equal to the full one: GKD's JSD as TRL writes it, Hinton's softened KL, the reverse KL), tokens
 the teacher did not score, a teacher that gave fewer than k tokens, the importance mask, a KL in the reward and in the
 loss, a policy gradient's distillation term, and the step on a toy policy, whose every distillation preset moves it
-toward its teacher on its own samples. `test_shared.py` takes each objective's case on two processes under torchrun,
+toward its teacher on its own samples. `test_step.py` also covers how far a step says it has got: its phases, the
+start's share of the work, its packs against the step's metrics, and the fraction rising to 1. `test_shared.py` takes
+each objective's case on two processes under torchrun,
 a toy model sharded with FSDP2 over gloo, one segment at a time and in packs, against one process, and checks how
 passes are shared out. `test_packing.py` covers packs' layout (first-fit-decreasing, a shared prefix once, each
 segment's tokens at its own positions), a segment grouped only where that spares tokens (two environments' turns, each

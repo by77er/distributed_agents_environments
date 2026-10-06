@@ -17,13 +17,13 @@ do not edit by hand.
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#rollout_trainrolloutsplan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Keeps`](#keeps), [`Labelled`](#labelled), [`Ledger`](#ledger), [`Made`](#made), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Remote`](#remote), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`StateLost`](#statelost), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Keeps`](#keeps), [`Labelled`](#labelled), [`Ledger`](#ledger), [`Made`](#made), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`Progress`](#progress), [`Progressing`](#progressing), [`record_serving`](#record_serving), [`Remote`](#remote), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`StateLost`](#statelost), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#rollout_traininferencescores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.inference.api`](#rollout_traininferenceapi)** — Channels on hosted APIs: by message, never trained on, spend counted. [`ApiChannel`](#apichannel), [`ATTEMPTS`](#attempts), [`Hosted`](#hosted), [`HostedEndpoint`](#hostedendpoint), [`priced`](#priced)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rollout_trainrecorderrendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
-- **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`HoursReached`](#hoursreached), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#rollout_trainjobsrun), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
+- **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`HoursReached`](#hoursreached), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#rollout_trainjobsrun), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`Stepping`](#stepping), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
 - **[`rollout_train.demand`](#rollout_traindemand)** — What a run's scheduled parts need, and the placement group that reserves them together. [`BRIDGE`](#bridge), [`bridge_asks`](#bridge_asks), [`Bundle`](#bundle), [`colocating`](#colocating), [`Demand`](#demand), [`demand`](#demand), [`HEADROOM`](#headroom), [`Part`](#part), [`placed`](#placed), [`played_channel`](#played_channel), [`Pod`](#rollout_traindemandpod), [`pods`](#pods), [`requested`](#requested), [`reserve`](#reserve), [`Resources`](#resources), [`SUBMITTER`](#submitter), [`TRAINER`](#trainer)
 - **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`checkpoints_at`](#checkpoints_at), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`POD_SECURITY`](#pod_security), [`pod_security`](#pod_security), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
@@ -49,8 +49,8 @@ do not edit by hand.
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
 - **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
 - **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`importance_weight`](#importance_weight), [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`moved_kl`](#moved_kl), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`TALLIED`](#tallied), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
-- **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`PackingPolicy`](#packingpolicy), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`SharedPolicy`](#sharedpolicy), [`TrainablePolicy`](#trainablepolicy)
-- **[`rollout_objectives.packing`](#rollout_objectivespacking)** — Many segments in one row of a model's input, a prefix several share once. [`Group`](#group), [`grouped`](#grouped), [`Pack`](#pack), [`packed`](#rollout_objectivespackingpacked), [`packs`](#packs), [`Run`](#rollout_objectivespackingrun), [`sampled_positions`](#sampled_positions), [`Scores`](#rollout_objectivespackingscores), [`SHARED_PREFIX`](#shared_prefix)
+- **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`GRADIENT_WORK`](#gradient_work), [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`PackingPolicy`](#packingpolicy), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`SharedPolicy`](#sharedpolicy), [`StepProgress`](#stepprogress), [`TrainablePolicy`](#trainablepolicy)
+- **[`rollout_objectives.packing`](#rollout_objectivespacking)** — Many segments in one row of a model's input, a prefix several share once. [`binned`](#binned), [`Group`](#group), [`grouped`](#grouped), [`Pack`](#pack), [`packed`](#rollout_objectivespackingpacked), [`packs`](#packs), [`Run`](#rollout_objectivespackingrun), [`sampled_positions`](#sampled_positions), [`Scores`](#rollout_objectivespackingscores), [`SHARED_PREFIX`](#shared_prefix)
 - **[`rollout_objectives.ranks`](#rollout_objectivesranks)** — The processes a step is shared among, one per GPU, and how a minibatch is shared. [`Ranks`](#ranks), [`shares`](#shares)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls)
@@ -2550,7 +2550,7 @@ Watch a runner (episodes as they start and end) or a run (its results and steps)
 **Methods**
 
 - `def on_note(self, event: Mapping[str, JsonValue]) -> None` — `event["kind"]` is `started` or `ended` (an episode, by a runner: an adopted one is started again), or the
-  run's `result`, `step` or `published`.
+  run's `result`, `step`, `progress` or `published`.
 
 ### `loaded` {#rollout_trainrolloutsloaded}
 
@@ -2954,6 +2954,7 @@ start (too little memory, say).
 - `@property def changeable(self) -> Mapping[str, JsonValue]` — The settings the trainer it wraps takes between steps (`rollout_train.trainer.Changeable`), if any.
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `@property def holding(self) -> str | None` — What the trainer it wraps holds between steps (`rollout_train.trainer.Resident`), if it holds anything.
+- `def watch(self, told: Callable[[Progress], None] | None) -> None` — Have the trainer it wraps tell `told` how far each step has got, where it says (`Progressing`).
 - `def close(self) -> None` — End what the trainer it wraps keeps running between steps, if it keeps anything.
 - `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
 
@@ -3366,6 +3367,59 @@ mean desirable and each below it undesirable (for the preference family).
 
 - `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Pair | Labelled]` — A pair of the group's best and worst completed episodes (the first of each where several tie), or every
   completed episode not at the group's mean, labelled; none where every score is the same.
+
+### `Progress`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Progress
+```
+
+How far a step being taken has got, as its trainer says it after each pack it runs and each minibatch it steps
+on (`rollout_objectives.step.StepProgress`). Shared among processes, it counts every process's packs and tokens,
+and its memory is the most any process's GPU holds.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `phase` | `str` | required | `start` (the logprobs the step starts from) or `minibatch`. |
+| `minibatch` | `int` | `0` | The minibatch being taken, from 1 (0 in the start). |
+| `minibatches` | `int` | `0` | The minibatches of the whole step, every pass's (as planned: until the start is done, as many in each pass as the first takes). |
+| `packs` | `int` | `0` | Packs run so far, in every phase (a trainer that runs no packs counts its passes over the model). |
+| `packs_total` | `int` | `0` | Packs the whole step runs, as planned now: each minibatch's are counted again once it has run them. |
+| `fraction` | `float` | `0.0` | Of the step's work done: each pack's tokens, three times over where it is run with a gradient. |
+| `seconds` | `float` | `0.0` | Since the step began. |
+| `tokens_per_second` | `float` | `0.0` | Segments' tokens run through the model a second, so far. |
+| `eta_seconds` | `float \| None` | `None` | Seconds left, at the pace so far. |
+| `loss` | `float \| None` | `None` | The mean loss of the minibatches stepped on so far. |
+| `kl` | `float \| None` | `None` | How far the last minibatch stepped on found the policy from where the step began (what the stop reads). |
+| `max_kl` | `float \| None` | `None` | Where the step stops (none: it does not). |
+| `clip_fraction` | `float \| None` | `None` | Of the tokens stepped on so far, those whose ratio was clipped. |
+| `gpu_gib` | `float \| None` | `None` | GPU memory held now, in GiB. |
+| `peak_gpu_gib` | `float \| None` | `None` | The most GPU memory held during the step, in GiB. |
+| `gpu_utilization` | `tuple[float, ...]` | `field(default_factory=tuple[float, ...])` | How busy each process's GPU is, in percent, as NVML says (none where it cannot be read). |
+
+**Methods**
+
+- `@property def percent(self) -> int` — The fraction done, in whole percent.
+- `def line(self) -> str` — In one line: `minibatch 23/58 · 41% · 5.9k tok/s · KL 0.012/0.05 · ETA 34 min`.
+- `def to_json(self) -> dict[str, JsonValue]`
+- `@classmethod def from_json(cls, said: Any) -> 'Progress | None'` — What `to_json` wrote (none for anything else).
+
+### `Progressing`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Progressing(Protocol)
+```
+
+A trainer that says how far the step it is taking has got, as it goes (`rollout_lora`'s, Tinker's, a training
+pod's): each `Progress` to what it was told to tell (none: to nothing), from whatever thread it learns it in.
+
+**Methods**
+
+- `def watch(self, told: Callable[[Progress], None] | None) -> None`
 
 ### `record_serving`
 
@@ -5155,6 +5209,7 @@ A run being built from its settings, and what it started: everything the loop of
 | `recorder` | `GatewayEndpoints \| None` | `None` |  |
 | `runner` | `EpisodeRunner \| None` | `None` |  |
 | `feed` | `Any` | `None` |  |
+| `stepping` | `Stepping` | `field(default_factory=Stepping)` | How far the step being taken has got, as the loop notes it (its runner's beats say it). |
 | `tool_bindings` | `dict[str, ToolBinding]` | `field(default_factory=dict[str, ToolBinding])` |  |
 | `pool_bindings` | `dict[str, PoolBinding]` | `field(default_factory=dict[str, PoolBinding])` |  |
 | `runs` | `set[str]` | `field(default_factory=set[str])` | The runs its runner plays: its own, and its evals'. |
@@ -5215,6 +5270,23 @@ class SpendReached(LimitReached)
 
 A run spent what its `limits.spend` allows.
 
+### `Stepping`
+
+*class* · `libraries/rollout-train/src/rollout_train/jobs.py`
+
+```python
+class Stepping
+```
+
+The driver's hook on its loop's `progress` notes: each said in a line of the driver's output
+(`step 12: minibatch 23/58 · 41% · 5.9k tok/s · KL 0.012/0.05 · ETA 34 min`), and kept for its runner's beats
+(`latest`), which it has beat at once (`beat`), at most every `PROGRESS_BEAT` seconds.
+
+**Methods**
+
+- `def __init__(self) -> None`
+- `def on_note(self, event: Mapping[str, JsonValue]) -> None`
+
 ### `taken_by`
 
 *function* · `libraries/rollout-train/src/rollout_train/jobs.py`
@@ -5236,13 +5308,16 @@ class TrainerActor
 ```
 
 A trainer in a Ray actor: made with `implementation` (`module:name`), the model and its settings, and asked
-for steps by a `TrainerClient`.
+for steps by a `TrainerClient`. How far the step being taken has got, where the trainer says, is kept for the
+client to ask (`progress`).
 
 **Methods**
 
 - `def __init__(self, implementation: str, model: str, settings: Mapping[str, Any]) -> None`
-- `def described(self) -> dict[str, Any]` — What the client says of the trainer: its budget, its weights, its objective, its changeable settings.
+- `def described(self) -> dict[str, Any]` — What the client says of the trainer: its budget, its weights, its objective, its changeable settings, and
+  whether it says how far its steps have got.
 - `async def step(self, batch: list[Item], seed: int, parent: Files | None, into: Path) -> Step`
+- `def progress(self) -> dict[str, JsonValue] | None` — How far the step being taken has got, as the trainer last said (`Progress.to_json`; none between steps).
 - `def change(self, settings: Mapping[str, JsonValue]) -> dict[str, JsonValue]`
 
 ### `TrainerClient`
@@ -5254,11 +5329,14 @@ class TrainerClient
 ```
 
 A `Trainer` over a `TrainerActor`'s handle: each step is an actor call (an error the trainer raised is raised
-as itself), and what it takes between steps is changed there.
+as itself), and what it takes between steps is changed there. While a step is taken it asks the actor how far it
+has got every `PROGRESS_LOOK` seconds, where the trainer says, and tells what it was told to (`Progressing`) each
+time that changed.
 
 **Methods**
 
 - `def __init__(self, handle: Any, described: Mapping[str, Any]) -> None`
+- `def watch(self, told: Callable[[Progress], None] | None) -> None`
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
@@ -6574,6 +6652,7 @@ steps, with their values now. The pod is reached as `connection` says
 - `def __init__(self, address: str, checkpoints: Checkpoints, *, weights: str = 'lora', budget: Budget | None = None, objective: Objective = DEFAULT, changeable: Mapping[str, JsonValue] | None = None, connection: Connection | None = None, client: httpx.AsyncClient | None = None, every: float = 2.0, patience: float = 300.0) -> None`
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
+- `def watch(self, told: Callable[[Progress], None] | None) -> None` — Have `told` told how far each step has got, as the pod's answers say.
 - `async def describe(self) -> dict[str, Any]` — What the pod says its trainer is: its kind, model, `weights`, `budget`, and the settings it takes between
   steps.
 - `async def made(self, batch: Sequence[Item], *, seed: int, parent: Checkpoint | None, into: str) -> Made` — A step from `parent`'s files where they are, in the blob store, making the checkpoint `into` (its id): what
@@ -9800,7 +9879,8 @@ while it steps: then each step's processes end after it, and give the engine bac
 kept between steps: a step from the checkpoint the last one made goes on from what they hold
 (`rollout_train.trainer.Resident`). Every step leaves the files a later one starts from (the full state every
 `state_every` steps): in `into/state` before it returns, or, told a blob store (`keep_in`), kept there by the
-processes after it returns (`kept`), its weights served meanwhile.
+processes after it returns (`kept`), its weights served meanwhile. It says how far each step has got as the
+processes say it (`rollout_train.trainer.Progressing`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -9813,6 +9893,7 @@ processes after it returns (`kept`), its weights served meanwhile.
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `@property def holding(self) -> str | None` — What its processes hold between steps (none beside an engine, where they end after each step).
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
+- `def watch(self, told: Callable[[Progress], None] | None) -> None` — Have `told` told how far each step has got, from the thread that reads what the processes say.
 - `def keep_in(self, blobs: Mapping[str, JsonValue]) -> None` — Have the processes keep each step's full state in the blob store at this location after the step returns
   (where they are kept between steps: beside an engine they end after each step, and write it before).
 - `async def kept(self, into: str) -> Manifest` — What the processes kept of the full state of the step that wrote into `into`, once they all have.
@@ -10091,6 +10172,17 @@ What a segment of `tokens` sampled tokens counts for in its minibatch's mean (a 
 
 A step over a batch on a local policy, its plan of minibatches, and its statistics.
 
+### `GRADIENT_WORK`
+
+*constant* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+GRADIENT_WORK = 3.0
+```
+
+What a token run with a gradient counts for in a step's work, against one run without it (a backward pass costs
+about two forward passes).
+
 ### `line`
 
 *function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
@@ -10196,6 +10288,7 @@ class PolicyStep
 | `fresh` | `bool` | `True` | Whether the optimizer starts afresh (warmed up), or goes on from a state loaded into it. |
 | `ranks` | `Ranks` | `field(default_factory=Ranks)` | The processes the step is shared among (one by default: none). |
 | `optimizer_given` | `InitVar[torch.optim.Optimizer \| None]` | `None` | An optimizer to go on with (a resident trainer's, from its last step); else a new AdamW. |
+| `progress` | `Callable[[Progress], None] \| None` | `None` | Told how far each step has got, after each pack and each minibatch (`StepProgress`), in the process of rank 0. |
 
 **Methods**
 
@@ -10251,6 +10344,29 @@ process has it too, where the step goes on without the pass.
 - `def clip_gradients(self, maximum: float, ranks: Ranks) -> float`
 - `def recover(self) -> None`
 
+### `StepProgress`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+class StepProgress
+```
+
+How far a step has got, said to `told` (a `Progress` each time) after each pack (`ran`) and each minibatch
+stepped on (`stepped`): its work done against the work planned for its stages, the start and then each minibatch
+(`plan`), each stage counted as what it ran once the next begins (`begin`). `gauge` says the GPU's memory and how
+busy it is. Without `told` it says nothing, and reads no GPU.
+
+**Methods**
+
+- `def __init__(self, told: Callable[[Progress], None] | None = None, *, max_kl: float | None = None, gauge: Callable[[], Gauge] | None = None) -> None`
+- `def plan(self, start: tuple[int, float] | None, minibatches: Sequence[tuple[int, float]]) -> None` — The packs and work the start takes (none: as planned before) and each minibatch.
+- `def begin(self, minibatch: int) -> None` — The `minibatch`-th minibatch (from 1) begins: the stages before it count for what they ran.
+- `def ran(self, packs: int, rows: float, tokens: float, *, gradient: bool) -> None` — `packs` more were run (`rows` tokens in their rows, `tokens` in their segments), with a gradient or not.
+- `def stepped(self, *, loss: float, kl: float | None, clip_fraction: float) -> None` — A minibatch was stepped on: the mean loss of those stepped on so far, how far the last found the policy from
+  the step's start, and the share of their tokens clipped.
+- `def progress(self) -> Progress` — How far the step has got now.
+
 ### `TrainablePolicy`
 
 *class* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
@@ -10277,6 +10393,16 @@ beside the sampled ones'). A policy that runs packs is a `PackingPolicy`; a step
 ## `rollout_objectives.packing`
 
 Many segments in one row of a model's input, a prefix several share once.
+
+### `binned`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/packing.py`
+
+```python
+def binned(groups: Sequence[Group], capacity: int) -> list[list[Group]]
+```
+
+The groups each of `packed`'s packs holds, in its order, without laying out their rows.
 
 ### `Group`
 
@@ -10347,7 +10473,7 @@ def packed(segments: Sequence[Segment], groups: Sequence[Group], capacity: int) 
 ```
 
 `groups` of `segments` in packs of at most `capacity` tokens (a group longer than that in a pack of its own),
-placed first-fit-decreasing by their tokens.
+placed first-fit-decreasing by their tokens (`binned`).
 
 ### `packs`
 
@@ -10952,4 +11078,5 @@ an objective that reads the reference, the entropy or the top-k form's logprobs,
 - `@property def objective(self) -> Objective`
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
+- `def watch(self, told: Callable[[Progress], None] | None) -> None` — Have `told` told how far each step has got.
 - `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`

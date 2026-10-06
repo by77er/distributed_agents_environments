@@ -218,6 +218,11 @@ its Tinker checkpoints have new names.
 `state/minibatches.jsonl` has each update's line, with what Tinker's `optim_step` reported (`optimizer_*`); a
 `gradient_norm` is reported when that includes one.
 
+**How far a step has got.** The trainer says it as the LoRA step does
+([how far a step has got](rollout-objectives.md#how-far-a-step-has-got)), after each call to Tinker and each update,
+each call counted as a pack: the forward pass for `old` (without a gradient), then each minibatch's forward-backward;
+its work is the segments' tokens, three times over with a gradient. It reads no GPU.
+
 ## What a checkpoint holds
 
 | Path | Holds |

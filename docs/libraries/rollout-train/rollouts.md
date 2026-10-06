@@ -172,8 +172,11 @@ A run's runner (`run/RUN`) says, in each beat: its host, the run it serves, the 
 serves (adapter and version) with what passed through it since the beat before (requests, tokens, tokens a second,
 requests at once); for a routed channel, by its name within each run (`RUN/NAME`), what each of its servers would sample
 from and how far behind that is; and what the run holds of Ray: its demand in all (`demand`: the driver's and its
-placement group's CPUs, memory and GPUs), when it asked for it (`asked`) and when Ray reserved it (`reserved`). The
-[monitor](monitor.md) shows machines, inference throughput, what is served and the queue from these beats. Before it
+placement group's CPUs, memory and GPUs), when it asked for it (`asked`) and when Ray reserved it (`reserved`); and,
+while a step is being taken, how far it has got (`progress`: the trainer's
+[`Progress`](training.md#how-far-a-step-has-got) with the step's number), beating at once when that moves on (at most
+every 5 seconds). The [monitor](monitor.md) shows machines, inference throughput, what is served, the queue and the
+step being taken from these beats. Before it
 plays, while Ray has not given the run what it asked for, its driver beats under the same name (kind `run`) with what
 it waits for, and its `demand` and `asked` (`reserved` none until its placement group is reserved). An engine host (kind `engines`) beats with the run it follows, its machine, and
 what each channel's engines serve ([what a channel should serve](channels.md#what-a-channel-should-serve)); a gateway
@@ -262,5 +265,6 @@ at. Every event has `kind` and `at`; a runner's also have `runner`, a run's `run
 | `ended` | a runner | an episode was recorded | `run`, `group`, `episode`, `run_id`, `labels`, `outcome`, `detail`, `reward`, `info`, and `sampled`: tokens sampled by slot |
 | `published` | the run | weights were published | `channel`, `adapter`, `version` |
 | `result`, `step` | the run | a group's result, a step's outcome | [the record](training.md#the-record) |
+| `progress` | the run | a step being taken moved on by a whole percent or a phase, and once its trainer returned | `step`, and `progress`: the trainer's [`Progress`](training.md#how-far-a-step-has-got), none once it returned |
 
 The [monitor](monitor.md)'s feed is one such hook.
