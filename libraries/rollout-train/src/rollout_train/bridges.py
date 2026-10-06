@@ -27,6 +27,9 @@ and memory the bridge declares, on whichever node has room. A bridge notes in th
 (`checkpoints/resharding`) and what it made (`checkpoints/resharded`: the bridge, what its task said, and a manifest
 of the files, in the blob store), keyed `CHECKPOINT@BRIDGE`, so that one checkpoint is bridged once for each format it
 is served in, under the fence of the run that made the checkpoint. A checkpoint bridged before is not bridged again.
+The verbatim bridges (`verbatim`, `full-reload`) serve the checkpoint's own files: what they made is noted as the
+checkpoint's manifest, in the process that runs the chain, and no file is read or written (a checkpoint a training pod
+made is served without a byte of it read to the driver's machine).
 """
 
 import asyncio
@@ -249,7 +252,9 @@ class Context:
 
 
 def verbatim(weights: Path, into: Path, context: Context) -> dict[str, JsonValue]:
-    """The provider loads the trainer's files as they are: each is linked (or copied) into `into`."""
+    """The provider loads the trainer's files as they are: each is linked (or copied) into `into`. A chain notes what
+    this bridge makes as the checkpoint's own manifest without running it (the same files are the same blobs); it is the
+    task for a caller that has the files on disk."""
     for each in sorted(weights.rglob("*")):
         if each.is_file():
             target = into / each.relative_to(weights)
@@ -324,15 +329,10 @@ async def _step(
     entry = key(context.checkpoint, bridge.name)
     begun: JsonValue = {"at": round(time.time(), 1), "bridge": bridge.name, "host": os.uname().nodename}
     await checkpoints.ledger.append(BRIDGING, entry, begun, fence)
-    await asyncio.to_thread(scratch.mkdir, parents=True, exist_ok=True)
-    work = Path(await asyncio.to_thread(tempfile.mkdtemp, dir=scratch, prefix=f"{context.checkpoint}-"))
-    try:
-        weights = await checkpoints.files(source, work / WEIGHTS)
-        into = work / "bridged"
-        said = await asyncio.to_thread(named(bridge.task), weights, into, context)
-        manifest = await kept(into, checkpoints.blobs)
-    finally:
-        await asyncio.to_thread(shutil.rmtree, work, ignore_errors=True)
+    if bridge.task == VERBATIM:  # (the same files, so the same blobs: none is read or written)
+        said, manifest = {"kind": "verbatim"}, source
+    else:
+        said, manifest = await _made_by(checkpoints, bridge.task, source, context, scratch)
     record: dict[str, Any] = {
         "at": round(time.time(), 1),
         "bridge": bridge.name,
@@ -343,6 +343,22 @@ async def _step(
     if not await checkpoints.ledger.append(BRIDGED, entry, record, fence):
         return await made(checkpoints.ledger, context.checkpoint, bridge.name) or manifest
     return manifest
+
+
+async def _made_by(
+    checkpoints: Checkpoints, task: str, source: Manifest, context: Context, scratch: Path
+) -> tuple[JsonValue, Manifest]:
+    """What a bridge's task (`module:name`) says and makes of `source`'s files, read to `scratch` for the while it
+    takes, and what it made kept in the blob store."""
+    await asyncio.to_thread(scratch.mkdir, parents=True, exist_ok=True)
+    work = Path(await asyncio.to_thread(tempfile.mkdtemp, dir=scratch, prefix=f"{context.checkpoint}-"))
+    try:
+        weights = await checkpoints.files(source, work / WEIGHTS)
+        into = work / "bridged"
+        said = await asyncio.to_thread(named(task), weights, into, context)
+        return said, await kept(into, checkpoints.blobs)
+    finally:
+        await asyncio.to_thread(shutil.rmtree, work, ignore_errors=True)
 
 
 def _opened(ledger_at: Mapping[str, Any], blobs_at: Mapping[str, Any]) -> Checkpoints:
@@ -407,6 +423,12 @@ async def on_ray(
         if bridge.task is None:
             continue
         told = dict((settings or {}).get(bridge.name, {}))
+        if bridge.task == VERBATIM:  # (nothing to read or write: noted from this process)
+            files = await asyncio.to_thread(
+                _on_worker, dict(ledger_at), dict(blobs_at), (fence.scope, fence.number), checkpoint, bridge, files,
+                target, told, scratch,
+            )  # fmt: skip
+            continue
         cpus, memory = told.get("cpus", bridge.cpus), told.get("memory_gib", bridge.memory_gib)
         task = ray.remote(_on_worker).options(  # pyright: ignore[reportUnknownMemberType]
             num_cpus=float(cast(float, cpus)), memory=int(float(cast(float, memory)) * 2**30), **dict(placement or {})

@@ -74,6 +74,7 @@ from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
 from rollout_train.cluster import Cluster, located
 from rollout_train.colocated import Colocated
 from rollout_train.demand import BRIDGE, TRAINER, Demand, Resources, colocating, demand, placed, played_channel, reserve
+from rollout_train.evals import Fetched
 from rollout_train.gateway import Gateway, GatewayEndpoints, Keyring, TurnStore
 from rollout_train.inference import Channel, Limits, Route, Routes
 from rollout_train.inference.api import ApiChannel, Hosted
@@ -747,12 +748,13 @@ class Run:
         }  # fmt: skip
         return binding_for(environment, self.channel, self.tool_bindings, self.pool_bindings, slots)
 
-    async def publish(self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
-                      ) -> int:  # fmt: skip
-        """Serve a checkpoint on a channel: on engines in this process (Tinker's), loaded now; elsewhere, its engine
-        hosts and servers follow the run's serving record, and this returns the version given."""
+    async def publish(self, channel: str, adapter: str, files: Fetched, version: int | None = None, *,
+                      full: bool = False) -> int:  # fmt: skip
+        """Serve a checkpoint on a channel: on engines in this process (Tinker's), its files read here and loaded now;
+        elsewhere, its engine hosts and servers follow the run's serving record and read the files themselves, and this
+        returns the version given."""
         if channel in self.channels:
-            return await self.channels[channel].publish(adapter, path, version, full=full)
+            return await self.channels[channel].publish(adapter, await files(), version, full=full)
         return version or 0
 
     async def bridged(self, checkpoint: Checkpoint, fence: Fence) -> Manifest:

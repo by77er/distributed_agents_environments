@@ -1,10 +1,18 @@
 """The training service on a training pod: a `Trainer` taking one step at a time, asked for over HTTP.
 
 A step is asked for by the checkpoint it makes (`into`, the checkpoint's id), with its seed, its batch (a blob: the
-weighted segments, `batch_bytes`), its parent's files (manifests of blobs: the weights, and the trainer's state if it
-left any), and the settings the trainer takes between steps (`rollout_train.trainer.Changeable`). The service fetches
-the batch and the parent's files from the blob store, runs the step, keeps the new weights and state in the blob store,
-and answers with their manifests and the step's metrics.
+weighted segments, `batch_bytes`), its parent (its id, and manifests of blobs: the weights, and the trainer's state if
+it left any), and the settings the trainer takes between steps (`rollout_train.trainer.Changeable`). The service
+fetches the batch and the parent's files from the blob store, runs the step, keeps the new weights in the blob store,
+and answers with their manifest, the state's, and the step's metrics (with how long the step took on the pod,
+`step_seconds`, and keeping the weights, `upload_adapter_seconds`).
+
+**The weights first, the state after.** A trainer that keeps a step's full state itself after the step returns
+(`rollout_train.trainer.Keeps`, told the pod's blob store, `ROLLOUT_BLOBS`) has the step answered as soon as the weights
+and what it wrote of the state are kept: the answer says the state is incomplete (`StepMade.complete` false), and the
+loop serves the weights at once. Once the trainer has kept the rest, the answer is the whole state's (`complete`); if
+keeping it failed, it says why (`state_failed`), loudly in the service's log too, and stays incomplete. A step whose
+parent's state this service is still keeping, and which its trainer does not hold, waits for it.
 
 A step is idempotent by `into`: asked again while it runs, it is the same step; asked again after it was made, the
 answer is the one it made (kept on the pod's disk), or, where the ledger already has the checkpoint, the checkpoint's
@@ -49,10 +57,12 @@ import asyncio
 import contextlib
 import dataclasses
 import json
+import logging
 import os
 import re
 import shutil
 import socket
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -63,7 +73,7 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from rollout.contracts import BlobReference
 from rollout.names import named
 from rollout_train.checkpoints import Checkpoints, Manifest, kept
-from rollout_train.pods.environment import listening, required, serial, serial_file, served, stores
+from rollout_train.pods.environment import listening, location, required, serial, serial_file, served, stores
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.presence import beating, presence_of
 from rollout_train.trainer import (
@@ -74,6 +84,7 @@ from rollout_train.trainer import (
     Distilled,
     Files,
     Item,
+    Keeps,
     Labelled,
     Pair,
     Resident,
@@ -83,6 +94,8 @@ from rollout_train.trainer import (
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
+
+logger = logging.getLogger(__name__)
 
 TRAINER = "trainer"
 """The role a training pod says in its beats."""
@@ -96,10 +109,12 @@ MAX_BATCH = 512 * 2**20
 
 @dataclass(frozen=True)
 class Parent:
-    """A step's parent's files, as blobs: the weights, and what the trainer left for itself beside them."""
+    """A step's parent's files, as blobs: the weights, and what the trainer left for itself beside them; and the
+    parent's id (the step that made it, here or elsewhere)."""
 
     weights: Manifest
     state: Manifest | None = None
+    id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +140,11 @@ class StepMade:
     metrics: Mapping[str, float]
     weights: Manifest
     state: Manifest | None = None
+    complete: bool = True
+    """Whether `state` is the whole state: false while the trainer keeps the rest (`state` then holds what it wrote
+    before the step returned), and for good once keeping it failed (`state_failed`)."""
+    state_failed: str | None = None
+    """Why the rest of the state was not kept, if it was not."""
 
 
 @dataclass(frozen=True)
@@ -175,6 +195,8 @@ class TrainerService:
         self.directory = directory
         self.states: dict[str, StepState] = {}
         """The steps asked for since the service started, by `into` (steps made before are on disk)."""
+        self.keeping: dict[str, asyncio.Task[None]] = {}
+        """The steps whose state the trainer is still keeping, by `into`."""
         self._running: tuple[str, asyncio.Task[None]] | None = None
         self.run: str | None = None
         """The run whose trainer it holds (as its lease said), if it follows a lease."""
@@ -204,15 +226,20 @@ class TrainerService:
         if into in self.states:
             return self.states[into]
         with contextlib.suppress(OSError, ValueError, ValidationError):
-            said = await asyncio.to_thread(self._answer(into).read_bytes)
-            return StepState(MADE, _MADE.validate_json(said))
+            said = _MADE.validate_json(await asyncio.to_thread(self._answer(into).read_bytes))
+            if not said.complete and said.state_failed is None and into not in self.keeping:
+                said = dataclasses.replace(said, state_failed="the service started again while it kept the state")
+            return StepState(MADE, said)
         try:
             checkpoint = await self.checkpoints.checkpoint(into)
         except KeyError:
             return None
         if checkpoint.weights is None:
             return StepState(FAILED, error=f"{into} was made and its files released")
-        return StepState(MADE, StepMade(into, dict(checkpoint.metrics), checkpoint.weights, checkpoint.state))
+        failed = None if checkpoint.state_complete else "its state was not kept, and this service is not keeping it"
+        made = StepMade(into, dict(checkpoint.metrics), checkpoint.weights, checkpoint.state,
+                        checkpoint.state_complete, failed)  # fmt: skip
+        return StepState(MADE, made)
 
     def describe(self) -> dict[str, JsonValue]:
         trainer = self.trainer
@@ -229,6 +256,8 @@ class TrainerService:
 
     async def _step(self, asked: StepAsked) -> None:
         work = self.directory / "steps" / asked.into
+        trainer = self.trainer  # (the one that takes the step keeps its state, whatever the service holds by then)
+        keeping = False
         try:
             await asyncio.to_thread(shutil.rmtree, work, ignore_errors=True)  # (what a step that died left)
             data = await self.checkpoints.blobs.read(asked.batch)
@@ -236,26 +265,60 @@ class TrainerService:
                 raise ValueError(f"the batch is {len(data)} bytes, more than {MAX_BATCH}")
             batch = batch_of(data)
             parent = await self._parent(asked, work / "parent")
-            if asked.settings and isinstance(self.trainer, Changeable):
-                self.trainer.change(asked.settings)
+            if asked.settings and isinstance(trainer, Changeable):
+                trainer.change(asked.settings)
             into = work / "made" / asked.into  # (named by the checkpoint, as the loop names it: a trainer may read it)
             await asyncio.to_thread(into.mkdir, parents=True, exist_ok=True)
-            step = await self.trainer.step(batch, seed=asked.seed, parent=parent, into=into)
+            began = time.monotonic()
+            step = await trainer.step(batch, seed=asked.seed, parent=parent, into=into)
+            stepped, began = time.monotonic() - began, time.monotonic()
             weights = await kept(into / WEIGHTS, self.checkpoints.blobs)
+            uploaded = time.monotonic() - began
             state = await kept(into / STATE, self.checkpoints.blobs) if (into / STATE).exists() else None
-            made = StepMade(asked.into, {name: float(value) for name, value in step.metrics.items()}, weights, state)
-            answer = self._answer(asked.into)
-            await asyncio.to_thread(answer.parent.mkdir, parents=True, exist_ok=True)
-            await asyncio.to_thread(_written, answer, _MADE.dump_json(made))
-            self.states[asked.into] = StepState(MADE, made)
+            metrics = {name: float(value) for name, value in step.metrics.items()}
+            metrics |= {"step_seconds": round(stepped, 3), "upload_adapter_seconds": round(uploaded, 3)}
+            keeping = step.keeping and isinstance(trainer, Keeps)
+            made = StepMade(asked.into, metrics, weights, state, complete=not keeping)
+            await self._answered(made)
+            if keeping:
+                assert isinstance(trainer, Keeps)
+                self.keeping[asked.into] = asyncio.create_task(self._kept(trainer, made, work))
         except Exception as error:  # (a step that failed: taken again when it is asked for again)
+            keeping = False
             self.states[asked.into] = StepState(FAILED, error=f"{type(error).__name__}: {error}"[-2000:])
         finally:
+            await asyncio.to_thread(shutil.rmtree, work / "parent" if keeping else work, ignore_errors=True)
+
+    async def _kept(self, trainer: Keeps, made: StepMade, work: Path) -> None:
+        """Wait until `trainer` has kept the rest of the step's state, and answer with the whole state; or, if it never
+        will, say why (loudly), leaving the state incomplete. The step's files on the pod are deleted after."""
+        try:
+            rest = await trainer.kept(made.into)
+            whole = {**(made.state.files if made.state is not None else {}), **rest.files}
+            done = dataclasses.replace(made, state=Manifest(whole), complete=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            said = f"{type(error).__name__}: {error}"[-2000:]
+            logger.error("the state of step %s was not kept, and stays incomplete: %s", made.into, said)
+            done = dataclasses.replace(made, state_failed=said)
+        try:
+            await self._answered(done)
+        finally:
+            self.keeping.pop(made.into, None)
             await asyncio.to_thread(shutil.rmtree, work, ignore_errors=True)
+
+    async def _answered(self, made: StepMade) -> None:
+        """What a step made, as its answer: kept on disk (an answer for the step asked for again, after a restart too),
+        and here."""
+        answer = self._answer(made.into)
+        await asyncio.to_thread(answer.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(_written, answer, _MADE.dump_json(made))
+        self.states[made.into] = StepState(MADE, made)
 
     async def _parent(self, asked: StepAsked, directory: Path) -> Files | None:
         """The step's parent's files under `directory`: only the state's `HELD` where the trainer holds the parent,
-        else all of them."""
+        else all of them, the state the whole one where this service made the parent (waiting while it keeps it)."""
         if asked.parent is None:
             return None
         state = asked.parent.state
@@ -266,8 +329,19 @@ class TrainerService:
                 kept_state = await self.checkpoints.files(Manifest({HELD: state.files[HELD]}), directory / STATE)
                 await asyncio.to_thread((directory / WEIGHTS).mkdir, parents=True, exist_ok=True)
                 return Files(directory / WEIGHTS, kept_state)
+        if asked.parent.id is not None and (whole := await self._whole(asked.parent.id)) is not None:
+            state = whole
         weights = await self.checkpoints.files(asked.parent.weights, directory / WEIGHTS)
         return Files(weights, await self.checkpoints.files(state, directory / STATE) if state else None)
+
+    async def _whole(self, into: str) -> Manifest | None:
+        """The whole state of a step this service made, once kept (waiting while it is being kept); None where it has
+        none (another made the step, or its state was not kept)."""
+        if (task := self.keeping.get(into)) is not None:
+            await asyncio.shield(task)
+        said = await self.state(into) if CHECKPOINT_ID.fullmatch(into) else None
+        made = said.made if said is not None else None
+        return made.state if made is not None and made.complete else None
 
     def _answer(self, into: str) -> Path:
         return self.directory / "made" / f"{into}.json"
@@ -408,6 +482,8 @@ async def main(environ: Mapping[str, str]) -> None:
     sleeps = environ.get("ROLLOUT_SLEEP_VLLM", "") in ("1", "true")
     gpus = int(environ["ROLLOUT_TRAINER_GPUS"]) if environ.get("ROLLOUT_TRAINER_GPUS") else None
 
+    kept_in = location(environ, "ROLLOUT_BLOBS")
+
     def make(said: Mapping[str, JsonValue]) -> Trainer:
         given: Any = said.get("trainer")
         chosen = cast(dict[str, Any], given) if isinstance(given, dict) else cast(dict[str, Any], settings)
@@ -421,6 +497,8 @@ async def main(environ: Mapping[str, str]) -> None:
 
             local = _LocalServer(environ.get("ROLLOUT_VLLM", "http://127.0.0.1:8000"))
             return cast(Trainer, Colocated(trainer, [local]))
+        if isinstance(trainer, Keeps):  # (its steps' state kept after they return: the weights served first)
+            trainer.keep_in(kept_in)
         return trainer
 
     work = Path(environ.get("ROLLOUT_WORK", "/workspace/rollout"))

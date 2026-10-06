@@ -30,6 +30,7 @@ from rollout_train import (
     trained,
 )
 from rollout_train.checkpoints import Retention
+from rollout_train.evals import Fetched
 from rollout_train.ledger import Fenced
 from rollout_train.objectives import PRESETS
 from rollout_train.record import GROUPS, STARTS, STEPS, table
@@ -352,7 +353,9 @@ async def test_a_loop_trains_in_a_directory_of_its_own_and_once_replaced_deletes
 
     trainer = Noting()
 
-    async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
+    async def publish(
+        channel: str, adapter: str, files: Fetched, version: int | None = None, *, full: bool = False
+    ) -> int:
         await asyncio.to_thread((directory / "theirs").mkdir)  # what the loop that replaces it keeps there
         await checkpoints.ledger.take("runs/train")  # another loop takes the run while this one serves
         return 1

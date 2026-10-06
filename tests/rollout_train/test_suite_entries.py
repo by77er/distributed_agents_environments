@@ -18,6 +18,7 @@ from rollout_train.evals import (
     EVAL_DATA,
     GIVEN,
     SCORES,
+    Fetched,
     Schedule,
     edit_suite,
     evaluate,
@@ -83,7 +84,9 @@ async def test_an_eval_of_two_environments_plays_each_in_a_part_and_scores_each_
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     suite = await make_suite(ledger, "mixed", two_entries())
 
-    async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
+    async def publish(
+        channel: str, adapter: str, files: Fetched, version: int | None = None, *, full: bool = False
+    ) -> int:
         raise AssertionError("the base model is served as it is")
 
     recorder = answering()

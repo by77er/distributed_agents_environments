@@ -6,8 +6,8 @@ roles (runs' drivers, runners, the monitor, the gateway, the reaper) hold it. A 
 nothing but the secret and keeps no list of tokens. A pod's token may:
 
 - read the run's serving records and starts (`runs/RUN/serving`, `runs/RUN/starts`), and those checkpoints (in
-  `checkpoints` and `checkpoints/released`) that the run made, that its serving records name, that its channels are
-  fixed on, and the checkpoints each of those was trained over;
+  `checkpoints`, `checkpoints/released` and `checkpoints/completed`) that the run made, that its serving records name,
+  that its channels are fixed on, and the checkpoints each of those was trained over;
 - write the pod's own beat (`presence.beat` under the pod's name);
 - read the pod's own lease (`pods.get` of its name), which says which run holds the pod now, and the token for that
   run (a pod taken by another run reads its new token there).

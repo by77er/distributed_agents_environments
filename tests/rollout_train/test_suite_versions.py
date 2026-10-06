@@ -17,6 +17,7 @@ from rollout_train.evals import (
     DRAWN,
     EVAL_DATA,
     GIVEN,
+    Fetched,
     Schedule,
     edit_suite,
     evaluate,
@@ -127,7 +128,9 @@ async def test_every_eval_keeps_the_version_it_played(tmp_path: Path) -> None:
         ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-no"], seeds=[5], episodes=2)]
     )
 
-    async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
+    async def publish(
+        channel: str, adapter: str, files: Fetched, version: int | None = None, *, full: bool = False
+    ) -> int:
         raise AssertionError("the base model is served as it is")
 
     async with here(ledger, answering(), blobs):

@@ -14,7 +14,15 @@ or by the run and step that made it (`resolved`).
 
 All checkpoints are one append-only table of the ledger (`checkpoints`), each appended under the fence of the run that
 made it. Weights are kept as a `Manifest`: a map from the files of a checkpoint to blobs, each file its own blob, as
-the trainer wrote them; whoever needs them reads the files it needs.
+the trainer wrote them; whoever needs them reads the files it needs. A checkpoint is added from manifests (files a
+trainer elsewhere kept in the blob store itself), or from directories on this machine, whose files are kept first.
+
+**A checkpoint's trainer state may be kept after it.** A trainer that keeps the full state of a step after the step
+returns (`rollout_train.trainer.Keeps`, on a training pod) leaves its checkpoint's state incomplete (`state_complete`
+false, `state` holding what was kept with the weights), so the checkpoint can be served at once. The state's manifest
+is appended once it is all kept (`completed`, to the table `checkpoints/completed`), and the checkpoint reads complete
+from then on. A state that was never kept leaves its checkpoint incomplete: whatever needs the full state (a trainer
+that does not hold the checkpoint) refuses it.
 """
 
 import asyncio
@@ -37,8 +45,9 @@ from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout_train.ledger import Fence, Ledger
 from rollout_train.stores import opened
 
-CHECKPOINTS, RELEASED = "checkpoints", "checkpoints/released"
-"""The ledger's tables of checkpoints, and of the checkpoints whose files were deleted."""
+CHECKPOINTS, RELEASED, COMPLETED = "checkpoints", "checkpoints/released", "checkpoints/completed"
+"""The ledger's tables of checkpoints, of the checkpoints whose files were deleted, and of the checkpoints whose trainer
+state was all kept after they were added (its manifest, keyed by the checkpoint's id)."""
 SHORTEST = 4
 """The fewest characters of an id a checkpoint is shown by."""
 _ALPHABET = "klmnopqrstuvwxyz"
@@ -75,7 +84,13 @@ class Checkpoint:
     step: int | None = None
     """The run's step that made it (none for a checkpoint made outside a run's steps, such as by imitation)."""
     state: Manifest | None = None
-    """What a trainer goes on from: the optimizer's state, say."""
+    """What a trainer goes on from: the optimizer's state, say. While `state_complete` is false, only what was kept with
+    the weights (the name a trainer gave what it holds, and what the step did)."""
+    state_complete: bool = True
+    """Whether `state` is all the trainer left: false while the trainer is still keeping the rest
+    (`Checkpoints.completed`), and for good if it never kept it."""
+    state_seconds: float | None = None
+    """How long the trainer took to keep the rest of the state after the step returned, for a state completed so."""
     batch: BlobReference | None = None
     """What it was trained on: the segments, each as its source (`RUN/GROUP/EPISODE/SLOT/INDEX`) and its advantage."""
     metrics: Mapping[str, float] = field(default_factory=dict[str, float])
@@ -146,7 +161,10 @@ class Checkpoints:
         found = (await self.ledger.read(CHECKPOINTS)).get(id)
         if found is None:
             raise KeyError(f"there is no checkpoint {id}")
-        return _as_released(_VERSION.validate_python(found), await self.ledger.read(RELEASED))
+        checkpoint = _VERSION.validate_python(found)
+        if not checkpoint.state_complete:
+            checkpoint = _as_completed(checkpoint, await self.ledger.read(COMPLETED))
+        return _as_released(checkpoint, await self.ledger.read(RELEASED))
 
     async def under(self, checkpoint: Checkpoint) -> Checkpoint | None:
         """The full checkpoint whose weights `checkpoint` is served over: itself, if it is full; the full checkpoint it
@@ -171,35 +189,39 @@ class Checkpoints:
         fence: Fence,
         id: str,
         *,
-        weights: Path,
+        weights: Path | Manifest,
         run: str | None,
         base: str | None = None,
         kind: str = "lora",
         step: int | None = None,
-        state: Path | None = None,
+        state: Path | Manifest | None = None,
+        state_complete: bool = True,
         parents: Sequence[str] = (),
         batch: BlobReference | None = None,
         metrics: Mapping[str, float] | None = None,
         dataset: str | None = None,
         supervision: str | None = None,
     ) -> Checkpoint:
-        """Keep a checkpoint's files and append the checkpoint that names them, under `fence` (the run's that makes it).
-        Its base is what its weights build on (`_base`): for an adapter over a full checkpoint, that checkpoint (by
-        id); for a merge (full weights from an adapter), the `base` it names; else its first parent's base, or `base`
-        for a checkpoint made from the base model. The append is what
-        makes the checkpoint exist: a writer that dies before it has made nothing, and one that repeats it (the same id,
-        decided before) gets the checkpoint that is there."""
+        """Append the checkpoint that names its files, under `fence` (the run's that makes it): `weights` and `state`
+        are manifests of files in the blob store, or directories on this machine, whose files are kept first. A state
+        the trainer is still keeping is added incomplete (`state_complete` false: what was kept with the weights), and
+        completed once it is kept (`completed`). Its base is what its weights build on (`_base`): for an adapter over a
+        full checkpoint, that checkpoint (by id); for a merge (full weights from an adapter), the `base` it names; else
+        its first parent's base, or `base` for a checkpoint made from the base model. The append is what makes the
+        checkpoint exist: a writer that dies before it has made nothing, and one that repeats it (the same id, decided
+        before) gets the checkpoint that is there."""
         first = await self.checkpoint(parents[0]) if parents else None
         checkpoint = Checkpoint(
             id,
-            weights=await kept(weights, self.blobs),
+            weights=weights if isinstance(weights, Manifest) else await kept(weights, self.blobs),
             parents=tuple(parents),
             depth=(first.depth if first else 0) + 1,
             base=_base(first, kind, base),
             kind=kind,
             run=run,
             step=step,
-            state=await kept(state, self.blobs) if state is not None else None,
+            state=state if state is None or isinstance(state, Manifest) else await kept(state, self.blobs),
+            state_complete=state_complete,
             batch=batch,
             metrics=dict(metrics or {}),
             dataset=dataset,
@@ -210,6 +232,15 @@ class Checkpoints:
         if not await self.ledger.append(CHECKPOINTS, id, record, fence):
             return await self.checkpoint(id)
         return checkpoint
+
+    async def completed(self, fence: Fence, id: str, state: Manifest, *, seconds: float | None = None) -> Checkpoint:
+        """Complete a checkpoint's trainer state, kept after it was added: `state` is the whole state (what was kept
+        with the weights among it), and `seconds` how long keeping the rest took. Appended under `fence` (the run's
+        that made it); a checkpoint completed before stays as it was."""
+        record: JsonValue = {"state": _MANIFEST.dump_python(state, mode="json"), "at": round(time.time(), 1),
+                             "seconds": round(seconds, 2) if seconds is not None else None}  # fmt: skip
+        await self.ledger.append(COMPLETED, id, record, fence)
+        return await self.checkpoint(id)
 
     async def thin(self, fence: Fence, run: str, retention: "Retention", keep: Collection[str] = ()) -> list[str]:
         """Delete the files (weights and trainer state) of the checkpoints `run` made that `retention` does not keep,
@@ -229,10 +260,11 @@ class Checkpoints:
                 await self.ledger.append(RELEASED, checkpoint.id, record, fence)
                 released.append(checkpoint.id)
         records = await self.ledger.read(CHECKPOINTS)
+        completed = await self.ledger.read(COMPLETED)
         named = await self._named()
         for id in await self.ledger.read(RELEASED):
             record = records.get(id)
-            made = _VERSION.validate_python(record) if record is not None else None
+            made = _as_completed(_VERSION.validate_python(record), completed) if record is not None else None
             for manifest in (made.weights, made.state) if made is not None else ():
                 for reference in manifest.files.values() if manifest else ():
                     if reference.sha256 not in named:
@@ -362,10 +394,22 @@ class Retention:
 
 async def checkpoints_in(ledger: Ledger) -> list[Checkpoint]:
     """Every checkpoint a ledger has, oldest first (for a reader that has no use for their files)."""
-    released = await ledger.read(RELEASED)
+    released, completed = await ledger.read(RELEASED), await ledger.read(COMPLETED)
     return [
-        _as_released(_VERSION.validate_python(record), released) for record in (await ledger.read(CHECKPOINTS)).values()
+        _as_released(_as_completed(_VERSION.validate_python(record), completed), released)
+        for record in (await ledger.read(CHECKPOINTS)).values()
     ]
+
+
+def _as_completed(checkpoint: Checkpoint, completed: Mapping[str, JsonValue]) -> Checkpoint:
+    """A checkpoint with its whole trainer state, if the state it was added without has been kept since."""
+    record = completed.get(checkpoint.id)
+    if checkpoint.state_complete or not isinstance(record, dict):
+        return checkpoint
+    seconds: Any = record.get("seconds")
+    state = _MANIFEST.validate_python(record["state"])
+    took = None if seconds is None else float(seconds)
+    return replace(checkpoint, state=state, state_complete=True, state_seconds=took)
 
 
 def _as_released(checkpoint: Checkpoint, released: Mapping[str, JsonValue]) -> Checkpoint:

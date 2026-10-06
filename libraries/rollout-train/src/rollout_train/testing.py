@@ -4,7 +4,7 @@ environment, an algorithm or a whole run built from its settings can be tried wi
 
 import asyncio
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -237,9 +237,10 @@ class Policy:
         self._gateways: dict[str, GatewayEndpoints] = {}
 
     async def publish(
-        self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
-    ) -> int:
-        return await self.channels[channel].publish(adapter, path, version, full=full)
+        self, channel: str, adapter: str, files: Callable[[], Awaitable[str]], version: int | None = None, *,
+        full: bool = False,
+    ) -> int:  # fmt: skip
+        return await self.channels[channel].publish(adapter, await files(), version, full=full)
 
     def gateway(self, ledger: Ledger, blobs: Blobs) -> GatewayEndpoints:
         """A gateway in this process over the channels, recording in `ledger` and `blobs`: one for each place the

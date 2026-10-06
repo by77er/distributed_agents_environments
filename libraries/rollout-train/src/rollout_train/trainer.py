@@ -9,6 +9,11 @@ a batch, moves the policy, and says where the new weights are (`Step`). It also 
 longest segment, and how many a step can afford. Those come from its hardware, and nothing above it chooses them. A
 trainer may take some of its settings between steps (`Changeable`): a run's settings page changes them for the run's
 next step (`rollout_train.settings`).
+
+A trainer on another machine (`Remote`) takes its parent and gives what it made as manifests of the blob store, so
+the loop records, serves and thins its checkpoints without reading their files. One that keeps a step's full state
+itself after the step returns (`Keeps`) has its weights served first, and its checkpoint's state completed once kept
+(`rollout_train.checkpoints.Checkpoints.completed`).
 """
 
 from collections.abc import Mapping, Sequence
@@ -18,6 +23,7 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import JsonValue
 
+from rollout_train.checkpoints import Checkpoint, Manifest
 from rollout_train.objectives import DEFAULT, Objective
 from rollout_train.recorder import Segment, TeacherScores
 
@@ -114,6 +120,20 @@ class Files:
 @dataclass(frozen=True)
 class Step:
     metrics: Mapping[str, float]
+    keeping: bool = False
+    """Whether the trainer keeps the rest of the step's state itself after returning (`Keeps.kept`): `into/state` then
+    holds only what it wrote before it returned."""
+
+
+@dataclass(frozen=True)
+class Made:
+    """What a step of a trainer elsewhere made (`Remote`), kept in the blob store: its metrics, the new weights, and the
+    state, whole or (`complete` false) only what was kept with the weights so far."""
+
+    metrics: Mapping[str, float]
+    weights: Manifest
+    state: Manifest | None = None
+    complete: bool = True
 
 
 WEIGHTS = "weights"
@@ -166,6 +186,44 @@ class Resident(Protocol):
     def close(self) -> None:
         """End what it keeps running (its processes, and what they hold)."""
         ...
+
+
+@runtime_checkable
+class Remote(Protocol):
+    """A trainer on another machine, whose steps' files go through the blob store (`rollout_train.pods.RemoteTrainer`):
+    given its parent as the checkpoint, it says what it made as manifests (`Made`), so nothing is read to the loop's
+    machine. The rest of a step's state may be kept after `made` returns (`Made.complete` false): `state` waits for
+    it."""
+
+    async def made(self, batch: Sequence[Item], *, seed: int, parent: Checkpoint | None, into: str) -> Made:
+        """`Trainer.step`, from `parent`'s files in the blob store, making the checkpoint `into` (its id)."""
+        ...
+
+    async def state(self, into: str) -> Manifest:
+        """The whole state of the step that made `into`, once it is kept. Raises `StateLost` if it never will be."""
+        ...
+
+
+@runtime_checkable
+class Keeps(Protocol):
+    """A trainer that can keep the full state of its steps in a blob store itself, after each step returns, so a step's
+    weights are kept and served while its state is still being kept (`rollout_lora`'s, with its processes kept between
+    steps). Its steps say which they keep so (`Step.keeping`)."""
+
+    def keep_in(self, blobs: Mapping[str, JsonValue]) -> None:
+        """Keep its steps' full state from now on in the blob store at this location (`rollout_train.stores.opened`),
+        rather than in `into/state` before a step returns."""
+        ...
+
+    async def kept(self, into: str) -> Manifest:
+        """The files it kept of the full state of the step that wrote into `into` (by its name), by their paths within
+        the state, once they are kept. Raises `StateLost` if they never will be."""
+        ...
+
+
+class StateLost(Exception):
+    """A step's full state will never be kept: its checkpoint stays incomplete, and a step from it needs the trainer
+    that holds it."""
 
 
 @runtime_checkable

@@ -10,8 +10,10 @@
   examples, and its segments with their teachers' scores. Teacher routing and scoring are in `distillation`.
 - `Trainer`, `Weighted`, `Pair`, `Labelled`, `Distilled`, `Budget`, `Files`, `Step`, `StepFailed` (`trainer`): what a
   trainer is and what it trains on; `Changeable`, one that takes some of its settings between steps; `Resident`, one
-  that keeps its policy in memory between steps. `Colocated`: the
-  wrapper for one that shares its accelerator with the engines. Its objective is declared in `objectives`.
+  that keeps its policy in memory between steps; `Remote` (with `Made`), one elsewhere whose steps' files go through
+  the blob store; `Keeps` (with `StateLost`), one that keeps a step's full state after the step returns.
+  `Colocated`: the wrapper for one that shares its accelerator with the engines. Its objective is declared in
+  `objectives`.
 - `Result`, `results`, `Trained`, `trained` (`record`): how each group of a run went, and what was done with it.
 - `evaluate`, `make_suite`, `edit_suite`, `suite_entry`, `suite_for`, `suite_of`, `Suite`, `SuiteEntry`, `Schedule`
   (`evals`): a suite, an eval configuration of one or more environments kept in versions, an eval that plays one
@@ -55,9 +57,13 @@ from rollout_train.trainer import (
     Changeable,
     Distilled,
     Files,
+    Keeps,
     Labelled,
+    Made,
     Pair,
+    Remote,
     Resident,
+    StateLost,
     Step,
     StepFailed,
     Trainer,
@@ -81,16 +87,20 @@ __all__ = [
     "Files",
     "Follower",
     "Grpo",
+    "Keeps",
     "Labelled",
     "Ledger",
+    "Made",
     "Manifest",
     "Pair",
     "Preferences",
+    "Remote",
     "Resident",
     "Result",
     "Retention",
     "Schedule",
     "Serving",
+    "StateLost",
     "Step",
     "StepFailed",
     "Suite",

@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import JsonValue
 
 from rollout.harness.sandboxes import Lease
-from rollout_train.checkpoints import CHECKPOINTS, RELEASED
+from rollout_train.checkpoints import CHECKPOINTS, COMPLETED, RELEASED
 from rollout_train.launches import Asked, launches_of
 from rollout_train.ledger import Fence, Ledger
 from rollout_train.ledger_service.scopes import Forbidden, Scope, scope_of
@@ -87,7 +87,7 @@ async def _read(ledger: Ledger, args: Mapping[str, Any], scope: Scope) -> JsonVa
     assert scope.run is not None
     if name in (table(scope.run, SERVING), table(scope.run, STARTS)):
         return cast(JsonValue, await ledger.read(name))
-    if name in (CHECKPOINTS, RELEASED):
+    if name in (CHECKPOINTS, RELEASED, COMPLETED):
         readable = await _checkpoints_of(ledger, scope.run)
         return {key: value for key, value in (await ledger.read(name)).items() if key in readable}
     raise Forbidden(f"a pod's token reads its run's serving records, starts and checkpoints, not {name}")
@@ -98,7 +98,7 @@ async def _tables(ledger: Ledger, args: Mapping[str, Any], scope: Scope) -> Json
     if scope.platform:
         return cast(JsonValue, names)
     assert scope.run is not None
-    readable = {table(scope.run, SERVING), table(scope.run, STARTS), CHECKPOINTS, RELEASED}
+    readable = {table(scope.run, SERVING), table(scope.run, STARTS), CHECKPOINTS, RELEASED, COMPLETED}
     return [name for name in names if name in readable]
 
 

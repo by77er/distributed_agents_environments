@@ -115,7 +115,8 @@ async def test_a_remote_step_trains_on_the_batch_from_the_parent_and_brings_its_
     checkpoints = checkpoints_of(tmp_path, blob_store)
     async with pod(TrainerService(fake, checkpoints, tmp_path / "pod")) as trainer:
         first = await trainer.step(BATCH, seed=7, parent=None, into=tmp_path / "making" / "kmnopqrstuvwxyzk")
-        assert first.metrics == {"loss": 0.5, "segments": 2.0}
+        assert {key: first.metrics[key] for key in ("loss", "segments")} == {"loss": 0.5, "segments": 2.0}
+        assert {"step_seconds", "upload_adapter_seconds"} <= set(first.metrics)  # (the pod's timings)
         made = tmp_path / "making" / "kmnopqrstuvwxyzk"
         assert (made / WEIGHTS / "adapter.txt").read_text() == "base+7"
         assert (made / STATE / "optimizer.txt").read_text() == "moments after 7"
@@ -147,7 +148,7 @@ async def test_a_step_asked_for_again_is_the_same_step(tmp_path: Path) -> None:
     assert len(fake.steps) == 1 and (tmp_path / "b" / "kmnopqrstuvwxyzk" / WEIGHTS / "adapter.txt").exists()
     again = TrainerService(fake, checkpoints, tmp_path / "pod")  # (the pod started again: the answer is on its disk)
     state = await again.ask(asked)
-    assert state.state == MADE and state.made is not None and state.made.metrics == {"loss": 0.5, "segments": 2.0}
+    assert state.state == MADE and state.made is not None and state.made.metrics["loss"] == 0.5
     assert len(fake.steps) == 1
 
 

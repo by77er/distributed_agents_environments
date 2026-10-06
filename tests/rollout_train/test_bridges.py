@@ -1,6 +1,6 @@
 """Bridges: the path from a checkpoint's format to what a provider loads, the pairs refused and why, the rank a
 provider sees, a checkpoint's format read from its files; and each bridge run once per checkpoint, here and as a Ray
-task, noted under `CHECKPOINT@BRIDGE`."""
+task, noted under `CHECKPOINT@BRIDGE`; the verbatim bridges read no file."""
 
 from pathlib import Path
 from typing import Any
@@ -127,7 +127,7 @@ async def test_a_checkpoint_is_bridged_once_for_each_bridge(tmp_path: Path) -> N
     assert await bridge_of(checkpoints.ledger, checkpoint) == "verbatim"
     again = await bridged(checkpoints, fence, checkpoint, chain, tmp_path / "scratch")
     assert again == manifest and len(await checkpoints.ledger.read(BRIDGING)) == 1  # not bridged again
-    assert not list((tmp_path / "scratch").iterdir())  # what it wrote there is gone
+    assert not (tmp_path / "scratch").exists()  # (the same files: none was read or written)
 
 
 async def test_a_released_checkpoint_cannot_be_bridged(tmp_path: Path) -> None:
@@ -141,16 +141,16 @@ async def test_a_released_checkpoint_cannot_be_bridged(tmp_path: Path) -> None:
         await bridged(checkpoints, fence, checkpoint, (by_name("verbatim"),), tmp_path / "scratch")
 
 
-async def test_a_bridge_runs_as_a_ray_task(tmp_path: Path, local_ray: LocalRay) -> None:
+async def test_a_verbatim_bridge_on_ray_is_noted_with_the_checkpoint_s_own_files(tmp_path: Path) -> None:
     checkpoints, fence, checkpoint = await a_checkpoint(tmp_path)
     ledger_at, blobs_at = locations(tmp_path)
     scratch = str(tmp_path / "worker")
     manifest = await on_ray(ledger_at, blobs_at, fence, checkpoint, (by_name("verbatim"),), scratch=scratch)
-    assert sorted(manifest.files) == ["adapter_config.json", "adapter_model.safetensors"]
-    assert await made(checkpoints.ledger, checkpoint, "verbatim") == manifest  # (noted by the task, in the ledger)
+    assert manifest == (await checkpoints.checkpoint(checkpoint)).weights  # (the same blobs)
+    assert await made(checkpoints.ledger, checkpoint, "verbatim") == manifest  # (noted in the ledger)
     begun: Any = (await checkpoints.ledger.read(BRIDGING))[f"{checkpoint}@verbatim"]
     assert begun["bridge"] == "verbatim"
-    assert not list((tmp_path / "worker" / "bridges").iterdir())  # (its work is gone)
+    assert not (tmp_path / "worker").exists()  # (no task ran: nothing was read to this machine)
 
 
 async def test_the_path_chosen_is_what_runs(tmp_path: Path, local_ray: LocalRay) -> None:

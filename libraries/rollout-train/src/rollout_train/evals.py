@@ -521,12 +521,18 @@ def entry_scores(environment: str, rewards: Sequence[float], solved: Sequence[bo
     }
 
 
+type Fetched = Callable[[], Awaitable[str]]
+"""Where a checkpoint's files are on this machine, read from the blob store when it is called."""
+
+
 class Publisher(Protocol):
     """Serves new weights on a channel from now on (with `full`, a full checkpoint's in place of the engines'); returns
-    the number its samples are stamped with (the checkpoint's depth)."""
+    the number its samples are stamped with (the checkpoint's depth). It calls `files` only where it loads the weights
+    by path (engines in its own process): engines elsewhere follow the serving record and read the files themselves, so
+    nothing is read to this machine for them."""
 
     async def __call__(
-        self, channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False
+        self, channel: str, adapter: str, files: Fetched, version: int | None = None, *, full: bool = False
     ) -> int: ...
 
 
@@ -659,9 +665,14 @@ async def evaluate(
     for each, its_fence in {run: fence, **dict(zip(runs, fences, strict=True))}.items():
         await record_serving(ledger, each, serving, its_fence)
     if subject is not None and publish is not None:
-        assert serving.files is not None
-        files = await checkpoints.files(serving.files, directory / subject / ("resharded" if reshard else WEIGHTS))
-        version = await publish(channel, subject, str(files), serving.depth, full=serving.kind == "full")
+        manifest = serving.files
+        assert manifest is not None
+        loaded_at = directory / subject / ("resharded" if reshard else WEIGHTS)
+
+        async def fetched() -> str:
+            return str(await checkpoints.files(manifest, loaded_at))
+
+        version = await publish(channel, subject, fetched, serving.depth, full=serving.kind == "full")
         note("published", {"channel": channel, "adapter": subject, "version": version})
 
     for entry, played_by, its_fence, count in zip(suite.entries, runs, fences, counts, strict=True):

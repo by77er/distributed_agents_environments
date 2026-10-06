@@ -6,7 +6,7 @@ import pytest
 from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
-from rollout_train.checkpoints import Checkpoint, Checkpoints, Retention, kept, new_id, short
+from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, Retention, kept, new_id, short
 from rollout_train.ledger import Fenced, FileLedger
 from rollout_train.record import scope
 
@@ -157,3 +157,30 @@ async def test_a_reader_without_a_runs_writer_key_still_reads_a_checkpoint_from_
     assert made.weights is not None
     read = await checkpoints.files(made.weights, tmp_path / "read")
     assert (read / "nested" / "adapter_model.safetensors").read_text() == "weights 1"
+
+
+async def test_a_checkpoint_added_from_manifests_with_its_state_incomplete_is_completed_once_kept(
+    tmp_path: Path,
+) -> None:
+    ledger = FileLedger(tmp_path / "ledger")
+    blobs = FileBlobStore(tmp_path / "blobs")
+    checkpoints = Checkpoints(ledger, blobs)
+    fence = await ledger.take(scope("miner"))
+    weights = await kept(checkpoint(tmp_path / "a", "weights 1"), blobs)  # (kept elsewhere: only manifests here)
+    held = Manifest({"held.txt": await blobs.put(b"one:held", "text/plain")})
+    made = await checkpoints.add(fence, new_id(), weights=weights, run="miner", step=1, state=held,
+                                 state_complete=False)  # fmt: skip
+    assert made.weights == weights and made.state == held and not made.state_complete
+    assert not (await checkpoints.checkpoint(made.id)).state_complete
+    whole = Manifest({**held.files, "optimizer.pt": await blobs.put(b"moments 1", "application/octet-stream")})
+    completed = await checkpoints.completed(fence, made.id, whole, seconds=12.5)
+    assert completed.state == whole and completed.state_complete and completed.state_seconds == 12.5
+    assert [each.state for each in await checkpoints.all()] == [whole]
+    assert (await checkpoints.completed(fence, made.id, held)).state == whole  # (completed once)
+    # Released, its whole state's blobs are deleted with its weights'.
+    later = await checkpoints.add(fence, new_id(), weights=checkpoint(tmp_path / "b", "weights 2"), run="miner",
+                                  step=2, parents=[made.id])  # fmt: skip
+    retention = Retention(recent=1, every=0, grace=0.0)
+    assert await checkpoints.thin(fence, "miner", retention, keep={later.id}) == [made.id]
+    with pytest.raises(OSError):
+        await blobs.read(whole.files["optimizer.pt"])

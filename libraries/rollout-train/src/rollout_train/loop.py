@@ -24,6 +24,7 @@ taken twice.
 | with groups queued | finds results to train on that no step covers, and queues them again |
 | during a step | finds the step decided and no checkpoint made, and takes it again over the same groups |
 | after the step | finds the checkpoint, serves it, and goes on |
+| before a checkpoint's state was kept | asks its trainer for the state again, and completes the checkpoint with it |
 
 Taking the run's fence when it starts shuts out a loop it replaced: that one's next write is refused. The checkpoints it
 makes are appended under that fence. What it does outside the ledger, it does only while its fence is the newest: it
@@ -32,9 +33,22 @@ looks before it publishes a checkpoint, before it deletes files in the run's dir
 checkpoint's (`MAKES`) once the checkpoint is added, so a loop that was replaced while its trainer ran never writes
 where its replacement does.
 
+**A trainer on another machine** (`rollout_train.trainer.Remote`, a training pod's) is given its parent as the
+checkpoint and gives back manifests of what it kept in the blob store: the loop records the checkpoint from them, serves
+it and thins the run's checkpoints, and reads none of their files. The checkpoint's record (its manifests, with each
+file's size and hash, its step and when it was made) is what shows it was made. Such a trainer may keep the rest of a
+step's state after the step returns: the checkpoint is added with its state incomplete and served at once, and the loop
+completes it in the background once the trainer has kept the state (`Checkpoints.completed`, noted as `state`, with how
+long it took); a state never kept is logged as an error and noted, and its checkpoint left incomplete. The next step
+does not wait for it: it goes on from the checkpoint the step before made, which the trainer holds; a trainer that does
+not hold it waits for the state it is keeping, or refuses a state that was never kept (`StepFailed`), and never starts
+afresh. At the end of the run the loop waits for the states still being kept.
+
 **What its channel serves is written down** (`rollout_train.serving`): each time it serves a checkpoint, it appends that
 the channel serves it from now on (the base model until the first), and then publishes it to the engines in its own
-process, if it has any. Engines on other machines follow the record (`rollout_train.following`).
+process, if it has any, which read its files to this machine as they load them. Engines on other machines follow the
+record and read the files themselves (`rollout_train.following`). A step's note says how long serving took
+(`publish_seconds`, beside the trainer's own timings in its metrics).
 
 **It can evaluate its checkpoints as it makes them** (`evals`, a `rollout_train.evals.Schedule`). After a step whose
 checkpoint the schedule names is served, the suite is asked for as an eval of that checkpoint, a run of its own (and a
@@ -58,6 +72,7 @@ hooks (`paused`, `resumed`).
 
 import asyncio
 import json
+import logging
 import os
 import random
 import shutil
@@ -108,7 +123,20 @@ from rollout_train.settings import (
     run_key,
     trainer_key,
 )
-from rollout_train.trainer import STATE, WEIGHTS, Changeable, Files, Item, StepFailed, Trainer, objective_of, weight_of
+from rollout_train.trainer import (
+    STATE,
+    WEIGHTS,
+    Changeable,
+    Files,
+    Item,
+    Remote,
+    StepFailed,
+    Trainer,
+    objective_of,
+    weight_of,
+)
+
+logger = logging.getLogger(__name__)
 
 FAILED_UPDATES = 3
 """Steps that may fail in a row (each is written down, and the weights stay as they were) before the loop stops."""
@@ -219,12 +247,35 @@ async def train(
             hook.on_note(event)
 
     async def files(checkpoint: Checkpoint) -> Files:
-        """A checkpoint's files on this machine, read from the blob store if they are not here."""
+        """A checkpoint's files on this machine (for a trainer here), read from the blob store if they are not here."""
         here = directory / checkpoint.id
         if checkpoint.weights is None:
             raise ValueError(f"{checkpoint.id} was released: its weights are gone")
         weights = await checkpoints.files(checkpoint.weights, here / WEIGHTS)
         return Files(weights, await checkpoints.files(checkpoint.state, here / STATE) if checkpoint.state else None)
+
+    async def completing(checkpoint: Checkpoint) -> None:
+        """Complete a checkpoint's state once its trainer has kept the rest of it, in the background: a state that is
+        never kept is said loudly, and its checkpoint left incomplete."""
+        if not isinstance(trainer, Remote) or checkpoint.id in completions or checkpoint.state_complete:
+            return
+        remote, began = trainer, time.monotonic()
+
+        async def complete() -> None:
+            try:
+                state = await remote.state(checkpoint.id)
+                seconds = time.monotonic() - began
+                await checkpoints.completed(fence, checkpoint.id, state, seconds=seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:  # (left incomplete: a step from it needs the trainer that holds it)
+                said = f"{type(error).__name__}: {error}".strip()[:500]
+                logger.error("the state of checkpoint %s was not kept: it stays incomplete: %s", checkpoint.id, said)
+                note("state", {"checkpoint": checkpoint.id, "step": checkpoint.step, "error": said})
+                return
+            note("state", {"checkpoint": checkpoint.id, "step": checkpoint.step, "seconds": round(seconds, 2)})
+
+        completions[checkpoint.id] = asyncio.create_task(complete())
 
     async def serve(checkpoint: Checkpoint) -> None:
         nonlocal served
@@ -240,12 +291,13 @@ async def train(
             max_lag=int(str(settings[MAX_LAG])),
         )  # fmt: skip
         await record_serving(ledger, run, wanted, fence)  # (whatever serves the channel elsewhere follows it)
-        if reshard is not None:
-            loaded = await checkpoints.files(manifest, directory / checkpoint.id / "resharded")
-        else:
-            loaded = (await files(checkpoint)).weights
+
+        async def loaded() -> str:  # (read here only for engines in this process, which load by path)
+            place = directory / checkpoint.id / ("resharded" if reshard is not None else WEIGHTS)
+            return str(await checkpoints.files(manifest, place))
+
         await newest(ledger, fence)
-        served_as = await publish(channel, checkpoint.id, str(loaded), checkpoint.depth, full=checkpoint.kind == "full")
+        served_as = await publish(channel, checkpoint.id, loaded, checkpoint.depth, full=checkpoint.kind == "full")
         note("published", {"channel": channel, "adapter": checkpoint.id, "version": served_as})
         served = checkpoint
         keep = {checkpoint.id, checkpoint.parent}
@@ -365,9 +417,14 @@ async def train(
                 trainer.change(differ)
 
     served: Checkpoint | None = None
+    completions: dict[str, asyncio.Task[None]] = {}
+    """The checkpoints whose state is being completed in the background, by id."""
     halted = False
     """Whether the run was paused when last looked."""
     await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
+    for made_before in await checkpoints.all():  # (a state a loop that stopped was waiting for)
+        if made_before.run == run and not made_before.state_complete and made_before.released is None:
+            await completing(made_before)
     if (now := await current()) is not None:
         await serve(now)  # (a loop that died between making a checkpoint and serving it serves it now)
         await evaluated_with(now)  # (and one that died while evaluating it finishes the eval)
@@ -471,14 +528,24 @@ async def train(
             parent_id = str(intent["parent"]) if intent["parent"] else None
             parent = await checkpoints.checkpoint(parent_id) if parent_id else None
             # An adapter's first step over full weights begins a new adapter: the model it trains over is those weights.
-            begin = await files(parent) if parent is not None and parent.kind == trainer.weights else None
+            going_on = parent if parent is not None and parent.kind == trainer.weights else None
             into = directory / "making" / str(fence.number) / makes  # (its own: one it replaced may write its own)
-            await asyncio.to_thread(shutil.rmtree, into, ignore_errors=True)  # (what a step that died left)
-            await asyncio.to_thread(into.parent.mkdir, parents=True, exist_ok=True)
             if isinstance(used := intent.get("settings"), dict):  # (the settings it was decided with, taken again too)
                 trained_with(_trainers(used))
+            seed_of = int(str(intent["seed"]))
             try:
-                step = await trainer.step(given, seed=int(str(intent["seed"])), parent=begin, into=into)
+                if isinstance(trainer, Remote):  # (its files stay in the blob store: none are read here)
+                    made_there = await trainer.made(given, seed=seed_of, parent=going_on, into=makes)
+                    weights, state, complete = made_there.weights, made_there.state, made_there.complete
+                    metrics_of = made_there.metrics
+                else:
+                    begin = await files(going_on) if going_on is not None else None
+                    await asyncio.to_thread(shutil.rmtree, into, ignore_errors=True)  # (what a step that died left)
+                    await asyncio.to_thread(into.parent.mkdir, parents=True, exist_ok=True)
+                    step = await trainer.step(given, seed=seed_of, parent=begin, into=into)
+                    has_state = await asyncio.to_thread((into / STATE).exists)
+                    weights, state, complete = into / WEIGHTS, into / STATE if has_state else None, True
+                    metrics_of = step.metrics
             except StepFailed as error:  # the weights stay as they were, and the run goes on
                 failed_updates += 1
                 said: dict[str, JsonValue] = {
@@ -495,28 +562,35 @@ async def train(
             checkpoint = await checkpoints.add(
                 fence,
                 makes,
-                weights=into / WEIGHTS,
+                weights=weights,
                 run=run,
                 base=base,
                 kind=trainer.weights,
                 step=key,
-                state=into / STATE if await asyncio.to_thread((into / STATE).exists) else None,
+                state=state,
+                state_complete=complete,
                 parents=[parent_id] if parent_id else [],
                 batch=BlobReference.model_validate(intent["batch"]),
-                metrics=step.metrics,
+                metrics=metrics_of,
             )
             # The checkpoint is this loop's (another's add under an older fence is refused since this one took its
             # fence, and it was not there when the step began): its files are where the checkpoint's are looked for.
             await newest(ledger, fence)
-            await asyncio.to_thread(_moved, into, directory / makes)
+            if await asyncio.to_thread(into.exists):
+                await asyncio.to_thread(_moved, into, directory / makes)
         failed_updates = 0
+        began = time.monotonic()
         await serve(checkpoint)
+        publishing = time.monotonic() - began
+        await completing(checkpoint)  # (the rest of its state, kept after it is served)
         if made is not None:
             await newest(ledger, fence)  # (a loop that was replaced does not move a bookmark back)
             await made(checkpoint)
         await checkpoints.thin(fence, run, retention, await keeping())
         metrics: dict[str, JsonValue] = {name: round(value, 5) for name, value in checkpoint.metrics.items()}
-        note("step", {"step": key, "groups": list[JsonValue](numbers), "checkpoint": checkpoint.id, "metrics": metrics})
+        metrics["publish_seconds"] = round(publishing, 3)
+        note("step", {"step": key, "groups": list[JsonValue](numbers), "checkpoint": checkpoint.id, "metrics": metrics,
+                      "state_complete": checkpoint.state_complete})  # fmt: skip
         done_with(numbers)
         await evaluated_with(checkpoint)  # (the next step waits for it: the checkpoint is served until it ends)
 
@@ -566,8 +640,9 @@ async def train(
             if stepping is not None and stepping in finished:
                 done, stepping = stepping, None
                 done.result()  # (a step that failed too often stops the loop)
+        await asyncio.gather(*completions.values())  # (the run's last states, completed before it ends)
     finally:
-        for task in [*outstanding, *([stepping] if stepping else [])]:
+        for task in [*outstanding, *([stepping] if stepping else []), *completions.values()]:
             task.cancel()
         if stepping is not None:
             await asyncio.gather(stepping, return_exceptions=True)

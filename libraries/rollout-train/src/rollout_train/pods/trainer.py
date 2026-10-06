@@ -1,11 +1,17 @@
 """`RemoteTrainer`: a `Trainer` whose steps run on a training pod, through its training service
 (`rollout_train.pods.training`).
 
-A step puts its batch and its parent's files in the blob store (content-addressed: files the store has are not written
-again), asks the pod for the step by the checkpoint it makes (`into`'s name, the checkpoint's id), and asks after it
-every few seconds until it is made or has failed. Then it fetches the new weights and state from the blob store into
-`into`, where the training loop looks for them. Asking again is safe: the pod knows a step by its checkpoint, so a step
-asked for again after a connection dropped, or by a loop started again, is the same step.
+It is a `rollout_train.trainer.Remote`: the training loop asks it for a step (`made`) with the parent as the checkpoint,
+whose manifests it hands the pod, and gets back manifests of the new weights and state, which the pod kept in the blob
+store; nothing is read to the loop's machine. A step puts its batch in the blob store, asks the pod for the step by the
+checkpoint it makes (its id), and asks after it every few seconds until it is made or has failed. The pod answers once
+the weights are kept; the rest of the state may still be being kept then (`Made.complete` false), and `state` asks
+after the step until it is (or raises `StateLost` where it never will be). Asking again is safe: the pod knows a step by
+its checkpoint, so a step asked for again after a connection dropped, or by a loop started again, is the same step.
+
+As a plain `Trainer` (`step`, for a caller that works with files), it keeps the parent's files from disk in the blob
+store (content-addressed: files the store has are not written again), and fetches the whole step's files into `into`
+once the state is kept.
 
 The settings the trainer takes between steps (`Changeable`) are kept here, and those that differ from what it was made
 with are sent with every step, so the pod's trainer steps with the settings the run has now, whatever it took before (a
@@ -26,12 +32,22 @@ from typing import Any
 import httpx
 from pydantic import JsonValue
 
-from rollout_train.checkpoints import Checkpoints, kept
+from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest, kept
 from rollout_train.http import answer_of
 from rollout_train.inference.remote import Connection, https_only
 from rollout_train.objectives import DEFAULT, Objective
-from rollout_train.pods.training import FAILED, MADE, Parent, StepAsked, StepState, asked_json, batch_bytes, state_of
-from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Item, Step, StepFailed
+from rollout_train.pods.training import (
+    FAILED,
+    MADE,
+    Parent,
+    StepAsked,
+    StepMade,
+    StepState,
+    asked_json,
+    batch_bytes,
+    state_of,
+)
+from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Item, Made, StateLost, Step, StepFailed
 
 
 class TrainerUnreachable(StepFailed):
@@ -97,23 +113,58 @@ class RemoteTrainer:
         steps."""
         return await self._call("GET", "/v1/trainer")
 
+    async def made(self, batch: Sequence[Item], *, seed: int, parent: Checkpoint | None, into: str) -> Made:
+        """A step from `parent`'s files where they are, in the blob store, making the checkpoint `into` (its id): what
+        the pod kept, as manifests, its state whole or (`complete` false) only what was kept with the weights so far."""
+        given = None
+        if parent is not None:
+            if parent.weights is None:
+                raise StepFailed(f"{parent.id} was released: its weights are gone")
+            given = Parent(parent.weights, parent.state, parent.id)
+        made = await self._made(batch, seed, given, into)
+        return Made(dict(made.metrics), made.weights, made.state, made.complete)
+
+    async def state(self, into: str) -> Manifest:
+        """The whole state of the step that made `into`, once the pod has kept it; `StateLost` where it never will (the
+        pod says keeping it failed, or no longer knows the step)."""
+        while True:
+            try:
+                said = state_of(await self._call("GET", f"/v1/steps/{into}"))
+            except _Forgotten:
+                raise StateLost(f"{self.address} no longer knows step {into}: its state was not kept") from None
+            made = said.made
+            if said.state != MADE or made is None:
+                raise StateLost(f"{self.address} says step {into} is {said.state}: {said.error}")
+            if made.state_failed is not None:
+                raise StateLost(f"{self.address} did not keep the state of step {into}: {made.state_failed}")
+            if made.complete:
+                return made.state if made.state is not None else Manifest({})
+            await asyncio.sleep(self.every)
+
     async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
-        async with self._lock:
+        """The step, its parent's files kept in the blob store from disk, and the files it made fetched into `into`
+        once its state is all kept."""
+        given = None
+        if parent is not None:
             blobs = self.checkpoints.blobs
-            reference = await blobs.put(batch_bytes(batch), "application/json")
-            given = None
-            if parent is not None:
-                left = await kept(parent.state, blobs) if parent.state is not None else None
-                given = Parent(await kept(parent.weights, blobs), left)
+            left = await kept(parent.state, blobs) if parent.state is not None else None
+            given = Parent(await kept(parent.weights, blobs), left)
+        made = await self._made(batch, seed, given, into.name)
+        state = made.state if made.complete else await self.state(into.name)
+        await self.checkpoints.files(made.weights, into / WEIGHTS)
+        if state is not None:
+            await self.checkpoints.files(state, into / STATE)
+        return Step(dict(made.metrics))
+
+    async def _made(self, batch: Sequence[Item], seed: int, given: Parent | None, into: str) -> StepMade:
+        """Ask the pod for the step, with the batch in the blob store, and wait until it is made."""
+        async with self._lock:
+            reference = await self.checkpoints.blobs.put(batch_bytes(batch), "application/json")
             changed = {key: value for key, value in self._changeable.items() if value != self._made_with.get(key)}
-            asked = StepAsked(into.name, seed, reference, given, changed)
-            made = (await self._asked(asked)).made
+            made = (await self._asked(StepAsked(into, seed, reference, given, changed))).made
             if made is None:
-                raise StepFailed(f"{self.address} took step {into.name} and said it made nothing")
-            await self.checkpoints.files(made.weights, into / WEIGHTS)
-            if made.state is not None:
-                await self.checkpoints.files(made.state, into / STATE)
-            return Step(dict(made.metrics))
+                raise StepFailed(f"{self.address} took step {into} and said it made nothing")
+            return made
 
     async def _asked(self, asked: StepAsked) -> StepState:
         """Ask for the step, and after it until it is made or failed."""

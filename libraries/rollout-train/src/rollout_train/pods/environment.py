@@ -40,10 +40,10 @@ def required(environ: Mapping[str, str], name: str) -> str:
 
 def stores(environ: Mapping[str, str]) -> tuple[Ledger, Blobs]:
     """The ledger and the blob store the environment names (with a copy on the pod's disk, `ROLLOUT_BLOB_CACHE`)."""
-    blobs = blobs_at(_location(environ, "ROLLOUT_BLOBS"))
+    blobs = blobs_at(location(environ, "ROLLOUT_BLOBS"))
     if cache := environ.get("ROLLOUT_BLOB_CACHE"):
         blobs = CachedBlobs(blobs, FileBlobStore(Path(cache)))
-    return opened(_location(environ, "ROLLOUT_LEDGER")), blobs
+    return opened(location(environ, "ROLLOUT_LEDGER")), blobs
 
 
 class CachedBlobs:
@@ -107,7 +107,8 @@ async def served(app: Any, host: str, port: int) -> None:
         raise
 
 
-def _location(environ: Mapping[str, str], name: str) -> dict[str, Any]:
+def location(environ: Mapping[str, str], name: str) -> dict[str, Any]:
+    """Where a store is, as the JSON object in variable `name` says (`ROLLOUT_BLOBS`, `ROLLOUT_LEDGER`)."""
     try:
         said: Any = json.loads(required(environ, name))
     except json.JSONDecodeError as error:

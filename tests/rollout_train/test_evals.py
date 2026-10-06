@@ -20,6 +20,7 @@ from rollout_train.evals import (
     EVAL,
     EVAL_DATA,
     NOTHING_TRAINED,
+    Fetched,
     edit_suite,
     evaluate,
     make_suite,
@@ -104,7 +105,9 @@ async def test_a_full_checkpoint_is_evaluated_in_place_of_the_engines_weights(tm
     subject = await checkpoints.add(fence, new_id(), weights=weights, run=None, base="tiny", kind="full")
     published: list[tuple[str, bool]] = []
 
-    async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
+    async def publish(
+        channel: str, adapter: str, files: Fetched, version: int | None = None, *, full: bool = False
+    ) -> int:
         published.append((adapter, full))
         return version or 0
 
@@ -129,9 +132,11 @@ async def test_an_eval_plays_a_suite_with_a_checkpoint_and_records_how_it_went(t
     subject = await checkpoints.add(fence, new_id(), weights=weights, run="trained", step=3, base="tiny")
     published: list[tuple[str, str, int | None]] = []
 
-    async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
+    async def publish(
+        channel: str, adapter: str, files: Fetched, version: int | None = None, *, full: bool = False
+    ) -> int:
         published.append((channel, adapter, version))
-        assert (Path(path) / "adapter.bin").read_text() == "weights" and not full
+        assert (Path(await files()) / "adapter.bin").read_text() == "weights" and not full
         return version or 0
 
     recorder = answering()
@@ -192,7 +197,9 @@ async def test_an_eval_of_the_base_model_serves_nothing(tmp_path: Path) -> None:
     ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
     suite = await make_suite(ledger, "words-v1", [suite_entry(ENVIRONMENT, words, rows=["say-no"], seeds=[1])])
 
-    async def publish(channel: str, adapter: str, path: str, version: int | None = None, *, full: bool = False) -> int:
+    async def publish(
+        channel: str, adapter: str, files: Fetched, version: int | None = None, *, full: bool = False
+    ) -> int:
         raise AssertionError("the base model is served as it is")
 
     async with here(ledger, answering(), blobs):
