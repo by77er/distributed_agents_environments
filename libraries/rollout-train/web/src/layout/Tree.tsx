@@ -10,7 +10,7 @@ import type { EvalRun, GroupEpisode, Run, System } from "../api/types";
 import { Avatar, Dots, EpisodeDots, Twist } from "../components/ui";
 import { entriesText, shareText } from "../components/evals";
 import { byNumber, figure, mean } from "../lib/format";
-import { asked, episodeClass, groupsOf, madeBy, nameOf, range, reported, towardStep } from "../lib/model";
+import { asked, episodeClass, groupsOf, listed, madeBy, nameOf, range, reported, towardStep } from "../lib/model";
 import { basePlace, environmentPlace, episodePlace, evalPlace, groupPlace, type Place, runPlace, statisticsPlace, stepPlace, checkpointPlace, subjectPlace, suitePlace } from "../lib/places";
 import { type Folds, useFolds, useStored } from "../lib/stored";
 import { versionTag } from "../lib/suites";
@@ -52,7 +52,7 @@ function RunsTree({ place, system }: { place: Place; system: System }) {
   const { data: episode } = useEpisodeLabels(episodeId);
   const showing = place.kind === "episode" ? episode : undefined;
   const others = (feeds ?? []).filter(run => !run.labels.run).length;
-  const runs = system.runs.filter(run => run.kind !== "eval");  // (an eval's run is under the evals)
+  const runs = listed(system.runs.filter(run => run.kind !== "eval"));  // (an eval's run is under the evals)
   return (
     <>
       {runs.map(run => (
@@ -360,7 +360,7 @@ export const useHidden = () => useStored<string[]>("monitor.hidden", []);
 function StatisticsTree({ place, system }: { place: Place; system: System }) {
   const [hidden, setHidden] = useHidden();
   const colorOf = useRunColor();
-  const runs = system.runs.filter(run => run.kind !== "eval");  // (evals are on the evals page)
+  const runs = listed(system.runs.filter(run => run.kind !== "eval"));  // (evals are on the evals page)
   const toggle = (run: string) => setHidden(hidden.includes(run) ? hidden.filter(each => each !== run) : [...hidden, run]);
   return (
     <>

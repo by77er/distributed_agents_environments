@@ -132,6 +132,13 @@ export const reported = (solved: (boolean | null | undefined)[]): boolean => sol
 /** What a run is called: its name, or its id. */
 export const nameOf = (run: { run: string; name?: string | null }): string => run.name || run.run;
 
+const LIVE = new Set(["running", "idle", "paused"]);
+
+/** Runs in the order they are listed: the live first, then the newest started, then by id. Nothing a run writes as it
+ * goes moves it (a run moves when it ends, or starts again). */
+export const listed = (runs: Run[]): Run[] =>
+  [...runs].sort((a, b) => Number(!LIVE.has(a.state)) - Number(!LIVE.has(b.state)) || (b.started ?? 0) - (a.started ?? 0) || a.run.localeCompare(b.run));
+
 /** What the page knows of runs and checkpoints, to say them: a run by its name, and a checkpoint by where it came from
  * (the run that made it and its step) and the shortest start of its id that no other has. */
 export interface Known {

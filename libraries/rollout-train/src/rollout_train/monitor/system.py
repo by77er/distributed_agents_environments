@@ -1108,8 +1108,8 @@ class System:
             if run["kind"] == EVAL and run["run"] not in finished and run["by"] in states and run["run"] not in beaten:
                 by = states[run["by"]]
                 run["state"] = PAUSED if by in (RUNNING, IDLE) and run["run"] in held else by
-        rank = {RUNNING: 0, PAUSED: 1, IDLE: 1}
-        runs.sort(key=lambda run: (rank.get(run["state"], 2), -(run["written"] or 0.0), run["run"]))
+        live = {RUNNING, IDLE, PAUSED}  # (the live first, then the newest started: nothing a run writes moves it)
+        runs.sort(key=lambda run: (run["state"] not in live, -(run["started"] or 0.0), run["run"]))
         return {
             "at": round(now, 1),
             "name": self.directory.name if self.directory else self.ledger,

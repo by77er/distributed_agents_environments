@@ -64,7 +64,7 @@ async def test_one_monitor_shows_every_run_of_a_database_each_from_its_own_direc
     system = System(ledger=ledger)
     snapshot = await system.snapshot()
     runs = {run["run"]: run for run in snapshot["runs"]}
-    assert {run["run"] for run in snapshot["runs"][:2]} == {"new", "busy"}  # (running ones first)
+    assert [run["run"] for run in snapshot["runs"]] == ["new", "busy", "quiet", "gone"]  # (live first, newest started)
     assert [runs[name]["state"] for name in ("busy", "new", "quiet", "gone")] == [RUNNING, RUNNING, GONE, GONE]
     assert runs["busy"]["episodes_at"] == "here" and runs["busy"]["played"]["episodes"] == 1
     assert runs["busy"]["directory"] == str(busy) and runs["busy"]["host"] == "here"

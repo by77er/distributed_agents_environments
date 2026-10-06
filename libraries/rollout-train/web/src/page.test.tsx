@@ -9,9 +9,10 @@ import { RunControls } from "./components/control";
 import { columnsOf, type Subject } from "./components/evals";
 import { pickable, readable } from "./lib/environments";
 import { slotHue } from "./lib/format";
-import { episodeClass, knownOf, lineOf, reported } from "./lib/model";
+import { episodeClass, knownOf, lineOf, listed, reported } from "./lib/model";
 import { running } from "./layout/runs";
 import { titleOf } from "./layout/Shell";
+import { Tree } from "./layout/Tree";
 import { placeOf } from "./lib/places";
 import { pathChart } from "./lib/scores";
 import { evalsSettings, NO_EVALS, settingOf, wantedOf } from "./lib/settings";
@@ -201,6 +202,35 @@ describe("a page read again", () => {
     const tile = screen.getByText("quiet").closest("a")!;
     expect(tile.textContent).toContain("mean reward-0.25");
     expect(tile.textContent).not.toContain("solved");
+  });
+
+  it("keeps two live runs in their places while each writes after the other", async () => {
+    const live = (name: string, started: number, written: number, state: Run["state"] = "running"): Run => ({ ...run(name, 2), state, started, written });
+    // (as the monitor answers: whichever wrote last first)
+    const beat = (main: number, cards: number) => {
+      const both = [live("main", 100, main), live("2-card test", 200, cards, "idle")].sort((a, b) => b.written! - a.written!);
+      return system([...both, live("before", 300, 300, "ended")]);
+    };
+    expect(listed(beat(1000, 1001).runs).map(each => each.run)).toEqual(["2-card test", "main", "before"]);
+    const client = newQueryClient();
+    client.setQueryData(topics.system().key, beat(1000, 1001));
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <nav><Tree place={{ page: "runs", kind: "runs" }} /></nav>
+          <main><Runs /></main>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const order = (selector: string) => {
+      const text = container.querySelector(selector)!.textContent!;
+      return ["2-card test", "main", "before"].sort((a, b) => text.indexOf(a) - text.indexOf(b));
+    };
+    for (const [main, cards] of [[1002, 1001], [1002, 1003], [1004, 1003]]) {
+      act(() => { client.setQueryData(topics.system().key, beat(main, cards)); });
+      await waitFor(() => expect(order("nav")).toEqual(["2-card test", "main", "before"]));
+      expect(order("main")).toEqual(["2-card test", "main", "before"]);
+    }
   });
 
   it("leaves the evals' runs to the evals page", () => {

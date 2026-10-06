@@ -8,7 +8,7 @@ import type { Launch, Run } from "../api/types";
 import { Spark } from "../components/charts";
 import { Card, Empty, Head, Mark, Spec, Specs, Tile } from "../components/ui";
 import { clock, figure, mean } from "../lib/format";
-import { episodeReward, learnableText, nameOf, nothingText, reported, runKind, slotRewards, stateKind, towardStep } from "../lib/model";
+import { episodeReward, learnableText, listed, nameOf, nothingText, reported, runKind, slotRewards, stateKind, towardStep } from "../lib/model";
 import { Marks } from "../components/checkpoints";
 import { episodePlace, launchPlace, runPlace } from "../lib/places";
 import { Asked, Starting, launchesByRun } from "../components/launches";
@@ -20,7 +20,7 @@ export function Runs() {
   const { data: launched } = useLaunches();
   if (!system) return <Empty>Reading the runs…</Empty>;
   const others = (feeds ?? []).filter(run => !run.labels.run);
-  const runs = system.runs.filter(run => run.kind !== "eval");  // (evals are on their own page)
+  const runs = listed(system.runs.filter(run => run.kind !== "eval"));  // (evals are on their own page)
   const launches = (launched?.launches ?? []).filter(each => each.asked.kind !== "eval");
   const byRun = launchesByRun(launches);
   const states = (["running", "paused", "idle", "finished", "stopped", "failed", "lost", "ended"] as const).map(name => [name, runs.filter(run => run.state === name).length] as const).filter(([, count]) => count);
