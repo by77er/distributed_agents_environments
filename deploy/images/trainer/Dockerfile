@@ -1,4 +1,5 @@
-# A training pod: the training service over rollout-lora's trainers (each step in a fresh process on the GPU), the
+# A training pod: the training service over rollout-lora's trainers (on one GPU each step in a fresh process; on
+# several a process per GPU under torchrun, kept between steps), the
 # certificate's renewal, and Envoy in front with mutual TLS (deploy/images/trainer/README.md).
 # Built from the repository's root, by .github/workflows/images.yml:
 #   docker build -f deploy/images/trainer/Dockerfile .

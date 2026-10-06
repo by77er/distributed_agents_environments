@@ -52,3 +52,49 @@ async def test_a_training_pods_trainer_is_made_for_the_run_that_holds_it(tmp_pat
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+class Closing(ScriptedTrainer):
+    """A trainer that holds something between steps (`Resident`), and counts the times it was closed."""
+
+    holding: str | None = "held"
+
+    def __init__(self, model: str, **settings: Any) -> None:
+        super().__init__(model, **settings)
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+async def test_a_trainer_that_holds_its_policy_is_closed_when_the_pod_is_released_or_taken_by_another_run(
+    tmp_path: Path,
+) -> None:
+    ledger = DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")
+    store = pod_leases_of(ledger)
+    assert store is not None
+    lease = await store.put(PodLease(
+        "trainer-a", "pods", 0, "trainer", "image", "m", "gpu", 1.0, run="run_1", state=HELD, settings={},
+    ), expect=None)  # fmt: skip
+    first = Closing("m")
+    service = TrainerService(first, Checkpoints(ledger, FileBlobStore(tmp_path / "blobs")), tmp_path)
+    made_ones: list[Closing] = []
+
+    def make(said: Any) -> Any:
+        made_ones.append(Closing("m"))
+        return made_ones[-1]
+
+    task = asyncio.ensure_future(following(service, "trainer-a", make, every=0.02))
+    try:
+        await until(lambda: service.run == "run_1")
+        assert first.closed == 1  # (the trainer the service started with: closed for the run's own)
+        lease = await store.put(replace(lease, run="run_2"), expect=lease.version)
+        await until(lambda: service.run == "run_2")
+        assert made_ones[0].closed == 1 and made_ones[1].closed == 0  # (another run took the pod)
+        await store.put(replace(lease, run=None, state=IDLE), expect=lease.version)
+        await until(lambda: service.run is None)
+        assert made_ones[1].closed == 1  # (released: what it held is freed)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task

@@ -29,7 +29,7 @@ from rollout_train.pods.training import (
 )
 from rollout_train.record import scope
 from rollout_train.recorder import Segment, Span
-from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Item, Step, StepFailed, Weighted
+from rollout_train.trainer import HELD, STATE, WEIGHTS, Budget, Files, Item, Step, StepFailed, Weighted
 
 BATCH = [
     Weighted(Segment([1, 2, 3, 4], [Span(2, 4, 3, "e/1")], [-0.5, float("nan")], "policy"), 1.5, "r/1/0/a/0"),
@@ -262,3 +262,49 @@ async def test_a_step_sends_only_the_settings_that_differ_from_what_the_trainer_
         trainer.change({"learning_rate": 5e-5})
         await trainer.step(BATCH, seed=3, parent=None, into=tmp_path / "making" / "kmnopqrstuvwxyzc")
     assert sent == [{}, {}, {"learning_rate": 5e-5}]
+
+
+class Holding(Fake):
+    """A fake that keeps its weights in memory between steps (`Resident`): each step's state names what it holds, and
+    what it was given of its parent is kept."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.holding: str | None = None
+        self.given: list[list[str]] = []
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+        self.holding = None
+
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
+        given = sorted(str(each.relative_to(parent.weights.parent)) for each in parent.weights.parent.rglob("*")
+                       if each.is_file()) if parent is not None else []  # fmt: skip
+        self.given.append(given)
+        named = parent.state / HELD if parent is not None and parent.state is not None else None
+        if named is not None and named.exists() and named.read_text() == self.holding:
+            parent = None  # (gone on from memory: the fake's weights are its parent's, which it does not read)
+        step = await Fake.step(self, batch, seed=seed, parent=parent, into=into)
+        self.holding = f"{into.name}:held"
+        (into / STATE / HELD).write_text(self.holding)
+        return step
+
+
+async def test_a_parent_the_trainer_holds_is_not_fetched_but_its_name(tmp_path: Path) -> None:
+    holding = Holding()
+    checkpoints = checkpoints_of(tmp_path)
+    async with pod(TrainerService(holding, checkpoints, tmp_path / "pod")) as trainer:
+        first = tmp_path / "making" / "kmnopqrstuvwxyzk"
+        await trainer.step(BATCH, seed=7, parent=None, into=first)
+        assert (first / STATE / HELD).read_text() == "kmnopqrstuvwxyzk:held"
+        second = tmp_path / "making" / "lmnopqrstuvwxyzl"
+        await trainer.step(BATCH, seed=8, parent=Files(first / WEIGHTS, first / STATE), into=second)
+        holding.close()  # (its processes ended: what it held is gone, and the next parent is fetched whole)
+        third = tmp_path / "making" / "mmnopqrstuvwxyzm"
+        await trainer.step(BATCH, seed=9, parent=Files(second / WEIGHTS, second / STATE), into=third)
+    assert holding.given == [
+        [],
+        [f"{STATE}/{HELD}"],  # (held: the name, and nothing else of the parent's)
+        [f"{STATE}/{HELD}", f"{STATE}/optimizer.txt", f"{WEIGHTS}/adapter.txt"],
+    ]

@@ -8,8 +8,11 @@
 | Envoy | `0.0.0.0:8443` (the pod's exposed TCP port), admin on `127.0.0.1:9901` | Ends mutual TLS; takes only the gateway's certificate; passes on `POST /v1/steps`, `GET /v1/steps/CHECKPOINT` and `GET /v1/trainer` and answers everything else 404; limits request sizes (1 MiB) and rates (20 a second, bursts of 40); times requests out; logs each request without its body |
 | The training service (`python -m rollout_train.pods.training`) | `127.0.0.1:8001` (and `/healthz`, `/readyz` there) | Takes one step at a time, each idempotent by the checkpoint it makes: fetches the batch and the parent's files from the blob store, steps, keeps the new weights and state in the blob store, answers with their manifests and the step's metrics; beats with the pod's name, identity, address and the step it is taking |
 
-The trainers (`rollout_lora:LoraTrainer`, `rollout_lora:FullTrainer`) run each step in a fresh process on the GPU, which
-frees the GPU and the memory when it ends. A run's trainer reaches the pod with `rollout_train.pods.RemoteTrainer`.
+The trainers (`rollout_lora:LoraTrainer`, `rollout_lora:FullTrainer`) run each step in a fresh process on a pod of one
+GPU, which frees the GPU and the memory when it ends. On a pod of several (`gpu_count`), the training service's trainer
+starts a process per GPU under torchrun (`python -m torch.distributed.run --standalone --nproc-per-node N -m
+rollout_lora.workers`, the image's PyTorch), which hold the policy sharded over the GPUs between steps and end when
+another run takes the pod or its lease is released. A run's trainer reaches the pod with `rollout_train.pods.RemoteTrainer`.
 The service reads its lease: when a run takes the pod, it makes its trainer anew with the run's settings (the lease's)
 and reads the ledger with the token the lease gives for that run, once no step runs; its beats then say it is ready for
 that run.
@@ -23,6 +26,7 @@ Beside those every pod reads ([deploy/images](../README.md#the-variables-both-po
 | `ROLLOUT_TRAINER` | The trainer, by `module:name`: `rollout_lora:LoraTrainer` or `rollout_lora:FullTrainer` |
 | `ROLLOUT_TRAINER_MODEL` | The model it trains (a Hugging Face id) |
 | `ROLLOUT_TRAINER_SETTINGS` | Its settings, as a JSON object of `LoraSettings`' fields (default `{}`), until a run that holds the pod says its own |
+| `ROLLOUT_TRAINER_GPUS` | The GPUs it steps on: the provider's `gpu_count`, which the pod is leased with; by default all the pod has |
 | `ROLLOUT_SLEEP_VLLM` | On a pod that also serves (`runpod-host`): `1` to have the pod's vLLM sleep while a step is taken |
 | `ROLLOUT_VLLM` | Where that vLLM listens (default `http://127.0.0.1:8000`) |
 | `ROLLOUT_WORK` | Where steps' files and the answers of the steps made are kept (default `/workspace/rollout`, on the volume, so a step made before the pod started again is answered from it) |

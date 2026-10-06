@@ -480,3 +480,34 @@ async def test_the_reaper_never_frees_a_lease_renewed_meanwhile(
     assert raced == [lease.pod] and there is not None and there.run == "run_1" and lease.id in fake.pods
     await pods.renewed()  # (its lease is the run's yet)
     await pods.release()
+
+
+FOUR = """
+[trainers.four]
+kind = "runpod-trainer"
+trainer = "full"
+image = "ghcr.io/by77er/rollout-trainer@sha256:0"
+gpu_types = ["NVIDIA H100 80GB HBM3"]
+gpu_count = 4
+models = ["m"]
+"""
+
+
+async def test_a_trainer_pod_of_several_gpus_is_rented_with_them_and_its_trainer_told_how_many(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    ledger, fake, _ = world
+    base = cluster_of(tmp_path)
+    trainers = parsed(tomllib.loads(f'name = "test"\n[ledger]\nurl = "sqlite:///{tmp_path / "x.db"}"\n{FOUR}')).trainers
+    cluster = replace(base, trainers=trainers)
+    need = PodNeed("four", "trainer", 1, "m", None, {"implementation": "rollout_lora:FullTrainer", "model": "m"})
+    pods = pods_of("run_1", cluster, ledger, fake)
+    try:
+        await pods.claim([need])
+        (body,) = fake.created_bodies()
+        assert body["gpuCount"] == 4 and body["gpuTypeIds"] == ["NVIDIA H100 80GB HBM3"]
+        env = body["env"]
+        assert (env["ROLLOUT_ROLE"], env["ROLLOUT_TRAINER"], env["ROLLOUT_TRAINER_GPUS"]) == (
+            "trainer", "rollout_lora:FullTrainer", "4")  # fmt: skip
+    finally:
+        await pods.release()

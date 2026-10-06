@@ -12,6 +12,11 @@ answer is the one it made (kept on the pod's disk), or, where the ledger already
 own files. A step that failed is taken again when it is asked for again. One step runs at a time: another asked for
 meanwhile is refused (409), and the asker tries it again later.
 
+A trainer on several GPUs keeps its processes, policy and optimizer between steps (`rollout_train.trainer.Resident`):
+where a step's parent is what it holds (the parent's state names it, `HELD`), the service fetches that one small file
+of the parent's and none of the rest. When the run that holds the pod changes, or its lease is released, the trainer
+is closed, which ends its processes and frees the GPUs.
+
 - `POST /v1/steps` with a `StepAsked`: 202 and `{"state": "running"}`; 200 and the step's state if it was made; 409
   while another step runs; 400 for a request it cannot read.
 - `GET /v1/steps/INTO`: the step's state (`StepState`: `running`, `made` with what it made, or `failed` with why); 404
@@ -25,6 +30,8 @@ meanwhile is refused (409), and the asker tries it again later.
 - `ROLLOUT_TRAINER_MODEL`: the model it trains.
 - `ROLLOUT_TRAINER_SETTINGS`: its settings, as a JSON object (default `{}`), until a run that holds the pod says its
   own.
+- `ROLLOUT_TRAINER_GPUS`: the GPUs it steps on (`gpus`, which `rollout_lora`'s trainers take: more than one, a process
+  per GPU under torchrun, the policy sharded over them); by default those the pod has.
 - `ROLLOUT_SLEEP_VLLM`: on a pod that serves too (`runpod-host`), `1` to have the pod's vLLM sleep while a step is
   taken (`rollout_train.colocated`).
 - `ROLLOUT_WORK`: where steps' files and the answers of the steps made are kept (default `/workspace/rollout`).
@@ -59,7 +66,20 @@ from rollout_train.checkpoints import Checkpoints, Manifest, kept
 from rollout_train.pods.environment import listening, required, serial, serial_file, served, stores
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.presence import beating, presence_of
-from rollout_train.trainer import STATE, WEIGHTS, Changeable, Distilled, Files, Item, Labelled, Pair, Trainer, Weighted
+from rollout_train.trainer import (
+    HELD,
+    STATE,
+    WEIGHTS,
+    Changeable,
+    Distilled,
+    Files,
+    Item,
+    Labelled,
+    Pair,
+    Resident,
+    Trainer,
+    Weighted,
+)
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -215,11 +235,7 @@ class TrainerService:
             if len(data) > MAX_BATCH:
                 raise ValueError(f"the batch is {len(data)} bytes, more than {MAX_BATCH}")
             batch = batch_of(data)
-            parent = None
-            if asked.parent is not None:
-                weights = await self.checkpoints.files(asked.parent.weights, work / "parent" / WEIGHTS)
-                state = asked.parent.state
-                parent = Files(weights, await self.checkpoints.files(state, work / "parent" / STATE) if state else None)
+            parent = await self._parent(asked, work / "parent")
             if asked.settings and isinstance(self.trainer, Changeable):
                 self.trainer.change(asked.settings)
             into = work / "made" / asked.into  # (named by the checkpoint, as the loop names it: a trainer may read it)
@@ -236,6 +252,22 @@ class TrainerService:
             self.states[asked.into] = StepState(FAILED, error=f"{type(error).__name__}: {error}"[-2000:])
         finally:
             await asyncio.to_thread(shutil.rmtree, work, ignore_errors=True)
+
+    async def _parent(self, asked: StepAsked, directory: Path) -> Files | None:
+        """The step's parent's files under `directory`: only the state's `HELD` where the trainer holds the parent,
+        else all of them."""
+        if asked.parent is None:
+            return None
+        state = asked.parent.state
+        holding = self.trainer.holding if isinstance(self.trainer, Resident) else None
+        if holding is not None and state is not None and HELD in state.files:
+            named = await self.checkpoints.blobs.read(state.files[HELD])
+            if named.decode(errors="replace").strip() == holding:
+                kept_state = await self.checkpoints.files(Manifest({HELD: state.files[HELD]}), directory / STATE)
+                await asyncio.to_thread((directory / WEIGHTS).mkdir, parents=True, exist_ok=True)
+                return Files(directory / WEIGHTS, kept_state)
+        weights = await self.checkpoints.files(asked.parent.weights, directory / WEIGHTS)
+        return Files(weights, await self.checkpoints.files(state, directory / STATE) if state else None)
 
     def _answer(self, into: str) -> Path:
         return self.directory / "made" / f"{into}.json"
@@ -350,11 +382,20 @@ async def following(
             if lease is not None and run is not None and run != service.run and service.running is None:
                 if lease.token and callable(use := getattr(service.checkpoints.ledger, "use", None)):
                     use(lease.token)
+                await asyncio.to_thread(closed, service.trainer)  # (its processes end: the GPUs are the next one's)
                 service.trainer = await asyncio.to_thread(make, lease.settings)
                 service.run = run
             elif run is None and service.running is None:
+                if service.run is not None:  # (released: what the trainer holds is freed)
+                    await asyncio.to_thread(closed, service.trainer)
                 service.run = None
         await asyncio.sleep(every)
+
+
+def closed(trainer: Trainer) -> None:
+    """End what a trainer keeps running between steps (`Resident`), if it keeps anything."""
+    if isinstance(trainer, Resident):
+        trainer.close()
 
 
 async def main(environ: Mapping[str, str]) -> None:
@@ -365,10 +406,13 @@ async def main(environ: Mapping[str, str]) -> None:
     model = required(environ, "ROLLOUT_TRAINER_MODEL")
     implementation = required(environ, "ROLLOUT_TRAINER")
     sleeps = environ.get("ROLLOUT_SLEEP_VLLM", "") in ("1", "true")
+    gpus = int(environ["ROLLOUT_TRAINER_GPUS"]) if environ.get("ROLLOUT_TRAINER_GPUS") else None
 
     def make(said: Mapping[str, JsonValue]) -> Trainer:
         given: Any = said.get("trainer")
         chosen = cast(dict[str, Any], given) if isinstance(given, dict) else cast(dict[str, Any], settings)
+        if gpus is not None:
+            chosen = {**chosen, "gpus": gpus}
         trainer = made(str(said.get("implementation") or implementation), str(said.get("model") or model), chosen)
         if sleeps:
             from rollout_train.colocated import Colocated

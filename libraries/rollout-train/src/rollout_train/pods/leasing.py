@@ -416,6 +416,7 @@ class Pods:
         if lease.role in (TRAINER, HOST):
             env["ROLLOUT_TRAINER"] = str(need.settings.get("implementation") or "rollout_lora:LoraTrainer")
             env["ROLLOUT_TRAINER_MODEL"] = str(need.settings.get("model") or lease.model)
+            env["ROLLOUT_TRAINER_GPUS"] = str(table.gpu_count)  # (more than one: a process per GPU, sharded)
         sensitive = {"ROLLOUT_LEDGER_TOKEN": lease.token or "", **keys}
         ca = self._ca(table)
         if ca is not None:
