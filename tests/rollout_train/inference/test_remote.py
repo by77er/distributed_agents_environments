@@ -17,7 +17,7 @@ from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.following import Follower
 from rollout_train.gateway import GatewayEndpoints
 from rollout_train.inference import Channel, Connection, Limits, RemoteChannel, RemoteEngine, Route, Routes
-from rollout_train.inference.remote import ENGINES, NotLoaded
+from rollout_train.inference.remote import ENGINES, NotLoaded, Unreachable
 from rollout_train.ledger import Fence, FileLedger
 from rollout_train.presence import FilePresence
 from rollout_train.record import scope
@@ -119,6 +119,25 @@ async def test_a_remote_engine_samples_on_a_vllm_server_by_the_name_of_the_check
         assert engine.told == ["load kpqxwlmrtsnvoyzu", "remove kpqxwlmrtsnvoyzu"]
         with pytest.raises(NotImplementedError, match="full weights"):
             await remote.load_weights("/checkpoints/full")
+        remote.close()
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+async def test_a_proxy_that_answers_for_a_server_that_did_not_says_the_server_is_unreachable(status: int) -> None:
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+    from starlette.responses import PlainTextResponse, Response
+    from starlette.routing import Route as Path_
+
+    async def completions(_: Request) -> Response:
+        said = "upstream connect error or disconnect/reset before headers. reset reason: connection termination"
+        return PlainTextResponse(said, status)
+
+    app = Starlette(routes=[Path_("/v1/completions", completions, methods=["POST"])])
+    async with served(app) as (address, _):
+        remote = RemoteEngine(MODEL, address=address)
+        with pytest.raises(Unreachable, match=f"{status} upstream connect error"):  # (routed around, the turn again)
+            await remote.generate([65], adapter=None, **OPTIONS)
         remote.close()
 
 

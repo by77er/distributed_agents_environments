@@ -137,6 +137,15 @@ static_resources:
     - name: trainer
       type: STATIC
       connect_timeout: 2s
+      # Uvicorn behind it (vLLM's server, the pod's own) closes a connection idle for 5 s: Envoy closes its own first,
+      # so that it never sends a request down one the server is closing (a 503, "connection termination").
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          common_http_protocol_options:
+            idle_timeout: 4s
+          explicit_http_config:
+            http_protocol_options: {}
       load_assignment:
         cluster_name: trainer
         endpoints:

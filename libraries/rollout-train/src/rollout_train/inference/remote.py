@@ -62,6 +62,10 @@ CONNECTIONS = 1024
 """Connections a client keeps to one server at most: a turn in flight holds one for as long as it samples, so fewer
 than a server's sequences would hold turns back in the client (httpx's default is 100)."""
 
+PASSED_ON_UNANSWERED = frozenset({502, 503, 504})
+"""What a proxy before a server (a pod's Envoy) answers for a request the server did not: it could not reach it, or
+the server closed the connection before answering, or did not answer in time."""
+
 
 class Unreachable(Unserved):
     """A server did not answer: it is routed around."""
@@ -391,6 +395,9 @@ class RemoteEngine:
             raise Unreachable(f"{self.address}: {type(error).__name__}: {error}") from error
         if response.status_code == 404 and path == "/v1/completions":
             raise NotLoaded(f"{self.address}: {error_of(response).get('message') or 'no such model'}")
+        if response.status_code in PASSED_ON_UNANSWERED:  # (the proxy before it: the server did not answer)
+            said = error_of(response).get("message") or response.text[:300]
+            raise Unreachable(f"{self.address}: {response.status_code} {said}")
         if response.status_code >= 400:
             said = error_of(response).get("message") or response.text[:300]
             raise RuntimeError(f"{self.address}: {response.status_code} {said}")
