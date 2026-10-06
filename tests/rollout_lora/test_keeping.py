@@ -49,13 +49,33 @@ def same_optimizer(one: dict[str, Any], two: dict[str, Any]) -> None:
 def test_a_state_kept_after_its_step_is_the_one_the_step_left_while_the_next_trains(
     tiny: str, tmp_path: Path, count: int
 ) -> None:
+    kept_against_written(tiny, tmp_path, count, "cpu")
+
+
+@pytest.mark.live
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_on_a_gpu_a_state_kept_from_pinned_host_memory_is_the_one_the_step_left(
+    tiny: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    (tmp_path / "path").mkdir()
+    (tmp_path / "path" / "sitecustomize.py").write_text("import torch\n\ntorch.use_deterministic_algorithms(True)\n")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path / "path"), os.environ.get("PYTHONPATH", "")]))
+    monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # (the processes compute alike in two runs)
+    kept_against_written(tiny, tmp_path, 1, "cuda")
+
+
+def kept_against_written(tiny: str, tmp_path: Path, count: int, device: str) -> None:
+    """Two steps whose states are kept after they answer, through a slow store, against the same steps whose states
+    are written before: the same bytes."""
     settings = LoraSettings(**SETTINGS)
     torch.manual_seed(SEED)
     policy = Policy.load(tiny, rank=settings.rank, alpha=settings.alpha, device="cpu")
     torch.manual_seed(1)
     given = batch(policy.logprobs)
     # Written before the processes answer: what each step left.
-    written = Workers(tiny, settings, "lora", count, device="cpu")
+    written = Workers(tiny, settings, "lora", count, device=device)
     try:
         asyncio.run(written.step(given, seed=0, parent=None, into=tmp_path / "written" / "first"))
         made = Files(tmp_path / "written" / "first" / "weights", tmp_path / "written" / "first" / "state")
@@ -64,7 +84,7 @@ def test_a_state_kept_after_its_step_is_the_one_the_step_left_while_the_next_tra
         written.close()
     # Kept after they answer, in a store whose puts take a second each: the second step trains while the first's
     # state is kept, and takes its own snapshot once that is kept.
-    keeping = Workers(tiny, settings, "lora", count, device="cpu")
+    keeping = Workers(tiny, settings, "lora", count, device=device)
     keeping.keep = {"kind": f"{STORES}:SlowStore", "directory": str(tmp_path / "blobs"), "delay": 1.0}
     try:
         first = asyncio.run(keeping.step(given, seed=0, parent=None, into=tmp_path / "kept" / "first"))
