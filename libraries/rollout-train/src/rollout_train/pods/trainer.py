@@ -13,6 +13,9 @@ As a plain `Trainer` (`step`, for a caller that works with files), it keeps the 
 store (content-addressed: files the store has are not written again), and fetches the whole step's files into `into`
 once the state is kept.
 
+While a step runs, the pod's answer says how far it has got, where its trainer says: each change is told to what this
+was told to tell (`rollout_train.trainer.Progressing`).
+
 The settings the trainer takes between steps (`Changeable`) are kept here, and those that differ from what it was made
 with are sent with every step, so the pod's trainer steps with the settings the run has now, whatever it took before (a
 pod's trainer is made with the settings it was given at the start, as its lease says).
@@ -25,7 +28,7 @@ its own where the pod is the cause: `TrainerUnreachable` when it did not answer 
 
 import asyncio
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +50,18 @@ from rollout_train.pods.training import (
     batch_bytes,
     state_of,
 )
-from rollout_train.trainer import STATE, WEIGHTS, Budget, Files, Item, Made, StateLost, Step, StepFailed
+from rollout_train.trainer import (
+    STATE,
+    WEIGHTS,
+    Budget,
+    Files,
+    Item,
+    Made,
+    Progress,
+    StateLost,
+    Step,
+    StepFailed,
+)
 
 
 class TrainerUnreachable(StepFailed):
@@ -97,6 +111,7 @@ class RemoteTrainer:
         self.every = every
         self.patience = patience
         self._lock = asyncio.Lock()
+        self._told: Callable[[Progress], None] | None = None
 
     @property
     def changeable(self) -> Mapping[str, JsonValue]:
@@ -107,6 +122,10 @@ class RemoteTrainer:
             known = ", ".join(self._changeable) or "none"
             raise ValueError(f"{', '.join(unknown)} cannot change between steps (these can: {known})")
         self._changeable.update(settings)
+
+    def watch(self, told: Callable[[Progress], None] | None) -> None:
+        """Have `told` told how far each step has got, as the pod's answers say."""
+        self._told = told
 
     async def describe(self) -> dict[str, Any]:
         """What the pod says its trainer is: its kind, model, `weights`, `budget`, and the settings it takes between
@@ -167,14 +186,19 @@ class RemoteTrainer:
             return made
 
     async def _asked(self, asked: StepAsked) -> StepState:
-        """Ask for the step, and after it until it is made or failed."""
+        """Ask for the step, and after it until it is made or failed, telling how far it has got as it changes."""
         said = state_of(await self._call("POST", "/v1/steps", asked_json(asked), busy=True))
+        last: Progress | None = None
         while said.state not in (MADE, FAILED):
             await asyncio.sleep(self.every)
             try:
                 said = state_of(await self._call("GET", f"/v1/steps/{asked.into}"))
             except _Forgotten:  # (the pod started again and the step went with it: asked for again)
                 said = state_of(await self._call("POST", "/v1/steps", asked_json(asked), busy=True))
+            progress = Progress.from_json(said.progress)
+            if progress is not None and progress != last and (told := self._told) is not None:
+                told(progress)
+                last = progress
         if said.state == FAILED:
             raise StepFailed(f"{self.address}: step {asked.into} failed: {said.error}")
         return said

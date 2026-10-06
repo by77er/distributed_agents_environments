@@ -92,7 +92,7 @@ from rollout_train.rollouts.scheduler import EpisodeRunner
 from rollout_train.run_settings import KINDS, RunSettings, is_trainers, objective_in, recorded
 from rollout_train.sandboxes import admits, keep, leases_of
 from rollout_train.stores import Stores, blobs_at, ledger_at
-from rollout_train.trainer import Budget, Files, Item, Step, Trainer, objective_of
+from rollout_train.trainer import Budget, Files, Item, Progress, Progressing, Step, Trainer, objective_of
 
 if TYPE_CHECKING:
     from rollout_train.objectives import Objective
@@ -102,6 +102,7 @@ __all__ = [
     "NotEnoughMemory",
     "Run",
     "SpendReached",
+    "Stepping",
     "TrainerActor",
     "TrainerClient",
     "driven",
@@ -117,6 +118,11 @@ ENTRYPOINT = "rollout_train.jobs"
 """The module a run's job runs (`python -m rollout_train.jobs LAUNCH`)."""
 LOOK = 2.0
 """Seconds between the driver's looks at what it waits for from Ray."""
+PROGRESS_LOOK = 2.0
+"""Seconds between a trainer client's questions to its actor about how far the step being taken has got."""
+PROGRESS_BEAT = 5.0
+"""The fewest seconds between the beats a driver's runner takes at once to say how far a step has got (beside its beats
+every 15 seconds)."""
 FEED = "feed"
 """Under a run's directory: the monitor's feed."""
 
@@ -160,23 +166,40 @@ def run_directory(cluster: Cluster, run: str) -> Path:
 
 class TrainerActor:
     """A trainer in a Ray actor: made with `implementation` (`module:name`), the model and its settings, and asked
-    for steps by a `TrainerClient`."""
+    for steps by a `TrainerClient`. How far the step being taken has got, where the trainer says, is kept for the
+    client to ask (`progress`)."""
 
     def __init__(self, implementation: str, model: str, settings: Mapping[str, Any]) -> None:
         self.trainer: Trainer = named(implementation)(model, **dict(settings))
+        self._progress: dict[str, JsonValue] | None = None
+        if isinstance(self.trainer, Progressing):
+            self.trainer.watch(self._told)
 
     def described(self) -> dict[str, Any]:
-        """What the client says of the trainer: its budget, its weights, its objective, its changeable settings."""
+        """What the client says of the trainer: its budget, its weights, its objective, its changeable settings, and
+        whether it says how far its steps have got."""
         changeable = getattr(self.trainer, "changeable", None)
         return {
             "budget": self.trainer.budget,
             "weights": self.trainer.weights,
             "objective": objective_of(self.trainer),
             "changeable": dict(changeable) if isinstance(changeable, Mapping) else None,
+            "progressing": isinstance(self.trainer, Progressing),
         }
 
     async def step(self, batch: list[Item], seed: int, parent: Files | None, into: Path) -> Step:
-        return await self.trainer.step(batch, seed=seed, parent=parent, into=into)
+        self._progress = None
+        try:
+            return await self.trainer.step(batch, seed=seed, parent=parent, into=into)
+        finally:
+            self._progress = None
+
+    def progress(self) -> dict[str, JsonValue] | None:
+        """How far the step being taken has got, as the trainer last said (`Progress.to_json`; none between steps)."""
+        return self._progress
+
+    def _told(self, progress: Progress) -> None:
+        self._progress = progress.to_json()
 
     def change(self, settings: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         change = getattr(self.trainer, "change", None)
@@ -188,7 +211,9 @@ class TrainerActor:
 
 class TrainerClient:
     """A `Trainer` over a `TrainerActor`'s handle: each step is an actor call (an error the trainer raised is raised
-    as itself), and what it takes between steps is changed there."""
+    as itself), and what it takes between steps is changed there. While a step is taken it asks the actor how far it
+    has got every `PROGRESS_LOOK` seconds, where the trainer says, and tells what it was told to (`Progressing`) each
+    time that changed."""
 
     def __init__(self, handle: Any, described: Mapping[str, Any]) -> None:
         self.handle = handle
@@ -196,6 +221,11 @@ class TrainerClient:
         self.weights: str = described["weights"]
         self.objective = described["objective"]
         self._changeable: dict[str, JsonValue] | None = described["changeable"]
+        self._progressing = bool(described.get("progressing"))
+        self._told: Callable[[Progress], None] | None = None
+
+    def watch(self, told: Callable[[Progress], None] | None) -> None:
+        self._told = told
 
     @property
     def changeable(self) -> Mapping[str, JsonValue]:
@@ -213,10 +243,26 @@ class TrainerClient:
     async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         from ray.exceptions import RayTaskError
 
+        asking = asyncio.create_task(self._asked()) if self._progressing and self._told is not None else None
         try:
             return await self.handle.step.remote(list(batch), seed, parent, into)
         except RayTaskError as error:
             raise _cause(error) from None
+        finally:
+            if asking is not None:
+                asking.cancel()
+                await asyncio.gather(asking, return_exceptions=True)
+
+    async def _asked(self) -> None:
+        """Ask the actor how far the step has got, every `PROGRESS_LOOK` seconds, and tell each change."""
+        last: Progress | None = None
+        while True:
+            await asyncio.sleep(PROGRESS_LOOK)
+            with contextlib.suppress(Exception):  # (asked again at the next look)
+                found = Progress.from_json(await self.handle.progress.remote())
+                if found is not None and found != last and (told := self._told) is not None:
+                    told(found)
+                    last = found
 
 
 def _raised[T](call: Callable[[], T]) -> T:
@@ -251,6 +297,31 @@ def taken_by(making: Any, settings: Mapping[str, Any]) -> dict[str, Any]:
         return dict(settings)
     names = {each.name for each in parameters}
     return {key: value for key, value in settings.items() if key in names}
+
+
+class Stepping:
+    """The driver's hook on its loop's `progress` notes: each said in a line of the driver's output
+    (`step 12: minibatch 23/58 · 41% · 5.9k tok/s · KL 0.012/0.05 · ETA 34 min`), and kept for its runner's beats
+    (`latest`), which it has beat at once (`beat`), at most every `PROGRESS_BEAT` seconds."""
+
+    def __init__(self) -> None:
+        self.latest: dict[str, JsonValue] | None = None
+        """How far the step being taken has got, with its number (`step`); none between steps."""
+        self.beat: Callable[[], Coroutine[Any, Any, None]] | None = None
+        self._beaten = 0.0
+        self._beating: asyncio.Task[None] | None = None
+
+    def on_note(self, event: Mapping[str, JsonValue]) -> None:
+        if event.get("kind") != "progress":
+            return
+        progress = Progress.from_json(event.get("progress"))
+        self.latest = {"step": event.get("step"), **progress.to_json()} if progress is not None else None
+        if progress is not None:
+            print(f"step {event.get('step')}: {progress.line()}", flush=True)
+        idle = self._beating is None or self._beating.done()
+        if self.beat is not None and idle and time.monotonic() - self._beaten >= PROGRESS_BEAT:
+            self._beaten = time.monotonic()
+            self._beating = asyncio.get_running_loop().create_task(self.beat())
 
 
 @dataclass
@@ -295,6 +366,8 @@ class Run:
     recorder: GatewayEndpoints | None = None
     runner: EpisodeRunner | None = None
     feed: Any = None
+    stepping: Stepping = field(default_factory=Stepping)
+    """How far the step being taken has got, as the loop notes it (its runner's beats say it)."""
     tool_bindings: dict[str, ToolBinding] = field(default_factory=dict[str, ToolBinding])
     pool_bindings: dict[str, PoolBinding] = field(default_factory=dict[str, PoolBinding])
     runs: set[str] = field(default_factory=set[str])
@@ -692,6 +765,7 @@ class Run:
             guard=_needs(self.cluster.guards.runs_gib, "to run more episodes"), presence=presence_of(self.ledger),
             about=self._about,
         )  # fmt: skip
+        self.stepping.beat = self.runner.beat
         await self.runner.prepare()
         await runner.launch()
         stack.push_async_callback(runner.close)
@@ -723,8 +797,8 @@ class Run:
         return pools
 
     def _about(self) -> dict[str, JsonValue]:
-        """What the runner says in each beat: its machine, the run, what each channel serves, and what the run holds of
-        Ray (`_held`)."""
+        """What the runner says in each beat: its machine, the run, what each channel serves, what the run holds of
+        Ray (`_held`), and how far the step being taken has got (`progress`, while one is)."""
         channels: list[JsonValue] = [
             {"channel": name, "adapter": channel.serving, "version": channel.version, **channel.take()}
             for name, channel in self.channels.items()
@@ -734,9 +808,10 @@ class Run:
             channels.append({"channel": name, **channel.take(), "servers": servers})
         for name, each in self.on_apis.items():
             channels.append({"channel": name, "provider": each.provider.name, "model": each.model, **each.take()})
+        progress = {"progress": self.stepping.latest} if self.stepping.latest is not None else {}
         return {
             "host": socket.gethostname(), "directory": str(self.directory), "machine": measured(self.directory),
-            "run": self.run.id, "channels": channels, **self._held(),
+            "run": self.run.id, "channels": channels, **self._held(), **progress,
         }  # fmt: skip
 
     def binding(self, environment: Environment) -> Any:
@@ -995,7 +1070,8 @@ async def _train(run: Run) -> None:
                     objective_of(live.trainer), cast(int | None, run.settings["group_size"])),
                 max_lag=int(cast(int, run.settings["max_lag"])), seed=int(cast(int, run.settings["seed"])),
                 episodes_at_once=int(cast(int, run.settings["episodes_at_once"])), binding=live.binding(environment),
-                run=run.run.id, started=run.started, hooks=[live.feed], kept=live.bookmarked, made=live.made,
+                run=run.run.id, started=run.started, hooks=[live.feed, live.stepping], kept=live.bookmarked,
+                made=live.made,
                 reshard=live.bridged if live.chain else None, evals=schedule, desired=desired, scheduled=scheduled,
             ))  # fmt: skip
 

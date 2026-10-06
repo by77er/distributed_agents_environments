@@ -5,7 +5,7 @@ blob store and its weights come back the same way; a step is idempotent by the c
 import asyncio
 import contextlib
 import math
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -31,7 +31,20 @@ from rollout_train.pods.training import (
 )
 from rollout_train.record import scope
 from rollout_train.recorder import Segment, Span
-from rollout_train.trainer import HELD, STATE, WEIGHTS, Budget, Files, Item, Step, StepFailed, Weighted
+from rollout_train.trainer import (
+    HELD,
+    MINIBATCH,
+    STATE,
+    WEIGHTS,
+    Budget,
+    Files,
+    Item,
+    Progress,
+    Progressing,
+    Step,
+    StepFailed,
+    Weighted,
+)
 
 BATCH = [
     Weighted(Segment([1, 2, 3, 4], [Span(2, 4, 3, "e/1")], [-0.5, float("nan")], "policy"), 1.5, "r/1/0/a/0"),
@@ -265,6 +278,54 @@ async def test_a_step_sends_only_the_settings_that_differ_from_what_the_trainer_
         trainer.change({"learning_rate": 5e-5})
         await trainer.step(BATCH, seed=3, parent=None, into=tmp_path / "making" / "kmnopqrstuvwxyzc")
     assert sent == [{}, {}, {"learning_rate": 5e-5}]
+
+
+class Saying(Fake):
+    """A fake that says how far each step has got (`Progressing`) before it is let go on."""
+
+    HALFWAY = Progress(MINIBATCH, 1, 2, packs=3, packs_total=6, fraction=0.5, tokens_per_second=900.0)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.told: Callable[[Progress], None] | None = None
+
+    def watch(self, told: Callable[[Progress], None] | None) -> None:
+        self.told = told
+
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
+        assert self.told is not None
+        self.told(self.HALFWAY)
+        return await super().step(batch, seed=seed, parent=parent, into=into)
+
+
+async def test_a_running_step_says_how_far_it_has_got_and_the_client_tells_it_on(tmp_path: Path) -> None:
+    saying = Saying()
+    saying.gate.clear()
+    service = TrainerService(saying, checkpoints_of(tmp_path), tmp_path / "pod")
+    into = "kmnopqrstuvwxyzk"
+    told: list[Progress] = []
+    heard = asyncio.Event()
+
+    def hear(progress: Progress) -> None:
+        told.append(progress)
+        heard.set()
+
+    async with pod(service) as trainer:
+        assert isinstance(trainer, Progressing)
+        trainer.watch(hear)
+        stepping = asyncio.create_task(trainer.step(BATCH, seed=7, parent=None, into=tmp_path / "making" / into))
+        await asyncio.wait_for(heard.wait(), 10)
+        said = await service.state(into)
+        assert said is not None and said.state == RUNNING and said.progress == Saying.HALFWAY.to_json()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app(service)), base_url="https://pod") as http:
+            answer = (await http.get(f"/v1/steps/{into}")).json()
+        assert answer["state"] == RUNNING and Progress.from_json(answer["progress"]) == Saying.HALFWAY
+        saying.gate.set()
+        await stepping
+    assert told == [Saying.HALFWAY]  # (once: told again only when it changes)
+    made = await service.state(into)
+    assert made is not None and made.state == MADE and made.progress is None
+    assert saying.told is None and service.progress is None  # (watched only while the step ran)
 
 
 class Holding(Fake):

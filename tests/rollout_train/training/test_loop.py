@@ -4,7 +4,7 @@ import asyncio
 import dataclasses
 import json
 import random
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -37,9 +37,9 @@ from rollout_train.record import GROUPS, STARTS, STEPS, table
 from rollout_train.rollouts import Record, loaded
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
-from rollout_train.trainer import WEIGHTS, Item, Pair
+from rollout_train.trainer import MINIBATCH, START, WEIGHTS, Item, Pair, Progress, Progressing
 from tests.rollout_train.rollouts.games import Words
-from tests.rollout_train.support import Counting, Notes, Running, answering, here, made_by
+from tests.rollout_train.support import Counting, Notes, Running, Seen, answering, here, made_by
 
 
 @dataclasses.dataclass
@@ -375,3 +375,58 @@ async def test_a_loop_trains_in_a_directory_of_its_own_and_once_replaced_deletes
     assert written == [directory / "making" / "1" / checkpoint.id]  # the trainer wrote where only this loop does
     assert (directory / checkpoint.id / WEIGHTS / "adapter.bin").exists()  # (then the checkpoint's own)
     assert (directory / "theirs").exists() and bookmarked == []  # replaced, it deleted and moved nothing
+
+
+class Telling(Counting):
+    """A trainer that says how far each step has got, from a thread of its own, as a trainer on a GPU does."""
+
+    SAID = ((START, 0.0), (START, 0.004), (MINIBATCH, 0.5), (MINIBATCH, 0.5), (MINIBATCH, 0.501), (MINIBATCH, 1.0))
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.told: Callable[[Progress], None] | None = None
+        self.watched: list[bool] = []
+
+    def watch(self, told: Callable[[Progress], None] | None) -> None:
+        self.told = told
+        self.watched.append(told is not None)
+
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
+        def tell() -> None:
+            for phase, fraction in self.SAID:
+                assert self.told is not None
+                self.told(Progress(phase, 1 if phase == MINIBATCH else 0, 2, fraction=fraction, max_kl=0.05))
+
+        await asyncio.to_thread(tell)
+        await asyncio.sleep(0)
+        return await super().step(batch, seed=seed, parent=parent, into=into)
+
+
+async def test_how_far_a_step_has_got_is_noted_once_for_each_whole_percent_or_phase(tmp_path: Path) -> None:
+    recorder = answering()
+    checkpoints, trainer, notes = checkpoints_in(tmp_path), Telling(), Seen()
+    assert isinstance(trainer, Progressing)
+    async with here(checkpoints.ledger, recorder, checkpoints.blobs):
+        await train(
+            Words(), trainer, checkpoints, base="words-base", channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, groups=2, groups_per_step=1, hooks=[notes],
+        )  # fmt: skip
+    steps = sorted({int(str(event["step"])) for event in notes.notes if event["kind"] == "progress"})
+    assert steps and trainer.watched == [True, False] * len(steps)  # (watched only while its step is taken)
+    for key in steps:
+        said = [event for event in notes.notes if event["kind"] in ("progress", "step") and event["step"] == key]
+        progress = [Progress.from_json(event["progress"]) for event in said if event["kind"] == "progress"]
+        assert [(each.phase, each.percent) if each else None for each in progress] == [
+            (START, 0), (MINIBATCH, 50), (MINIBATCH, 100), None,  # (a note with none once the trainer returned)
+        ]  # fmt: skip
+        assert said[-1]["kind"] == "step"
+
+
+def test_progress_says_itself_in_one_line_and_reads_back_from_json() -> None:
+    progress = Progress(MINIBATCH, 23, 58, 812, 1990, 0.413, 1440.0, 5912.0, 2040.0, 0.01, 0.0123, 0.05, 0.02,
+                        61.2, 70.4, (97.0, 95.0))  # fmt: skip
+    assert progress.line() == "minibatch 23/58 · 41% · 5.9k tok/s · KL 0.012/0.05 · ETA 34 min"
+    assert Progress.from_json(json.loads(json.dumps(progress.to_json()))) == progress
+    assert Progress(START, fraction=0.031, tokens_per_second=812.0).line() == "start · 3% · 812 tok/s"
+    assert Progress.from_json({"phase": 3}) is None and Progress.from_json(None) is None
+    assert Progress.from_json({"phase": MINIBATCH, "fraction": 0.5, "later": 1}) == Progress(MINIBATCH, fraction=0.5)

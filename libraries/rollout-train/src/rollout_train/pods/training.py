@@ -27,8 +27,9 @@ closed, which ends its processes and frees the GPUs.
 
 - `POST /v1/steps` with a `StepAsked`: 202 and `{"state": "running"}`; 200 and the step's state if it was made; 409
   while another step runs; 400 for a request it cannot read.
-- `GET /v1/steps/INTO`: the step's state (`StepState`: `running`, `made` with what it made, or `failed` with why); 404
-  for a step it never heard of.
+- `GET /v1/steps/INTO`: the step's state (`StepState`: `running`, with how far it has got where its trainer says
+  (`progress`, `rollout_train.trainer.Progress`), `made` with what it made, or `failed` with why); 404 for a step it
+  never heard of.
 - `GET /v1/trainer`: what the trainer is: its kind, model, `weights`, `budget`, and the settings it takes between steps.
 - `GET /healthz`, `GET /readyz`: 200 while the service answers (for the pod's own checks: the proxy passes neither on).
 
@@ -46,7 +47,7 @@ closed, which ends its processes and frees the GPUs.
 - `ROLLOUT_LISTEN`: where the service listens (default `127.0.0.1:8001`);
 
 and those every pod reads (`rollout_train.pods.environment`). It beats every 15 seconds with the pod's name, identity,
-the run it takes steps for, whether it is ready for that run, and whether a step is running.
+the run it takes steps for, whether it is ready for that run, whether a step is running, and how far it has got.
 
 Which run it takes steps for is its lease's (`rollout_train.pods.leases`): when a run takes the pod, the service makes
 its trainer anew with the run's settings (the trainer's implementation, model and settings the lease says), and reads
@@ -87,6 +88,8 @@ from rollout_train.trainer import (
     Keeps,
     Labelled,
     Pair,
+    Progress,
+    Progressing,
     Resident,
     Trainer,
     Weighted,
@@ -153,6 +156,8 @@ class StepState:
     """`running`, `made` or `failed`."""
     made: StepMade | None = None
     error: str | None = None
+    progress: Mapping[str, JsonValue] | None = None
+    """While it runs, how far it has got, as its trainer last said (`Progress.to_json`), where it says."""
 
 
 _ASKED = TypeAdapter(StepAsked)
@@ -200,6 +205,8 @@ class TrainerService:
         self._running: tuple[str, asyncio.Task[None]] | None = None
         self.run: str | None = None
         """The run whose trainer it holds (as its lease said), if it follows a lease."""
+        self.progress: Progress | None = None
+        """How far the step running has got, as its trainer last said (none between steps)."""
 
     @property
     def running(self) -> str | None:
@@ -227,7 +234,10 @@ class TrainerService:
         if not CHECKPOINT_ID.fullmatch(into):
             return None
         if into in self.states:
-            return self.states[into]
+            state, progress = self.states[into], self.progress
+            if state.state == RUNNING and progress is not None and self.running == into:
+                return dataclasses.replace(state, progress=progress.to_json())
+            return state
         with contextlib.suppress(OSError, ValueError, ValidationError):
             said = _MADE.validate_json(await asyncio.to_thread(self._answer(into).read_bytes))
             if not said.complete and said.state_failed is None and into not in self.keeping:
@@ -273,7 +283,15 @@ class TrainerService:
             into = work / "made" / asked.into  # (named by the checkpoint, as the loop names it: a trainer may read it)
             await asyncio.to_thread(into.mkdir, parents=True, exist_ok=True)
             began = time.monotonic()
-            step = await trainer.step(batch, seed=asked.seed, parent=parent, into=into)
+            self.progress = None
+            if isinstance(trainer, Progressing):
+                trainer.watch(self._told)
+            try:
+                step = await trainer.step(batch, seed=asked.seed, parent=parent, into=into)
+            finally:
+                if isinstance(trainer, Progressing):
+                    trainer.watch(None)
+                self.progress = None
             stepped, began = time.monotonic() - began, time.monotonic()
             weights = await kept(into / WEIGHTS, self.checkpoints.blobs)
             uploaded = time.monotonic() - began
@@ -291,6 +309,10 @@ class TrainerService:
             self.states[asked.into] = StepState(FAILED, error=f"{type(error).__name__}: {error}"[-2000:])
         finally:
             await asyncio.to_thread(shutil.rmtree, work / "parent" if keeping else work, ignore_errors=True)
+
+    def _told(self, progress: Progress) -> None:
+        """How far the step running has got, as its trainer says it (from whatever thread it says it in)."""
+        self.progress = progress
 
     async def _kept(self, trainer: Keeps, made: StepMade, work: Path) -> None:
         """Wait until `trainer` has kept the rest of the step's state, and answer with the whole state; or, if it never
@@ -515,6 +537,8 @@ async def main(environ: Mapping[str, str]) -> None:
         pod: dict[str, JsonValue] = {"name": name, "identity": identity, "role": TRAINER,
                                      "ready": service.run is not None, "run": service.run, "running": service.running,
                                      "serial": serial(serials), "steps": True}  # fmt: skip
+        if (progress := service.progress) is not None and service.running is not None:
+            pod["progress"] = progress.to_json()
         return {"host": socket.gethostname(), "kind": TRAINER, POD: pod}
 
     host, port = listening(environ, "ROLLOUT_LISTEN", "127.0.0.1:8001")

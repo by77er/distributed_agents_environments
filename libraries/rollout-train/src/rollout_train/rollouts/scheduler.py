@@ -233,7 +233,7 @@ class Hooks(Protocol):
 
     def on_note(self, event: Mapping[str, JsonValue]) -> None:
         """`event["kind"]` is `started` or `ended` (an episode, by a runner: an adopted one is started again), or the
-        run's `result`, `step` or `published`."""
+        run's `result`, `step`, `progress` or `published`."""
         ...
 
 

@@ -4,17 +4,24 @@
 that trains nothing: its engine hosts and its trainer are actors it asks Ray for, the trainer colocated with the
 trained channel's hosts; its gateway samples every channel its settings name; its start records them. A judging run
 launched by its settings binds its judge's slot to a channel of its own; settings the cluster refuses end the run with
-the reasons; a run that cannot have its GPUs yet waits, and says what for."""
+the reasons; a run that cannot have its GPUs yet waits, and says what for. A trainer in an actor says how far its step
+has got to the driver, which says it in a line and in its runner's beats."""
 
 import asyncio
+import dataclasses
+import inspect
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from pydantic import JsonValue
 
+from rollout_train import jobs
 from rollout_train.cluster import Cluster
-from rollout_train.jobs import Run, driven, ran
+from rollout_train.jobs import Run, Stepping, TrainerActor, TrainerClient, driven, ran
 from rollout_train.launches import ENDED, launch_of, launches_of
 from rollout_train.launching import Refused
 from rollout_train.record import ENDS, RESULTS, STARTS, newest_record, table
@@ -24,6 +31,7 @@ from rollout_train.run_settings import RunSettings
 from rollout_train.serving import SERVING
 from rollout_train.stores import Stores
 from rollout_train.submitting import ask
+from rollout_train.trainer import MINIBATCH, Budget, Files, Item, Progress, Progressing, Step
 from tests.local_ray import LocalRay
 from tests.rollout_train.clusters import JUDGED, POLICY, WORDS, a_cluster
 
@@ -155,3 +163,93 @@ async def test_a_run_that_cannot_have_its_gpus_yet_waits_and_says_what_for(tmp_p
     finally:
         going.cancel()
         await asyncio.gather(going, return_exceptions=True)
+
+
+HALFWAY = Progress(MINIBATCH, 3, 6, packs=10, packs_total=20, fraction=0.5, tokens_per_second=5900.0, kl=0.012,
+                   max_kl=0.05, eta_seconds=2040.0)  # fmt: skip
+
+
+class Saying:
+    """A trainer that says how far its step has got, then waits until it is let go on."""
+
+    budget = Budget()
+    weights = "lora"
+
+    def __init__(self, model: str) -> None:
+        self.told: Callable[[Progress], None] | None = None
+        self.go = asyncio.Event()
+
+    def watch(self, told: Callable[[Progress], None] | None) -> None:
+        self.told = told
+
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
+        assert self.told is not None
+        self.told(HALFWAY)
+        await self.go.wait()
+        return Step({"loss": 0.5})
+
+
+class Handle:
+    """An actor's handle as Ray gives it, over an object in this process: each method's `remote` gives what awaits its
+    answer."""
+
+    def __init__(self, actor: object) -> None:
+        self.actor = actor
+
+    def __getattr__(self, name: str) -> Any:
+        method = getattr(self.actor, name)
+
+        async def answer(*given: Any) -> Any:
+            found = method(*given)
+            return await found if inspect.isawaitable(found) else found
+
+        return SimpleNamespace(remote=answer)
+
+
+async def test_a_trainer_in_an_actor_says_how_far_its_step_has_got_to_the_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jobs, "PROGRESS_LOOK", 0.01)
+    actor = TrainerActor("tests.rollout_train.test_jobs:Saying", "tiny", {})
+    client = TrainerClient(Handle(actor), actor.described())
+    told: list[Progress] = []
+    heard = asyncio.Event()
+
+    def hear(progress: Progress) -> None:
+        told.append(progress)
+        heard.set()
+
+    assert isinstance(client, Progressing)
+    client.watch(hear)
+    stepping = asyncio.create_task(client.step([], seed=0, parent=None, into=tmp_path))
+    await asyncio.wait_for(heard.wait(), 10)
+    await asyncio.sleep(0.05)
+    assert told == [HALFWAY]  # (asked again and again, told once: it did not change)
+    cast(Saying, actor.trainer).go.set()
+    assert (await stepping).metrics == {"loss": 0.5}
+    assert actor.progress() is None  # (none between steps)
+
+
+async def test_a_driver_says_each_progress_noted_in_a_line_and_in_its_runners_beats(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    beaten: list[float] = []
+
+    async def beat() -> None:
+        beaten.append(time.monotonic())
+
+    stepping = Stepping()
+    stepping.beat = beat
+    later = dataclasses.replace(HALFWAY, minibatch=4, fraction=0.51)
+    stepping.on_note({"kind": "result", "group": 1})
+    stepping.on_note({"kind": "progress", "step": 3, "progress": HALFWAY.to_json()})
+    stepping.on_note({"kind": "progress", "step": 3, "progress": later.to_json()})
+    await asyncio.sleep(0)
+    assert capsys.readouterr().out.splitlines() == [
+        "step 3: minibatch 3/6 · 50% · 5.9k tok/s · KL 0.012/0.05 · ETA 34 min",
+        "step 3: minibatch 4/6 · 51% · 5.9k tok/s · KL 0.012/0.05 · ETA 34 min",
+    ]
+    assert stepping.latest == {"step": 3, **later.to_json()}
+    assert len(beaten) == 1  # (beaten at once, then not again for PROGRESS_BEAT seconds)
+    stepping.on_note({"kind": "progress", "step": 3, "progress": None})
+    assert stepping.latest is None and capsys.readouterr().out == ""

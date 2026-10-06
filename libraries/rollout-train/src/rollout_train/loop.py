@@ -66,6 +66,10 @@ of them (`desired`), and decides the step with them; the step's record says whic
 again after a stop uses those. Whether a checkpoint is evaluated is the evals its step was decided with, and the
 version of the suite its name pointed to then (`rollout_train.evals`): an edit of the suite applies from the next step.
 
+**It says how far a step being taken has got**, where its trainer says (`rollout_train.trainer.Progressing`, a training
+pod's too): as a `progress` note to its hooks with the step's number and the trainer's `Progress`, once for each whole
+percent or phase it moves to, and a note with none once the trainer has returned.
+
 **It can be paused** (`rollout_train.settings.PAUSED`, among the desired settings). Each time it is about to decide a
 group or a step it looks; paused, it decides neither, while the episodes playing play out and are recorded and a step
 being taken is finished (runners claim none of its episodes meanwhile: `rollout_train.rollouts.scheduler`). It looks
@@ -133,6 +137,8 @@ from rollout_train.trainer import (
     Changeable,
     Files,
     Item,
+    Progress,
+    Progressing,
     Remote,
     StepFailed,
     Trainer,
@@ -417,6 +423,23 @@ async def train(
             halted = now
         return now
 
+    def watched(key: int) -> Callable[[Progress], None]:
+        """What the trainer tells how far step `key` has got (from any thread): noted on the loop's thread, once for
+        each whole percent or phase it moves to, while the step is being taken."""
+        running = asyncio.get_running_loop()
+        said: list[tuple[str, int]] = []
+
+        def heard(progress: Progress) -> None:
+            if watching != key or [(progress.phase, progress.percent)] == said:
+                return
+            said[:] = [(progress.phase, progress.percent)]
+            note("progress", {"step": key, "progress": progress.to_json()})
+
+        def told(progress: Progress) -> None:
+            running.call_soon_threadsafe(heard, progress)
+
+        return told
+
     def trained_with(said: Mapping[str, JsonValue]) -> None:
         """Have the trainer take these of its settings from its next step on, where they differ from what it has."""
         if isinstance(trainer, Changeable):
@@ -429,6 +452,8 @@ async def train(
     """The checkpoints whose state is being completed in the background, by id."""
     halted = False
     """Whether the run was paused when last looked."""
+    watching: int | None = None
+    """The step whose progress is noted, while its trainer takes it."""
     await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
     for made_before in await checkpoints.all():  # (a state a loop that stopped was waiting for)
         if made_before.run == run and not made_before.state_complete and made_before.released is None:
@@ -508,7 +533,7 @@ async def train(
 
     async def take(key: int, numbers: list[int]) -> None:
         """A step over `numbers`: decided (unless it was), made once, served."""
-        nonlocal failed_updates
+        nonlocal failed_updates, watching
         given = within([item for number in numbers for item in segments[number]], trainer.budget.segments,
                        random.Random(f"{seed}-step-{key}"))  # fmt: skip
         if key not in steps:
@@ -541,6 +566,9 @@ async def train(
             if isinstance(used := intent.get("settings"), dict):  # (the settings it was decided with, taken again too)
                 trained_with(_trainers(used))
             seed_of = int(str(intent["seed"]))
+            watching = key
+            if isinstance(trainer, Progressing):
+                trainer.watch(watched(key))
             try:
                 if isinstance(trainer, Remote):  # (its files stay in the blob store: none are read here)
                     made_there = await trainer.made(given, seed=seed_of, parent=going_on, into=makes)
@@ -567,6 +595,11 @@ async def train(
                 if failed_updates >= FAILED_UPDATES:
                     raise
                 return
+            finally:
+                watching = None
+                if isinstance(trainer, Progressing):
+                    trainer.watch(None)
+                note("progress", {"step": key, "progress": None})
             checkpoint = await checkpoints.add(
                 fence,
                 makes,
