@@ -269,11 +269,13 @@ class Objective:
 
     def changed(self, changes: Mapping[str, JsonValue]) -> "Objective":
         """With `changes` (dotted keys, each a component that may change between steps), checked as any objective is
-        (else `ValueError`)."""
+        (else `ValueError`). A change to the value a component has already changes nothing, and is not checked as an
+        override (a step may be given every changeable component, at its value)."""
         for key in changes:
             found = component(key)
             if found is None or not found.changeable:
                 raise ValueError(f"objective.{key} cannot change between steps")
+        changes = {key: value for key, value in changes.items() if value != self.get(key)}
         made = _with(self, changes)
         if made.distills != self.distills:  # (what a batch item is would change)
             raise ValueError("objective.distillation.coefficient can change between steps, but not to or from 0")

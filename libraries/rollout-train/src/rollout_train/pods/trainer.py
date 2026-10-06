@@ -7,8 +7,9 @@ every few seconds until it is made or has failed. Then it fetches the new weight
 `into`, where the training loop looks for them. Asking again is safe: the pod knows a step by its checkpoint, so a step
 asked for again after a connection dropped, or by a loop started again, is the same step.
 
-The settings the trainer takes between steps (`Changeable`) are kept here and sent with every step, so the pod's
-trainer steps with the settings the run has now, whatever it took before.
+The settings the trainer takes between steps (`Changeable`) are kept here, and those that differ from what it was made
+with are sent with every step, so the pod's trainer steps with the settings the run has now, whatever it took before (a
+pod's trainer is made with the settings it was given at the start, as its lease says).
 
 Every way a step can fail is a `StepFailed` (the policy stays as it was, and a later step may succeed), with a kind of
 its own where the pod is the cause: `TrainerUnreachable` when it did not answer for `patience` seconds,
@@ -74,6 +75,7 @@ class RemoteTrainer:
         self.budget = budget or Budget()
         self.objective = objective
         self._changeable: dict[str, JsonValue] = dict(changeable or {})
+        self._made_with: dict[str, JsonValue] = dict(changeable or {})
         self._http = client or (connection or Connection()).client(timeout=60.0)
         self._owned = client is None
         self.every = every
@@ -103,7 +105,8 @@ class RemoteTrainer:
             if parent is not None:
                 left = await kept(parent.state, blobs) if parent.state is not None else None
                 given = Parent(await kept(parent.weights, blobs), left)
-            asked = StepAsked(into.name, seed, reference, given, dict(self._changeable))
+            changed = {key: value for key, value in self._changeable.items() if value != self._made_with.get(key)}
+            asked = StepAsked(into.name, seed, reference, given, changed)
             made = (await self._asked(asked)).made
             if made is None:
                 raise StepFailed(f"{self.address} took step {into.name} and said it made nothing")

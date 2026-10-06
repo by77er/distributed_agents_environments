@@ -7,7 +7,7 @@ import contextlib
 import math
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -242,3 +242,23 @@ async def test_parent_files_the_store_has_are_named_not_written_again(tmp_path: 
     (parent / "adapter.txt").write_text("base+1")
     first = await kept(parent, checkpoints.blobs)
     assert await kept(parent, checkpoints.blobs) == first  # (content-addressed: the same blobs)
+
+
+async def test_a_step_sends_only_the_settings_that_differ_from_what_the_trainer_was_made_with(tmp_path: Path) -> None:
+    # (an older pod's trainer may check every setting it is sent as a change: those it already has are not sent)
+    checkpoints = checkpoints_of(tmp_path)
+    async with pod(TrainerService(Fake(), checkpoints, tmp_path / "pod")) as trainer:
+        sent: list[dict[str, Any]] = []
+        asked = trainer._asked  # pyright: ignore[reportPrivateUsage]
+
+        async def recorded(step: Any) -> Any:
+            sent.append(dict(step.settings))
+            return await asked(step)
+
+        setattr(trainer, "_asked", recorded)  # noqa: B010  (the step a trainer asks for, seen on its way)
+        await trainer.step(BATCH, seed=1, parent=None, into=tmp_path / "making" / "kmnopqrstuvwxyza")
+        trainer.change({"learning_rate": 1e-4})  # (its value already: no change)
+        await trainer.step(BATCH, seed=2, parent=None, into=tmp_path / "making" / "kmnopqrstuvwxyzb")
+        trainer.change({"learning_rate": 5e-5})
+        await trainer.step(BATCH, seed=3, parent=None, into=tmp_path / "making" / "kmnopqrstuvwxyzc")
+    assert sent == [{}, {}, {"learning_rate": 5e-5}]

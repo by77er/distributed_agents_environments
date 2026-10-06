@@ -238,3 +238,13 @@ def test_teachers_are_a_table_of_channels_by_route_and_record_themselves() -> No
         {"objective.preset": "mopd"}, flattened({"objective": {"distillation": {"teachers": {"*": "t"}}}})
     )
     assert objective_in(settings).distillation.teachers == {"*": "t"}
+
+
+def test_a_step_given_every_changeable_component_at_its_value_changes_nothing() -> None:
+    # (a trainer may be handed every changeable component between steps, distillation's at their defaults while its
+    # coefficient is 0: that is no override of a distillation term)
+    every = {
+        key: value for key, value in DEFAULT.components().items() if (found := component(key)) and found.changeable
+    }
+    assert any(key.startswith("distillation.") for key in every)
+    assert DEFAULT.changed(every) == DEFAULT
