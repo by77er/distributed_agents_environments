@@ -54,6 +54,10 @@ besides where and by what it was started, the environment (as `module:name`), it
 - **Play and training go their own ways.** Enough groups are kept asked for that `episodes_at_once` episodes (6 by
   default) have work waiting, whatever groups they are of. Runners claim the oldest group's episodes first, as many
   at once as each has places, so a group may begin before the one before it is done, and end first.
+- **The trainer holds play back.** No group is decided while `groups_ahead` groups are decided and in no step yet (in
+  play, or played and queued): by default `groups_per_step` × (1 + `max_lag`), and never fewer than `groups_per_step`.
+  Play that runs ahead of a slower trainer waits for it, so no step takes more groups than that, and how idle the
+  engines are says that the trainer is the bottleneck.
 - **When a group's last episode ends**, its result is written at once: the curriculum records it, and the algorithm
   says what in it to train on. A group with nothing to train on is done with, with the algorithm's reason
   (`skipped`); the others join a queue.

@@ -6,7 +6,10 @@ in the ledger, and runners, wherever they are, play them (`rollout_train.rollout
 everything in one process and with the runners, the engines and the trainer on machines of their own.
 
 **Play and training go their own ways.** Enough groups are kept asked for that `episodes_at_once` episodes have work
-waiting, whatever groups they are of. When a group's last episode ends its result is written down at once, and what the
+waiting, whatever groups they are of, as long as the trainer keeps up: no group is decided while `groups_ahead` groups
+are decided and in no step yet (in play, or played and waiting for a step), `groups_per_step` times one more than
+`max_lag` unless the run says. A trainer slower than play holds play back, so a step never takes more than that many
+groups. When a group's last episode ends its result is written down at once, and what the
 algorithm finds to train on in it joins a queue. A step is taken over every group queued once there are at least
 `groups_per_step` (so that no step leans toward one task), while play goes on; at the end of the run, over whatever is
 left. Tokens sampled under an older checkpoint than the one a step starts from are corrected for by the trainer's
@@ -116,6 +119,7 @@ from rollout_train.settings import (
     EVALS_EPISODES,
     EVALS_EVERY,
     EVALS_SUITE,
+    GROUPS_AHEAD,
     GROUPS_PER_STEP,
     MAX_LAG,
     PAUSED,
@@ -160,6 +164,7 @@ async def train(
     algorithm: Algorithm | None = None,
     groups: int = 100,
     groups_per_step: int = 4,
+    groups_ahead: int | None = None,
     max_lag: int = MAX_LAG_DEFAULT,
     episodes_at_once: int = 6,
     seed: int = 0,
@@ -234,6 +239,7 @@ async def train(
     the last of one before it has ended)."""
     settings: dict[str, JsonValue] = {
         GROUPS_PER_STEP: groups_per_step,
+        GROUPS_AHEAD: groups_ahead,
         MAX_LAG: max_lag,
         EVALS_SUITE: (evals.named or evals.suite.name) if evals else None,
         EVALS_EVERY: evals.every if evals else 1,
@@ -596,6 +602,12 @@ async def train(
         done_with(numbers)
         await evaluated_with(checkpoint)  # (the next step waits for it: the checkpoint is served until it ends)
 
+    def ahead() -> int:
+        """Groups that may be decided and in no step yet (`groups_ahead`); never fewer than a step waits for."""
+        per_step = int(str(settings[GROUPS_PER_STEP]))
+        said = settings[GROUPS_AHEAD]
+        return max(int(str(said)) if said is not None else per_step * (1 + int(str(settings[MAX_LAG]))), per_step)
+
     failed_updates = 0
     stepping: asyncio.Task[None] | None = None
     try:
@@ -615,7 +627,7 @@ async def train(
         owed = groups - len(outstanding)
         while outstanding or owed > 0 or queue or stepping is not None:
             paused = await pausing()  # (paused, nothing is decided: what is in flight goes on)
-            while not paused and len(outstanding) < asking and owed > 0:
+            while not paused and len(outstanding) < asking and len(outstanding) + len(queue) < ahead() and owed > 0:
                 await decide()
                 owed -= 1
             last = not outstanding and owed <= 0

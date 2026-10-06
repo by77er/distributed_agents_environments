@@ -47,7 +47,7 @@ def test_keys_that_kept_their_meaning_kept_their_names() -> None:
     )
     changeable = {each.pattern for each in KEYS if each.changeable and not each.pattern.startswith("objective.")}
     assert changeable == {
-        "groups_per_step", "max_lag", "evals.suite", "evals.every", "evals.episodes", "limits.spend",
+        "groups_per_step", "groups_ahead", "max_lag", "evals.suite", "evals.every", "evals.episodes", "limits.spend",
     }  # fmt: skip
 
 

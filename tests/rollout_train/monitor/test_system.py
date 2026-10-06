@@ -77,7 +77,7 @@ async def test_a_run_that_trained_is_shown_as_its_ledger_and_its_feed_have_it(tm
     async with playing(runner):
         await train(
             Words(), Trains(), checkpoints, base="tiny", channel="policy", directory=tmp_path / "checkpoints",
-            publish=policy.publish, groups=3, groups_per_step=1, seed=1, hooks=[feed],
+            publish=policy.publish, groups=3, groups_per_step=1, groups_ahead=3, seed=1, hooks=[feed],
             started={"directory": str(tmp_path)},
         )  # fmt: skip
     await presence.beat("here", {**about(), "places": 4, "playing": 0})  # (its last beat, the last checkpoint served)

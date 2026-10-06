@@ -83,7 +83,7 @@ async def test_the_loop_records_each_group_and_steps_on_what_it_played(
         async with here(checkpoints.ledger, recorder, checkpoints.blobs, runner=runner, hooks=[notes]):
             await train(
                 Words(), trainer, checkpoints, base="words-base", channel="policy", directory=tmp_path / "checkpoints",
-                publish=recorder.publish, groups=groups, groups_per_step=1, seed=1, hooks=[notes],
+                publish=recorder.publish, groups=groups, groups_per_step=1, groups_ahead=3, seed=1, hooks=[notes],
             )  # fmt: skip
 
     await more(3)

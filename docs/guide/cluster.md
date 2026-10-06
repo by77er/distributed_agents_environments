@@ -402,6 +402,7 @@ step on. `KEYS` is the schema: each key's type, default, whether it is changeabl
 | `check.episodes` | | Episodes of each group a check plays (none: a group's size) |
 | `imitation.dataset`, `.limit`, `.passes`, `.warmup`, `.resume_optimizer`, `.without` | | Supervised steps |
 | `groups_per_step` | 4 | Changeable |
+| `groups_ahead` | `groups_per_step` × (1 + `max_lag`) | Changeable: the most groups decided and in no step yet; play waits for a slower trainer |
 | `max_lag` | 1 | Changeable |
 | `evals.suite`, `evals.every`, `evals.episodes` | , 1, | Changeable |
 | `limits.spend` | | Changeable: dollars. The run ends, stopped, once it spends this: its turns on hosted APIs (an eval's with its parts') and its pods' hours at their price. A training run whose one step is estimated above it is refused |

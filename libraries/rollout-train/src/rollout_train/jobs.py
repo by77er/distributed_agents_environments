@@ -990,7 +990,8 @@ async def _train(run: Run) -> None:
                 environment, live.trainer, run.checkpoints, start=live.origin, channel=live.channel,
                 base=str(run.settings.get(f"channels.{live.channel}.model")), directory=live.directory / "checkpoints",
                 publish=live.publish, groups=int(cast(int, run.settings["groups"])),
-                groups_per_step=int(cast(int, run.settings["groups_per_step"])), algorithm=algorithm_for(
+                groups_per_step=int(cast(int, run.settings["groups_per_step"])),
+                groups_ahead=cast(int | None, run.settings["groups_ahead"]), algorithm=algorithm_for(
                     objective_of(live.trainer), cast(int | None, run.settings["group_size"])),
                 max_lag=int(cast(int, run.settings["max_lag"])), seed=int(cast(int, run.settings["seed"])),
                 episodes_at_once=int(cast(int, run.settings["episodes_at_once"])), binding=live.binding(environment),

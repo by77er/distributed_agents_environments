@@ -2,6 +2,7 @@
 place; and a running loop that reads them each time it is about to decide a step, takes only the changeable ones from
 that step on, and says in each step's record which settings it used."""
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from rollout_train.settings import (
     CHANGEABLE,
     EVALS_EVERY,
     EVALS_SUITE,
+    GROUPS_AHEAD,
     GROUPS_PER_STEP,
     applied,
     checked,
@@ -145,10 +147,11 @@ async def test_a_running_loop_takes_the_changeable_settings_wanted_from_the_next
     steps: Any = await ledger.read(table("train", STEPS))
     used = [steps[key]["settings"] for key in sorted(steps, key=int)]
     assert len(used) >= 3
-    assert used[0] == {GROUPS_PER_STEP: 1, "max_lag": 1, EVALS_SUITE: None, EVALS_EVERY: 1, "evals.episodes": None,
+    assert used[0] == {GROUPS_PER_STEP: 1, GROUPS_AHEAD: None, "max_lag": 1, EVALS_SUITE: None, EVALS_EVERY: 1,
+                       "evals.episodes": None,
                        "trainer.learning_rate": 1e-4}  # fmt: skip
     assert all(each == used[1] for each in used[1:])  # (taken from the step after the change, and kept)
-    assert used[1] == {GROUPS_PER_STEP: 2, "max_lag": 1, EVALS_SUITE: "words-v1", EVALS_EVERY: 1,
+    assert used[1] == {GROUPS_PER_STEP: 2, GROUPS_AHEAD: None, "max_lag": 1, EVALS_SUITE: "words-v1", EVALS_EVERY: 1,
                        "evals.episodes": None,
                        "trainer.learning_rate": 3e-5}  # fmt: skip
     assert trainer.rates == [1e-4] + [3e-5] * (len(used) - 1) and trainer.changes == [{"learning_rate": 3e-5}]
@@ -158,6 +161,33 @@ async def test_a_running_loop_takes_the_changeable_settings_wanted_from_the_next
     made = {checkpoint.step: checkpoint.id for checkpoint in await made_by(checkpoints)}
     assert sorted(int(key) for key in evaluated) == sorted(step for step in made if step and step > 1)
     assert len(read) >= len(used)  # (read before each step was decided)
+
+
+class Slow(Counting):
+    """A trainer much slower than play."""
+
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
+        await asyncio.sleep(1.5)
+        return await super().step(batch, seed=seed, parent=parent, into=into)
+
+
+@pytest.mark.parametrize(("ahead", "most"), [(None, 4), (3, 3), (1, 2), (100, None)])
+async def test_a_trainer_slower_than_play_holds_play_back_so_no_step_takes_more_than_groups_ahead(
+    tmp_path: Path, ahead: int | None, most: int | None
+) -> None:
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    recorder = answering()
+    async with here(ledger, recorder, blobs):
+        await train(
+            words, Slow(), Checkpoints(ledger, blobs), base="tiny", channel="policy", directory=tmp_path / "files",
+            publish=recorder.publish, groups=12, groups_per_step=2, groups_ahead=ahead, episodes_at_once=24, seed=1,
+        )  # fmt: skip
+    steps: Any = await ledger.read(table("train", STEPS))
+    taken = [len(steps[key]["groups"]) for key in sorted(steps, key=int)]
+    if most is None:  # (held back by nothing, the second step takes every group played meanwhile)
+        assert max(taken) > 4
+    else:  # (none: 2 times 1 + max_lag; never fewer than groups_per_step)
+        assert max(taken) == most
 
 
 async def test_a_value_the_trainer_cannot_take_leaves_its_settings_as_they_were(tmp_path: Path) -> None:

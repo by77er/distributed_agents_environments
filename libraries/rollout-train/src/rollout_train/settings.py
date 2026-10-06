@@ -4,10 +4,11 @@ next step on; and the settings someone wants a run to have from now on (its desi
 A training run's settings are named by dotted key (`rollout_train.run_settings`). Fixed ones are fixed when it starts:
 its trainer and model, the adapter's rank, its channels and their providers, how many episodes it plays at once.
 Changeable ones can change between two steps without breaking it (`CHANGEABLE`): how many groups a step waits for
-(`groups_per_step`), the evals it makes of its checkpoints (`evals.suite`: a suite by name, which follows its newest
-version, or one version by id, `NAME@N`; `evals.every`; `evals.episodes`, none for the suite's own), and whatever
-settings its trainer says it takes between steps (`trainer.learning_rate`, or a component of its objective,
-`objective.kl.coefficient`, say: `rollout_train.trainer.Changeable`).
+(`groups_per_step`), how many groups may be decided ahead of the trainer (`groups_ahead`), the evals it makes of its
+checkpoints (`evals.suite`: a suite by name, which follows its newest version, or one version by id, `NAME@N`;
+`evals.every`; `evals.episodes`, none for the suite's own), and whatever settings its trainer says it takes between
+steps (`trainer.learning_rate`, or a component of its objective, `objective.kl.coefficient`, say:
+`rollout_train.trainer.Changeable`).
 
 A run's desired settings are ordinary state, changed in place, not part of the ledger's append-only record: a file
 beside a ledger of files (`FileDesiredSettings`), a table in a database ledger's database
@@ -36,6 +37,9 @@ from rollout_train.ledger import FileLedger, Ledger, locked
 from rollout_train.record import STARTS, newest_record, table
 
 GROUPS_PER_STEP = "groups_per_step"
+GROUPS_AHEAD = "groups_ahead"
+"""The most groups decided and in no step yet (in play, or played and waiting for one); none: `groups_per_step` times
+one more than `max_lag`. Never fewer than `groups_per_step`."""
 MAX_LAG = "max_lag"
 """How many checkpoints behind the newest a turn of the trained channel may begin (0: only the newest)."""
 EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES = "evals.suite", "evals.every", "evals.episodes"
@@ -58,7 +62,7 @@ def trainer_key(key: str) -> str | None:
     return key.removeprefix(TRAINER) if key.startswith(TRAINER) else None
 
 
-CHANGEABLE = (GROUPS_PER_STEP, MAX_LAG, EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES)
+CHANGEABLE = (GROUPS_PER_STEP, GROUPS_AHEAD, MAX_LAG, EVALS_SUITE, EVALS_EVERY, EVALS_EPISODES)
 """The changeable settings every training run has; its trainer's (`trainer.…`) are beside them."""
 PAUSED = "paused"
 """The key of a run's desired settings that says whether it is paused (`true`): not a setting a step takes."""
@@ -117,9 +121,9 @@ async def paused(ledger: Ledger, run: str, store: DesiredSettings | None = None)
 def checked(key: str, value: JsonValue) -> JsonValue:
     """A changeable setting's value, as a run takes it; raises `ValueError` for one it cannot take (`evals.every`
     below 1, say). A trainer's own settings are checked by the trainer."""
-    if key == EVALS_EPISODES and value is None:  # (the suite's own)
+    if key in (EVALS_EPISODES, GROUPS_AHEAD) and value is None:  # (the suite's own; from groups_per_step and max_lag)
         return None
-    if key in (GROUPS_PER_STEP, EVALS_EVERY, EVALS_EPISODES):
+    if key in (GROUPS_PER_STEP, GROUPS_AHEAD, EVALS_EVERY, EVALS_EPISODES):
         if isinstance(value, bool) or not isinstance(value, int | float) or int(value) != value or value < 1:
             raise ValueError(f"{key} is a whole number, 1 at least (not {value!r})")
         return int(value)

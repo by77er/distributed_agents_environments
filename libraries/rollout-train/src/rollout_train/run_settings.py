@@ -200,6 +200,7 @@ KEYS: tuple[Key, ...] = (
     Key("imitation.without", ("list",), [], False, frozenset({"imitate"}), "Datasets whose segments are left out"),
     # Changeable: taken from the next step on.
     Key("groups_per_step", _I, 4, True, TRAINED, "Groups a step waits for", least=1),
+    Key("groups_ahead", _I + _N, None, True, TRAINED, "At most this many groups in no step yet", least=1),
     Key("max_lag", _I, 1, True, TRAINED, "Checkpoints behind the newest a turn may begin", least=0),
     Key("evals.suite", _S + _N, None, True, TRAINED, "The suite its checkpoints play, by name or `NAME@N`"),
     Key("evals.every", _I, 1, True, TRAINED, "Every this many steps", least=1),
