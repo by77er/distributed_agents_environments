@@ -31,6 +31,7 @@ Beside those every pod reads ([deploy/images](../README.md#the-variables-both-po
 | `ROLLOUT_VLLM` | Where that vLLM listens (default `http://127.0.0.1:8000`) |
 | `ROLLOUT_WORK` | Where steps' files and the answers of the steps made are kept (default `/workspace/rollout`, on the volume, so a step made before the pod started again is answered from it) |
 | `ROLLOUT_LISTEN` | Where the training service listens (default `127.0.0.1:8001`) |
+| `NCCL_NVLS_ENABLE` | Whether NCCL uses NVLink SHARP across the pod's GPUs (default `0`: a pod's container has no fabric manager to set it up) |
 
 ## Building
 

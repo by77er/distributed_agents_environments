@@ -16,6 +16,9 @@ done
 unset STEP_TOKEN # (used, and good for nothing more: no other process sees it)
 
 export HF_HOME=${HF_HOME:-/workspace/huggingface}
+# NVLink SHARP needs the host's fabric manager and multicast, which a pod's container is not given: NCCL fails to set it
+# up on several GPUs of one pod. A step's all-reduces are small (an adapter's gradients), so it gains nothing there.
+export NCCL_NVLS_ENABLE=${NCCL_NVLS_ENABLE:-0}
 
 start certificates /opt/rollout/bin/pki.sh renew
 start envoy envoy --config-path "${ENVOY_CONFIG:-/etc/envoy/envoy.yaml}" --log-level "${ENVOY_LOG_LEVEL:-warn}" \
