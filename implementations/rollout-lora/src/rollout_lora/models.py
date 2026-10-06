@@ -1,4 +1,4 @@
-"""Where a model's files are on this machine, and what kind of model they hold."""
+"""Where a model's files are on this machine, what kind of model they hold, and where its decoder is once loaded."""
 
 import json
 from pathlib import Path
@@ -44,6 +44,13 @@ def multimodal(model: str) -> bool:
 def quantized(model: str) -> bool:
     found = config(model)
     return "quantization_config" in found or "quantization_config" in found.get("text_config", {})
+
+
+def body(model: Any) -> Any:
+    """A loaded model's decoder, whose last hidden states the output layer reads: an image-text model's language part,
+    or a text model's own."""
+    inner = model.model
+    return getattr(inner, "language_model", inner)
 
 
 COPIED = ("config.json", "generation_config.json", "tokenizer.json", "tokenizer_config.json", "chat_template.jinja",

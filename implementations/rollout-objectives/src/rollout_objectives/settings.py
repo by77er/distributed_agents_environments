@@ -41,8 +41,9 @@ class StepSettings:
     """How many segments a step can afford (None: any number)."""
     pack_tokens: int | None = None
     """The most tokens one forward and backward pass runs: a step packs its segments into rows of up to this many
-    (`rollout_objectives.packing`). None: `segment_tokens`, so that a pack takes no more memory than the longest
-    segment would alone, or 8,192 where that is none (what the trainer's memory estimate allows for,
+    (`rollout_objectives.packing`). None: `segment_tokens`, so that a pack takes about the memory the longest segment
+    would alone (a pack's activations are those of a segment as long as its row, whatever prefixes its segments
+    share), or 8,192 where that is none (what the trainer's memory estimate allows for,
     `rollout_train.memory.SEGMENT_TOKENS`). A segment longer than it has a pack of its own."""
     share_prefixes: bool = True
     """Whether segments of a pack that start with the same tokens share them: the prefix is run once, and each

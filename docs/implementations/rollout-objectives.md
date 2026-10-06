@@ -197,8 +197,10 @@ as many to a pass as fit in `pack_tokens`:
 - **A row.** Roots first (each segment alone, or each shared prefix), then branches (each segment's rest after its
   prefix). Positions restart at each root and go on from the prefix in a branch. Each token sees only the tokens of
   its own segment before it: a root's own, a branch's own and its prefix's. The policy (`rollout_lora.packing`)
-  keeps them apart in each kind of layer: softmax attention runs over each run on its own, and Qwen3.5's gated delta
-  rule starts each root from a zero state and each branch from the state its prefix ended in.
+  keeps them apart in each kind of layer: softmax attention runs each root on its own and every branch token over its
+  prefix and its own branch, nothing copied for a branch, and Qwen3.5's gated delta rule starts each root from a zero
+  state and each branch from the state its prefix ended in. A pack's activations are those of a segment as long as its
+  row.
 - **The same loss.** Each segment's logprobs are those it has alone, so its terms, their normalisation (per token,
   segment, item or group) and the minibatch's units are the unpacked step's; a minibatch's gradient is accumulated a
   pack at a time. A prefix's backward pass adds up every branch's gradient.

@@ -2,9 +2,11 @@
 """Packs on tiny random models on the CPU, of each kind of attention the trainers pack: Qwen3's and Llama's softmax
 attention, and Qwen3.5's hybrid of softmax attention and a gated delta rule (linear attention, a recurrence). A pack
 gives each segment the logprobs, entropies and logprobs of given tokens it has alone, with its prefix shared or not;
-changing one segment of a pack changes no other's; and a step in packs takes the losses and the gradients a step of
-one segment at a time does, for each objective family, with the first minibatch's start folded into it or not. Two
-processes (FSDP2 over gloo) step in packs as one does."""
+changing one segment of a pack changes no other's; the branches' block mask is FlexAttention's own of the whole mask; a
+pack's `Layout` passes FSDP's input casting as it is; rotary scalings that read the row's length are not packed; on
+weights a step leaves alone every minibatch's ratios are exactly 1 in bfloat16; and a step in packs takes the losses
+and the gradients a step of one segment at a time does, for each objective family, with the first minibatch's start
+folded into it or not. Two processes (FSDP2 over gloo) step in packs as one does."""
 
 import asyncio
 import inspect
@@ -23,9 +25,9 @@ from rollout_lora.packing import prepare
 from rollout_lora.policy import TARGETS, Policy
 from rollout_lora.settings import LoraSettings
 from rollout_objectives import step as step_module
-from rollout_objectives.packing import Pack, packs
+from rollout_objectives.packing import Pack, packs, sampled_positions
 from rollout_objectives.settings import StepSettings
-from rollout_objectives.step import PolicyStep, positions
+from rollout_objectives.step import PolicyStep
 from rollout_train.recorder import Segment, Span, TeacherScores
 from rollout_train.trainer import Distilled, Item, Labelled, Pair, Weighted
 from tests.rollout_objectives.shared import nothing_folded
@@ -44,9 +46,10 @@ def torch_recurrence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(modeling_qwen3_5, "torch_chunk_gated_delta_rule", reference)
 
 
-def config(kind: str) -> Any:
+def config(kind: str, head: int = 8) -> Any:
+    """A tiny model's configuration, its attention heads `head` wide (FlexAttention, on the GPU, takes 16 at least)."""
     shape: dict[str, Any] = {"vocab_size": VOCABULARY, "hidden_size": 32, "intermediate_size": 64,
-                             "num_attention_heads": 4, "num_key_value_heads": 2, "head_dim": 8,
+                             "num_attention_heads": 4, "num_key_value_heads": 2, "head_dim": head,
                              "tie_word_embeddings": False, "max_position_embeddings": 512}  # fmt: skip
     if kind == "qwen3":
         from transformers import Qwen3Config
@@ -63,17 +66,17 @@ def config(kind: str) -> Any:
                              layer_types=["linear_attention", "full_attention"] * 2)  # fmt: skip
 
 
-def model_of(kind: str) -> nn.Module:
+def model_of(kind: str, head: int = 8, dtype: torch.dtype = torch.float32) -> nn.Module:
     from transformers import AutoModelForCausalLM
 
     torch.manual_seed(0)
-    return cast(nn.Module, AutoModelForCausalLM.from_config(config(kind), dtype=torch.float32))
+    return cast(nn.Module, AutoModelForCausalLM.from_config(config(kind, head), dtype=dtype))
 
 
-def policy_of(kind: str) -> Policy:
-    """A tiny model with an adapter that has moved (its B is not zero), checkpointed for the backward pass, as
-    `Policy.load` makes one."""
-    model = model_of(kind)
+def policy_of(kind: str, *, head: int = 8, dtype: torch.dtype = torch.float32, device: str = "cpu") -> Policy:
+    """A tiny model (in `dtype`, on `device`) with an adapter that has moved (its B is not zero), checkpointed for the
+    backward pass, as `Policy.load` makes one."""
+    model = model_of(kind, head, dtype).to(device)
     for parameter in model.parameters():
         parameter.requires_grad_(False)
     add_lora(model, TARGETS, rank=4, alpha=8.0, within="layers", dtype=torch.float32)
@@ -108,7 +111,7 @@ def sampled_at(policy: Policy, segments: Sequence[Segment], seed: int = 0) -> li
     found: list[Segment] = []
     with torch.no_grad():
         for segment in segments:
-            exact = policy.logprobs(segment.tokens, positions(segment)).float().cpu()
+            exact = policy.logprobs(segment.tokens, sampled_positions(segment)).float().cpu()
             noise = 0.05 * torch.randn(exact.shape, generator=generator)
             found.append(Segment(segment.tokens, segment.spans, (exact + noise).tolist()))
     return found
@@ -116,7 +119,7 @@ def sampled_at(policy: Policy, segments: Sequence[Segment], seed: int = 0) -> li
 
 def alone(policy: Policy, pack: Pack, index: int) -> torch.Tensor:
     segment = pack.segments[index]
-    return policy.logprobs(segment.tokens, positions(segment))
+    return policy.logprobs(segment.tokens, sampled_positions(segment))
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -132,16 +135,16 @@ def test_a_pack_gives_each_segment_what_it_has_alone(kind: str, share: bool) -> 
         for pack in made:
             scored = policy.packed(pack, entropy=True)
             references = policy.packed_reference(pack)
-            candidates = [torch.randint(0, VOCABULARY, (len(positions(each)), 3)) for each in pack.segments]
+            candidates = [torch.randint(0, VOCABULARY, (len(sampled_positions(each)), 3)) for each in pack.segments]
             among = policy.packed(pack, candidates=candidates)
             for index, segment in enumerate(pack.segments):
-                logprobs, entropy = policy.logprobs_and_entropy(segment.tokens, positions(segment))
+                logprobs, entropy = policy.logprobs_and_entropy(segment.tokens, sampled_positions(segment))
                 torch.testing.assert_close(scored[index].logprobs, logprobs, rtol=1e-5, atol=1e-5)
                 torch.testing.assert_close(scored[index].entropy, entropy, rtol=1e-5, atol=1e-5)
-                reference = policy.reference(segment.tokens, positions(segment))
+                reference = policy.reference(segment.tokens, sampled_positions(segment))
                 torch.testing.assert_close(references[index], reference, rtol=1e-5, atol=1e-5)
                 assert not torch.allclose(reference, logprobs)  # (the adapter moved: the reference differs)
-                _, wanted = policy.logprobs_among(segment.tokens, positions(segment), candidates[index])
+                _, wanted = policy.logprobs_among(segment.tokens, sampled_positions(segment), candidates[index])
                 torch.testing.assert_close(among[index].among, wanted, rtol=1e-5, atol=1e-5)
 
 
@@ -195,6 +198,89 @@ def test_a_recurrent_state_does_not_cross_into_the_next_segment(kind: str) -> No
         alone_logprobs = policy.logprobs(second, range(1, 40))
     torch.testing.assert_close(found[0], found[1], rtol=0, atol=1e-6)
     torch.testing.assert_close(found[0], alone_logprobs, rtol=1e-5, atol=1e-5)
+
+
+def test_dynamic_and_longrope_scaling_are_not_packed() -> None:
+    """They rescale by the longest position of the sequence: in a pack, the row's."""
+    from rollout_lora.packing import packable
+
+    model = model_of("llama")
+    assert packable(model)
+    for scaling in ({"rope_type": "dynamic", "rope_theta": 10000.0, "factor": 2.0},
+                    {"rope_type": "longrope", "rope_theta": 10000.0, "short_factor": [1.0] * 4,
+                     "long_factor": [2.0] * 4, "original_max_position_embeddings": 64}):  # fmt: skip
+        cast(Any, model).config.rope_parameters = scaling
+        assert not packable(model)
+    cast(Any, model).config.rope_parameters = {"rope_type": "llama3", "rope_theta": 10000.0, "factor": 8.0}
+    assert packable(model)  # (a fixed scaling)
+    from transformers import AutoModelForCausalLM
+
+    dynamic = config("llama")
+    dynamic.rope_parameters = {"rope_type": "dynamic", "rope_theta": 10000.0, "factor": 2.0}
+    assert not prepare(cast(nn.Module, AutoModelForCausalLM.from_config(dynamic)))  # (made with it: not readied)
+
+
+def test_the_branches_block_mask_holds_the_blocks_the_whole_mask_does() -> None:
+    """The blocks the GPU's FlexAttention runs (held, and full where every branch token of the block sees every key)
+    are FlexAttention's own blocks of the mask the CPU runs whole."""
+    from torch.nn.attention.flex_attention import create_block_mask
+
+    from rollout_lora.packing import BLOCK, Layout
+
+    rng = random.Random(1)
+    prompts = [[rng.randrange(VOCABULARY) for _ in range(length)] for length in (300, 40, 150)]
+    segments = [Segment(prompt + [rng.randrange(VOCABULARY) for _ in range(rng.randrange(1, 200))], [Span(1, 2, 0)],
+                        [0.0]) for prompt in prompts for _ in range(4)]  # fmt: skip
+    segments += [Segment([rng.randrange(VOCABULARY) for _ in range(90)], [Span(1, 2, 0)], [0.0])]
+    for pack in packs(segments, 10_000):
+        layout = Layout(pack, torch.device("cpu"))
+        whole = layout.mask()
+        assert whole.shape == (pack.length - layout.roots, pack.length)
+        mine = layout.block_mask()
+        theirs = create_block_mask(lambda b, h, q, k, whole=whole: whole[q, k], None, None, *whole.shape,
+                                   device="cpu", BLOCK_SIZE=BLOCK)  # fmt: skip
+        for count, indices in (("kv_num_blocks", "kv_indices"), ("full_kv_num_blocks", "full_kv_indices")):
+            found, wanted = getattr(mine, count), getattr(theirs, count)
+            assert torch.equal(found, wanted.to(found.dtype)), count
+            for row, held in enumerate(found[0, 0].tolist()):
+                assert sorted(getattr(mine, indices)[0, 0, row, :held].tolist()) == sorted(
+                    getattr(theirs, indices)[0, 0, row, :held].tolist()
+                )
+
+
+def test_a_layout_passes_fsdps_input_casting_as_it_is() -> None:
+    """FSDP casts each layer's inputs, rebuilding a dataclass among them: a pack's `Layout` reaches every layer as the
+    same object, and what one layer built of it (the convolution's indices, the branches' mask) the next reads."""
+    from torch.distributed.utils import _apply_to_tensors  # pyright: ignore[reportPrivateUsage]
+
+    from rollout_lora.packing import Layout
+
+    (pack,) = packs(gridworld(7), 10_000)
+    layout = Layout(pack, torch.device("cpu"))
+    built = layout.convolved(3), layout.seen()
+    cast_one = _apply_to_tensors(lambda tensor: tensor.to(torch.bfloat16), {"packing": layout})["packing"]
+    assert cast_one is layout and cast_one.convolved(3) is built[0] and cast_one.seen() is built[1]
+
+
+def at_the_start(policy: Policy, case: str) -> None:
+    """On weights a step that learns nothing leaves alone, every minibatch finds itself exactly where the step started
+    (its KL from there 0, every ratio exactly 1)."""
+    segments = sampled_at(policy, gridworld(15))
+    settings = StepSettings(objective=OBJECTIVES[case], learning_rate=0.0, tokens_per_step=40, max_kl=None,
+                            pack_tokens=220)  # fmt: skip
+    stepping = PolicyStep(policy, settings)
+    metrics = stepping.step(items_of(case, segments), seed=3)
+    assert len(stepping.minibatches) > 2 and metrics["prefix_shared_fraction"] > 0.2
+    assert [each["kl"] for each in stepping.minibatches] == [0.0] * len(stepping.minibatches)
+    if case == "default":
+        assert metrics["mean_ratio"] == 1.0 and metrics["clip_fraction"] == 0.0
+
+
+@pytest.mark.parametrize("case", ["default", "dpo"])
+def test_on_unchanged_weights_every_minibatchs_ratios_are_exactly_1_in_bfloat16(case: str) -> None:
+    """The step's start is computed in the packs each minibatch makes: in other packs bfloat16 rounds each segment's
+    logprobs differently, and minibatches after the first would find themselves moved before any update."""
+    at_the_start(policy_of("qwen3_5", dtype=torch.bfloat16), case)
 
 
 def items_of(case: str, segments: Sequence[Segment]) -> list[Item]:

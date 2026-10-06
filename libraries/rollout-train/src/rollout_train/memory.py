@@ -17,8 +17,11 @@ vocabulary of `V`, segments of `s` tokens:
   (`frozen_reference`).
 - **Activations.** Each layer's input kept (`2·s·h·L`), one layer recomputed (`34·s·h`), a chunk of logits
   (`128 · V · 12`); for an adapter, the recomputed layer's inputs cast to float32 for the adapter (`36·s·h`); for a
-  model with linear attention (Qwen3.5's), the recomputed layer's state at each chunk of 64 tokens and its gradient,
-  in float32 (`2 · s/64 · S · 4`, `S` the state's values: value heads times key width times value width).
+  model with linear attention (Qwen3.5's), the recomputed layer's states and their gradients, in float32
+  (`2 · c · S · 4`, `S` a state's values: value heads times key width times value width): one at each chunk of 64
+  tokens, and for each run of a pack (`rollout_objectives.packing`; allowed one for every 128 tokens) its last chunk,
+  however short, and a branch's starting state (`c = s/64 + 2 · s/128`). A pack's activations are otherwise those of a
+  segment as long as its row.
 - **Allowance.** 3 GiB: the CUDA context, the collectives' buffers, the allocator's fragmentation.
 
 `A`, the adapter's parameters, is about `18 · rank · h · L` (every attention and MLP projection of every layer). The
@@ -57,6 +60,9 @@ LOGIT_ROWS = 128
 LINEAR_CHUNK = 64
 """Tokens of a linear-attention layer's chunk, at each of which its kernels keep the state (flash-linear-attention's
 kernels)."""
+RUN_TOKENS = 128
+"""The tokens an estimate allows each run of a pack, on average: in a linear-attention layer each run takes a chunk of
+its own however short, and each branch a starting state."""
 GPU_MEMORY_GIB: Mapping[str, float] = {
     "NVIDIA B200": 180, "NVIDIA H200": 141, "NVIDIA H200 NVL": 141, "NVIDIA H100 80GB HBM3": 80,
     "NVIDIA H100 NVL": 94, "NVIDIA H100 PCIe": 80, "NVIDIA A100-SXM4-80GB": 80, "NVIDIA A100 80GB PCIe": 80,
@@ -129,7 +135,8 @@ def trainer_memory(
     h, layers, vocabulary = model.hidden, model.layers, model.vocabulary
     s = segment_tokens or SEGMENT_TOKENS
     activations = 2 * s * h * layers + 34 * s * h + LOGIT_ROWS * vocabulary * 12
-    activations += 2 * -(-s // LINEAR_CHUNK) * model.linear_state * 4
+    chunks = -(-s // LINEAR_CHUNK) + 2 * -(-s // RUN_TOKENS)
+    activations += 2 * chunks * model.linear_state * 4
     heads = vocabulary * h * (1 if model.tied else 2)
     """The token embeddings and the output layer, which the root of a sharded model holds."""
     if weights == "lora":

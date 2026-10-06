@@ -163,10 +163,10 @@ in GiB a GPU for a 9B and a 4B model of Qwen3.5's shapes, segments (and packs) o
 
 | Model | Weights | 1 GPU | 2 | 4 | 8 |
 |---|---|---|---|---|---|
-| 9B | adapter | 27 | 36 (whole on each) | 31 | 29 |
-| 9B | full | 163 (no) | 91 (no on 80 GB) | 55 | 37 |
-| 4B | adapter | 16 | 20 | 18 | 17 |
-| 4B | full | 79 | 45 | 27 | 19 |
+| 9B | adapter | 28 | 36 (whole on each) | 32 | 29 |
+| 9B | full | 164 (no) | 92 (no on 80 GB) | 56 | 38 |
+| 4B | adapter | 16 | 21 | 18 | 17 |
+| 4B | full | 80 | 45 | 28 | 19 |
 
 ## The memory bound
 
@@ -196,19 +196,23 @@ are left out before the pass and counted in `segments_too_long`. A pack holds at
 ## Packs
 
 `rollout_lora.packing.prepare` readies a model for packs (`rollout_objectives.packing`) where its decoder is one of
-`PACKABLE` (Llama, Qwen2, Qwen3, and Qwen3.5's text model, whose layers are softmax attention and a gated delta rule),
-and the policy says so (`packing`); any other model runs one segment at a time, and a step's `packed` metric is 0.
+`PACKABLE` (Llama, Qwen2, Qwen3, and Qwen3.5's text model, whose layers are softmax attention and a gated delta rule)
+with no sliding window and no rotary scaling that reads the sequence's longest position (`dynamic`, `longrope`: in a
+pack, the row's), and the policy says so (`packing`); any other model runs one segment at a time, and a step's `packed`
+metric is 0.
 `Policy.packed` and `FullPolicy.packed` run a pack's row through the decoder and the output layer in one call of the
 policy's `Scorer`, so on several GPUs a pack is one pass of the sharded model. Each layer keeps the segments apart:
 
 | Layer | In a pack |
 |---|---|
-| Softmax attention | The attention function `PACKED`: each run on its own (`scaled_dot_product_attention`, causal), a branch's queries over its prefix's keys and values and its own (causal from the bottom right). Rotary positions are each token's position in its segment. Without a pack it is transformers' `sdpa` |
-| Qwen3.5's gated delta rule | The short convolution reads, for each run, the tokens before it in its segment (zeros for a root, the prefix's last three for a branch). The recurrence runs over the roots, each from a zero state, then over the branches, each from the state its prefix ended in: on the GPU flash-linear-attention's kernel takes the runs' boundaries (`cu_seqlens`) and the branches' starting states and passes the gradient back through them; on the CPU transformers' own recurrence runs a run at a time |
+| Softmax attention | The attention function `PACKED`: each root on its own (`scaled_dot_product_attention`, causal), then every branch token in one call over the row's keys and values, seeing its prefix and its own branch's tokens up to itself; each key and value head serves its group of query heads as it is (`enable_gqa`), and nothing is copied for a branch. On the GPU that call is FlexAttention, compiled once a process for rows of any length, with a block mask of 128 tokens a side that skips the blocks no branch token sees (a pass without a gradient runs the kernels a pass with one does, so that both round alike); on the CPU, `scaled_dot_product_attention` with the mask whole. Rotary positions are each token's position in its segment. Without a pack it is transformers' `sdpa` |
+| Qwen3.5's gated delta rule | The short convolution reads, for each run, the tokens before it in its segment (zeros for a root; for a branch, its prefix's last tokens, as many as the convolution's width less one). The recurrence runs over the roots, each from a zero state, then over the branches, each from the state its prefix ended in: on the GPU flash-linear-attention's kernel takes the runs' boundaries (`cu_seqlens`, and a copy on the CPU so that it reads none back from the GPU) and the branches' starting states and passes the gradient back through them; on the CPU transformers' own recurrence runs a run at a time |
 | Every other layer | Each token on its own (projections, norms, MLPs), whatever is beside it in the row |
 
 A shared prefix is computed once: its keys, values and recurrent state are those every segment under it computes
-alone, and its backward pass adds up every branch's gradient. Every model `PACKABLE` names shares prefixes.
+alone, and its backward pass adds up every branch's gradient. Every model `PACKABLE` names shares prefixes. What the
+layers build from a pack (the branches' block mask, the convolution's indices) is built once a pass, in its `Layout`,
+which FSDP passes to each layer as it is.
 
 ## The step
 
@@ -246,8 +250,24 @@ kernels compiled and tuned):
 | `cyankiwi/Qwen3.5-9B-AWQ-4bit`, rank 32 | 32 | 8,000 | 95 s, 1,240 tokens/s | 78 s, 1,520 tokens/s | 51 s, 2,340 tokens/s (37% shared) |
 
 The three agree to bfloat16's rounding: the first minibatch's loss is -0.01681 each way on Qwen3-0.6B, and -0.01456 to
--0.01457 on Qwen3.5; the step's gradient norm is within 1%. Peak memory with packs of 8,000 tokens on Qwen3.5 was
-12.1 GiB, against 8.9 GiB one segment at a time.
+-0.01457 on Qwen3.5; the step's gradient norm is within 1%.
+
+Peak activations of one forward and backward pass over one pack of about 8,190 tokens, and its time (a 32-rank adapter;
+the pass's peak less what the policy held before it):
+
+| Pack | Qwen3-0.6B | Qwen3.5-9B AWQ |
+|---|---|---|
+| One segment of 8,192 | 1.29 GiB, 1.1 s | 5.24 GiB, 7.0 s |
+| 8 segments of 1,024 | 1.29 GiB, 0.9 s | 5.24 GiB, 6.9 s |
+| A prefix of 2,048 and 15 branches of 409 | 1.29 GiB, 1.1 s | 5.27 GiB, 8.6 s |
+| A prefix of 4,096 and 30 branches of 136 | 1.29 GiB, 1.2 s | 5.30 GiB, 7.1 s |
+| A prefix of 7,168 and 40 branches of 25 | 1.29 GiB, 1.2 s | 5.31 GiB, 7.4 s |
+
+FlexAttention compiles its kernels once a process for each kind of pack (its branches' tokens one block of queries, or
+several), about 5 s each.
+
+A step that learns nothing (a learning rate of 0) on `cyankiwi/Qwen3.5-9B-AWQ-4bit`, 16 turns under a shared prompt of
+1,000 tokens in 4 minibatches: every minibatch's KL from the step's start is 0, and the mean ratio exactly 1.
 
 Qwen3-0.6B, rank 8, on the same card (`test_resident_on_gpu.py`), with PyTorch's deterministic algorithms: a step of
 6 segments of 400 to 900 tokens in a fresh process, the same step again, the same step in a kept process, and that
@@ -268,13 +288,16 @@ steps write gigabytes, so give it `--basetemp` on disk, not `/tmp`.
 
 `test_packing.py` takes tiny random Qwen3, Llama and Qwen3.5 models on the CPU: a pack gives each segment the
 logprobs, entropies, reference logprobs and logprobs of given tokens it has alone, its prefix shared or not; changing
-one segment of a pack changes no other's (no attention, convolution or recurrent state crosses a boundary); a step in
-packs takes the losses, minibatches and gradients of a step one segment at a time for each objective family (a policy
+one segment of a pack changes no other's (no attention, convolution or recurrent state crosses a boundary); the
+branches' block mask holds the blocks of the whole mask that FlexAttention's own would; a model with `dynamic` or
+`longrope` rotary scaling is not packed; on weights a step leaves alone, every minibatch's ratios are exactly 1 in
+bfloat16; a step in packs takes the losses, minibatches and gradients of a step one segment at a time for each objective family (a policy
 gradient with and without a KL to the reference and an entropy bonus, a segment ratio, a likelihood, pairs, labelled
 examples, both forms of distillation); the first minibatch's start folded into it is the start computed apart; and two
 processes (FSDP2 over gloo) step in packs, with shared prefixes, as one does. `test_packing_on_gpu.py` (`-m live`)
-takes Qwen3.5's packs on the GPU, where flash-linear-attention's kernels run: logprobs and gradients against each
-segment alone, and a step against one segment at a time.
+takes Qwen3.5's packs on the GPU, where flash-linear-attention's kernels and FlexAttention run: logprobs and gradients
+against each segment alone, a step against one segment at a time, and every minibatch's ratios exactly 1 in bfloat16
+on weights a step leaves alone.
 
 `test_sharded.py` takes the trainers' steps on one, two and three processes on the CPU (gloo) with a tiny random Qwen3,
 against the step on one: an adapter with its model sharded and whole, a step from files one process wrote, a

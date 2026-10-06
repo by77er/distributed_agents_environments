@@ -6,6 +6,7 @@ them, never sharing an engine's, and a host's pod has one."""
 import json
 import struct
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,17 @@ def test_full_weights_are_sharded_over_the_gpus_and_an_adapters_model_is_whole_w
     longer = trainer_memory(EIGHT, weights="lora", gpus=1, segment_tokens=32_768)
     assert longer.activations > trainer_memory(EIGHT, weights="lora", gpus=1).activations
     assert "GiB a GPU (weights" in four.said()
+
+
+def test_linear_attention_counts_a_state_at_each_chunk_and_for_each_run_of_a_pack() -> None:
+    """A state at each chunk of 64 tokens, and for each run of a pack (one allowed for every 128 tokens) its last chunk
+    and a branch's starting state; each with its gradient, in float32."""
+    hybrid = ModelFacts(file_bytes=8_000_000_000, parameters=None, hidden=4096, layers=32, vocabulary=248_320,
+                        tied=False, linear_state=32 * 128 * 128)  # fmt: skip
+    plain = trainer_memory(replace(hybrid, linear_state=0), weights="lora", gpus=1)
+    found = trainer_memory(hybrid, weights="lora", gpus=1)
+    chunks = 8192 // 64 + 2 * 8192 // 128
+    assert (found.activations - plain.activations) * 2**30 == pytest.approx(2 * chunks * 32 * 128 * 128 * 4)
 
 
 def test_a_gpus_memory_is_known_by_its_runpod_id() -> None:

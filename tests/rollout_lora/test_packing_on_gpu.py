@@ -9,32 +9,18 @@ from typing import Any, cast
 import pytest
 import torch
 
-from tests.rollout_lora.test_packing import gridworld, model_of, sampled_at
+from tests.rollout_lora.test_packing import at_the_start, gridworld, policy_of, sampled_at
 
 pytestmark = [pytest.mark.live, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 
-def policy_on_gpu() -> Any:
-    from rollout_lora.layers import add_lora
-    from rollout_lora.packing import prepare
-    from rollout_lora.policy import TARGETS, Policy
-
-    model = model_of("qwen3_5").to("cuda")
-    for parameter in model.parameters():
-        parameter.requires_grad_(False)
-    add_lora(model, TARGETS, rank=4, alpha=8.0, within="layers", dtype=torch.float32)
-    torch.manual_seed(1)
-    for name, parameter in model.named_parameters():
-        if ".lora_B." in name:
-            parameter.data.normal_(0, 0.05)
-    cast(Any, model).gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    cast(Any, model).enable_input_require_grads()
-    return Policy(model, "tiny", 4, 8.0, None, prepare(model))
+def policy_on_gpu(dtype: torch.dtype = torch.float32) -> Any:
+    """Its attention heads 16 wide, the narrowest FlexAttention takes (the branches' attention, on the GPU)."""
+    return policy_of("qwen3_5", head=16, dtype=dtype, device="cuda")
 
 
 def test_a_pack_on_the_gpu_gives_each_segment_its_logprobs_and_gradients_alone() -> None:
-    from rollout_objectives.packing import packs
-    from rollout_objectives.step import positions
+    from rollout_objectives.packing import packs, sampled_positions
 
     policy = policy_on_gpu()
     segments = gridworld(9)
@@ -48,7 +34,7 @@ def test_a_pack_on_the_gpu_gives_each_segment_its_logprobs_and_gradients_alone()
         each.grad = None
     total = torch.zeros((), device="cuda")
     for index, segment in enumerate(pack.segments):
-        alone = policy.logprobs(segment.tokens, positions(segment))
+        alone = policy.logprobs(segment.tokens, sampled_positions(segment))
         torch.testing.assert_close(found[index].logprobs.detach(), alone.detach(), rtol=1e-4, atol=1e-4)
         total = total + alone.sum()
     total.backward()
@@ -73,3 +59,8 @@ def test_a_step_in_packs_on_the_gpu_is_the_step_one_segment_at_a_time() -> None:
     for key in ("loss", "kl_moved", "kl_floor", "kl_penalty", "gradient_norm", "optimizer_steps"):
         assert packed[key] == pytest.approx(alone[key], rel=1e-3, abs=1e-5), key
     assert packed["packs"] < alone["packs"] and packed["prefix_shared_fraction"] > 0.2
+
+
+@pytest.mark.parametrize("case", ["default", "dpo"])
+def test_on_unchanged_weights_every_minibatchs_ratios_are_exactly_1_in_bfloat16_on_the_gpu(case: str) -> None:
+    at_the_start(policy_on_gpu(torch.bfloat16), case)

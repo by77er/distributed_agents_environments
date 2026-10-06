@@ -37,7 +37,7 @@ from torch import nn
 from torch.utils.checkpoint import checkpoint
 
 from rollout_lora.layers import adapter_off, add_lora, lora_parameters, save_adapter
-from rollout_lora.models import config, local, multimodal, quantized
+from rollout_lora.models import body, config, local, multimodal, quantized
 from rollout_lora.packing import hidden, prepare
 from rollout_lora.quantized import replace_compressed_linears
 from rollout_objectives.packing import Pack, Scores
@@ -88,13 +88,6 @@ class FileEmbedding:
 
 EMBEDDING = "model.language_model.embed_tokens.weight"
 """The token embeddings of an image-text model's language part (a text model's are `model.embed_tokens.weight`)."""
-
-
-def body(model: nn.Module) -> Any:
-    """The decoder whose last hidden states the output layer reads: an image-text model's language part, or a text
-    model's own."""
-    inner = cast(Any, model).model
-    return getattr(inner, "language_model", inner)
 
 
 def scored(model: nn.Module, hidden: torch.Tensor, ids: torch.Tensor, positions: Sequence[int]) -> torch.Tensor:
@@ -190,19 +183,16 @@ def scored_rows_among(
     return torch.cat([part[0] for part in parts]), torch.cat([part[1] for part in parts])
 
 
-def pack_rows(pack: Pack, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
-    """For each of a pack's segments in turn, the rows of the hidden states before its sampled tokens, and the tokens;
-    and how many each segment has."""
+def pack_rows(pack: Pack, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    """For each of a pack's segments in turn, the rows of the hidden states before its sampled tokens, and the
+    tokens."""
     rows: list[int] = []
     targets: list[int] = []
-    counts: list[int] = []
     for index in range(len(pack.segments)):
         found_rows, found_targets = pack.scored(index)
         rows.extend(found_rows)
         targets.extend(found_targets)
-        counts.append(len(found_rows))
-    found_rows = torch.tensor(rows, device=device, dtype=torch.long)
-    return found_rows, torch.tensor(targets, device=device, dtype=torch.long), counts
+    return torch.tensor(rows, device=device, dtype=torch.long), torch.tensor(targets, device=device, dtype=torch.long)
 
 
 def split_scores(found: tuple[torch.Tensor, torch.Tensor], pack: Pack, *, entropy: bool, among: bool) -> list[Scores]:
@@ -237,7 +227,7 @@ class Scorer(nn.Module):
         `candidates` theirs, likewise); the model must be one `rollout_lora.packing.prepare` readied."""
         if pack is not None:
             found = hidden(self.model, pack, ids=ids, embeddings=embedded)
-            rows, targets, _ = pack_rows(pack, found.device)
+            rows, targets = pack_rows(pack, found.device)
             if candidates is not None:
                 return scored_rows_among(self.model, found, rows, targets, candidates)
             return scored_rows(self.model, found, rows, targets, entropy=entropy)
