@@ -174,7 +174,8 @@ Which items, and with what advantages, is the [algorithm's](../libraries/rollout
    hold one pack's activations at a time: the loss of the logprobs computed without a gradient (on the weights the
    minibatch steps from; before any update, old) gives each logprob's gradient, and each segment's logprobs, computed
    again with a gradient, are moved by it. The gradient is the loss's. A minibatch that does not fit is dropped and
-   counted.
+   counted, and with it what its pass left of the gradient (a sharded policy's `recover`: the gradients of the weights
+   it gathered and did not reduce, and the sharded model's state of the pass).
 4. **The stop.** Before a minibatch's optimizer step, its estimate of KL(old ‖ now) on the sampled tokens is compared
    with `max_kl`; if it is more, the pass stops without that step. The estimate is the mean over its sampled tokens of
    k3, `(r - 1) - log r` with `log r = now - old` (`moved_kl`): never below 0, and with the KL's mean on tokens sampled

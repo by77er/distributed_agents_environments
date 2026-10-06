@@ -9,6 +9,10 @@
 - `accumulated` (two processes): one minibatch's gradient of an adapter sharded with its frozen model whole, reduced
   once (`rollout_lora.sharded.gradient_sync`) and after each pass; writes the largest difference of the gradients, and
   how many reductions each took.
+- `out_of_memory` (one process): a full-weight policy sharded on one process (as on one GPU), whose first minibatch
+  runs out of memory part way through its backward pass and is dropped; writes how far the next minibatch's gradient
+  is from that minibatch's gradient where nothing ran out, with the policy's `recover` and with FSDP's state reset
+  alone.
 """
 
 import json
@@ -21,10 +25,11 @@ from typing import Any, cast
 import torch
 from torch import nn
 
+from rollout_lora.full import FullPolicy
 from rollout_lora.layers import LoraLinear, adapter_tensors
 from rollout_lora.policy import Policy, layers_of
 from rollout_lora.settings import LoraSettings
-from rollout_lora.sharded import joined, shard_adapter, summed, whole
+from rollout_lora.sharded import joined, shard_adapter, shard_full, summed, whole
 from rollout_lora.workers import SEED
 from rollout_objectives.step import PolicyStep
 from rollout_train import Weighted
@@ -136,6 +141,66 @@ def accumulated(model: str) -> dict[str, Any]:
     return found
 
 
+class Failing(torch.autograd.Function):
+    """Nothing in the forward pass; in the backward pass, out of memory where `armed` (once)."""
+
+    armed = False
+
+    @staticmethod
+    def forward(ctx: Any, inputs: torch.Tensor) -> torch.Tensor:
+        return inputs.view_as(inputs)
+
+    @staticmethod
+    def backward(ctx: Any, *gradients: torch.Tensor) -> torch.Tensor:
+        if Failing.armed:
+            Failing.armed = False
+            raise torch.OutOfMemoryError("out of memory part way through the backward pass")
+        return gradients[0]
+
+
+def failing(forward: Callable[[torch.Tensor], torch.Tensor]) -> Callable[[torch.Tensor], torch.Tensor]:
+    """`forward`, its input passed through `Failing` first."""
+    return lambda inputs: forward(cast(torch.Tensor, Failing.apply(inputs)))
+
+
+def out_of_memory(model: str) -> dict[str, Any]:
+    ranks, device, mesh = joined("cpu")
+    found: dict[str, Any] = {}
+    gradients: dict[str, list[torch.Tensor]] = {}
+    for name in ("clean", "recovered", "reset"):
+        policy = FullPolicy.load(model, device="cpu")
+        given = batch(cast(Any, policy))
+        shard_full(policy, mesh, device)
+        if name == "reset":  # (FSDP's state reset, and what the pass left on the gathered weights kept)
+            policy.recover = cast(Any, policy.scorer).reset_iter_state  # type: ignore[method-assign]
+        norm = cast(Any, layers_of(policy.model)[1]).post_attention_layernorm
+        norm.forward = failing(norm.forward)  # (the layer's MLP's weights' gradients come before it in the backward)
+        settings = LoraSettings(learning_rate=0.0, tokens_per_step=12, max_kl=None)
+        recorded = Recorded(policy.parameters())
+        stepping = PolicyStep(policy, settings, ranks=ranks, optimizer_given=recorded)
+        Failing.armed = name != "clean"  # (the first minibatch's backward pass)
+        metrics = stepping.step(given, seed=0)
+        found[f"dropped_{name}"] = metrics["minibatches_out_of_memory"]
+        gradients[name] = recorded.gradients[1 if name == "clean" else 0]  # (the second minibatch's)
+    for name in ("recovered", "reset"):
+        found[name] = max(float((one - two).abs().max()) for one, two in
+                          zip(gradients[name], gradients["clean"], strict=True))  # fmt: skip
+    found["largest"] = max(float(each.abs().max()) for each in gradients["clean"])
+    return found
+
+
+class Recorded(torch.optim.SGD):
+    """An optimizer that records each update's gradient (gathered), and applies nothing."""
+
+    def __init__(self, parameters: list[nn.Parameter]) -> None:
+        super().__init__(parameters, lr=0.0)
+        self.trained = parameters
+        self.gradients: list[list[torch.Tensor]] = []
+
+    def step(self, closure: Any = None) -> None:
+        self.gradients.append([whole(cast(torch.Tensor, each.grad)).clone() for each in self.trained])
+
+
 class Kept(torch.optim.SGD):
     """An optimizer that keeps the gradient, unapplied."""
 
@@ -153,7 +218,7 @@ def main() -> None:
     import torch.distributed as distributed
 
     mode, model, out = sys.argv[1:4]
-    found = precision(model) if mode == "precision" else accumulated(model)
+    found = {"precision": precision, "accumulated": accumulated, "out_of_memory": out_of_memory}[mode](model)
     if distributed.get_rank() == 0:
         Path(out).write_text(json.dumps(found))
     distributed.destroy_process_group()

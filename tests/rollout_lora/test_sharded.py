@@ -400,3 +400,12 @@ def test_an_adapters_gradients_reduced_once_a_minibatch_are_those_reduced_after_
     found = alone("accumulated", tiny, 2, tmp_path / "accumulated.json")
     assert found["reductions_once"] == 2 and found["reductions_each"] > found["reductions_once"]  # (a unit a layer)
     assert found["apart"] <= 1e-6 * found["largest"]  # (the same sums, added up in another order)
+
+
+def test_a_minibatch_out_of_memory_leaves_nothing_in_the_next_ones_gradient(tiny: str, tmp_path: Path) -> None:
+    """Full weights sharded on one process: what a backward pass that ran out of memory part way gathered and did not
+    reduce (the output layer's gradient, the last norm's, half a layer's) is dropped with it."""
+    found = alone("out_of_memory", tiny, 1, tmp_path / "out_of_memory.json")
+    assert found["dropped_clean"] == 0 and found["dropped_recovered"] == found["dropped_reset"] == 1
+    assert found["recovered"] <= 1e-6 * found["largest"]
+    assert found["reset"] > 1e-3 * found["largest"]  # (FSDP's reset alone keeps them: the next minibatch adds them)

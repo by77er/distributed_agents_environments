@@ -15,7 +15,7 @@ only when asked (`LoraSettings.frozen_reference`).
 
 import json
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -25,7 +25,7 @@ from torch import nn
 
 from rollout_lora.models import COPIED, local, multimodal
 from rollout_lora.packing import prepare
-from rollout_lora.policy import Scorer, clip_gradients, idle_pass, split_scores
+from rollout_lora.policy import Scorer, clip_gradients, idle_pass, recover, split_scores
 from rollout_objectives.packing import Pack, Scores
 from rollout_objectives.ranks import Ranks
 
@@ -41,6 +41,9 @@ class FullPolicy:
     """Whether it runs packs (`packed`), as `rollout_lora.policy.Policy` does."""
     scorer: Scorer = field(init=False)
     frozen_scorer: Scorer | None = field(init=False)
+    gradient_sync: Callable[[bool], None] | None = field(default=None, init=False)
+    """None: each pass reduces its own gradients (kept to a minibatch's last pass, full weights' unsharded gradients
+    would be on every GPU)."""
 
     def __post_init__(self) -> None:
         self.scorer = Scorer(self.model)
@@ -138,6 +141,11 @@ class FullPolicy:
     def clip_gradients(self, maximum: float, ranks: Ranks) -> float:
         """Every weight's gradient clipped (`rollout_lora.policy.clip_gradients`); its norm before."""
         return clip_gradients(self.parameters(), maximum, ranks)
+
+    def recover(self) -> None:
+        """After a pass that ran out of memory part way: what it left of the sharded weights and the reference dropped
+        (`rollout_lora.policy.recover`)."""
+        recover([self.scorer, self.frozen_scorer])
 
     def _ids(self, tokens: Sequence[int]) -> torch.Tensor:
         device = next(iter(self.model.parameters())).device

@@ -278,6 +278,30 @@ def clip_gradients(parameters: Sequence[nn.Parameter], maximum: float, ranks: Ra
     return total
 
 
+def recover(scorers: Sequence[nn.Module | None]) -> None:
+    """After a pass that ran out of memory part way, for each of `scorers` sharded with FSDP2 (`rollout_lora.sharded`,
+    on one process too): every gradient the pass left on a gathered weight, not yet reduced to its shard, dropped (the
+    output layer's, the last norm's, a layer's half done: the next pass would add them to its own), and FSDP's state of
+    the pass reset (`reset_iter_state`). A scorer that is not sharded has none: the optimizer's `zero_grad` clears its
+    gradients."""
+    from torch.distributed.fsdp import FSDPModule
+
+    for scorer in scorers:
+        if not isinstance(scorer, FSDPModule):
+            continue
+        for module in scorer.modules():
+            if not isinstance(module, FSDPModule):
+                continue
+            state = module._get_fsdp_state()  # pyright: ignore[reportPrivateUsage]  (FSDP2 keeps these to itself)
+            for group in state._fsdp_param_groups:  # pyright: ignore[reportPrivateUsage]
+                for each in group.fsdp_params:
+                    gathered = getattr(each, "_unsharded_param", None)
+                    if gathered is not None:
+                        gathered.grad = None
+                    each.unsharded_accumulated_grad = None
+        scorer.reset_iter_state()
+
+
 def layers_of(model: nn.Module) -> list[nn.Module]:
     """The decoder's layers, in order."""
     return list(cast(nn.ModuleList, body(model).layers))
@@ -396,6 +420,10 @@ class Policy:
     def clip_gradients(self, maximum: float, ranks: Ranks) -> float:
         """The adapter's gradient clipped (`clip_gradients`); its norm before."""
         return clip_gradients(self.parameters(), maximum, ranks)
+
+    def recover(self) -> None:
+        """After a pass that ran out of memory part way: what it left of a sharded adapter's dropped (`recover`)."""
+        recover([self.scorer])
 
     def save(self, directory: Path) -> Path:
         return save_adapter(self.model, directory, base_model=self.checkpoint, rank=self.rank, alpha=self.alpha)

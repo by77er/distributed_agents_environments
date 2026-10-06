@@ -174,11 +174,16 @@ Each process may use the GPU memory that is free when it starts, less `MEMORY_MA
 (`torch.cuda.set_per_process_memory_fraction`). Some drivers let a process spill past the card into system memory,
 where a step crawls instead of failing; the bound turns that into an out-of-memory error. On one process, a minibatch
 that runs out of memory is dropped whole, its gradient cleared, and counted in `minibatches_out_of_memory`; the pass
-goes on with the next. A pack of the step's start that runs out of memory runs again a segment at a time, and an item with a
+goes on with the next. Full weights are sharded with FSDP2 on one GPU too, and a backward pass that ends part way leaves
+gradients on the weights it gathered that it never reduced to their shards (the output layer's, the last norm's, a
+layer's half done): the policy's `recover` drops them and resets FSDP's state of the pass (`reset_iter_state`), else
+the next minibatch would add them to its own. A pack of the step's start that runs out of memory runs again a segment at a time, and an item with a
 segment that runs out alone is left out and counted in `start_out_of_memory`. Segments longer than `segment_tokens`
 are left out before the pass and counted in `segments_too_long`. A pack holds at most `pack_tokens` (by default
-`segment_tokens`), so a pass needs no more memory than the longest segment alone; the memory estimate
-(`rollout_train.memory`, [several GPUs](#several-gpus)) counts activations for the larger of the two.
+`segment_tokens`) row tokens, and its activations are those of a segment as long as its row whatever prefixes it shares
+(nothing is copied for a branch), so a pass needs about the memory of the longest segment alone; the memory estimate
+(`rollout_train.memory`, [several GPUs](#several-gpus)) counts activations for the larger of the two, and for a model
+with linear attention a state for each run of a pack beside each chunk's.
 
 ## The policy
 
@@ -305,6 +310,7 @@ full-weight trainer's state written by two processes and read by three, a step a
 from its parent's full state (or is refused where the parent left it out), a step that fails and the next that starts
 the processes again; one process kept between steps and one ended after each, their steps alike; what the processes
 hold is nothing once torchrun is gone, and is dropped before another parent is loaded; an adapter's float32 units
-sharded on one process step bitwise as the policy does, and its gradients reduced once a minibatch are those reduced
-after each pass (`sharded_alone.py`, under torchrun). `test_resident_on_gpu.py` (`-m live`) takes a kept process's
+sharded on one process step bitwise as the policy does, its gradients reduced once a minibatch are those reduced
+after each pass, and full weights sharded on one process drop a minibatch that runs out of memory part way through its
+backward pass with nothing of it left in the next minibatch's gradient (`sharded_alone.py`, under torchrun). `test_resident_on_gpu.py` (`-m live`) takes a kept process's
 steps on one GPU against fresh processes'. A step on several GPUs (NCCL) is taken only where a machine has them.

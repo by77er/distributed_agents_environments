@@ -117,11 +117,18 @@ class SharedPolicy(TrainablePolicy, Protocol):
     fewer passes than the others, since the processes gather a sharded model's layers together; and clips its
     gradient by the norm over every process's shard (`clip_gradients`, which returns the norm before). It may reduce a
     minibatch's gradient once, in its last pass (`gradient_sync`, told before each of a minibatch's gradient passes
-    whether it is the last: a sharded adapter keeps the others' gradients in each process)."""
+    whether it is the last: a sharded adapter keeps the others' gradients in each process; none: each pass reduces its
+    own). After a pass that ran out of memory part way, it drops what that pass left (`recover`: a sharded model's
+    gradients not yet reduced, and its state of the pass), so that the next pass starts clean; a model sharded on one
+    process has it too, where the step goes on without the pass."""
+
+    gradient_sync: Callable[[bool], None] | None
 
     def idle(self, *, gradient: bool = False, reference: bool = False) -> None: ...
 
     def clip_gradients(self, maximum: float, ranks: Ranks) -> float: ...
+
+    def recover(self) -> None: ...
 
 
 def positions(segment: Segment) -> list[int]:
@@ -333,6 +340,14 @@ class PolicyStep:
         """A pass that keeps this process in step with the others, learning nothing (`SharedPolicy.idle`)."""
         cast(SharedPolicy, self.policy).idle(gradient=gradient, reference=reference)
 
+    def _recover(self) -> None:
+        """After a pass that ran out of memory part way: what it left dropped (`SharedPolicy.recover`, where the
+        policy has it), and the memory it held given back."""
+        recovering = getattr(self.policy, "recover", None)
+        if recovering is not None:
+            recovering()
+        torch.cuda.empty_cache()
+
     def _segments(self, batch: Sequence[Item]) -> list[Segment]:
         """A minibatch's segments as its passes pack them: each weighted (or distilled) item's, or every segment of
         its preference items once."""
@@ -386,8 +401,8 @@ class PolicyStep:
             except torch.OutOfMemoryError:  # a gradient with a segment missing is not this minibatch's: drop it
                 if self.ranks.shared:  # (the other processes wait on this one's passes: the step fails)
                     raise
+                self._recover()
                 self.optimizer.zero_grad(set_to_none=True)
-                torch.cuda.empty_cache()
                 out_of_memory += 1
                 continue
             if sums["tokens"] == 0:
@@ -512,12 +527,12 @@ class PolicyStep:
             except torch.OutOfMemoryError:  # (left out of the step, and counted)
                 if failed is None or self.ranks.shared:
                     raise
-                torch.cuda.empty_cache()
+                self._recover()
             for member, segment in zip(pack.members, pack.segments, strict=True):
                 try:
                     found[member] = compute(Pack.single(member, segment))[0]
                 except torch.OutOfMemoryError:
-                    torch.cuda.empty_cache()
+                    self._recover()
                     failed.add(id(segment))
         return self._gathered(found) if self.ranks.shared else found
 
