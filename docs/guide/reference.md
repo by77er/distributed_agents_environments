@@ -6582,7 +6582,8 @@ step-ca (by default the one its table says, if any). `told` hears what the run w
 - `def of(self, role: str | None = None, *, channel: str | None = None, provider: str | None = None) -> list[PodLease]` — The leases it holds, of `role` (`trainer` counts a host), `channel` and `provider` where said.
 - `async def renewed(self) -> float` — Stamp each lease it holds, and its time on each pod; the dollars that time cost since the last renewal.
   Raises `LeaseLost` where a lease is no longer the run's.
-- `async def renewing(self, spent: Callable[[float], Awaitable[None]] | None = None) -> None` — Renew every `renew` seconds until cancelled, telling `spent` the dollars each renewal adds.
+- `async def renewing(self, spent: Callable[[float], Awaitable[None]] | None = None) -> None` — Renew every `renew` seconds until cancelled, telling `spent` the dollars its pods cost that it has not told
+  yet: first what they cost while the run waited for them to be ready (renewed then too), then each renewal's.
 - `async def release(self) -> None` — Release every lease it holds: each pod stays warm for its provider's `idle_stop` (deleted at once where that
   is 0), its warm time charged to the run.
 - `async def deleted(self, lease: PodLease, why: str, *, still: Callable[[PodLease], bool] | None = None) -> bool` — Delete a lease and its pod (`delete`), and hold it no more; whether it was deleted (false where it is no

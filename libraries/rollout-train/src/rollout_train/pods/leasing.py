@@ -559,11 +559,14 @@ class Pods:
         return added
 
     async def renewing(self, spent: Callable[[float], Awaitable[None]] | None = None) -> None:
-        """Renew every `renew` seconds until cancelled, telling `spent` the dollars each renewal adds."""
+        """Renew every `renew` seconds until cancelled, telling `spent` the dollars its pods cost that it has not told
+        yet: first what they cost while the run waited for them to be ready (renewed then too), then each renewal's."""
+        told = 0.0
         while True:
             await asyncio.sleep(self.renew)
-            added = await self.renewed()
-            if spent is not None and added:
+            await self.renewed()
+            if spent is not None and self.spent > told:
+                added, told = self.spent - told, self.spent
                 await spent(added)
 
     async def release(self) -> None:

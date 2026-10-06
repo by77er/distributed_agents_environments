@@ -151,6 +151,29 @@ async def test_a_pod_whose_provider_says_its_thinking_starts_vllm_bounding_it(
         cluster_of(tmp_path, 'reasoning = { parser = "qwen3", open = "<think>" }')
 
 
+async def test_what_pods_cost_while_the_run_waited_for_them_is_told_with_the_first_renewal(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    ledger, fake, _ = world
+    pods = pods_of("run_1", cluster_of(tmp_path), ledger, fake, renew=0.05)
+    await pods.claim([NEED])
+    await asyncio.sleep(0.1)
+    await pods.renewed()  # (as the wait for a pod renews its leases)
+    waited = pods.spent
+    told: list[float] = []
+
+    async def spent(dollars: float) -> None:
+        told.append(dollars)
+
+    renewing = asyncio.create_task(pods.renewing(spent))
+    await asyncio.sleep(0.3)
+    renewing.cancel()
+    await asyncio.gather(renewing, return_exceptions=True)
+    assert waited > 0 and told and told[0] > waited  # (the first told has what the wait cost)
+    assert sum(told) == pytest.approx(pods.spent)
+    await pods.release()
+
+
 async def test_a_run_starts_a_pod_renews_it_and_releases_it_warm(
     tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
 ) -> None:
