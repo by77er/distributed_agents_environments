@@ -11,7 +11,8 @@
 - `Trainer`, `Weighted`, `Pair`, `Labelled`, `Distilled`, `Budget`, `Files`, `Step`, `StepFailed` (`trainer`): what a
   trainer is and what it trains on; `Changeable`, one that takes some of its settings between steps; `Resident`, one
   that keeps its policy in memory between steps; `Remote` (with `Made`), one elsewhere whose steps' files go through
-  the blob store; `Keeps` (with `StateLost`), one that keeps a step's full state after the step returns.
+  the blob store; `Keeps` (with `StateLost`), one that keeps a step's full state after the step returns;
+  `Progressing` (with `Progress`), one that says how far the step it is taking has got.
   `Colocated`: the wrapper for one that shares its accelerator with the engines. Its objective is declared in
   `objectives`.
 - `Result`, `results`, `Trained`, `trained` (`record`): how each group of a run went, and what was done with it.
@@ -61,6 +62,8 @@ from rollout_train.trainer import (
     Labelled,
     Made,
     Pair,
+    Progress,
+    Progressing,
     Remote,
     Resident,
     StateLost,
@@ -94,6 +97,8 @@ __all__ = [
     "Manifest",
     "Pair",
     "Preferences",
+    "Progress",
+    "Progressing",
     "Remote",
     "Resident",
     "Result",

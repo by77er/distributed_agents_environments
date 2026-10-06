@@ -21,7 +21,8 @@ import torch
 
 from rollout_train.recorder import Segment
 
-__all__ = ["SHARED_PREFIX", "Group", "Pack", "Run", "Scores", "grouped", "packed", "packs", "sampled_positions"]
+__all__ = ["SHARED_PREFIX", "Group", "Pack", "Run", "Scores", "binned", "grouped", "packed", "packs",
+           "sampled_positions"]  # fmt: skip
 
 SHARED_PREFIX = 32
 """The fewest tokens a prefix holds for segments to share it in a pack."""
@@ -196,7 +197,12 @@ def grouped(
 
 def packed(segments: Sequence[Segment], groups: Sequence[Group], capacity: int) -> list[Pack]:
     """`groups` of `segments` in packs of at most `capacity` tokens (a group longer than that in a pack of its own),
-    placed first-fit-decreasing by their tokens."""
+    placed first-fit-decreasing by their tokens (`binned`)."""
+    return [Pack.laid_out(segments, each) for each in binned(groups, capacity)]
+
+
+def binned(groups: Sequence[Group], capacity: int) -> list[list[Group]]:
+    """The groups each of `packed`'s packs holds, in its order, without laying out their rows."""
     bins: list[list[Group]] = []
     room: list[int] = []
     for group in sorted(groups, key=lambda each: -each.tokens):  # (stable: ties keep their order)
@@ -208,7 +214,7 @@ def packed(segments: Sequence[Segment], groups: Sequence[Group], capacity: int) 
         else:
             bins.append([group])
             room.append(capacity - group.tokens)
-    return [Pack.laid_out(segments, each) for each in bins]
+    return bins
 
 
 def packs(segments: Sequence[Segment], capacity: int, *, share: bool = True, least: int = SHARED_PREFIX) -> list[Pack]:

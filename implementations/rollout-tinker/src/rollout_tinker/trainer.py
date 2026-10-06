@@ -37,7 +37,9 @@ logprobs of tokens other than the sampled ones here, so an objective that reads 
 of distillation) is refused (validation says so before a run starts).
 
 Each minibatch's statistics are the objective's terms of the logprobs the forward-backward returns (the policy before
-that update), so a step's metrics are `PolicyStep`'s (`rollout_objectives.step.metrics`). A minibatch that finds the
+that update), so a step's metrics are `PolicyStep`'s (`rollout_objectives.step.metrics`). It says how far a step has got
+as `PolicyStep` does (`rollout_objectives.step.StepProgress`, `rollout_train.trainer.Progressing`), counting each call
+to Tinker as a pack: the forward pass for `old`, then each minibatch's forward-backward. A minibatch that finds the
 policy further than `max_kl` from where the step began, by the k3 estimate the LoRA step reads
 (`rollout_objectives.terms.moved_kl`), stops the pass; its gradient has been accumulated where no call clears it, so
 that client is not used again.
@@ -46,7 +48,7 @@ that client is not used again.
 import asyncio
 import json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -56,7 +58,7 @@ from pydantic import JsonValue
 from tinker import AdamParams, Datum, ForwardBackwardOutput
 
 from rollout_objectives.distillation import distilled
-from rollout_objectives.step import MINIBATCHES, Plan, line, metrics, preference_terms
+from rollout_objectives.step import GRADIENT_WORK, MINIBATCHES, Plan, StepProgress, line, metrics, preference_terms
 from rollout_objectives.terms import SUMS, Terms, moved_kl, tally, terms, units
 from rollout_tinker.data import datum, rows
 from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of, unpaid
@@ -71,6 +73,7 @@ from rollout_train.trainer import (
     Distilled,
     Files,
     Item,
+    Progress,
     Step,
     StepFailed,
     Weighted,
@@ -138,6 +141,7 @@ class TinkerTrainer:
         self._live: tuple[str, Trainable] | None = None
         """The training state the last step saved, and the client that saved it."""
         self._lock = asyncio.Lock()
+        self._told: Callable[[Progress], None] | None = None
 
     @property
     def objective(self) -> Objective:
@@ -149,6 +153,10 @@ class TinkerTrainer:
 
     def change(self, settings: Mapping[str, JsonValue]) -> None:
         self.settings = self.settings.changed(settings)  # (the live client goes on)
+
+    def watch(self, told: Callable[[Progress], None] | None) -> None:
+        """Have `told` told how far each step has got."""
+        self._told = told
 
     async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         async with self._lock:
@@ -214,15 +222,22 @@ class TinkerTrainer:
         single = len(updates) == 1
         way = route(objective, single)
         billed = 0.0
+        starts = objective.family != LIKELIHOOD and not single and bool(segments)
+        stops = objective.family != LIKELIHOOD and settings.max_kl is not None
+        tracked = StepProgress(self._told, max_kl=settings.max_kl if stops else None)
+        sizes = [float(sum(len(each.tokens) for each in _segments(minibatch))) for minibatch in updates]
+        whole = float(sum(len(each.tokens) for each in plan.segments))
+        tracked.plan((1, whole) if starts else (0, 0.0), [(1, each * GRADIENT_WORK) for each in sizes])
 
         # Where the step starts, when more than one update needs it: each sampled token's logprob on these weights.
-        if objective.family != LIKELIHOOD and not single and segments:
+        if starts:
             parts = list(segments.values())
             data = [datum(part.segment.tokens, [], {"weights": []}) for part in parts]
             out = await (await client.forward_async(data, "cross_entropy"))
             billed += sum(len(part.segment.tokens) - 1 for part in parts)
             for part, found in zip(parts, out.loss_fn_outputs, strict=True):
                 part.old = _logprobs(found)[part.rows]
+            tracked.ran(1, whole, whole, gradient=False)
         started_pass = time.monotonic()
 
         totals = dict.fromkeys(SUMS, 0.0)
@@ -230,8 +245,8 @@ class TinkerTrainer:
         optimizer: dict[str, list[float]] = {}
         lines: list[dict[str, float]] = []
         stopped = False
-        stops = objective.family != LIKELIHOOD and settings.max_kl is not None
         for update, minibatch in enumerate(updates):
+            tracked.begin(update + 1)
             parts = [segments[id(each)] for each in _segments(minibatch)]
             if objective.family == PREFERENCE:
                 count = float(len(minibatch))
@@ -246,6 +261,7 @@ class TinkerTrainer:
             billed += sum(len(part.segment.tokens) - 1 for part in parts) * (2 if way == CUSTOM else 1)
             if stops and update > 0:  # the distance, before the update
                 sums = self._measured(minibatch, parts, await pending)
+                tracked.ran(1, sizes[update], sizes[update], gradient=True)
                 if sums["moved"] / max(sums["tokens"], 1.0) > (settings.max_kl or 0.0):
                     stopped = True
                     break
@@ -253,6 +269,7 @@ class TinkerTrainer:
             else:  # the update sent at once, beside the forward-backward
                 optimizing = await client.optim_step_async(self._adam(rate))
                 sums = self._measured(minibatch, parts, await pending)
+                tracked.ran(1, sizes[update], sizes[update], gradient=True)
                 stepped = await optimizing
             moved = sums["moved"] / max(sums["tokens"], 1.0)
             for key, value in sums.items():
@@ -261,6 +278,9 @@ class TinkerTrainer:
             for key, value in reported.items():
                 optimizer.setdefault(key, []).append(value)
             lines.append({**line(sums, count, rate), **{f"optimizer_{key}": value for key, value in reported.items()}})
+            kl = moved if objective.family != LIKELIHOOD else None
+            loss, clipped = totals["loss"] / max(totals["units"], 1.0), totals["clipped"] / max(totals["tokens"], 1.0)
+            tracked.stepped(loss=loss, kl=kl, clip_fraction=clipped)
 
         found = metrics(
             totals,

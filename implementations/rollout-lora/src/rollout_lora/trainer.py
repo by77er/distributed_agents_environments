@@ -4,7 +4,7 @@ fresh one for each step beside an engine. Kept, they keep each step's full state
 they are told one (`rollout_train.trainer.Keeps`, as a training pod tells them)."""
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +15,7 @@ from rollout_lora.resident import Workers, visible_gpus
 from rollout_lora.settings import LoraSettings
 from rollout_train.checkpoints import Manifest
 from rollout_train.objectives import Objective
-from rollout_train.trainer import Budget, Files, Item, Step
+from rollout_train.trainer import Budget, Files, Item, Progress, Step
 
 
 class LoraTrainer:
@@ -30,7 +30,8 @@ class LoraTrainer:
     kept between steps: a step from the checkpoint the last one made goes on from what they hold
     (`rollout_train.trainer.Resident`). Every step leaves the files a later one starts from (the full state every
     `state_every` steps): in `into/state` before it returns, or, told a blob store (`keep_in`), kept there by the
-    processes after it returns (`kept`), its weights served meanwhile."""
+    processes after it returns (`kept`), its weights served meanwhile. It says how far each step has got as the
+    processes say it (`rollout_train.trainer.Progressing`)."""
 
     weights = "lora"
 
@@ -56,6 +57,10 @@ class LoraTrainer:
     def change(self, settings: Mapping[str, JsonValue]) -> None:
         self.settings = self.settings.changed(settings)
         self._process.settings = self.settings
+
+    def watch(self, told: Callable[[Progress], None] | None) -> None:
+        """Have `told` told how far each step has got, from the thread that reads what the processes say."""
+        self._process.watcher = told
 
     def keep_in(self, blobs: Mapping[str, JsonValue]) -> None:
         """Have the processes keep each step's full state in the blob store at this location after the step returns

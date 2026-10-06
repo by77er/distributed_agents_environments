@@ -23,7 +23,8 @@ Told where to keep the full state (`keep`, a blob store's location), the process
 it (`rollout_lora.workers`): `keeping` says which steps' state they are keeping, and `kept_state` waits for what every
 process kept of one, merged, or raises `StateLost` where one could not keep its share or the processes ended first.
 Whatever reads from the processes (a step waiting for its answers, `kept_state` waiting for a state) reads every
-message that arrives, so each is noted whoever reads it. Closing waits for the states being kept, for up to
+message that arrives, so each is noted whoever reads it: how far the step being taken has got among them (`progress`,
+which `watcher` is told too, from the thread that read it). Closing waits for the states being kept, for up to
 `KEEP_PATIENCE` seconds, before it ends the processes.
 """
 
@@ -36,14 +37,14 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from multiprocessing.connection import Connection, Listener, wait
 from pathlib import Path
 from typing import Any, cast
 
 from rollout.processes import end_with_parent
 from rollout_lora.settings import LoraSettings
-from rollout_train.trainer import Files, Item, StateLost, StepFailed
+from rollout_train.trainer import Files, Item, Progress, StateLost, StepFailed
 
 __all__ = ["KEEP_PATIENCE", "START_TIMEOUT", "Workers", "visible_gpus"]
 
@@ -105,6 +106,10 @@ class Workers:
         """The steps whose full state the processes keep, by their directories' names: how many processes keep it."""
         self._reports: dict[str, dict[int, dict[str, Any]]] = {}
         """What each process said it kept of a step's full state (or why it could not), by rank."""
+        self.progress: Progress | None = None
+        """How far the step being taken has got, as the processes last said (none between steps)."""
+        self.watcher: Callable[[Progress], None] | None = None
+        """Told each `progress` as it arrives."""
 
     @property
     def holding(self) -> str | None:
@@ -143,13 +148,17 @@ class Workers:
                       keep=self.keep)  # fmt: skip
         self._holding = None  # (until they say they made it)
         self._answered = {}
+        self.progress = None
         try:
             for connection in self._connections:
                 connection.send(("step", asked))
         except OSError as error:
             self.close()
             raise StepFailed(f"the trainer's processes could not be reached: {error}") from None
-        answers = self._answers()
+        try:
+            answers = self._answers()
+        finally:
+            self.progress = None
         self._holding = name
         if self.keep is not None and answers[0].get("full_state") == 1.0:
             self._keeping[into.name] = self.count
@@ -188,6 +197,10 @@ class Workers:
                     message = ("error", f"process {rank} ended without an answer")
                 if message[0] == "kept":
                     self._reports.setdefault(str(message[1]), {})[rank] = cast(dict[str, Any], message[2])
+                elif message[0] == "progress":
+                    self.progress = cast(Progress, message[1])
+                    if (watcher := self.watcher) is not None:
+                        watcher(self.progress)
                 else:
                     self._answered[rank] = (str(message[0]), message[1])
             return bool(ready)

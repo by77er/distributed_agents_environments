@@ -7,5 +7,5 @@
 - `distillation`: a distillation's loss of a segment a teacher scored, in its policy-gradient or top-k form, and a
   policy gradient's distillation term.
 - `step`: a step over a batch on a local policy (`PolicyStep`), the plan of minibatches any trainer shares (`Plan`),
-  and the step's statistics (`metrics`, `line`).
+  the step's statistics (`metrics`, `line`), and how far a step has got as it goes (`StepProgress`).
 """

@@ -17,7 +17,18 @@ from rollout_tinker.trainer import CUSTOM, route
 from rollout_tinker.weights import pointer
 from rollout_train.objectives import resolved
 from rollout_train.recorder import TeacherScores
-from rollout_train.trainer import STATE, WEIGHTS, Distilled, Files, Labelled, Pair
+from rollout_train.trainer import (
+    MINIBATCH,
+    START,
+    STATE,
+    WEIGHTS,
+    Distilled,
+    Files,
+    Labelled,
+    Pair,
+    Progress,
+    Progressing,
+)
 from tests.rollout_tinker.support import Bigram, segments
 
 SAME = ("loss", "clip_fraction", "mean_ratio", "kl_floor", "mean_mismatch", "mean_weight", "truncated_fraction",
@@ -72,6 +83,21 @@ async def test_a_step_on_tinker_moves_the_model_as_the_lora_step_does(case: str,
     assert ("forward" in service.calls) == ("forward" in calls)  # (the pass for where the step starts, if needed)
     assert pointer(into / WEIGHTS, "sampler") in service.saved  # (a sampler checkpoint, named after the version)
     assert (into / STATE / "minibatches.jsonl").read_text().count("\n") == int(taken.metrics["optimizer_steps"])
+
+
+async def test_a_step_on_tinker_says_how_far_it_has_got_after_each_call(tmp_path: Path) -> None:
+    service = FakeService(vocabulary=24, seed=3)
+    trainer = TinkerTrainer("tiny", service=service, **ours({"tokens_per_step": 40, "max_kl": 5.0}))
+    told: list[Progress] = []
+    assert isinstance(trainer, Progressing)
+    trainer.watch(told.append)
+    taken = await trainer.step(segments(service, 12), seed=7, parent=None, into=tmp_path / "made")
+    updates = int(taken.metrics["optimizer_steps"])
+    assert told[0].phase == START and told[0].packs == 1 and told[0].minibatches == updates  # (the forward pass)
+    last = told[-1]
+    assert last.phase == MINIBATCH and last.minibatch == updates and last.packs == last.packs_total == 1 + updates
+    assert last.fraction == 1.0 and last.max_kl == 5.0 and last.kl == pytest.approx(taken.metrics["kl_moved"])
+    assert last.loss == pytest.approx(taken.metrics["loss"]) and last.gpu_gib is None
 
 
 async def test_one_update_needs_no_pass_for_where_the_step_starts(tmp_path: Path) -> None:

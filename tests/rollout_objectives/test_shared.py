@@ -1,7 +1,7 @@
 """A step shared among processes moves the policy as one process does: the same batch, two steps of each objective's
 case (`shared.py`), one segment at a time and in packs, on one process and on two (FSDP2 over gloo, on the CPU), give
-the same losses, minibatches, gradient norms and weights. And a minibatch's passes are shared out balanced by their
-count, then their tokens."""
+the same losses, minibatches, gradient norms and weights, and say alike how far they got. And a minibatch's passes are
+shared out balanced by their count, then their tokens."""
 
 import json
 import subprocess
@@ -77,3 +77,8 @@ def test_a_step_shared_by_two_processes_is_the_step_one_process_takes(
     if case == "stopped":
         assert one["metrics"][0]["stopped_at_max_kl"] == 1.0  # (both stopped the pass at the same minibatch)
     assert one["metrics"][0]["optimizer_steps"] >= 1
+    for metrics, said in zip(one["metrics"], one["progress"], strict=True):  # (every process's packs, counted alike)
+        assert said["packs"] == metrics["packs"]
+        if case != "stopped":
+            assert said["packs_total"] == said["packs"] and said["fraction"] == 1.0
+            assert said["minibatch"] == said["minibatches"] == metrics["optimizer_steps"]

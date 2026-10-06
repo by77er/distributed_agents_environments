@@ -22,7 +22,7 @@ from rollout_objectives.ranks import Ranks
 from rollout_objectives.settings import StepSettings
 from rollout_objectives.step import PolicyStep
 from rollout_train.recorder import Segment, Span
-from rollout_train.trainer import Item, Labelled, Pair, Weighted
+from rollout_train.trainer import Item, Labelled, Pair, Progress, Weighted
 
 VOCABULARY = 12
 CASES: dict[str, dict[str, Any]] = {
@@ -162,15 +162,26 @@ def settings_of(case: str, *, packing: bool = False) -> StepSettings:
     return StepSettings(**{**SETTINGS, **CASES[case]}, pack_tokens=PACK_TOKENS if packing else None)
 
 
+PROGRESS = ("phase", "minibatch", "minibatches", "packs", "packs_total", "fraction", "loss", "kl", "clip_fraction")
+"""What the last `Progress` of each step said that one process and two say alike (rank 0 says it)."""
+
+
 def steps(case: str, policy: ToyPolicy, ranks: Ranks) -> dict[str, Any]:
-    """Two steps of the case on the policy: their metrics and minibatches, and the weights after them."""
+    """Two steps of the case on the policy: their metrics and minibatches, how far each said it had got last, and the
+    weights after them."""
     settings = settings_of(case, packing=policy.packing)
-    stepping = PolicyStep(policy, settings, ranks=ranks)
-    found: dict[str, Any] = {"metrics": [], "minibatches": []}
+    told: list[Progress] = []
+    stepping = PolicyStep(policy, settings, ranks=ranks, progress=told.append)
+    found: dict[str, Any] = {"metrics": [], "minibatches": [], "progress": []}
     for seed in range(2):
         found["metrics"].append(stepping.step(batch(case, policy), seed=seed))
         found["minibatches"].append(list(stepping.minibatches))
-        stepping = PolicyStep(policy, settings, fresh=False, ranks=ranks, optimizer_given=stepping.optimizer)
+        last = told[-1].to_json() if told else {}
+        found["progress"].append({key: last.get(key) for key in PROGRESS if last.get(key) is not None})
+        told.clear()
+        stepping = PolicyStep(
+            policy, settings, fresh=False, ranks=ranks, optimizer_given=stepping.optimizer, progress=told.append
+        )
     return found
 
 

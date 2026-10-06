@@ -10,8 +10,10 @@ the key it takes connections with, in hex), joins the others (`ROLLOUT_WORKERS_D
 on gloo), bounds its GPU memory to what was free when it started, less `MEMORY_MARGIN` (where a driver lets a process
 spill into system memory, as Windows does, a step that needs more would crawl instead of failing), says it is ready,
 and takes the steps it is sent (`Asked`), answering each with the step's metrics (rank 0) or nothing (the others), or
-with the traceback of what failed. After a failure it ends: the processes are out of step, and the trainer ends them
-and starts others. It also ends when the trainer's connection closes, and when its parent (torchrun's agent) ends.
+with the traceback of what failed. While a step runs, rank 0 says how far it has got after each pack and each minibatch
+(`("progress", Progress)`, `rollout_objectives.step.PolicyStep.progress`). After a failure it ends: the processes are
+out of step, and the trainer ends them and starts others. It also ends when the trainer's connection closes, and when
+its parent (torchrun's agent) ends.
 
 **Loading.** A step goes on from what the processes hold when its parent is the checkpoint they made last (its state's
 `HELD` says the name they gave it). Else they drop what they hold, and free its memory, before they load the policy:
@@ -63,7 +65,7 @@ from typing import TYPE_CHECKING, Any
 
 from rollout.processes import end_with_parent
 from rollout_lora.settings import LoraSettings
-from rollout_train.trainer import HELD, STATE, WEIGHTS, Files, Item
+from rollout_train.trainer import HELD, STATE, WEIGHTS, Files, Item, Progress
 
 if TYPE_CHECKING:
     import torch
@@ -232,9 +234,16 @@ def _loaded(asked: Asked, ranks: Any, device: "torch.device", mesh: Any) -> _Hel
     return _Held(policy, optimizer, fresh, whole_base=whole_base)
 
 
-def _stepped(asked: Asked, held: _Held, ranks: Any, device: "torch.device", keeper: "_Keeper") -> dict[str, float]:
+def _stepped(
+    asked: Asked,
+    held: _Held,
+    ranks: Any,
+    device: "torch.device",
+    keeper: "_Keeper",
+    told: Callable[[Progress], None] | None = None,
+) -> dict[str, float]:
     """The step taken on what the processes hold, its files written (its full state kept after it, by `keeper`, where
-    the step says where); its metrics."""
+    the step says where), `told` how far it has got as it goes; its metrics."""
     import torch
 
     from rollout_lora.sharded import write_adapter, write_serving_copy
@@ -246,7 +255,8 @@ def _stepped(asked: Asked, held: _Held, ranks: Any, device: "torch.device", keep
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
     began = time.monotonic()
-    stepping = PolicyStep(held.policy, settings, fresh=held.fresh, ranks=ranks, optimizer_given=held.optimizer)
+    stepping = PolicyStep(held.policy, settings, fresh=held.fresh, ranks=ranks, optimizer_given=held.optimizer,
+                          progress=told)  # fmt: skip
     metrics: dict[str, Any] = stepping.step(asked.segments, seed=asked.seed)
     trained, began = time.monotonic() - began, time.monotonic()
     loaded, held.loaded, held.fresh = held.loaded, False, False
@@ -497,6 +507,10 @@ def _serve(
         with sending:
             send(message)
 
+    def told(progress: Progress) -> None:
+        with contextlib.suppress(OSError):  # (the trainer is gone: the step's answer fails it)
+            said(("progress", progress))
+
     keeper = _Keeper(said)
     held: _Held | None = None
     try:
@@ -514,7 +528,7 @@ def _serve(
                     _freed(device)
                 if held is None:
                     held = _loaded(asked, ranks, device, mesh)
-                metrics = _stepped(asked, held, ranks, device, keeper)
+                metrics = _stepped(asked, held, ranks, device, keeper, told if ranks.rank == 0 else None)
                 metrics["free_gpu_gib"] = min(ranks.gathered(free))  # (when the processes started)
                 said(("done", metrics if ranks.rank == 0 else {}))
             except Exception:

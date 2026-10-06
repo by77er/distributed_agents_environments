@@ -3,6 +3,7 @@
 how its objectives weigh tokens."""
 
 import copy
+import itertools
 import math
 from collections.abc import Sequence
 
@@ -11,11 +12,11 @@ import torch
 from torch import nn
 
 from rollout_objectives.settings import StepSettings
-from rollout_objectives.step import PolicyStep, minibatches
+from rollout_objectives.step import GRADIENT_WORK, PolicyStep, minibatches
 from rollout_objectives.terms import terms
 from rollout_train import Weighted
 from rollout_train.recorder import Segment, Span, TeacherScores
-from rollout_train.trainer import Distilled
+from rollout_train.trainer import MINIBATCH, START, Distilled, Progress
 
 
 class ToyPolicy:
@@ -120,6 +121,34 @@ def test_a_small_last_minibatch_joins_the_one_before() -> None:
     assert [len(batch) for batch in minibatches(four, 10)] == [3, 2]
     assert [len(batch) for batch in minibatches(four[:4], 10)] == [4]  # not [3, 1]: Adam would step as far for one
     assert [len(batch) for batch in minibatches(four[:1], 10)] == [1] and minibatches([], 10) == []
+
+
+def test_a_step_says_how_far_it_has_got_after_each_pack_and_each_minibatch() -> None:
+    policy = ToyPolicy()
+    told: list[Progress] = []
+    settings = StepSettings(learning_rate=0.05, tokens_per_step=3, max_kl=5.0, passes=2)
+    trainer = PolicyStep(policy, settings, progress=told.append)  # type: ignore[arg-type]
+    given = [segment(policy, tokens, advantage) for tokens, advantage in (([1, 2, 3, 4], 1.0), ([1, 5, 6, 7], -1.0),
+                                                                         ([2, 3, 4, 5], 0.5))]  # fmt: skip
+    metrics = trainer.step(given)
+    # Three minibatches of a segment each, twice over: the start computes the second's and the third's (the first
+    # minibatch computes its own), then each minibatch its segment with a gradient.
+    starting = [each for each in told if each.phase == START]
+    assert [each.packs for each in starting] == [1, 2] and all(each.minibatches == 6 for each in starting)
+    assert starting[-1].fraction == pytest.approx(8 / (8 + 6 * 4 * GRADIENT_WORK))  # (a token with a gradient: 3)
+    assert {each.minibatch for each in told if each.phase == MINIBATCH} == set(range(1, 7))
+    last = told[-1]
+    assert last.packs == last.packs_total == metrics["packs"] == 8 and last.fraction == 1.0 and last.eta_seconds == 0
+    assert all(one.fraction <= two.fraction for one, two in itertools.pairwise(told))
+    assert last.loss is not None and last.clip_fraction is not None and last.max_kl == 5.0
+    assert last.kl == pytest.approx(metrics["kl_moved"]) and last.tokens_per_second > 0
+    assert last.gpu_gib is None and last.gpu_utilization == ()  # (on the CPU)
+    assert len([each for each in told if each.loss is not None and each.packs == each.packs_total]) >= 1
+
+    told.clear()
+    PolicyStep(policy, StepSettings(objective="sft", tokens_per_step=3), progress=told.append).step(given)  # type: ignore[arg-type]
+    assert told[0].phase == MINIBATCH and told[-1].fraction == 1.0  # (a likelihood reads no start, and never stops)
+    assert told[-1].kl is None and told[-1].max_kl is None
 
 
 def test_the_pass_stops_once_the_policy_has_moved_as_far_as_allowed() -> None:

@@ -14,12 +14,16 @@ A trainer on another machine (`Remote`) takes its parent and gives what it made 
 the loop records, serves and thins its checkpoints without reading their files. One that keeps a step's full state
 itself after the step returns (`Keeps`) has its weights served first, and its checkpoint's state completed once kept
 (`rollout_train.checkpoints.Checkpoints.completed`).
+
+A trainer may say how far the step it is taking has got, as it goes (`Progressing`, with `Progress`): the loop hands
+it to its hooks, and a training pod puts it in its beats and its answer about the step.
 """
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+import math
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from pydantic import JsonValue
 
@@ -219,6 +223,114 @@ class Keeps(Protocol):
         """The files it kept of the full state of the step that wrote into `into` (by its name), by their paths within
         the state, once they are kept. Raises `StateLost` if they never will be."""
         ...
+
+
+START, MINIBATCH = "start", "minibatch"
+"""A step's phases, as `Progress` says them: computing the logprobs it starts from, then its minibatches' updates."""
+
+
+@dataclass(frozen=True)
+class Progress:
+    """How far a step being taken has got, as its trainer says it after each pack it runs and each minibatch it steps
+    on (`rollout_objectives.step.StepProgress`). Shared among processes, it counts every process's packs and tokens,
+    and its memory is the most any process's GPU holds."""
+
+    phase: str
+    """`start` (the logprobs the step starts from) or `minibatch`."""
+    minibatch: int = 0
+    """The minibatch being taken, from 1 (0 in the start)."""
+    minibatches: int = 0
+    """The minibatches of the whole step, every pass's (as planned: until the start is done, as many in each pass as
+    the first takes)."""
+    packs: int = 0
+    """Packs run so far, in every phase (a trainer that runs no packs counts its passes over the model)."""
+    packs_total: int = 0
+    """Packs the whole step runs, as planned now: each minibatch's are counted again once it has run them."""
+    fraction: float = 0.0
+    """Of the step's work done: each pack's tokens, three times over where it is run with a gradient."""
+    seconds: float = 0.0
+    """Since the step began."""
+    tokens_per_second: float = 0.0
+    """Segments' tokens run through the model a second, so far."""
+    eta_seconds: float | None = None
+    """Seconds left, at the pace so far."""
+    loss: float | None = None
+    """The mean loss of the minibatches stepped on so far."""
+    kl: float | None = None
+    """How far the last minibatch stepped on found the policy from where the step began (what the stop reads)."""
+    max_kl: float | None = None
+    """Where the step stops (none: it does not)."""
+    clip_fraction: float | None = None
+    """Of the tokens stepped on so far, those whose ratio was clipped."""
+    gpu_gib: float | None = None
+    """GPU memory held now, in GiB."""
+    peak_gpu_gib: float | None = None
+    """The most GPU memory held during the step, in GiB."""
+    gpu_utilization: tuple[float, ...] = field(default_factory=tuple[float, ...])
+    """How busy each process's GPU is, in percent, as NVML says (none where it cannot be read)."""
+
+    @property
+    def percent(self) -> int:
+        """The fraction done, in whole percent."""
+        return min(100, max(0, math.floor(100 * self.fraction)))
+
+    def line(self) -> str:
+        """In one line: `minibatch 23/58 · 41% · 5.9k tok/s · KL 0.012/0.05 · ETA 34 min`."""
+        said = [f"minibatch {self.minibatch}/{self.minibatches}" if self.phase == MINIBATCH else self.phase]
+        said += [f"{self.percent}%", f"{_thousands(self.tokens_per_second)} tok/s"]
+        if self.kl is not None:
+            said.append(f"KL {self.kl:.2g}" + (f"/{self.max_kl:g}" if self.max_kl is not None else ""))
+        if self.eta_seconds is not None:
+            said.append(f"ETA {_span(self.eta_seconds)}")
+        return " · ".join(said)
+
+    def to_json(self) -> dict[str, JsonValue]:
+        said: dict[str, JsonValue] = {}
+        for each in fields(self):
+            value = getattr(self, each.name)
+            if isinstance(value, tuple):
+                value = list[JsonValue](round(float(used), 1) for used in cast(tuple[float, ...], value))
+            said[each.name] = round(value, 6) if isinstance(value, float) else value
+        return said
+
+    @classmethod
+    def from_json(cls, said: Any) -> "Progress | None":
+        """What `to_json` wrote (none for anything else)."""
+        if not isinstance(said, dict):
+            return None
+        found = cast(dict[str, Any], said)
+        if not isinstance(found.get("phase"), str):
+            return None
+        names = {each.name for each in fields(cls)}
+        given: dict[str, Any] = {key: value for key, value in found.items() if key in names}
+        used = given.get("gpu_utilization")
+        given["gpu_utilization"] = (
+            tuple(float(each) for each in cast(list[Any], used)) if isinstance(used, list) else ()
+        )
+        try:
+            return cls(**given)
+        except (TypeError, ValueError):
+            return None
+
+
+def _thousands(value: float) -> str:
+    return f"{value / 1000:.1f}k" if value >= 1000 else f"{value:.0f}"
+
+
+def _span(seconds: float) -> str:
+    if seconds < 90:
+        return f"{seconds:.0f} s"
+    if seconds < 90 * 60:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds / 3600:.1f} h"
+
+
+@runtime_checkable
+class Progressing(Protocol):
+    """A trainer that says how far the step it is taking has got, as it goes (`rollout_lora`'s, Tinker's, a training
+    pod's): each `Progress` to what it was told to tell (none: to nothing), from whatever thread it learns it in."""
+
+    def watch(self, told: Callable[[Progress], None] | None) -> None: ...
 
 
 class StateLost(Exception):

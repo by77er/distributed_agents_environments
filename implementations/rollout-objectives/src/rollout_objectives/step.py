@@ -27,8 +27,16 @@ which hold one pack's activations at a time: the loss of the logprobs computed w
 the minibatch steps from) gives each token's gradient, and each segment's logprobs, computed again with a gradient,
 are moved by it (`d loss / d logprobs · logprobs`, whose gradient is the loss's).
 
-`Plan` (which items, in which minibatches), `metrics` and `line` are what any trainer of this step shares
-(`rollout_tinker`'s takes it on Tinker, which batches a minibatch's segments itself).
+`Plan` (which items, in which minibatches), `metrics`, `line` and `StepProgress` are what any trainer of this step
+shares (`rollout_tinker`'s takes it on Tinker, which batches a minibatch's segments itself).
+
+A step says how far it has got (`PolicyStep.progress`, told a `rollout_train.trainer.Progress` after each pack and each
+minibatch): the packs it has run against those it plans, and its work done, each pack's tokens counted three times
+over where it runs with a gradient (`GRADIENT_WORK`). Its plan is made before the start: the first pass's packs,
+counted without laying out their rows, and as many again for each further pass; once the start is done, every pass's
+minibatches, as they are shuffled; and each minibatch's packs are counted again once it has run them (a preference
+loss's gradient pass runs only the segments that move). With them its pace, what is left at that pace, the running
+loss, how far the policy has moved against `max_kl`, the clip fraction, and the GPU's memory and how busy it is.
 
 A step may be shared among processes, one per GPU (`ranks`, `rollout_objectives.ranks`): each takes the same plan,
 computes its share of every minibatch's segments and of the logprobs the step starts from, and the processes gather
@@ -41,6 +49,9 @@ reduction is a sum), so the update is the one a single process makes of the same
 processes. A process with fewer packs than the most takes idle passes (a two-token sequence, its loss times zero) as
 many times as it lacks: a sharded model's layers are gathered by every process at once, so each takes as many passes as
 the others. A step shared this way does not leave out a minibatch or a segment that runs out of memory: the step fails.
+Shared, the process of rank 0 says how far the step has got: every process takes its passes in step with the others,
+so after each of its own it counts every process's packs and tokens from the shares, which each process computes
+alike; the processes gather each one's GPU memory and use after each minibatch.
 """
 
 import functools
@@ -55,21 +66,23 @@ import torch
 from torch import nn
 
 from rollout_objectives.distillation import Taught, distilled
-from rollout_objectives.packing import Pack, Scores, grouped, packed, sampled_positions
+from rollout_objectives.packing import Pack, Scores, binned, grouped, packed, sampled_positions
 from rollout_objectives.ranks import Ranks, shares
 from rollout_objectives.settings import StepSettings
 from rollout_objectives.terms import SUMS, Scored, Terms, labelled, moved_kl, pair, tally, terms, units
 from rollout_train.memory import SEGMENT_TOKENS
 from rollout_train.objectives import LIKELIHOOD, PREFERENCE, Objective
 from rollout_train.recorder import Segment
-from rollout_train.trainer import Distilled, Item, Labelled, Pair, Weighted, segments_of
+from rollout_train.trainer import MINIBATCH, START, Distilled, Item, Labelled, Pair, Progress, Weighted, segments_of
 
 __all__ = [
+    "GRADIENT_WORK",
     "MINIBATCHES",
     "PackingPolicy",
     "Plan",
     "PolicyStep",
     "SharedPolicy",
+    "StepProgress",
     "TrainablePolicy",
     "line",
     "metrics",
@@ -80,6 +93,9 @@ __all__ = [
 
 MINIBATCHES = "minibatches.jsonl"
 """In a step's state: what each of its minibatches did, one line each (`line`)."""
+GRADIENT_WORK = 3.0
+"""What a token run with a gradient counts for in a step's work, against one run without it (a backward pass costs
+about two forward passes)."""
 
 
 class TrainablePolicy(Protocol):
@@ -202,6 +218,125 @@ def minibatches[Each: Item](items: Sequence[Each], tokens_per_step: int) -> list
     return [batch for batch in batches if batch]
 
 
+type Gauge = tuple[float | None, float | None, tuple[float, ...]]
+"""GPU memory held now and at its peak, in GiB, and how busy each GPU is, in percent (`Progress`)."""
+
+
+class StepProgress:
+    """How far a step has got, said to `told` (a `Progress` each time) after each pack (`ran`) and each minibatch
+    stepped on (`stepped`): its work done against the work planned for its stages, the start and then each minibatch
+    (`plan`), each stage counted as what it ran once the next begins (`begin`). `gauge` says the GPU's memory and how
+    busy it is. Without `told` it says nothing, and reads no GPU."""
+
+    def __init__(
+        self,
+        told: Callable[[Progress], None] | None = None,
+        *,
+        max_kl: float | None = None,
+        gauge: Callable[[], Gauge] | None = None,
+    ) -> None:
+        self.told = told
+        self.max_kl = max_kl
+        self.gauge = gauge
+        self.began = time.monotonic()
+        self._planned: list[tuple[int, float]] = [(0, 0.0)]
+        """The packs and work of each stage: the start, then each minibatch."""
+        self._stage = 0
+        self._packs = self._stage_packs = 0
+        self._work = self._stage_work = self._tokens = 0.0
+        self._loss: float | None = None
+        self._kl: float | None = None
+        self._clip_fraction: float | None = None
+
+    def plan(self, start: tuple[int, float] | None, minibatches: Sequence[tuple[int, float]]) -> None:
+        """The packs and work the start takes (none: as planned before) and each minibatch."""
+        self._planned = [start if start is not None else self._planned[0], *minibatches]
+
+    def begin(self, minibatch: int) -> None:
+        """The `minibatch`-th minibatch (from 1) begins: the stages before it count for what they ran."""
+        for index in range(self._stage, min(minibatch, len(self._planned))):
+            self._planned[index] = (self._stage_packs, self._stage_work) if index == self._stage else (0, 0.0)
+        self._stage, self._stage_packs, self._stage_work = minibatch, 0, 0.0
+
+    def ran(self, packs: int, rows: float, tokens: float, *, gradient: bool) -> None:
+        """`packs` more were run (`rows` tokens in their rows, `tokens` in their segments), with a gradient or not."""
+        work = rows * (GRADIENT_WORK if gradient else 1.0)
+        self._packs += packs
+        self._stage_packs += packs
+        self._work += work
+        self._stage_work += work
+        self._tokens += tokens
+        self._say()
+
+    def stepped(self, *, loss: float, kl: float | None, clip_fraction: float) -> None:
+        """A minibatch was stepped on: the mean loss of those stepped on so far, how far the last found the policy from
+        the step's start, and the share of their tokens clipped."""
+        self._loss, self._kl, self._clip_fraction = loss, kl, clip_fraction
+        self._say()
+
+    def progress(self) -> Progress:
+        """How far the step has got now."""
+        packs_total, work_total = 0, 0.0
+        for index, (packs, work) in enumerate(self._planned):
+            if index == self._stage:
+                packs, work = max(packs, self._stage_packs), max(work, self._stage_work)
+            packs_total += packs
+            work_total += work
+        seconds = time.monotonic() - self.began
+        left = seconds * (work_total - self._work) / self._work if self._work > 0 else None
+        memory: Gauge = self.gauge() if self.gauge is not None else (None, None, ())
+        return Progress(
+            START if self._stage == 0 else MINIBATCH, self._stage, len(self._planned) - 1, self._packs, packs_total,
+            min(1.0, self._work / work_total) if work_total > 0 else 0.0, seconds, self._tokens / max(seconds, 1e-9),
+            left, self._loss, self._kl, self.max_kl, self._clip_fraction, *memory,
+        )  # fmt: skip
+
+    def _say(self) -> None:
+        if self.told is not None:
+            self.told(self.progress())
+
+
+class _Turns(list[Pack | None]):
+    """A process's turns over some segments (`PolicyStep._turns`), with what every process has run after each of
+    them: packs, their rows' tokens and their segments' tokens."""
+
+    done: list[tuple[int, int, int]]
+
+
+def _across(sizes: Sequence[tuple[int, int]], parts: Sequence[Sequence[int]]) -> list[tuple[int, int, int]]:
+    """What every process has run after each turn, when each takes the packs of `sizes` (each a pack's rows' and
+    segments' tokens) that its part names, in step with the others."""
+    found: list[tuple[int, int, int]] = []
+    packs = rows = tokens = 0
+    for turn in range(max((len(each) for each in parts), default=0)):
+        for part in parts:
+            if turn < len(part):
+                packs += 1
+                rows += sizes[part[turn]][0]
+                tokens += sizes[part[turn]][1]
+        found.append((packs, rows, tokens))
+    return found
+
+
+def _gpu(device: torch.device) -> tuple[float | None, float | None, float | None]:
+    """A GPU's memory held now and the most held, in GiB, and how busy it is in percent (as NVML says, where it can be
+    read); none of them off a GPU."""
+    global _nvml
+    if device.type != "cuda":
+        return None, None, None
+    used = None
+    if _nvml:
+        try:
+            used = float(torch.cuda.utilization(device))
+        except Exception:  # (no NVML here: not asked again)
+            _nvml = False
+    return torch.cuda.memory_reserved(device) / 2**30, torch.cuda.max_memory_reserved(device) / 2**30, used
+
+
+_nvml = True
+"""Whether NVML may be there to say how busy a GPU is (until it was found not to be)."""
+
+
 def preference_terms(
     objective: Objective,
     batch: Sequence[Item],
@@ -240,6 +375,8 @@ class PolicyStep:
     """The processes the step is shared among (one by default: none)."""
     optimizer_given: InitVar[torch.optim.Optimizer | None] = None
     """An optimizer to go on with (a resident trainer's, from its last step); else a new AdamW."""
+    progress: Callable[[Progress], None] | None = None
+    """Told how far each step has got, after each pack and each minibatch (`StepProgress`), in the process of rank 0."""
 
     def __post_init__(self, optimizer_given: torch.optim.Optimizer | None) -> None:
         self.optimizer: torch.optim.Optimizer = optimizer_given or torch.optim.AdamW(
@@ -252,23 +389,95 @@ class PolicyStep:
         self._capacity = 1
         self._ran = dict.fromkeys(("packs", "rows", "tokens"), 0)
         """Of the last step, in this process: the packs it ran, their rows' tokens, and their segments' tokens."""
+        self._tracked = StepProgress()
+        """How far the step being taken has got."""
+        self._device = torch.device("cpu")
+        self._gauges: list[tuple[float | None, float | None, float | None]] = []
+        """Every process's GPU as it was last gathered, by rank (`_gpu`; none gathered where the step is not shared)."""
 
-    def _turns(self, segments: Sequence[Segment]) -> list[Pack | None]:
+    def _turns(self, segments: Sequence[Segment]) -> _Turns:
         """This process's turns over `segments`: its packs (each segment by its index in `segments`), then an idle
-        turn (none) for each pack it has fewer than the most any process has. Packing, segments that share a prefix
-        are grouped, and the groups packed; else each segment is a pack of its own. The packs are the same however
-        many processes share the step (so each segment is computed alike), and shared out balanced by their count,
-        then their tokens (`shares`): no process takes more than its even share of the passes, rounded up."""
+        turn (none) for each pack it has fewer than the most any process has; with what every process has run after
+        each. Packing, segments that share a prefix are grouped, and the groups packed; else each segment is a pack of
+        its own. The packs are the same however many processes share the step (so each segment is computed alike),
+        and shared out balanced by their count, then their tokens (`shares`): no process takes more than its even
+        share of the passes, rounded up."""
         if self.packing:
             groups = grouped(segments, self._capacity, share=self.settings.share_prefixes)
             units = packed(segments, groups, self._capacity)
         else:
             units = [Pack.single(index, each) for index, each in enumerate(segments)]
+        sizes = [(unit.length, unit.segment_tokens) for unit in units]
         if not self.ranks.shared:
-            return list(units)
+            turns = _Turns(units)
+            turns.done = _across(sizes, [range(len(units))])
+            return turns
         parts = shares([unit.length for unit in units], self.ranks.size)
         mine: list[Pack | None] = [units[index] for index in parts[self.ranks.rank]]
-        return mine + [None] * (max(len(each) for each in parts) - len(mine))
+        turns = _Turns(mine + [None] * (max(len(each) for each in parts) - len(mine)))
+        turns.done = _across(sizes, parts)
+        return turns
+
+    def _sizes(self, segments: Sequence[Segment]) -> list[tuple[int, int]]:
+        """The packs `_turns` makes of `segments`, each as its rows' tokens and its segments' tokens, counted without
+        laying out their rows."""
+        if not self.packing:
+            return [(len(each.tokens), len(each.tokens)) for each in segments]
+        lengths = [len(each.tokens) for each in segments]
+        groups = grouped(segments, self._capacity, share=self.settings.share_prefixes)
+        return [
+            (sum(group.tokens for group in each), sum(lengths[member] for group in each for member in group.members))
+            for each in binned(groups, self._capacity)
+        ]
+
+    def _counted(self, turns: _Turns, *, gradient: bool, synced: bool = False) -> Iterator[Pack | None]:
+        """A pass's turns, each counted as run (`StepProgress.ran`: every process's packs by then) once whatever takes
+        it is done with it; with `synced`, the policy told before each whether it is the last (`_synced_last`)."""
+        before = (0, 0, 0)
+        for index, turn in enumerate(self._synced_last(turns) if synced else turns):
+            yield turn
+            now = turns.done[index]
+            self._tracked.ran(now[0] - before[0], now[1] - before[1], now[2] - before[2], gradient=gradient)
+            before = now
+
+    def _planned(self, batch: Sequence[Item], *, updated: bool) -> tuple[int, float]:
+        """The packs a minibatch runs and its work (`StepProgress.plan`): its segments' packs, with a gradient; a
+        preference loss's after the first update twice, once without a gradient first."""
+        sizes = self._sizes(self._segments(batch))
+        packs, rows = len(sizes), float(sum(each for each, _ in sizes))
+        if self.settings.loss.family == PREFERENCE and updated:
+            return 2 * packs, rows * (1.0 + GRADIENT_WORK)
+        return packs, rows * GRADIENT_WORK
+
+    def _start_planned(self, plan: Plan) -> tuple[int, float]:
+        """The packs the start runs (`_start`) and its work: each minibatch's segments' but the first minibatch's,
+        and every segment's under the reference where the objective reads it."""
+        folded = {id(each) for item in _first_minibatch(plan, self.settings) for each in segments_of(item)}
+        packs, rows = 0, 0
+        for batch in minibatches(plan.items, self.settings.tokens_per_step):
+            segments = self._segments(batch)
+            sizes = self._sizes([each for each in segments if id(each) not in folded])
+            if self.settings.loss.needs_reference:
+                sizes += self._sizes(segments)
+            packs += len(sizes)
+            rows += sum(each for each, _ in sizes)
+        return packs, float(rows)
+
+    def _gauge(self) -> Gauge:
+        """The GPU memory held now and the most held, the most of any process's (this one's now, the others' as last
+        gathered), and how busy each process's GPU is (where every one can say)."""
+        here = _gpu(self._device)
+        found = [here if rank == self.ranks.rank else each for rank, each in enumerate(self._gauges)] or [here]
+        now = [each[0] for each in found if each[0] is not None]
+        peaks = [each[1] for each in found if each[1] is not None]
+        used = [each[2] for each in found]
+        busy = tuple(each for each in used if each is not None) if all(each is not None for each in used) else ()
+        return max(now) if now else None, max(peaks) if peaks else None, busy
+
+    def _measured(self) -> None:
+        """Every process's GPU, gathered where the step is shared (every process calls this at once)."""
+        if self.ranks.shared:
+            self._gauges = self.ranks.gathered(_gpu(self._device))
 
     def _score(
         self,
@@ -360,13 +569,20 @@ class PolicyStep:
         longest = max((len(each.tokens) for each in plan.segments), default=1)
         self._capacity = max(settings.pack_tokens or settings.segment_tokens or SEGMENT_TOKENS, longest)
         self._ran = dict.fromkeys(self._ran, 0)
+        reads_old = objective.family != LIKELIHOOD
+        self._device, self._gauges = next(iter(self.policy.parameters())).device, []
+        told = self.progress if self.ranks.rank == 0 else None
+        self._tracked = StepProgress(told, max_kl=settings.max_kl if reads_old else None, gauge=self._gauge)
+        first = minibatches(plan.items, settings.tokens_per_step)  # (the first pass's, as the start takes them)
+        again = [self._planned(batch, updated=True) for batch in first] * (settings.passes - 1)
+        planned = [self._planned(batch, updated=index > 0) for index, batch in enumerate(first)] + again
+        self._tracked.plan(self._start_planned(plan) if reads_old else (0, 0.0), planned)
 
         # Where the step starts: each sampled token's logprob on these weights, where it was sampled, and the
         # reference's.
         old: dict[int, torch.Tensor] = {}
         behaviors: dict[int, torch.Tensor] = {}
         references: dict[int, torch.Tensor] = {}
-        reads_old = objective.family != LIKELIHOOD
         start_out_of_memory = self._start(plan, old, behaviors, references) if reads_old else 0
         started_pass = time.monotonic()
 
@@ -376,7 +592,10 @@ class PolicyStep:
         out_of_memory = 0
         stopped = False
         self.minibatches = []
-        for batch in plan.minibatches(settings):
+        batches = plan.minibatches(settings)
+        self._tracked.plan(None, [self._planned(batch, updated=index > 0) for index, batch in enumerate(batches)])
+        for number, batch in enumerate(batches, 1):
+            self._tracked.begin(number)
             if reads_old and gradient_norms:  # (an item whose first minibatch ran out of memory has no start)
                 batch = [item for item in batch if all(id(each) in old for each in segments_of(item))]
             if not batch:
@@ -400,6 +619,7 @@ class PolicyStep:
                 self.optimizer.zero_grad(set_to_none=True)
                 out_of_memory += 1
                 continue
+            self._measured()
             if sums["tokens"] == 0:
                 continue
             if objective.family != LIKELIHOOD and settings.max_kl is not None and distance > settings.max_kl:
@@ -417,6 +637,8 @@ class PolicyStep:
             self.minibatches.append({**line(sums, units, rate), "gradient_norm": norm})
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
+            loss, clipped = totals["loss"] / max(totals["units"], 1.0), totals["clipped"] / max(totals["tokens"], 1.0)
+            self._tracked.stepped(loss=loss, kl=moved if reads_old else None, clip_fraction=clipped)
         seconds = time.monotonic() - started
         packs_run, rows, tokens = self.ranks.summed([float(self._ran[key]) for key in ("packs", "rows", "tokens")])
         return {
@@ -496,6 +718,7 @@ class PolicyStep:
                     kept = [each for each in segments if id(each) not in failed]
                     for index, found in self._computed(kept, self._reference, idle_reference, failed).items():
                         references[id(kept[index])] = found
+                self._measured()
         left_out = [item for item in plan.items if any(id(each) in failed for each in segments_of(item))]
         plan.items = [item for item in plan.items if not any(id(each) in failed for each in segments_of(item))]
         return len(left_out)
@@ -512,7 +735,7 @@ class PolicyStep:
         the step is shared. With `failed`, a pack that runs out of memory is run again a segment at a time, and a
         segment that runs out alone is added to it (by its `id`); else running out of memory fails the call."""
         found: dict[int, torch.Tensor] = {}
-        for pack in self._turns(segments):
+        for pack in self._counted(self._turns(segments), gradient=False):
             if pack is None:
                 idle()
                 continue
@@ -561,7 +784,7 @@ class PolicyStep:
         reads_old = objective.family != LIKELIHOOD
         lacking = reads_old and any(id(item.segment) not in old for item in segmented)
         folded: dict[int, torch.Tensor] = {}
-        for pack in self._synced_last(self._turns(self._segments(batch))):
+        for pack in self._counted(self._turns(self._segments(batch)), gradient=True, synced=True):
             if pack is None:
                 self._idle(gradient=True)
                 continue
@@ -639,7 +862,7 @@ class PolicyStep:
             gradient = now[id(segment)].grad
             if gradient is not None and bool(gradient.any()):
                 moving.append(segment)
-        for pack in self._synced_last(self._turns(moving)):
+        for pack in self._counted(self._turns(moving), gradient=True, synced=True):
             if pack is None:
                 self._idle(gradient=True)
                 continue
