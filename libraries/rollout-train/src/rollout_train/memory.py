@@ -7,16 +7,18 @@ pure function of them. Per GPU, for `n` GPUs, `P` parameters, a model of `B` byt
 vocabulary of `V`, segments of `s` tokens:
 
 - **Weights.** An adapter's frozen model: `B` on one GPU; on several, gathered once and kept beside its shard
-  (`B + B/n`) where each GPU holds the whole model (`whole_base`), else its shard `B/n`, two layers gathered at a time
-  and the output layer kept whole; the adapter in float32, `4A/n`, and gathered in bfloat16. Every weight: `4P/n` in
-  float32, and on several GPUs two layers gathered in bfloat16 and the embeddings and output layer with their
-  gradients.
+  (`B + B/n`) where each GPU holds the whole model (`whole_base`, `holds_whole_base`), else its shard `B/n`, two
+  layers gathered at a time and the output layer kept whole; the adapter in float32, `4A/n`, and on several GPUs
+  gathered (in float32: `4A`). Every weight: `4P/n` in float32, and (sharded on one GPU too) two layers gathered in
+  bfloat16 and the embeddings and output layer with their gradients.
 - **Gradients.** `4A/n` of the adapter; `4P/n` of every weight.
 - **Optimizer.** Adam's two moments: `8A/n`; `8P/n`.
 - **Reference.** None for an adapter (it is switched off); `2P/n` for every weight, where one is held
   (`frozen_reference`).
 - **Activations.** Each layer's input kept (`2·s·h·L`), one layer recomputed (`34·s·h`), a chunk of logits
-  (`128 · V · 12`).
+  (`128 · V · 12`); for an adapter, the recomputed layer's inputs cast to float32 for the adapter (`36·s·h`); for a
+  model with linear attention (Qwen3.5's), the recomputed layer's state at each chunk of 64 tokens and its gradient,
+  in float32 (`2 · s/64 · S · 4`, `S` the state's values: value heads times key width times value width).
 - **Allowance.** 3 GiB: the CUDA context, the collectives' buffers, the allocator's fragmentation.
 
 `A`, the adapter's parameters, is about `18 · rank · h · L` (every attention and MLP projection of every layer). The
@@ -40,6 +42,7 @@ __all__ = [
     "ModelFacts",
     "TrainerMemory",
     "gpu_memory_gib",
+    "holds_whole_base",
     "model_facts",
     "trainer_memory",
 ]
@@ -51,6 +54,9 @@ SEGMENT_TOKENS = 8_192
 """The segment an estimate allows activations for where the trainer says no longest one (`segment_tokens`)."""
 LOGIT_ROWS = 128
 """Positions sent through the output layer at a time (`rollout_lora.policy.LOGIT_ROWS`)."""
+LINEAR_CHUNK = 64
+"""Tokens of a linear-attention layer's chunk, at each of which its kernels keep the state (flash-linear-attention's
+kernels)."""
 GPU_MEMORY_GIB: Mapping[str, float] = {
     "NVIDIA B200": 180, "NVIDIA H200": 141, "NVIDIA H200 NVL": 141, "NVIDIA H100 80GB HBM3": 80,
     "NVIDIA H100 NVL": 94, "NVIDIA H100 PCIe": 80, "NVIDIA A100-SXM4-80GB": 80, "NVIDIA A100 80GB PCIe": 80,
@@ -74,6 +80,9 @@ class ModelFacts:
     vocabulary: int
     tied: bool
     """Whether its output layer is its token embeddings."""
+    linear_state: int = 0
+    """The values of a linear-attention layer's state (value heads times key width times value width); 0 for a model
+    without linear attention."""
 
 
 @dataclass(frozen=True)
@@ -115,34 +124,43 @@ def trainer_memory(
 ) -> TrainerMemory:
     """What a trainer of `weights` (`lora` or `full`) over `model` on `gpus` GPUs needs of each
     (`rollout_train.memory`). `whole_base` is the adapter's setting (none: whole where the model takes at most half of
-    `gpu_gib`)."""
+    `gpu_gib`: `holds_whole_base`)."""
     n = max(1, gpus)
     h, layers, vocabulary = model.hidden, model.layers, model.vocabulary
     s = segment_tokens or SEGMENT_TOKENS
-    activations = (2 * s * h * layers + 34 * s * h + LOGIT_ROWS * vocabulary * 12) / GIB
+    activations = 2 * s * h * layers + 34 * s * h + LOGIT_ROWS * vocabulary * 12
+    activations += 2 * -(-s // LINEAR_CHUNK) * model.linear_state * 4
     heads = vocabulary * h * (1 if model.tied else 2)
     """The token embeddings and the output layer, which the root of a sharded model holds."""
     if weights == "lora":
         base = model.file_bytes
         adapter = 18 * rank * h * layers
-        whole = n == 1 or (whole_base if whole_base is not None else gpu_gib is not None and base <= gpu_gib * GIB / 2)
+        whole = n == 1 or (whole_base if whole_base is not None else holds_whole_base(base, gpu_gib))
         if n == 1:
             held = base
         elif whole:
             held = base + base / n
         else:
             held = base / n + 2 * base / layers + 2 * heads
-        held += 4 * adapter / n + (2 * adapter if n > 1 else 0)
-        return TrainerMemory(n, held / GIB, 4 * adapter / n / GIB, 8 * adapter / n / GIB, 0.0, activations,
+        held += 4 * adapter / n + (4 * adapter if n > 1 else 0)
+        activations += 36 * s * h  # (the recomputed layer's inputs, cast to float32 for the adapter)
+        return TrainerMemory(n, held / GIB, 4 * adapter / n / GIB, 8 * adapter / n / GIB, 0.0, activations / GIB,
                              whole_base=whole and n > 1)  # fmt: skip
     parameters = model.parameters if model.parameters is not None else model.file_bytes / 2
     reference = 2 * parameters / n if frozen_reference else 0.0
-    held = 4 * parameters / n
-    if n > 1:  # (two layers gathered in bfloat16, and the root's embeddings and output layer with their gradients)
-        held += 2 * 2 * (parameters - heads) / layers + 6 * heads
-        reference += 2 * 2 * (parameters - heads) / layers if frozen_reference else 0.0
+    # Sharded on any number of GPUs: two layers gathered in bfloat16, the root's embeddings and output layer with
+    # their gradients.
+    held = 4 * parameters / n + 2 * 2 * (parameters - heads) / layers + 6 * heads
+    reference += 2 * 2 * (parameters - heads) / layers if frozen_reference else 0.0
     return TrainerMemory(n, held / GIB, 4 * parameters / n / GIB, 8 * parameters / n / GIB, reference / GIB,
-                         activations)  # fmt: skip
+                         activations / GIB)  # fmt: skip
+
+
+def holds_whole_base(file_bytes: float, gpu_gib: float | None) -> bool:
+    """Whether each GPU holds an adapter's whole frozen model where the settings do not say (`whole_base`): where the
+    model's files take at most half of a GPU's memory (`gpu_gib`, as `gpu_memory_gib` gives it; none: not known). The
+    estimate decides by it, and so does the trainer, from its GPUs' names."""
+    return gpu_gib is not None and file_bytes <= gpu_gib * GIB / 2
 
 
 def gpu_memory_gib(gpu_types: tuple[str, ...]) -> float | None:
@@ -192,7 +210,11 @@ def _facts(config: Mapping[str, Any], file_bytes: int, parameters: float | None)
         return None
     tied = bool(config.get("tie_word_embeddings", text.get("tie_word_embeddings", False)))
     quantized = "quantization_config" in config or "quantization_config" in text
-    return ModelFacts(file_bytes, None if quantized else parameters, hidden, layers, vocabulary, tied)
+    linear = 0
+    sizes = [text.get(key) for key in ("linear_num_value_heads", "linear_key_head_dim", "linear_value_head_dim")]
+    if all(isinstance(each, int) for each in sizes) and "linear_attention" in (text.get("layer_types") or []):
+        linear = math.prod(int(each) for each in sizes if isinstance(each, int))
+    return ModelFacts(file_bytes, None if quantized else parameters, hidden, layers, vocabulary, tied, linear)
 
 
 def model_facts(model: str, *, environ: Mapping[str, str] | None = None, patience: float = 5.0) -> ModelFacts | None:

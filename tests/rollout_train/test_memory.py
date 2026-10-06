@@ -24,7 +24,8 @@ STEP_CA = '{ url = "https://ca.example.com", provisioner = "launcher", key_file 
 
 def test_full_weights_are_sharded_over_the_gpus_and_an_adapters_model_is_whole_where_it_fits() -> None:
     one = trainer_memory(EIGHT, weights="full", gpus=1)
-    assert one.weights + one.gradients + one.optimizer == pytest.approx(16 * 8.2e9 / 2**30)  # (16 bytes a weight)
+    assert one.gradients + one.optimizer == pytest.approx(12 * 8.2e9 / 2**30)  # (and 4 bytes a weight of weights)
+    assert 4 * 8.2e9 / 2**30 < one.weights < 5.5 * 8.2e9 / 2**30  # (sharded on one GPU: two layers gathered, the root)
     four = trainer_memory(EIGHT, weights="full", gpus=4)
     assert four.optimizer == pytest.approx(one.optimizer / 4) and four.total < 80 < one.total
     lora = trainer_memory(EIGHT, weights="lora", gpus=2, gpu_gib=80)
