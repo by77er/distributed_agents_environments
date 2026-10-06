@@ -203,8 +203,11 @@ class TrainerService:
 
     @property
     def running(self) -> str | None:
-        """The step running now, by `into`."""
-        return self._running[0] if self._running is not None and not self._running[1].done() else None
+        """The step running now, by `into` (one that has answered is done, whatever it still tidies after)."""
+        if self._running is None or self._running[1].done():
+            return None
+        into = self._running[0]
+        return into if self.states.get(into, StepState(RUNNING)).state == RUNNING else None
 
     async def ask(self, asked: StepAsked) -> StepState:
         """Start the step (unless it runs or was made); its state now. `Busy` while another runs."""
