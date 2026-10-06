@@ -177,6 +177,7 @@ nav:
       - "Where sandboxes run": research/sandbox-placement.md
       - "Where a run runs": research/run-placement.md
       - "SFT datasets": research/sft-datasets.md
+      - "Pretraining": research/pretraining.md
       - "Thinking Machines' API": research/thinking-machines.md
       - "Prime Intellect's verifiers": research/prime-compat.md
       - "Cleanup inventory": research/cleanup-inventory.md

@@ -45,6 +45,10 @@ pages are the reference; a design note never overrides them.
   by default; replayed over the run's episodes.
 - [SFT datasets](sft-datasets.md), **built**: datasets made by rejection sampling from a run's episodes, the rules
   measured on one ledger, and the one recommended.
+- [Pretraining](pretraining.md), **proposed**: pretraining from nothing and continued pretraining as a run kind
+  with a trainer and a data source and no engines: tokenized corpora and mixtures in the blob store, a deterministic
+  data source, a contract for trainers that run for days, the options (the platform's own trainer, torchtitan
+  wrapped, or neither), and what runs from 125M to 9B parameters cost on one node.
 
 ## Other systems
 
