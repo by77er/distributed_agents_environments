@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import JsonValue
 
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Retention, kept, new_id, short
@@ -132,3 +133,27 @@ async def test_a_runs_saves_thin_out_with_age_and_what_must_stay_stays(tmp_path:
     assert (
         await checkpoints.thin(fence, "miner", Retention(recent=3, every=5), keep={bookmarked}) == []
     )  # (again: nothing)
+
+
+async def test_a_reader_without_a_runs_writer_key_still_reads_a_checkpoint_from_its_own_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # (an inference pod holds a store's read-only key; a run's start names the store with its writer's variables)
+    ledger = FileLedger(tmp_path / "ledger")
+    checkpoints = Checkpoints(ledger, FileBlobStore(tmp_path / "blobs"))
+    fence = await ledger.take(scope("miner"))
+    made = await checkpoints.add(
+        fence, new_id(), weights=checkpoint(tmp_path / "a", "weights 1"), run="miner", base="qwen"
+    )
+    monkeypatch.delenv("WRITER_KEY", raising=False)
+    monkeypatch.delenv("WRITER_SECRET", raising=False)
+    elsewhere: dict[str, JsonValue] = {
+        "kind": "rollout_s3:S3BlobStore",
+        "bucket": "b",
+        "access_key_id_env": "WRITER_KEY",
+        "secret_access_key_env": "WRITER_SECRET",
+    }
+    await ledger.append("runs/miner/starts", "1", {"blobs": elsewhere}, fence)
+    assert made.weights is not None
+    read = await checkpoints.files(made.weights, tmp_path / "read")
+    assert (read / "nested" / "adapter_model.safetensors").read_text() == "weights 1"

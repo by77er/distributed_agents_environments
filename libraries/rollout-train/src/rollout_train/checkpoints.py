@@ -298,7 +298,8 @@ class Checkpoints:
             raise
 
     async def _elsewhere(self) -> list[Blobs]:
-        """The other runs' blob stores, from where their starts say they are."""
+        """The other runs' blob stores, from where their starts say they are: those this process holds a key for (a
+        pod given a store's read-only key holds no key to the store as a run's start names it, its writer's)."""
         from rollout_train.record import STARTS  # (record reads checkpoints)
 
         if self._stores is None:
@@ -309,7 +310,13 @@ class Checkpoints:
                         kept = record.get("blobs") if isinstance(record, dict) else None
                         if isinstance(kept, dict):
                             where[json.dumps(kept, sort_keys=True)] = kept
-            self._stores = [opened(each) for each in where.values()]
+            stores: list[Blobs] = []
+            for each in where.values():
+                try:
+                    stores.append(opened(each))
+                except ValueError:  # (its key is not set here: nothing here reads that store)
+                    continue
+            self._stores = stores
         return self._stores
 
 
