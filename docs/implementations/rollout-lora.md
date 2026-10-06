@@ -13,8 +13,9 @@ checkpoint the engines serve (a 4-bit image-text checkpoint, the same file, or a
 each step's adapter where engines load it. What the
 [training loop](../libraries/rollout-train/training.md) asks of a trainer is defined there; this page is what this
 one does. Its step and its objective are [`rollout_objectives`](rollout-objectives.md)'; this package gives them a
-policy on the GPU, with its reference and entropies, and on several GPUs shards it over them
-([several GPUs](#several-gpus)). The package is installed with `uv sync --all-extras` and needs an NVIDIA GPU.
+policy on the GPU, with its reference and entropies, in a process per GPU ([processes](#processes)), and on several
+GPUs shards it over them ([several GPUs](#several-gpus)). The package is installed with `uv sync --all-extras` and
+needs an NVIDIA GPU.
 
 ## In a cluster config
 
@@ -40,27 +41,30 @@ A run's driver calls `LoraTrainer(model, **settings)` in its trainer actor, with
 `trainer.*` settings less `provider`, `channel` and `model`. A run's `objective.*` settings
 ([objectives](../libraries/rollout-train/training.md#objectives)) reach it as its `objective`. The trainer steps on the
 GPUs its actor is given (`CUDA_VISIBLE_DEVICES`, which Ray sets from the provider's `gpus`), or as many as `gpus` says
-(`LoraTrainer(model, gpus=4, ...)`; a training pod's `ROLLOUT_TRAINER_GPUS`).
+(`LoraTrainer(model, gpus=4, ...)`; a training pod's `ROLLOUT_TRAINER_GPUS`). A trainer that shares its GPU with the
+trained channel's engines (`colocate_with`, or a `runpod-host` pod whose vLLM sleeps) is made with `colocated=True`:
+its processes end after each step ([processes](#processes)).
 
 ### Every weight
 
-`FullTrainer` trains every weight of a text model, with the same settings (`rank` and `whole_base` are not used),
-on one GPU in the same fresh process per step. The weights are kept in float32 and the forward pass runs in bfloat16
-(autocast); on one GPU each step leaves `weights/` in the model's own layout (float32 safetensors, with the configuration saying `bfloat16`, which is what vLLM
-loads them as, and the tokenizer) and the optimizer's state in `state/`. A step starts from its parent's weights and
-state, or from the model for the first. It refuses an image-text model. Qwen3-0.6B's step of 4 segments of 600 tokens
-peaks under 14 GiB on a 16 GB card; its optimizer's state is about 5 GB. Its reference, for an objective that reads one,
-is a frozen copy of the model trained over, in bfloat16 beside the policy, which it holds only when asked
+`FullTrainer` trains every weight of a text model, with the same settings (`rank` and `whole_base` are not used). The
+weights, their gradients and Adam's two moments are kept in float32 and sharded with FSDP2 on any number of GPUs, one
+included, each unit's weights gathered in bfloat16 for the forward and backward passes, so that one GPU computes as
+several do ([several GPUs](#several-gpus)). Each step leaves `weights/` as a serving copy (bfloat16 safetensors in
+files of at most 4 GB, an index, the configuration saying `bfloat16`, and the tokenizer), and its full state (the
+float32 weights and the optimizer's state) in `state/shards/` every `state_every` steps, every step by default. A step
+starts from its parent's full state, or from the model for the first, or from its parent's serving copy where it is
+given no state (its optimizer afresh). It refuses an image-text model. Qwen3-0.6B's step of 4 segments of 600 tokens
+peaks under 14 GiB on a 16 GB card; its full state is about 7 GB. Its reference, for an objective that reads one, is a
+frozen copy of the model trained over, in bfloat16 beside the policy, which it holds only when asked
 (`frozen_reference = true`); without it, validation refuses such an objective. Sixteen bytes a weight is more than one
-GPU holds above a few billion parameters: on several GPUs the weights, gradients and Adam's moments are sharded over
-them, and each step leaves a serving copy in bfloat16 ([several GPUs](#several-gpus)).
+GPU holds above a few billion parameters: on several GPUs each holds its share.
 
 ```toml
-[trainer]
-kind = "rollout_lora:FullTrainer"
-channel = "policy"
-colocated = true
-learning_rate = 1e-6
+[trainers.local-full]                 # the cluster config
+kind = "full"
+gpus = 1
+models = ["Qwen/Qwen3-0.6B"]
 ```
 
 ### Merging
@@ -82,8 +86,8 @@ too), and these:
 |---|---|
 | `rank` | The adapter's rank. Its scaling (`alpha`) is twice the rank |
 | `frozen_reference` | For `FullTrainer`: hold a frozen copy of the model trained over as the reference (false). An adapter's reference is the model with the adapter switched off |
-| `state_every` | On several GPUs: write the trainer's full state (the optimizer's, and full weights in float32) every this many steps since its processes loaded; none: every step for an adapter, every 10 for full weights. On one GPU every step writes it |
-| `whole_base` | For an adapter on several GPUs: each GPU holds the whole frozen model, gathered once (true), or its share, each layer gathered as it computes (false: a model too large for one GPU); none: whole where the model's files take at most half of the smallest GPU's memory |
+| `state_every` | How often a trainer whose processes are kept between steps writes its full state (an adapter's optimizer; full weights' float32 weights and optimizer), counted since its processes loaded. 1 (the default): every step, so that any trainer goes on from any checkpoint as the one that made it would. More: the steps between leave it out (for full weights, about 12 bytes a weight less to write), and a step from one of them goes on only from the processes that hold it; once they are gone (a failed step, a restart, another run taking the pod) it fails rather than go on from less, and a run started from the newest checkpoint with its full state goes on ([processes](#processes)). A trainer beside an engine writes it every step |
+| `whole_base` | For an adapter on several GPUs: each GPU holds the whole frozen model, gathered once (true), or its share, each layer gathered as it computes (false: a model too large for one GPU); none: whole where the model's files take at most half of the smallest GPU's memory, its memory by its name as the memory estimate counts it (`rollout_train.memory.holds_whole_base`) |
 
 The step's settings (`learning_rate`, `tokens_per_step`, `max_kl`, `max_gradient_norm`, `passes`, `warmup_updates`,
 `segment_tokens`, `segments_per_step`, `pack_tokens`, `share_prefixes`, `objective`) are
@@ -101,55 +105,57 @@ A step is told where its files go (`into`) and leaves:
 
 | Path under `into` | Holds |
 |---|---|
-| `weights/` | The adapter, in PEFT's layout (`adapter_config.json`, `adapter_model.safetensors`), which vLLM loads as it is. Weights are saved as float32: the next step starts from this file, and updates are smaller than bfloat16 resolves |
-| `state/optimizer.pt` | The optimizer's state after the step (on several GPUs, an adapter's every `state_every` steps), in one GPU's layout whatever the number of GPUs |
+| `weights/` | The adapter, in PEFT's layout (`adapter_config.json`, `adapter_model.safetensors`), which vLLM loads as it is, in float32: the next step starts from this file, and updates are smaller than bfloat16 resolves. Full weights: the serving copy, in bfloat16 |
+| `state/optimizer.pt` | An adapter's optimizer's state after the step (every `state_every` steps), in one process's layout whatever the number of GPUs |
+| `state/shards/` | Full weights' full state (every `state_every` steps): the float32 weights and the optimizer's state, as PyTorch's distributed checkpoint writes them, a file for each tensor's shard, read back by however many processes there are |
 | `state/minibatches.jsonl` | What each minibatch of the step did: segments, tokens, loss, clipped share, Kullback-Leibler (KL) divergence estimate, learning rate, gradient norm |
-| `state/held.txt` | On several GPUs: the name the trainer's processes gave what they hold after the step |
-| `state/shards/` | On several GPUs, a full-weight trainer's full state every `state_every` steps: the float32 weights and the optimizer's state, as PyTorch's distributed checkpoint writes them, a file for each tensor's shard |
+| `state/held.txt` | Where the processes are kept between steps: the name they gave what they hold after the step |
 
-On one GPU the trainer keeps nothing of its own between steps: a step starts from the adapter and the optimizer's
-state of the checkpoint it is given, so any `LoraTrainer` can take any step from any checkpoint. On several it keeps
-its policy and optimizer, and still leaves every file a later step starts from: steps on one GPU and on several go on
-from each other's files. A run keeps each step's files as a
-[checkpoint](../libraries/rollout-train/checkpoints.md), named by its id, whose parent is the checkpoint the step began from.
+A step's full state is what a later step goes on from as the trainer that made it would: any `LoraTrainer` (or
+`FullTrainer`), on any number of GPUs, kept or not, takes any step from a checkpoint that has it, which is every
+checkpoint while `state_every` is 1. A checkpoint given without its state (a supervised step's by default) starts the
+optimizer afresh from its weights: an adapter's in float32, full weights' from their bfloat16 serving copy. A run keeps each step's files as a
+[checkpoint](../libraries/rollout-train/checkpoints.md), named by its id, whose parent is the checkpoint the step began
+from.
 
-## A fresh process per step
+## Processes
 
-On one GPU, `step` runs in a spawned process (`rollout_lora.worker`). The process loads the policy onto the GPU, loads the
-previous step's adapter and the optimizer's state, takes the step's passes over the batch, saves both and exits.
+A trainer steps in a process per GPU, under torchrun (`rollout_lora.workers`), which `rollout_lora.resident.Workers`
+starts at its first step. Every step is handed to all of them, with the settings the trainer has then (so a setting
+changed between steps reaches every process), and each answers; rank 0's answer is the step's metrics. Whether they
+are kept between steps depends on whether the trainer shares its GPU:
 
-| Why | |
+| Trainer | Its processes |
 |---|---|
-| Memory | Exiting frees the GPU and system memory. A trainer kept in system memory between steps takes 9 GB, next to a sleeping engine and whatever the environments run |
-| Isolation | vLLM's client libraries change how transformers builds models in the process that imports them. A separate process loads the checkpoint unaffected |
-| Cleanup | The process ends when its parent dies (`rollout.processes.end_with_parent`), and is terminated when the step is cancelled |
-
-The learning rate is the settings' on every step, whatever the saved optimizer state carries. A step whose process
-fails or exits without a result raises [`StepFailed`](../guide/reference.md#stepfailed) with the process's traceback.
-
-## Several GPUs
-
-On more than one GPU of a machine, the trainer runs a process per GPU under torchrun (`rollout_lora.workers`), started
-at its first step by `rollout_lora.resident.Workers` and kept between steps, each holding its shard of the policy and
-of the optimizer (`rollout_lora.sharded`, PyTorch's FSDP2). Every step is handed to all of them, with the settings the
-trainer has then (so a setting changed between steps reaches every process), and each answers; rank 0's answer is the
-step's metrics.
+| With its GPUs to itself (a `runpod-trainer`; a `lora` or `full` trainer without `colocate_with`) | Kept between steps ([`Resident`](../guide/reference.md#resident)): a step from the checkpoint they made last goes on from what they hold, and loads nothing. On Qwen3-0.6B that step takes 1.3 s, where a fresh process takes 9 s, most of it loading the model |
+| Beside an engine (`colocated`) | Ended after each step, which frees the GPU's memory and the machine's for the engine: a trainer kept in system memory between steps takes 9 GB, next to a sleeping engine and whatever the environments run. vLLM's client libraries, which change how transformers builds models in the process that imports them, are never in the trainer's processes |
 
 | Part | What it does |
 |---|---|
-| Loading | Each process loads the policy onto the CPU and shards it onto its GPU, the processes taking turns, so the machine holds one unsharded copy at a time. A new adapter is drawn alike in every process (each keeps its share of the same one) |
-| Sharding | Each decoder layer is a unit of `fully_shard`; the rest of the model (the output layer, the last norm, embeddings held on the GPU) is the root's, the policy's `Scorer`, which computes the hidden states and the output layer's chunks in one call, so the output layer is gathered once a call. For an adapter, where each GPU holds the whole frozen model (`whole_base`), a layer's adapter matrices are one unit, gathered for each pass, and the frozen layers are gathered once and kept; else each layer's frozen weights are gathered with its adapter's as it computes. The frozen output layer is kept once gathered. Full weights, their gradients and Adam's moments are sharded in float32, and a frozen reference beside them |
-| Precision | Weights gathered in bfloat16 (an adapter's too), gradients reduced in float32 (`MixedPrecisionPolicy`), activations checkpointed as on one GPU |
-| The step | `rollout_objectives.step.PolicyStep` shared among the processes ([a step on several GPUs](rollout-objectives.md#a-step-on-several-gpus)): every process makes the same plan and the same packs, each computes its share of each pass's packs (balanced by their count, then their tokens), and the gradients are summed, so the update is the one a single GPU makes of the same minibatch. The policy's `idle` passes keep a process with fewer packs in step with the others, and its `clip_gradients` clips by the norm over every shard |
-| Files | Rank 0 writes the step's files from tensors every process gathers in the same order: the adapter in PEFT's layout (float32) or the full weights' serving copy (bfloat16 safetensors in files of at most 4 GB, an index, the configuration and tokenizer); `state/optimizer.pt` for an adapter and `state/shards/` (every process writes its shards) for full weights, every `state_every` steps since the processes loaded; `state/minibatches.jsonl` and `state/held.txt` every step |
-| Going on | A step whose parent's `state/held.txt` names what the processes hold goes on from their memory and reads none of its files (a training pod fetches only that file, [`Resident`](../guide/reference.md#resident)). Otherwise they load the parent: the adapter or the weights, and the optimizer's state from `state/shards/` (read back by however many processes there are now) or `state/optimizer.pt`; a parent with neither starts the optimizer afresh, and full weights then from the bfloat16 serving copy |
-| Failures | A failure in one process leaves the others waiting at a collective: the step raises `StepFailed` with its traceback, and every process is ended; the next step starts others and loads its parent. A step shared among processes does not leave out a minibatch that runs out of memory: the step fails |
-| Ending | `close()` ends the processes (a training pod closes its trainer when its lease is released or another run takes the pod); they also end when the trainer's process does, when their connection to it closes, and when a step is cancelled |
-| Memory | Each process may use the GPU memory free when it started, less `MEMORY_MARGIN`, as on one GPU |
+| Loading | Torch's generator is seeded alike first (`SEED`): a new adapter is the same in every process and every trainer. On one process an adapter's policy is loaded onto the GPU as it is; on several each process loads it onto the CPU and shards it onto its GPU, the processes taking turns, so the machine holds one unsharded copy at a time. Full weights are sharded on any number ([several GPUs](#several-gpus)). What the processes held is dropped, and its memory freed, before another parent is loaded |
+| Going on | A step whose parent's `state/held.txt` names what the processes hold goes on from their memory and reads none of its files (a training pod fetches only that file). Otherwise they load the parent: the adapter or the weights, and the optimizer's state from `state/shards/` or `state/optimizer.pt`; a parent without a state starts the optimizer afresh. A parent whose state left the full state out (`state_every` above 1), and which the processes do not hold, is refused with `StepFailed` before any process is asked: going on would start its optimizer afresh, and full weights from their bfloat16 copy |
+| Learning rate | The settings' on every step, whatever the saved optimizer state carries |
+| Failures | A failure in one process leaves the others waiting at a collective: the step raises [`StepFailed`](../guide/reference.md#stepfailed) with its traceback, and every process is ended; the next step starts others and loads its parent |
+| Ending | `close()` ends the processes (a training pod closes its trainer when its lease is released or another run takes the pod); they also end when the trainer's process does, when their connection to it closes, and when a step is cancelled. What they hold is nothing once torchrun has ended (`holding`) |
+| Memory | Each process may use the GPU memory free when it started, less `MEMORY_MARGIN` ([the memory bound](#the-memory-bound)) |
 
 A step's metrics add `gpus`, `whole_base`, `loaded_from_files` (1 where the processes loaded the parent's files rather
 than going on from memory) and `full_state` (1 where the step wrote the trainer's full state); `peak_gpu_gib` is the
 largest of any process's, `free_gpu_gib` the least.
+
+## Several GPUs
+
+On more than one GPU of a machine, each process holds its shard of the policy and of the optimizer
+(`rollout_lora.sharded`, PyTorch's FSDP2); full weights are sharded so on one GPU too.
+
+| Part | What it does |
+|---|---|
+| Sharding | Each decoder layer is a unit of `fully_shard`; the rest of the model (the output layer, the last norm, embeddings held on the GPU) is the root's, the policy's `Scorer`, which computes the hidden states and the output layer's chunks in one call, so the output layer is gathered once a call. For an adapter, each layer's adapter matrices are a unit of their own, gathered for each pass; where each GPU holds the whole frozen model (`whole_base`), the frozen layers are gathered once and kept, else each layer's frozen weights are gathered as it computes. The frozen output layer is kept once gathered. Full weights, their gradients and Adam's moments are sharded in float32, and a frozen reference beside them |
+| Precision | An adapter is kept and computed in float32 and its frozen model in bfloat16, as on one GPU: sharded on one process, its step is bitwise the step on the policy as it is (on the CPU). Full weights' units are gathered in bfloat16, on one GPU as on several, so the forward and backward passes run in bfloat16 (the residual stream and the norms too). Gradients are reduced in float32 (`MixedPrecisionPolicy`), and activations checkpointed as on one GPU |
+| Reductions | An adapter whose frozen model is whole on each GPU reduces its gradients once a minibatch, in its last pass (`gradient_sync`): the passes before keep theirs in each process, in float32. Elsewhere each pass reduces its own: full weights' gradients kept to a minibatch's last pass would be on every GPU unsharded |
+| The step | `rollout_objectives.step.PolicyStep` shared among the processes ([a step on several GPUs](rollout-objectives.md#a-step-on-several-gpus)): every process makes the same plan and the same packs, each computes its share of each pass's packs (balanced by their count, then their tokens), and the gradients are summed, so the update is the one a single GPU makes of the same minibatch. The policy's `idle` passes keep a process with fewer packs in step with the others, and its `clip_gradients` clips by the norm over every shard |
+| Files | Rank 0 writes the step's files from tensors every process gathers in the same order: the adapter in PEFT's layout (float32) or the full weights' serving copy; `state/optimizer.pt` for an adapter and `state/shards/` (every process writes its shards) for full weights, every `state_every` steps since the processes loaded; `state/minibatches.jsonl`, and `state/held.txt` where the processes are kept, every step |
+| Failures | A step shared among processes does not leave out a minibatch that runs out of memory: the step fails |
 
 What each GPU needs is estimated by `rollout_train.memory` (the check's `memory` rule, [validation](../guide/cluster.md#validation)),
 in GiB a GPU for a 9B and a 4B model of Qwen3.5's shapes, segments (and packs) of 8,192 tokens (the same on 80 and 96 GB cards;
@@ -157,18 +163,18 @@ in GiB a GPU for a 9B and a 4B model of Qwen3.5's shapes, segments (and packs) o
 
 | Model | Weights | 1 GPU | 2 | 4 | 8 |
 |---|---|---|---|---|---|
-| 9B | adapter | 26 | 34 (whole on each) | 29 | 27 |
-| 9B | full | 150 (no) | 91 (no on 80 GB) | 55 | 37 |
-| 4B | adapter | 15 | 19 | 16 | 15 |
-| 4B | full | 75 | 44 | 27 | 18 |
+| 9B | adapter | 27 | 36 (whole on each) | 31 | 29 |
+| 9B | full | 163 (no) | 91 (no on 80 GB) | 55 | 37 |
+| 4B | adapter | 16 | 20 | 18 | 17 |
+| 4B | full | 79 | 45 | 27 | 19 |
 
 ## The memory bound
 
-The process may use the GPU memory that is free when it starts, less `MEMORY_MARGIN`, and no more
+Each process may use the GPU memory that is free when it starts, less `MEMORY_MARGIN`, and no more
 (`torch.cuda.set_per_process_memory_fraction`). Some drivers let a process spill past the card into system memory,
-where a step crawls instead of failing; the bound turns that into an out-of-memory error. A minibatch that runs out
-of memory is dropped whole, its gradient cleared, and counted in `minibatches_out_of_memory`; the pass goes on with
-the next. A pack of the step's start that runs out of memory runs again a segment at a time, and an item with a
+where a step crawls instead of failing; the bound turns that into an out-of-memory error. On one process, a minibatch
+that runs out of memory is dropped whole, its gradient cleared, and counted in `minibatches_out_of_memory`; the pass
+goes on with the next. A pack of the step's start that runs out of memory runs again a segment at a time, and an item with a
 segment that runs out alone is left out and counted in `start_out_of_memory`. Segments longer than `segment_tokens`
 are left out before the pass and counted in `segments_too_long`. A pack holds at most `pack_tokens` (by default
 `segment_tokens`), so a pass needs no more memory than the longest segment alone; the memory estimate
@@ -206,13 +212,13 @@ alone, and its backward pass adds up every branch's gradient. Every model `PACKA
 
 ## The step
 
-The worker takes [`rollout_objectives.step.PolicyStep`](rollout-objectives.md#the-step) on the policy: the plan of
+Each process takes [`rollout_objectives.step.PolicyStep`](rollout-objectives.md#the-step) on the policy: the plan of
 minibatches, where the step starts (each sampled token's logprob on the weights it starts from, and the reference's
 where the objective reads it), each minibatch's loss as the objective composes it, the stop at `max_kl` and AdamW's
 update. Which items are in the batch, and each one's advantage, is the
 [algorithm's](../libraries/rollout-train/training.md) business. The step's metrics are
-[`rollout_objectives`'](rollout-objectives.md#metrics), with the worker's `peak_gpu_gib` (GPU memory reserved at the
-peak) and `free_gpu_gib` (free when the process started); the training loop keeps them with the checkpoint the step
+[`rollout_objectives`'](rollout-objectives.md#metrics), with the processes' `peak_gpu_gib` (GPU memory reserved at
+the peak) and `free_gpu_gib` (free when they started); the training loop keeps them with the checkpoint the step
 made, and sends them to its hooks in its `step` note ([the record](../libraries/rollout-train/training.md#the-record)).
 
 ## Measurements
@@ -243,16 +249,10 @@ The three agree to bfloat16's rounding: the first minibatch's loss is -0.01681 e
 -0.01457 on Qwen3.5; the step's gradient norm is within 1%. Peak memory with packs of 8,000 tokens on Qwen3.5 was
 12.1 GiB, against 8.9 GiB one segment at a time.
 
-Qwen3-0.6B, rank 8, on the same card, a step sharded with FSDP2 on one GPU (`test_sharded_on_gpu.py`) against the
-fresh process, from the same adapter and optimizer's state:
-
-| What | Fresh process | Sharded, one GPU |
-|---|---|---|
-| Loss | -0.0621 | -0.0633 |
-| Gradient norm | 1.4858 | 1.4854 |
-| KL moved | 0.00345 | 0.00344 |
-| The two steps' adapters apart | | 3.5% of what the step moved them |
-| A step of 12 segments of 400 to 900 tokens, after the first | 6.7 s | 6.8 s (the model sharded), 8.0 s (whole on the GPU); the first step 13 to 14 s |
+Qwen3-0.6B, rank 8, on the same card (`test_resident_on_gpu.py`), with PyTorch's deterministic algorithms: a step of
+6 segments of 400 to 900 tokens in a fresh process, the same step again, the same step in a kept process, and that
+process's next step, from memory, against the same step from its files, in a fresh process. Each pair is bitwise
+alike. A step in a fresh process took 9 s, the kept process's first 7.3 s, its next, from memory, 1.3 s.
 
 ## Tests
 
@@ -261,7 +261,8 @@ the adapter switched off (the model it was added to), and the settings a trainer
 numbers among them); the step itself is [`rollout_objectives`'](rollout-objectives.md#tests). `test_merge.py` covers
 merging on the CPU. `test_small_on_gpu.py` runs only when asked
 (`-m live`), with nothing else on the card: on Qwen3-0.6B (`ROLLOUT_SMALL_MODEL` names another) it trains an
-adapter, takes two steps of every weight, and checks that a merged adapter gives what the adapter gave (an adapter
+adapter, takes steps of every weight (its serving copy and full state written, its next step from memory, a step from
+its weights alone), and checks that a merged adapter gives what the adapter gave (an adapter
 that moved logprobs by 2.6 on average, merged, is 0.06 from it: bfloat16 rounds part of a small update away). Its
 steps write gigabytes, so give it `--basetemp` on disk, not `/tmp`.
 
@@ -275,8 +276,12 @@ processes (FSDP2 over gloo) step in packs, with shared prefixes, as one does. `t
 takes Qwen3.5's packs on the GPU, where flash-linear-attention's kernels run: logprobs and gradients against each
 segment alone, and a step against one segment at a time.
 
-`test_sharded.py` takes the trainers' steps on two and three processes on the CPU (gloo) with a tiny random Qwen3,
+`test_sharded.py` takes the trainers' steps on one, two and three processes on the CPU (gloo) with a tiny random Qwen3,
 against the step on one: an adapter with its model sharded and whole, a step from files one process wrote, a
-full-weight trainer's state written by two processes and read by three, a step that fails and the next that starts
-the processes again. `test_sharded_on_gpu.py` (`-m live`) takes a sharded step on one GPU against the fresh process. A
-step on several GPUs (NCCL) is taken only where a machine has them.
+full-weight trainer's state written by two processes and read by three, a step after the processes ended that goes on
+from its parent's full state (or is refused where the parent left it out), a step that fails and the next that starts
+the processes again; one process kept between steps and one ended after each, their steps alike; what the processes
+hold is nothing once torchrun is gone, and is dropped before another parent is loaded; an adapter's float32 units
+sharded on one process step bitwise as the policy does, and its gradients reduced once a minibatch are those reduced
+after each pass (`sharded_alone.py`, under torchrun). `test_resident_on_gpu.py` (`-m live`) takes a kept process's
+steps on one GPU against fresh processes'. A step on several GPUs (NCCL) is taken only where a machine has them.

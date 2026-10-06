@@ -345,9 +345,11 @@ models = ["Qwen/Qwen3-8B"]
 segment_tokens = 8192
 ```
 
-Two of the trainer's settings are for several GPUs: `trainer.state_every` (how often its full state is written:
-every step for an adapter, every 10 for full weights, by default) and `trainer.whole_base` (whether each GPU holds an
-adapter's whole frozen model: by default where the model takes at most half a GPU).
+A trainer with its GPUs to itself keeps its processes between steps; one with `colocate_with` takes each step in fresh
+processes, which give the engine its memory back. `trainer.state_every` says how often a kept trainer writes its full
+state (every step by default: with more, a step from a checkpoint without it fails once the processes holding it are
+gone), and `trainer.whole_base` whether each of several GPUs holds an adapter's whole frozen model (by default where
+the model takes at most half a GPU) ([LoRA trainer](../implementations/rollout-lora.md#processes)).
 
 ## Bridges
 

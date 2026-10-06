@@ -8,11 +8,11 @@
 | Envoy | `0.0.0.0:8443` (the pod's exposed TCP port), admin on `127.0.0.1:9901` | Ends mutual TLS; takes only the gateway's certificate; passes on `POST /v1/steps`, `GET /v1/steps/CHECKPOINT` and `GET /v1/trainer` and answers everything else 404; limits request sizes (1 MiB) and rates (20 a second, bursts of 40); times requests out; logs each request without its body |
 | The training service (`python -m rollout_train.pods.training`) | `127.0.0.1:8001` (and `/healthz`, `/readyz` there) | Takes one step at a time, each idempotent by the checkpoint it makes: fetches the batch and the parent's files from the blob store, steps, keeps the new weights and state in the blob store, answers with their manifests and the step's metrics; beats with the pod's name, identity, address and the step it is taking |
 
-The trainers (`rollout_lora:LoraTrainer`, `rollout_lora:FullTrainer`) run each step in a fresh process on a pod of one
-GPU, which frees the GPU and the memory when it ends. On a pod of several (`gpu_count`), the training service's trainer
-starts a process per GPU under torchrun (`python -m torch.distributed.run --standalone --nproc-per-node N -m
-rollout_lora.workers`, the image's PyTorch), which hold the policy sharded over the GPUs between steps and end when
-another run takes the pod or its lease is released. A run's trainer reaches the pod with `rollout_train.pods.RemoteTrainer`.
+The trainers (`rollout_lora:LoraTrainer`, `rollout_lora:FullTrainer`) start a process per GPU under torchrun (`python -m
+torch.distributed.run --standalone --nproc-per-node N -m rollout_lora.workers`, the image's PyTorch), on a pod of one
+GPU too, which hold the policy (on several GPUs, sharded over them) between steps and end when another run takes the
+pod or its lease is released. On a host's pod whose vLLM sleeps while a step is taken (`ROLLOUT_SLEEP_VLLM`), they end
+after each step, which gives vLLM back the GPU's memory. A run's trainer reaches the pod with `rollout_train.pods.RemoteTrainer`.
 The service reads its lease: when a run takes the pod, it makes its trainer anew with the run's settings (the lease's)
 and reads the ledger with the token the lease gives for that run, once no step runs; its beats then say it is ready for
 that run.

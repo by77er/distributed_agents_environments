@@ -36,7 +36,7 @@ pages here describe the ones that exist.
 ## Read in this order
 
 1. [vLLM engine](../implementations/rollout-vllm.md): options, adapters by name, sleep and wake, measurements.
-2. [LoRA trainer](../implementations/rollout-lora.md): settings, a fresh process per step, the memory bound.
+2. [LoRA trainer](../implementations/rollout-lora.md): settings, its processes, the memory bound.
 3. [Objectives in torch](../implementations/rollout-objectives.md): an objective's loss from its components, the step,
    metrics.
 4. [Tinker trainer and engine](../implementations/rollout-tinker.md): training and sampling at Thinking Machines.

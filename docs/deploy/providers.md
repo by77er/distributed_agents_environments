@@ -139,9 +139,10 @@ says `colocate_with` and nothing of pods.
 A `runpod-trainer` with a `gpu_count` above one rents one pod with that many GPUs of its `gpu_types`, and its training
 service steps on all of them: it is given `ROLLOUT_TRAINER_GPUS`, and its trainer runs a process per GPU under
 torchrun, the policy sharded over them with FSDP2 and kept between steps
-([several GPUs](../implementations/rollout-lora.md#several-gpus)). A step from the checkpoint the pod made last
-fetches none of its parent's files; the pod still writes every checkpoint's weights (and its full state every
-`trainer.state_every` steps) to the bucket, so another pod, or the same one started again, goes on from them. When
+([several GPUs](../implementations/rollout-lora.md#several-gpus)); a pod of one GPU keeps its process between steps
+too. A step from the checkpoint the pod made last fetches none of its parent's files; the pod still writes every
+checkpoint's weights and its full state (every `trainer.state_every` steps, every step by default) to the bucket, so
+another pod, or the same one started again, goes on from them. When
 another run takes the pod, or its lease is released, the processes end and free the GPUs. The check refuses a trainer
 whose estimate of each GPU's memory is more than a GPU's (`memory`), and says how many would hold it.
 
@@ -159,15 +160,16 @@ cloud = "secure"
 price = 13.96                                  # four GPUs' worth: a pod's price
 max_pods = 1
 store = "r2"
-volume_gb = 400                                # the full state: about 100 GB every state_every steps
+volume_gb = 400                                # the full state: about 100 GB a step
 container_disk_gb = 100
 step_ca = { url = "https://ca.example.com", provisioner = "launcher", trust = "system", key_file = "/etc/rollout-secrets/step-ca/provisioner.jwk", root = "/etc/rollout-secrets/step-ca/root_ca.crt" }
 models = ["Qwen/Qwen3-8B"]
 segment_tokens = 8192
 ```
 
-A run on it says `trainer.provider = "h100x4-full"`, and may say `trainer.state_every` (10 by default for full weights;
-1 for an adapter). A host's pod (`runpod-host`) has one GPU: vLLM and the trainer share it.
+A run on it says `trainer.provider = "h100x4-full"`, and may say `trainer.state_every` (1 by default: with more, a
+step from a checkpoint without the full state fails once the pod that holds it is gone). A host's pod (`runpod-host`)
+has one GPU: vLLM and the trainer share it, and with `sleep` the trainer's process ends after each step.
 
 ### A pod that trains and samples
 

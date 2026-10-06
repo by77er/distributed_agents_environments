@@ -42,7 +42,7 @@ do not edit by hand.
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`checked_with`](#checked_with), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#rollout_trainpublishingpacked), [`Project`](#project), [`project_of`](#project_of), [`publish`](#rollout_trainpublishingpublish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteEntryFacts`](#suiteentryfacts), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
-- **[`rollout_train.memory`](#rollout_trainmemory)** — What a trainer needs of each GPU's memory, from the model's files and its GPUs. [`ALLOWANCE_GIB`](#allowance_gib), [`GPU_MEMORY_GIB`](#gpu_memory_gib), [`gpu_memory_gib`](#gpu_memory_gib), [`model_facts`](#model_facts), [`ModelFacts`](#modelfacts), [`SEGMENT_TOKENS`](#segment_tokens), [`trainer_memory`](#trainer_memory), [`TrainerMemory`](#trainermemory)
+- **[`rollout_train.memory`](#rollout_trainmemory)** — What a trainer needs of each GPU's memory, from the model's files and its GPUs. [`ALLOWANCE_GIB`](#allowance_gib), [`GPU_MEMORY_GIB`](#gpu_memory_gib), [`gpu_memory_gib`](#gpu_memory_gib), [`holds_whole_base`](#holds_whole_base), [`model_facts`](#model_facts), [`ModelFacts`](#modelfacts), [`SEGMENT_TOKENS`](#segment_tokens), [`trainer_memory`](#trainer_memory), [`TrainerMemory`](#trainermemory)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`LEDGER_TOKEN`](#ledger_token), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets), [`served_ledger`](#served_ledger)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
@@ -2946,6 +2946,8 @@ start (too little memory, say).
 - `def __init__(self, trainer: Trainer, channels: Sequence[Pausable], *, guard: Callable[[], None] | None = None) -> None`
 - `@property def changeable(self) -> Mapping[str, JsonValue]` — The settings the trainer it wraps takes between steps (`rollout_train.trainer.Changeable`), if any.
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
+- `@property def holding(self) -> str | None` — What the trainer it wraps holds between steps (`rollout_train.trainer.Resident`), if it holds anything.
+- `def close(self) -> None` — End what the trainer it wraps keeps running between steps, if it keeps anything.
 - `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
 
 ### `Dataset`
@@ -3340,9 +3342,10 @@ before (a loop started again serves what it served).
 class Resident(Protocol)
 ```
 
-A trainer that keeps its policy and optimizer in memory between steps (a trainer on several GPUs): a step from
-the checkpoint it made last goes on from them. Its steps still leave every file a later step needs, so any trainer
-can take any step.
+A trainer that keeps its policy and optimizer in memory between steps (`rollout_lora`'s, with its GPUs to
+itself): a step from the checkpoint it made last goes on from them. Its steps still leave every file a later step
+needs, so any trainer can take any step, unless it is told to leave its full state out of some (`rollout_lora`'s
+`state_every`): a step from one of those needs the trainer that holds it, and fails (`StepFailed`) without it.
 
 **Methods**
 
@@ -9234,6 +9237,18 @@ def gpu_memory_gib(gpu_types: tuple[str, ...]) -> float | None
 The least memory of any of RunPod's GPU types (`GPU_MEMORY_GIB`, or the `80GB` its id says); none where one is
 not known.
 
+### `holds_whole_base`
+
+*function* · `libraries/rollout-train/src/rollout_train/memory.py`
+
+```python
+def holds_whole_base(file_bytes: float, gpu_gib: float | None) -> bool
+```
+
+Whether each GPU holds an adapter's whole frozen model where the settings do not say (`whole_base`): where the
+model's files take at most half of a GPU's memory (`gpu_gib`, as `gpu_memory_gib` gives it; none: not known). The
+estimate decides by it, and so does the trainer, from its GPUs' names.
+
 ### `model_facts`
 
 *function* · `libraries/rollout-train/src/rollout_train/memory.py`
@@ -9264,6 +9279,7 @@ What a model's files say of its size.
 | `layers` | `int` | required |  |
 | `vocabulary` | `int` | required |  |
 | `tied` | `bool` | required | Whether its output layer is its token embeddings. |
+| `linear_state` | `int` | `0` | The values of a linear-attention layer's state (value heads times key width times value width); 0 for a model without linear attention. |
 
 ### `SEGMENT_TOKENS`
 
@@ -9285,7 +9301,7 @@ def trainer_memory(model: ModelFacts, *, weights: str, gpus: int, rank: int = 32
 
 What a trainer of `weights` (`lora` or `full`) over `model` on `gpus` GPUs needs of each
 (`rollout_train.memory`). `whole_base` is the adapter's setting (none: whole where the model takes at most half of
-`gpu_gib`).
+`gpu_gib`: `holds_whole_base`).
 
 ### `TrainerMemory`
 
@@ -9654,10 +9670,11 @@ class FullTrainer(LoraTrainer)
 ```
 
 Trains every weight of a text model (`rollout_lora.full`): a step starts from its parent's weights (the model's
-own for the first) and the optimizer's state, and leaves the new ones where it is told; on several GPUs the
-weights, gradients and optimizer's state are sharded over them, and a step leaves the weights in bfloat16 (what
-engines serve) and the full state every `state_every` steps. `settings` are `LoraSettings`' fields; `rank` is not
-used. It holds a reference (a frozen copy of the model) only when asked (`frozen_reference`).
+own for the first) and the optimizer's state, and leaves the new ones where it is told. The weights, gradients and
+optimizer's state are sharded over its GPUs (on one too), and a step leaves the weights in bfloat16 (what engines
+serve) and the full state (the float32 weights and the optimizer's) every `state_every` steps. `settings` are
+`LoraSettings`' fields; `rank` is not used. It holds a reference (a frozen copy of the model) only when asked
+(`frozen_reference`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -9677,13 +9694,12 @@ The settings of `LoraTrainer` and `FullTrainer`: a step's, and the adapter's sca
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `frozen_reference` | `bool` | `False` | For the full-weight trainer: hold a frozen copy of the model trained over (in bfloat16, beside the policy), the reference an objective may read. An adapter's reference is the model with the adapter switched off. |
-| `state_every` | `int \| None` | `None` | For a trainer on several GPUs, which keeps its model and optimizer between steps: write its full state (the optimizer's, and a full-weight trainer's float32 weights) every this many steps; the steps between leave the weights alone (an adapter in float32, full weights in bfloat16). None: every step for an adapter, every 10 for full weights. A trainer on one GPU writes it every step, which its next step starts from. |
-| `whole_base` | `bool \| None` | `None` | For an adapter on several GPUs: whether each GPU holds the whole frozen model, gathered once (true: no gathering for each segment, for a model that fits one GPU beside its activations), or a share of it, each layer gathered as it computes (false: a model too large for one GPU). None: whole where the model takes at most half of one GPU's memory. |
+| `state_every` | `int` | `1` | How often a trainer whose processes are kept between steps (one with its GPUs to itself) writes its full state: the optimizer's, and full weights in float32. Every step writes the weights (an adapter in float32, full weights as a bfloat16 serving copy) whatever this says. 1: every step, so that any trainer goes on from any checkpoint as the trainer that made it would. More: the steps between leave the full state out, which saves writing about 12 bytes a weight for full weights, and a step from one of them goes on only from the processes that hold it. Once those are gone (after a failed step, a restart, or another run taking a training pod) such a step fails (`StepFailed`) rather than go on from less than its parent was: a run started from the newest checkpoint with its full state goes on. A trainer whose processes end after each step (one beside an engine) writes it every step. |
+| `whole_base` | `bool \| None` | `None` | For an adapter on several GPUs: whether each GPU holds the whole frozen model, gathered once (true: no gathering for each segment, for a model that fits one GPU beside its activations), or a share of it, each layer gathered as it computes (false: a model too large for one GPU). None: whole where the model's files take at most half of a GPU's memory (`rollout_train.memory.holds_whole_base`, which the memory estimate decides by too). |
 
 **Methods**
 
 - `@property def alpha(self) -> float`
-- `def state_every_for(self, weights: str) -> int` — How often a resident trainer of `weights` (`lora`, `full`) writes its full state.
 
 ### `LoraTrainer`
 
@@ -9698,11 +9714,12 @@ Trains a LoRA adapter over `model`'s checkpoint, one step at a time. `settings` 
 steps (`rollout_train.trainer.Changeable`). Its reference is the model with the adapter switched off.
 
 `gpus` is how many GPUs it steps on (by default those it is given: `CUDA_VISIBLE_DEVICES`, which Ray sets for a
-trainer's actor, else the machine's). On one, each step runs in a fresh process (`rollout_lora.worker`) that keeps
-nothing: a step starts from the adapter and the optimizer's state it is given and leaves the new ones where it is
-told. On more, the steps run in a process per GPU kept between steps (`rollout_lora.resident`), the policy sharded
-over them (`rollout_lora.sharded`): a step from the checkpoint the last one made goes on from what they hold
-(`rollout_train.trainer.Resident`), and every step still leaves the files a later one can start from.
+trainer's actor, else the machine's), a process on each (`rollout_lora.workers`), the policy sharded over them on
+more than one (`rollout_lora.sharded`). `colocated` says it shares its GPU with an inference engine, which sleeps
+while it steps: then each step's processes end after it, and give the engine back the memory. Otherwise they are
+kept between steps: a step from the checkpoint the last one made goes on from what they hold
+(`rollout_train.trainer.Resident`). Every step leaves the files a later one starts from (the full state every
+`state_every` steps).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -9710,13 +9727,13 @@ over them (`rollout_lora.sharded`): a step from the checkpoint the last one made
 
 **Methods**
 
-- `def __init__(self, model: str, *, gpus: int | None = None, **settings: Any) -> None`
+- `def __init__(self, model: str, *, gpus: int | None = None, colocated: bool = False, **settings: Any) -> None`
 - `@property def objective(self) -> Objective`
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
-- `@property def holding(self) -> str | None` — What its processes hold between steps (none on one GPU, which holds nothing).
+- `@property def holding(self) -> str | None` — What its processes hold between steps (none beside an engine, where they end after each step).
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
-- `def close(self) -> None` — End its processes on several GPUs, and what they hold (the next step starts them again).
+- `def close(self) -> None` — End its processes, and what they hold (the next step starts them again).
 
 ## `rollout_objectives.settings`
 
@@ -10143,7 +10160,9 @@ A policy sharded among the processes a step is shared among, whose gradients are
 their mean: each item's loss is divided by its whole minibatch's units). It takes an idle pass (`idle`: one that
 learns nothing, under the reference with `reference`, with a backward pass with `gradient`) where a process has
 fewer passes than the others, since the processes gather a sharded model's layers together; and clips its
-gradient by the norm over every process's shard (`clip_gradients`, which returns the norm before).
+gradient by the norm over every process's shard (`clip_gradients`, which returns the norm before). It may reduce a
+minibatch's gradient once, in its last pass (`gradient_sync`, told before each of a minibatch's gradient passes
+whether it is the last: a sharded adapter keeps the others' gradients in each process).
 
 **Methods**
 

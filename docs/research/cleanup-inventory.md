@@ -495,7 +495,7 @@ No real record uses any of these layouts (see the ledger section above).
   - the front end at `WEB/api/types.ts:277` (`processes`, read by machines.tsx);
   - the test `tests/rollout/test_processes.py`.
 - **Why:** it exists because a killed driver left engines holding the GPU. Ray supervises actor processes.
-- **Keep:** `end_with_parent` (used by `implementations/rollout-lora/src/rollout_lora/worker.py:24` and
+- **Keep:** `end_with_parent` (used by `implementations/rollout-lora/src/rollout_lora/workers.py` and
   `minecraft_team/paper.py:45`) and `children` (used by `rollout_vllm/engine.py:16`).
 - **Risk:** medium. Delete only once engines are Ray actors and Ray's kill has been shown to reap vLLM's children.
 - **Lines:** ~50 code, ~15 tests.
@@ -511,7 +511,8 @@ No real record uses any of these layouts (see the ledger section above).
 - **`RT/colocated.py`.** The trainer shares a GPU with engines in the same process. That is the real one-GPU
   configuration, used by curriculum-9. It is not Ray-less as such. The replacement either puts trainer and engines in
   one actor or adds a sleep and wake protocol between actors. This is a design item, not a removal.
-- **`RT/machine.py`** (heartbeat measurements), **`RT/ray_cluster.py`**, and rollout-lora's fresh process per step.
+- **`RT/machine.py`** (heartbeat measurements), **`RT/ray_cluster.py`**, and rollout-lora's processes ended after
+  each step beside an engine.
 
 ---
 

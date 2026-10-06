@@ -2,7 +2,7 @@
 
 **Status: phase 4 built in part, the rest proposed.** Built: FSDP2 in `rollout_lora` for `lora` and `full` on the GPUs
 of one machine (a process per GPU under torchrun, sharded state, the serving copy and the adapter gathered by rank 0),
-a resident trainer on several GPUs that keeps its state between steps and writes its full state every
+a resident trainer (on its own GPUs, one or several) that keeps its state between steps and writes its full state every
 `trainer.state_every` steps, a provider's `gpus` (local) and `gpu_count` (RunPod) above one, and the check's `memory`
 rule from a model's files ([LoRA trainer](../implementations/rollout-lora.md#several-gpus)). Not built: everything
 else here, among it MoE expert LoRA with grouped kernels, the model card and the planner (phases 1 and 3), engines on
@@ -45,8 +45,8 @@ The parts the three questions touch, as main has them:
 
 | Part | Now | Code |
 |---|---|---|
-| LoRA trainer | On one GPU, one process per step (`device_map={"": "cuda"}`); the model is loaded from its files at the start of every step. On several GPUs of one machine, a process per GPU kept between steps, the frozen model sharded or whole on each, the adapter sharded (FSDP2). LoRA wraps every linear layer whose name ends in one of `TARGETS` (Qwen3.5's projections, linear attention included) inside `language_model` (an image-text model) or `layers`; the vision tower is dropped; the embedding table stays in its file | `rollout_lora.policy`, `.layers`, `.worker` |
-| Full-weight trainer | On one GPU, the same process per step; weights, gradients and Adam's two moments in FP32 on the one device (16 bytes a weight: Qwen3-0.6B takes about 10 GiB); image-text models refused; every step saves the whole model in FP32. On several GPUs, all of it sharded over them and kept between steps; each step saves a BF16 serving copy, and the full state every `trainer.state_every` steps (PyTorch's distributed checkpoint) | `rollout_lora.full`, `.sharded`, `.resident`, `.workers` |
+| LoRA trainer | A process per GPU under torchrun, kept between steps where the trainer has its GPUs to itself; beside an engine, ended after each step, so the model is loaded from its files at the start of every step. On one GPU the policy is on the device as it is (`device_map={"": "cuda"}`); on several, the frozen model sharded or whole on each, the adapter sharded (FSDP2). LoRA wraps every linear layer whose name ends in one of `TARGETS` (Qwen3.5's projections, linear attention included) inside `language_model` (an image-text model) or `layers`; the vision tower is dropped; the embedding table stays in its file | `rollout_lora.policy`, `.layers`, `.resident`, `.workers` |
+| Full-weight trainer | The same processes; weights, gradients and Adam's two moments in FP32, sharded (FSDP2) on any number of GPUs, one included (16 bytes a weight: Qwen3-0.6B takes about 10 GiB); image-text models refused; each step saves a BF16 serving copy, and the full state every `trainer.state_every` steps (PyTorch's distributed checkpoint; every step by default) | `rollout_lora.full`, `.sharded`, `.resident`, `.workers` |
 | Engines | `VllmEngine`: one vLLM `AsyncLLM` per engine host, started with a fixed set of arguments (BF16, LoRA on, `max_loras`, sleep mode, `language_model_only`, optional `quantization`): no tensor, pipeline, data or expert parallel. Full weights are loaded from a path with `collective_rpc("reload_weights")`; sleep drops the weights (level 2) and waking reads them again | `rollout_vllm.engine` |
 | A run's gang | One `PACK` placement group: a bundle per engine replica, one for the trainer on the driver's node (a step's files are handed to it by path), one for the largest bridge. A bundle must fit on one node; more than one GPU is rounded up to whole GPUs. On Kubernetes the RayJob's head pod holds the driver, trainer and bridge, and each engine replica's bundle can be a worker pod | `rollout_train.demand`, `.submitting` |
 | Weights from trainer to engines | Files: the trainer writes a checkpoint into the blob store, the loop appends a serving record naming the files (or what a bridge made of them), and each follower fetches and loads them. A colocated trainer shares one GPU with the engines, which sleep while it steps | `rollout_train.serving`, `.following`, `.colocated` |
@@ -202,18 +202,17 @@ offer pins the kernel where needed.
 
 **Full weights.** Sixteen bytes a weight is the floor for Adam in mixed precision; the only ways past one GPU are
 sharding (section 2) or a smaller optimizer state (8-bit Adam: about 10 bytes a weight), which changes the numerics of
-a recipe and is left out. Two habits of today's full-weight trainer do not survive large models:
+a recipe and is left out. Two habits do not survive large models:
 
 - **A fresh process per step that loads the parent's files.** At 70B that is 280 GB of FP32 weights and 560 GB of
   optimizer state read and written every step.
-- **The whole model saved in FP32 every step.** It goes to the blob store, so every follower fetches four bytes a
-  weight to serve two.
+- **The whole model saved in FP32 for the followers.** It goes to the blob store, so every follower fetches four bytes
+  a weight to serve two.
 
-So a full-weight trainer above a few billion parameters should be **resident**: it keeps its FP32 weights and
-optimizer state in GPU memory between steps, writes the serving copy (BF16) every step, and writes its full state to
-durable storage every few steps. A crash then loses at most those few steps: each checkpoint says whether it holds
-the trainer's full state or only its serving copy, and a resumed run goes on from the newest that holds the state
-(decision 1 below).
+So a full-weight trainer is **resident**: it keeps its FP32 weights and optimizer state in GPU memory between steps,
+writes the serving copy (BF16) every step, and writes its full state to durable storage every `trainer.state_every`
+steps. A step from a checkpoint without the full state goes on only from the processes that hold it, and fails
+without them rather than go on from the serving copy (decision 1 below).
 
 ### Engines
 
@@ -259,8 +258,8 @@ What one checkpoint weighs, and what moving it costs:
 | DeepSeek-V3 (671B) | about 1.37 TB | 689 GB (native) | 8 TB | — | 23 min |
 | Kimi K2 (1T) | about 2.05 TB | 1.03 TB (native) | 12.4 TB | about 10 GB (experts at `r/k`) | 34 min |
 
-The serving copy goes to every follower each step; the trainer's state only to durable storage, and only every few
-steps once the trainer is resident. An adapter is small at every size; full weights stop being cheap to publish
+The serving copy goes to every follower each step; the trainer's state only to durable storage, every
+`trainer.state_every` steps once the trainer is resident. An adapter is small at every size; full weights stop being cheap to publish
 through the blob store somewhere around 30B.
 
 - **Name maps from the architecture.** The trainer writes PEFT names; each consumer's names come from the
@@ -741,15 +740,16 @@ Most value first. Each later phase waits for its trigger: a run someone wants th
 
 ## Open decisions
 
-1. **A resident trainer for large models.** Today a step is a fresh process that loads its parent's files, which keeps
-   the trainer stateless and every step recoverable. For full weights above a few billion parameters (and any trainer
-   on several GPUs) that costs more than the step. *Recommendation:* keep the fresh process for one-GPU trainers;
+1. **A resident trainer for large models.** A fresh process per step that loads its parent's files keeps the trainer
+   stateless and every step recoverable. For full weights above a few billion parameters (and any trainer on several
+   GPUs) that costs more than the step. *Recommendation:* keep the fresh process for one-GPU trainers;
    make multi-GPU and full-weight trainers resident, writing the serving copy every step and the full state (FP32
    weights, optimizer) every `trainer.state_every` steps (default 1 for LoRA, 10 for full weights), so a crash costs
-   at most that many steps. *Built:* trainers on several GPUs are resident, with `trainer.state_every`; a trainer on
-   one GPU, full weights included, keeps the fresh process. A step whose parent's state lacks the full state starts
-   from the parent's serving copy with the optimizer afresh: the loop does not yet go back to the newest checkpoint
-   that holds it.
+   at most that many steps. *Built:* every trainer with its GPUs to itself is resident, one GPU included, with
+   `trainer.state_every` at 1 by default for both; a trainer beside an engine takes each step in fresh processes. A
+   step whose parent's state lacks the full state, and which no process holds, fails (`StepFailed`): the loop does
+   not go back to the newest checkpoint that holds it, so `state_every` above 1 trades going on after a restart for
+   less to write.
 2. **Our own FSDP2 trainer, or an existing framework's.** verl, NeMo-RL and SkyRL bring sharded trainers, but each
    brings its own loop, objectives and engine management, which overlap the platform's. *Recommendation:* FSDP2 in
    `rollout_lora` for one node (PyTorch's `fully_shard` over the same model code), so objectives stay one
