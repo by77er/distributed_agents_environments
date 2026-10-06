@@ -160,10 +160,12 @@ def _loaded(asked: Asked, ranks: Any, device: "torch.device", mesh: Any) -> _Hel
 
     from rollout_lora.full import FullPolicy
     from rollout_lora.layers import load_adapter
+    from rollout_lora.models import fetched
     from rollout_lora.policy import Policy
     from rollout_lora.sharded import in_turn, read_optimizer, read_state, shard_adapter, shard_full
 
     settings, parent = asked.settings, asked.parent
+    fetched(asked.checkpoint)  # (before anything reads its files: a pod's cache starts empty)
     whole_base = asked.weights == "lora" and _whole_base(asked, ranks, device)
     shared = ranks.size > 1
     staged = "cpu" if shared else str(device)  # (several: loaded onto the CPU in turn, then sharded)

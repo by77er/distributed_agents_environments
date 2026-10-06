@@ -20,6 +20,18 @@ def local(model: str) -> Path:
     return cached / "snapshots" / reference.read_text().strip()
 
 
+def fetched(model: str) -> Path:
+    """A model's directory, downloaded into the Hugging Face cache first where it is neither a directory nor cached (a
+    training pod starts with an empty cache; each process may ask, and the hub's file locks keep it to one copy)."""
+    try:
+        return local(model)
+    except FileNotFoundError:
+        from huggingface_hub import snapshot_download  # pyright: ignore[reportUnknownVariableType]
+
+        snapshot_download(model)  # pyright: ignore[reportUnknownMemberType]
+        return local(model)
+
+
 def config(model: str) -> dict[str, Any]:
     return json.loads((local(model) / "config.json").read_text())
 
