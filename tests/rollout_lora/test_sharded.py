@@ -72,11 +72,12 @@ def close(one: dict[str, float], two: dict[str, float], keys: tuple[str, ...]) -
 COMPARED = ("loss", "tokens", "segments", "kl_moved", "mean_ratio", "gradient_norm", "optimizer_steps")
 
 
-@pytest.mark.parametrize("whole_base", [False, True])
+@pytest.mark.parametrize(("whole_base", "objective"), [(False, "default"), (True, "default"), (True, "grpo")])
 def test_an_adapter_on_two_processes_steps_as_on_one_and_goes_on_from_what_they_hold(
-    tiny: str, tmp_path: Path, whole_base: bool
+    tiny: str, tmp_path: Path, whole_base: bool, objective: str
 ) -> None:
-    settings = LoraSettings(**SETTINGS, whole_base=whole_base)
+    # (GRPO reads the reference: the adapter switched off, which its layers' unit is not gathered for)
+    settings = LoraSettings(**SETTINGS, whole_base=whole_base, objective=objective)
     torch.manual_seed(SEED)  # (the new adapter the processes draw)
     policy = Policy.load(tiny, rank=settings.rank, alpha=settings.alpha, device="cpu")
     torch.manual_seed(1)
@@ -195,3 +196,23 @@ def test_a_step_that_fails_in_the_processes_ends_them_and_the_next_starts_them_a
     finally:
         workers.close()
     assert again["loaded_from_files"] == 1.0 and again["segments"] == 5.0
+
+
+def test_every_weight_with_a_frozen_reference_on_two_processes_steps_as_on_one(tiny: str, tmp_path: Path) -> None:
+    changed: dict[str, Any] = {**SETTINGS, "learning_rate": 1e-4, "objective": "grpo", "frozen_reference": True}
+    settings = LoraSettings(**changed)
+    policy = FullPolicy.load(tiny, reference=tiny, device="cpu")  # (the reference: a second sharded model)
+    torch.manual_seed(1)
+    given = batch(policy.logprobs)
+    workers = Workers(tiny, settings, "full", 2, device="cpu")
+    try:
+        first = asyncio.run(workers.step(given, seed=0, parent=None, into=tmp_path / "first"))
+        made = Files(tmp_path / "first" / "weights", tmp_path / "first" / "state")
+        second = asyncio.run(workers.step(given, seed=1, parent=made, into=tmp_path / "second"))
+    finally:
+        workers.close()
+    alone = PolicyStep(policy, settings)
+    close(alone.step(given, seed=0), first, (*COMPARED, "kl_penalty"))
+    following = PolicyStep(policy, settings, fresh=False, optimizer_given=alone.optimizer)
+    close(following.step(given, seed=1), second, (*COMPARED, "kl_penalty"))
+    assert second["kl_penalty"] > 0  # (the second step's policy has moved from its reference)
