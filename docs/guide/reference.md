@@ -17,7 +17,7 @@ do not edit by hand.
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#rollout_trainrolloutsplan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Labelled`](#labelled), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Labelled`](#labelled), [`Ledger`](#ledger), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`record_serving`](#record_serving), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#scores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.inference.api`](#rollout_traininferenceapi)** — Channels on hosted APIs: by message, never trained on, spend counted. [`ApiChannel`](#apichannel), [`ATTEMPTS`](#attempts), [`Hosted`](#hosted), [`HostedEndpoint`](#hostedendpoint), [`priced`](#priced)
@@ -42,6 +42,7 @@ do not edit by hand.
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
 - **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`checked_with`](#checked_with), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#packed), [`Project`](#project), [`project_of`](#project_of), [`publish`](#rollout_trainpublishingpublish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteEntryFacts`](#suiteentryfacts), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
+- **[`rollout_train.memory`](#rollout_trainmemory)** — What a trainer needs of each GPU's memory, from the model's files and its GPUs. [`ALLOWANCE_GIB`](#allowance_gib), [`GPU_MEMORY_GIB`](#gpu_memory_gib), [`gpu_memory_gib`](#gpu_memory_gib), [`model_facts`](#model_facts), [`ModelFacts`](#modelfacts), [`SEGMENT_TOKENS`](#segment_tokens), [`trainer_memory`](#trainer_memory), [`TrainerMemory`](#trainermemory)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`LEDGER_TOKEN`](#ledger_token), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets), [`served_ledger`](#served_ledger)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
@@ -49,6 +50,7 @@ do not edit by hand.
 - **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
 - **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`importance_weight`](#importance_weight), [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`moved_kl`](#moved_kl), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`TALLIED`](#tallied), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
 - **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`positions`](#positions), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`TrainablePolicy`](#trainablepolicy)
+- **[`rollout_objectives.ranks`](#rollout_objectivesranks)** — The processes a step is shared among, one per GPU, and how a minibatch is shared. [`Ranks`](#ranks), [`shares`](#shares)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
 - **[`rollout_gemma`](#rollout_gemma)** — Renderers for the Gemma model families. [`arguments`](#arguments), [`gemma4`](#gemma4), [`GemmaFunctionCalls`](#gemmafunctioncalls)
 - **[`rollout_openai`](#rollout_openai)** — A model endpoint for the OpenAI Responses API, on an API key or a Codex login. [`ApiKey`](#apikey), [`codex_provider`](#codex_provider), [`CodexLogin`](#codexlogin), [`Credentials`](#credentials), [`hosted`](#rollout_openaihosted), [`ResponsesContract`](#responsescontract), [`ResponsesEndpoint`](#responsesendpoint)
@@ -3328,6 +3330,23 @@ async def record_serving(ledger: Ledger, run: str, serving: Serving, fence: Fenc
 
 Write down, under the run's fence, that its channel serves `serving` from now on; False if it was written
 before (a loop started again serves what it served).
+
+### `Resident`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class Resident(Protocol)
+```
+
+A trainer that keeps its policy and optimizer in memory between steps (a trainer on several GPUs): a step from
+the checkpoint it made last goes on from them. Its steps still leave every file a later step needs, so any trainer
+can take any step.
+
+**Methods**
+
+- `@property def holding(self) -> str | None` — The name it gave what it holds (written to that step's state as `HELD`); none while it holds nothing.
+- `def close(self) -> None` — End what it keeps running (its processes, and what they hold).
 
 ### `Result`
 
@@ -7096,7 +7115,7 @@ What a RunPod kind's table says of its pods (`pod_table`).
 |---|---|---|---|
 | `image` | `str` | required | The image its pods run (a digest from the images workflow's summary). |
 | `gpu_types` | `tuple[str, ...]` | required | RunPod's GPU type ids, in order of preference (`NVIDIA H100 80GB HBM3`). |
-| `gpu_count` | `int` | `1` |  |
+| `gpu_count` | `int` | `1` | GPUs a pod has (a host's: one). A trainer's pod of more steps on all of them, the policy sharded over them. |
 | `max_pods` | `int` | `1` | The most pods of the provider at once, across runs: a cap on what it spends. |
 | `idle_stop` | `float` | `600.0` | Seconds a pod no run holds stays warm, for the next run with the same image, model and GPU, before it is deleted. |
 | `start_timeout` | `float` | `1200.0` | Seconds a pod may take to say it is ready for the run that holds it before it is deleted and the run fails. |
@@ -7224,7 +7243,7 @@ The cluster's own certificate authority and the client certificate its gateway a
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation',), not_settings={**_OBJECTIVE, 'frozen_reference': "an adapter's reference is the model with the adapter switched off"}), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation',), not_settings={**_OBJECTIVE, 'rank': 'a full-weight trainer has no adapter'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_FAMILY, True, frozenset({'tinker'}), reference='no', entropy=False, distribution=False), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project', 'implementation'), secrets=('project',), not_settings={**_OBJECTIVE, 'project': 'the cluster config says it ([trainers.NAME] project)'}, allocation='metered'), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=LEASED), fields=('trainer', *POD_FIELDS), secrets=('api_key',), not_settings=_OBJECTIVE))}
+TRAINER_KINDS: Mapping[str, TrainerKind] = {each.name: each for each in (TrainerKind('lora', _LORA, 'rollout_lora:LoraTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation', 'gpu_memory_gib'), not_settings={**_OBJECTIVE, 'frozen_reference': "an adapter's reference is the model with the adapter switched off"}), TrainerKind('full', _FULL, 'rollout_lora:FullTrainer', 'rollout_lora.settings:LoraSettings', auths=('none',), auth=Auth('none'), fields=('implementation', 'gpu_memory_gib'), not_settings={**_OBJECTIVE, 'rank': 'a full-weight trainer has no adapter', 'whole_base': 'every weight is trained, and sharded'}), TrainerKind('tinker', TrainerCapabilities('lora', 'tinker', _EVERY_FAMILY, True, frozenset({'tinker'}), reference='no', entropy=False, distribution=False), 'rollout_tinker:TinkerTrainer', 'rollout_tinker.settings:TinkerSettings', auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project', 'implementation'), secrets=('project',), not_settings={**_OBJECTIVE, 'project': 'the cluster config says it ([trainers.NAME] project)'}, allocation='metered'), TrainerKind('runpod-trainer', _LORA, 'rollout_train.pods:RemoteTrainer', 'rollout_lora.settings:LoraSettings', auths=('mtls',), auth=Auth('mtls', identity=LEASED), fields=('trainer', 'gpu_memory_gib', *POD_FIELDS), secrets=('api_key',), not_settings=_OBJECTIVE))}
 ```
 
 Every kind of trainer, by name.
@@ -7291,7 +7310,7 @@ A trainer as a cluster deploys it (`[trainers.NAME]`).
 | `models` | `tuple[str, ...]` | required | The models it trains here. |
 | `auth` | `Auth` | required |  |
 | `segment_tokens` | `int \| None` | `None` | The longest segment this hardware trains on (none: any). |
-| `gpus` | `float` | `0` |  |
+| `gpus` | `float` | `0` | The GPUs it steps on (a share of one, where it shares an engine's): above one, a whole number, which it steps on together, the policy sharded over them. A `runpod-trainer`'s are its pods' `gpu_count`. |
 | `colocate_with` | `str \| None` | `None` | A `vllm` provider whose GPU it shares (that provider's engines sleep while it steps), or, for a `runpod-trainer`, a `runpod-host` provider whose pods take its steps beside their vLLM. |
 | `cost` | `Mapping[str, float]` | `field(default_factory=dict[str, float])` | Dollars per million tokens trained (`train`), or per hour (`hour`), for a model `costs` does not name. |
 | `costs` | `Mapping[str, Mapping[str, float]]` | `field(default_factory=dict[str, Mapping[str, float]])` | Its cost for each model whose price differs, by model, in the units of `cost`. |
@@ -8918,11 +8937,11 @@ One pure check of a run's settings against a cluster, with its rule table.
 *function* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-def check(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None = None, ledger: LedgerFacts | None = None) -> list[Finding]
+def check(settings: RunSettings, cluster: Cluster, environment: EnvironmentFacts | None = None, ledger: LedgerFacts | None = None, *, model: ModelFacts | None = None) -> list[Finding]
 ```
 
-Everything wrong with a run's settings on this cluster, given what is known of its environment and the ledger;
-empty when nothing is. A finding whose `refuses` is false is a note: the run may go.
+Everything wrong with a run's settings on this cluster, given what is known of its environment, the ledger and
+the trained model's size; empty when nothing is. A finding whose `refuses` is false is a note: the run may go.
 
 ### `CheckpointFacts`
 
@@ -9064,7 +9083,7 @@ class Rule
 *constant* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered, or a hosted API shares a channel"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is a hosted API (no exact tokens or behaviour logprobs, whatever the objective), is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('renderer', 'a channel sampling tokens whose model no renderer renders, that several do with none said, or a renderer said that says it renders other models'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, needs sandboxes or tool sets the cluster lacks, or, on Kubernetes, sandboxes whose pool is not served from pods of its own'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a training run's spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
+RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered, or a hosted API shares a channel"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is a hosted API (no exact tokens or behaviour logprobs, whatever the objective), is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('renderer', 'a channel sampling tokens whose model no renderer renders, that several do with none said, or a renderer said that says it renders other models'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('memory', "a trainer whose estimate of what each of its GPUs holds (weights, gradients, optimizer state and activations, sharded over its GPUs) is more than a GPU's memory"), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, needs sandboxes or tool sets the cluster lacks, or, on Kubernetes, sandboxes whose pool is not served from pods of its own'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a training run's spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
 ```
 
 Every rule `check` applies, in the order it reports them.
@@ -9178,6 +9197,120 @@ def with_weights(settings: RunSettings, cluster: Cluster) -> RunSettings
 ```
 
 A training run's settings with what it trains said (`weights_of`), as its start records them.
+
+## `rollout_train.memory`
+
+What a trainer needs of each GPU's memory, from the model's files and its GPUs.
+
+### `ALLOWANCE_GIB`
+
+*constant* · `libraries/rollout-train/src/rollout_train/memory.py`
+
+```python
+ALLOWANCE_GIB = 3.0
+```
+
+Each GPU's memory beyond what the estimate counts: the CUDA context, the collectives' buffers, fragmentation.
+
+### `GPU_MEMORY_GIB`
+
+*constant* · `libraries/rollout-train/src/rollout_train/memory.py`
+
+```python
+GPU_MEMORY_GIB: Mapping[str, float] = {'NVIDIA B200': 180, 'NVIDIA H200': 141, 'NVIDIA H200 NVL': 141, 'NVIDIA H100 80GB HBM3': 80, 'NVIDIA H100 NVL': 94, 'NVIDIA H100 PCIe': 80, 'NVIDIA A100-SXM4-80GB': 80, 'NVIDIA A100 80GB PCIe': 80, 'NVIDIA RTX PRO 6000 Blackwell Server Edition': 96, 'NVIDIA RTX PRO 6000 Blackwell Workstation Edition': 96, 'NVIDIA L40S': 48, 'NVIDIA L40': 48, 'NVIDIA RTX 6000 Ada Generation': 48, 'NVIDIA RTX A6000': 48, 'NVIDIA A40': 48, 'NVIDIA GeForce RTX 5090': 32, 'NVIDIA GeForce RTX 4090': 24, 'NVIDIA L4': 24}
+```
+
+Each GPU's memory by RunPod's GPU type id (a type not here says it in its id, `80GB`, or is not known).
+
+### `gpu_memory_gib`
+
+*function* · `libraries/rollout-train/src/rollout_train/memory.py`
+
+```python
+def gpu_memory_gib(gpu_types: tuple[str, ...]) -> float | None
+```
+
+The least memory of any of RunPod's GPU types (`GPU_MEMORY_GIB`, or the `80GB` its id says); none where one is
+not known.
+
+### `model_facts`
+
+*function* · `libraries/rollout-train/src/rollout_train/memory.py`
+
+```python
+def model_facts(model: str, *, environ: Mapping[str, str] | None = None, patience: float = 5.0) -> ModelFacts | None
+```
+
+What a model's files say of its size: read from its directory or the Hugging Face cache, else asked of the
+Hugging Face Hub, for at most `patience` seconds (`config.json` and the safetensors index; `HF_TOKEN` for a gated
+model; never with `HF_HUB_OFFLINE`); none where neither says. It blocks: call it in a thread.
+
+### `ModelFacts`
+
+*class* · `libraries/rollout-train/src/rollout_train/memory.py`
+
+```python
+class ModelFacts
+```
+
+What a model's files say of its size.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `file_bytes` | `int` | required | Its weights' files, in all (a quantized model's are its quantized weights). |
+| `parameters` | `float \| None` | required | Its parameters (none for a quantized model, whose files do not say them). |
+| `hidden` | `int` | required |  |
+| `layers` | `int` | required |  |
+| `vocabulary` | `int` | required |  |
+| `tied` | `bool` | required | Whether its output layer is its token embeddings. |
+
+### `SEGMENT_TOKENS`
+
+*constant* · `libraries/rollout-train/src/rollout_train/memory.py`
+
+```python
+SEGMENT_TOKENS = 8192
+```
+
+The segment an estimate allows activations for where the trainer says no longest one (`segment_tokens`).
+
+### `trainer_memory`
+
+*function* · `libraries/rollout-train/src/rollout_train/memory.py`
+
+```python
+def trainer_memory(model: ModelFacts, *, weights: str, gpus: int, rank: int = 32, segment_tokens: int | None = None, frozen_reference: bool = False, whole_base: bool | None = None, gpu_gib: float | None = None) -> TrainerMemory
+```
+
+What a trainer of `weights` (`lora` or `full`) over `model` on `gpus` GPUs needs of each
+(`rollout_train.memory`). `whole_base` is the adapter's setting (none: whole where the model takes at most half of
+`gpu_gib`).
+
+### `TrainerMemory`
+
+*class* · `libraries/rollout-train/src/rollout_train/memory.py`
+
+```python
+class TrainerMemory
+```
+
+What a trainer needs of each GPU, in GiB, by part (`rollout_train.memory`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `gpus` | `int` | required |  |
+| `weights` | `float` | required |  |
+| `gradients` | `float` | required |  |
+| `optimizer` | `float` | required |  |
+| `reference` | `float` | required |  |
+| `activations` | `float` | required |  |
+| `allowance` | `float` | `ALLOWANCE_GIB` |  |
+| `whole_base` | `bool` | `False` | For an adapter on several GPUs: whether the estimate has each hold the whole frozen model. |
+
+**Methods**
+
+- `@property def total(self) -> float`
+- `def said(self) -> str` — In words: `52 GiB a GPU (weights 18, gradients 9, ...)`.
 
 ## `rollout_train.slots`
 
@@ -9519,10 +9652,11 @@ A trainer for 4-bit checkpoints with LoRA.
 class FullTrainer(LoraTrainer)
 ```
 
-Trains every weight of a text model (`rollout_lora.full`), one step at a time in a fresh process: a step
-starts from its parent's full weights (the model's own for the first) and the optimizer's state, and leaves the
-new ones where it is told. `settings` are `LoraSettings`' fields; `rank` is not used. It holds a reference (a frozen
-copy of the model) only when asked (`frozen_reference`).
+Trains every weight of a text model (`rollout_lora.full`): a step starts from its parent's weights (the model's
+own for the first) and the optimizer's state, and leaves the new ones where it is told; on several GPUs the
+weights, gradients and optimizer's state are sharded over them, and a step leaves the weights in bfloat16 (what
+engines serve) and the full state every `state_every` steps. `settings` are `LoraSettings`' fields; `rank` is not
+used. It holds a reference (a frozen copy of the model) only when asked (`frozen_reference`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -9542,10 +9676,13 @@ The settings of `LoraTrainer` and `FullTrainer`: a step's, and the adapter's sca
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `frozen_reference` | `bool` | `False` | For the full-weight trainer: hold a frozen copy of the model trained over (in bfloat16, beside the policy), the reference an objective may read. An adapter's reference is the model with the adapter switched off. |
+| `state_every` | `int \| None` | `None` | For a trainer on several GPUs, which keeps its model and optimizer between steps: write its full state (the optimizer's, and a full-weight trainer's float32 weights) every this many steps; the steps between leave the weights alone (an adapter in float32, full weights in bfloat16). None: every step for an adapter, every 10 for full weights. A trainer on one GPU writes it every step, which its next step starts from. |
+| `whole_base` | `bool \| None` | `None` | For an adapter on several GPUs: whether each GPU holds the whole frozen model, gathered once (true: no gathering for each segment, for a model that fits one GPU beside its activations), or a share of it, each layer gathered as it computes (false: a model too large for one GPU). None: whole where the model takes at most half of one GPU's memory. |
 
 **Methods**
 
 - `@property def alpha(self) -> float`
+- `def state_every_for(self, weights: str) -> int` — How often a resident trainer of `weights` (`lora`, `full`) writes its full state.
 
 ### `LoraTrainer`
 
@@ -9555,11 +9692,16 @@ The settings of `LoraTrainer` and `FullTrainer`: a step's, and the adapter's sca
 class LoraTrainer
 ```
 
-Trains a LoRA adapter over `model`'s checkpoint, one step at a time, each in a fresh process on the GPU
-(`rollout_lora.worker`). It keeps nothing between steps: a step starts from the adapter and the optimizer's
-state it is given and leaves the new ones where it is told. `settings` are `LoraSettings`' fields (its
+Trains a LoRA adapter over `model`'s checkpoint, one step at a time. `settings` are `LoraSettings`' fields (its
 `objective` among them); those in `CHANGEABLE`, and the changeable components of its objective, it takes between
 steps (`rollout_train.trainer.Changeable`). Its reference is the model with the adapter switched off.
+
+`gpus` is how many GPUs it steps on (by default those it is given: `CUDA_VISIBLE_DEVICES`, which Ray sets for a
+trainer's actor, else the machine's). On one, each step runs in a fresh process (`rollout_lora.worker`) that keeps
+nothing: a step starts from the adapter and the optimizer's state it is given and leaves the new ones where it is
+told. On more, the steps run in a process per GPU kept between steps (`rollout_lora.resident`), the policy sharded
+over them (`rollout_lora.sharded`): a step from the checkpoint the last one made goes on from what they hold
+(`rollout_train.trainer.Resident`), and every step still leaves the files a later one can start from.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -9567,11 +9709,13 @@ steps (`rollout_train.trainer.Changeable`). Its reference is the model with the 
 
 **Methods**
 
-- `def __init__(self, model: str, **settings: Any) -> None`
+- `def __init__(self, model: str, *, gpus: int | None = None, **settings: Any) -> None`
 - `@property def objective(self) -> Objective`
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
+- `@property def holding(self) -> str | None` — What its processes hold between steps (none on one GPU, which holds nothing).
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
+- `def close(self) -> None` — End its processes on several GPUs, and what they hold (the next step starts them again).
 
 ## `rollout_objectives.settings`
 
@@ -9925,6 +10069,8 @@ class PolicyStep
 | `policy` | `TrainablePolicy` | required |  |
 | `settings` | `StepSettings` | `field(default_factory=StepSettings)` |  |
 | `fresh` | `bool` | `True` | Whether the optimizer starts afresh (warmed up), or goes on from a state loaded into it. |
+| `ranks` | `Ranks` | `field(default_factory=Ranks)` | The processes the step is shared among (one by default: none). |
+| `optimizer_given` | `InitVar[torch.optim.Optimizer \| None]` | `None` | An optimizer to go on with (a resident trainer's, from its last step); else a new AdamW. |
 
 **Methods**
 
@@ -9982,6 +10128,47 @@ beside the sampled ones').
 
 - `def parameters(self) -> list[nn.Parameter]`
 - `def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor`
+
+## `rollout_objectives.ranks`
+
+The processes a step is shared among, one per GPU, and how a minibatch is shared.
+
+### `Ranks`
+
+*class* · `implementations/rollout-objectives/src/rollout_objectives/ranks.py`
+
+```python
+class Ranks
+```
+
+This process's place among those a step is shared among: its `rank` of `size`. `group` is the process group
+their sums and gathers go through: one on the CPU (gloo), whatever the GPUs' own collectives run on (none: the
+default group).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rank` | `int` | `0` |  |
+| `size` | `int` | `1` |  |
+| `group` | `Any` | `None` |  |
+
+**Methods**
+
+- `@property def shared(self) -> bool`
+- `def summed(self, values: Sequence[float]) -> list[float]` — Each of `values` added up across the processes (in float64).
+- `def gathered[T](self, value: T) -> list[T]` — Every process's `value` (picklable), by rank.
+- `def most(self, value: float) -> float` — The largest of every process's `value`.
+
+### `shares`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/ranks.py`
+
+```python
+def shares(sizes: Sequence[int], count: int) -> list[list[int]]
+```
+
+The indices of `sizes` (a segment's tokens each) shared among `count` processes, balanced by size: the largest
+first, each to the process with the fewest tokens so far (the lower rank on a tie). Each process's indices are in
+their order in `sizes`. Every process computes the same shares from the same sizes.
 
 ## `rollout_qwen`
 

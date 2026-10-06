@@ -140,7 +140,7 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 | `[runners]` | `places` | |
 | `[guards]` | `runs_gib`, `training_gib` | |
 | `[inference.NAME]` | `kind`, `auth`, `gpus`, `replicas`, `allocation`, `concurrency`, `models`, and the kind's own | Below |
-| `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, `costs`, `allocation`, `concurrency`, and the kind's own | Below |
+| `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, `costs`, `allocation`, `concurrency`, and the kind's own (`gpu_memory_gib`, for `lora`, `full` and `runpod-trainer`) | Below |
 | `[sandboxes.KIND]` | `provider`, `python`, `size`, `url`, `pools`, the provider's settings | A pool of sandboxes of the kind, which a run reaches only through the claiming interface. Without `url`, each run makes it in its driver from `provider`, `size` and the settings; with `url`, runs acquire from the pool served there (`rollout pool --kind KIND`, [sandboxes](../libraries/rollout/sandboxes.md#over-http)), and make none. What its sandboxes run and hold is the pool's business: a run's demand counts none of it. On Kubernetes a pool needs `url` ([Where sandboxes run](../research/sandbox-placement.md)) |
 | `[tools.NAME]` | `url`, `auth` | Tool sets served elsewhere |
 | `[environments."NAME"]` | `python = "platform"` or `project = PATH`; `interpreter` | A relative project is from the config file's directory. A run on it starts in `interpreter`, by default `PROJECT/.venv/bin/python` for a project and the platform's for `python = "platform"` |
@@ -329,6 +329,26 @@ A `lora`, `full` or `tinker` trainer may name its `implementation` (`module:name
 its kind's, called as the kind's is: with the model and the settings it takes (`rollout_train.testing:ScriptedTrainer`
 in tests, or an imported environment's own). A `vllm` provider's `engine` does the same for its engines.
 
+**Several GPUs.** A `lora` or `full` trainer with `gpus` above one (a whole number) steps on all of them at once: its
+actor asks Ray for that many, and the trainer runs a process per GPU under torchrun, the policy sharded over them with
+FSDP2 and kept between steps ([the LoRA trainer](../implementations/rollout-lora.md#several-gpus)). A `runpod-trainer`
+does the same on its pods' `gpu_count` GPUs. A trainer that shares an engine's GPU (`colocate_with`) steps on one, and
+a `runpod-host`'s pod has one GPU. `gpu_memory_gib` says each GPU's memory, for the `memory` rule (a RunPod trainer's
+is its GPU types' least, where they are known):
+
+```toml
+[trainers.local-full]
+kind = "full"
+gpus = 4                        # one machine's four GPUs, the weights sharded over them
+gpu_memory_gib = 80
+models = ["Qwen/Qwen3-8B"]
+segment_tokens = 8192
+```
+
+Two of the trainer's settings are for several GPUs: `trainer.state_every` (how often its full state is written:
+every step for an adapter, every 10 for full weights, by default) and `trainer.whole_base` (whether each GPU holds an
+adapter's whole frozen model: by default where the model takes at most half a GPU).
+
 ## Bridges
 
 | From | To | Bridge | Task |
@@ -438,9 +458,10 @@ every install and upgrade, and on one machine `rollout preset load` does.
 
 ## Validation
 
-`check(settings, cluster, environment, ledger)` returns a list of `Finding`s, each with its rule, the key it is about
-and a reason. It is pure: what it needs beyond the settings and the cluster is passed in as facts, gathered
-beforehand (`EnvironmentFacts`, `LedgerFacts`). A finding whose `refuses` is false is a note: the run waits, or
+`check(settings, cluster, environment, ledger, model=...)` returns a list of `Finding`s, each with its rule, the key it
+is about and a reason. It is pure: what it needs beyond the settings and the cluster is passed in as facts, gathered
+beforehand (`EnvironmentFacts`, `LedgerFacts`, and what the trained model's files say of its size,
+`rollout_train.memory.ModelFacts`). A finding whose `refuses` is false is a note: the run waits, or
 something could not be estimated. `refusals(findings)` keeps the ones that refuse.
 
 | Rule | Refuses when |
@@ -454,6 +475,7 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | `models` | `trainer.model` not among the trainer's; a channel's model not among its provider's; a channel serving the run's checkpoints with a model that is neither `trainer.model` nor quantized from it; a start trained over another model |
 | `rank` | `trainer.rank` times the bridge's rank factor above the provider model's `max_lora_rank` |
 | `segment` | `trainer.segment_tokens` above the trainer's here, or above the trained channel's context |
+| `memory` | a trainer of its own GPUs (`lora`, `full`, `runpod-trainer`) whose estimate of what each GPU holds (weights, gradients, optimizer state and activations, sharded over its GPUs: `rollout_train.memory`) is more than a GPU's memory, its `gpu_memory_gib` or its RunPod GPU types' least; the reason says the estimate's parts and how many GPUs would hold it. Within a tenth of a GPU's memory: a note. Where the GPUs' memory or the model's size is not known, nothing is said |
 | `start` | the start does not exist or was released; a full-weight trainer from an adapter (merge it first); Tinker from a checkpoint Tinker did not make; a local trainer from a Tinker checkpoint (bridge it first) |
 | `objective` | a component the objective's family does not accept, or a combination that means nothing (a clip with no ratio, a KL to the reference with none, a reference for a loss that compares likelihoods alone, a k1 KL penalty in the loss); a family the trainer does not take; a policy gradient for an imitate run; a reference the trainer cannot give (Tinker: none; the full-weight trainer: only with `trainer.frozen_reference`); an entropy bonus on a trainer without entropies; the top-k form of distillation on a trainer that gives the sampled tokens' logprobs only (Tinker). A policy gradient without an importance correction while turns may begin behind the newest checkpoint (`max_lag` above 0): a note |
 | `evals` | a suite that does not exist (a name never becomes a suite by itself), a version it lacks, a suite's environment not offered |

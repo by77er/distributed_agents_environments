@@ -54,6 +54,7 @@ PUBLIC_MODULES = [
     ("rollout_train.published", "Versions of environments imported from their source, beside the ledger."),
     ("rollout_train.publishing", "Importing an environment from git: fetched, stored, checked on Ray, recorded."),
     ("rollout_train.validation", "One pure check of a run's settings against a cluster, with its rule table."),
+    ("rollout_train.memory", "What a trainer needs of each GPU's memory, from the model's files and its GPUs."),
     ("rollout_train.slots", "A program's model slots bound to a run's channels, and the bindings a run may not make."),
     ("rollout_train.testing", "Test doubles: a scripted engine and a readable token format."),
     # implementations
@@ -62,6 +63,7 @@ PUBLIC_MODULES = [
     ("rollout_objectives.settings", "A policy step's settings, which the LoRA, full-weight and Tinker trainers take."),
     ("rollout_objectives.terms", "An objective's loss composed from its components, in torch."),
     ("rollout_objectives.step", "A step over a batch on a local policy, its plan of minibatches, and its statistics."),
+    ("rollout_objectives.ranks", "The processes a step is shared among, one per GPU, and how a minibatch is shared."),
     ("rollout_qwen", "Renderers for the Qwen model families."),
     ("rollout_gemma", "Renderers for the Gemma model families."),
     ("rollout_openai", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),

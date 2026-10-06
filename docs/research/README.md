@@ -26,10 +26,10 @@ pages are the reference; a design note never overrides them.
   internet path measured on a live run, the options, phases and what each costs.
 - [Cleanup inventory](cleanup-inventory.md), **in progress**: what to remove and what to factor out, ranked, and the
   order of the removal commits.
-- [Scaling models and topologies](scaling-models-and-topologies.md), **proposed**: many more model families and
-  sizes (MoE, hybrid attention, vision, up to a trillion parameters), tensor, pipeline and expert parallelism for
-  engines and trainers, gangs across nodes, how weights move from trainer to engines, and a planner that chooses GPU
-  types and counts from a model, a workload, a time target and a budget.
+- [Scaling models and topologies](scaling-models-and-topologies.md), **trainer on several GPUs built, the rest
+  proposed**: many more model families and sizes (MoE, hybrid attention, vision, up to a trillion parameters), tensor,
+  pipeline and expert parallelism for engines and trainers, gangs across nodes, how weights move from trainer to
+  engines, and a planner that chooses GPU types and counts from a model, a workload, a time target and a budget.
 
 ## Training
 

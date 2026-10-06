@@ -1,8 +1,14 @@
 # Scaling: more models, parallel topologies, and choosing GPUs
 
-**Status: proposed.** Nothing here is built. It is read against main `2b93527`; RunPod's pod leases, the pod that
-trains and samples on one GPU (`runpod-host`) and the estimate of what pods cost are being built on another branch
-and are named as in progress where they matter. A design note: see [Design notes](README.md) for the others.
+**Status: phase 4 built in part, the rest proposed.** Built: FSDP2 in `rollout_lora` for `lora` and `full` on the GPUs
+of one machine (a process per GPU under torchrun, sharded state, the serving copy and the adapter gathered by rank 0),
+a resident trainer on several GPUs that keeps its state between steps and writes its full state every
+`trainer.state_every` steps, a provider's `gpus` (local) and `gpu_count` (RunPod) above one, and the check's `memory`
+rule from a model's files ([LoRA trainer](../implementations/rollout-lora.md#several-gpus)). Not built: everything
+else here, among it MoE expert LoRA with grouped kernels, the model card and the planner (phases 1 and 3), engines on
+several GPUs (phase 2), weights pushed to engines over NCCL or CUDA IPC (phase 5), several nodes (phase 6), and
+tensor, pipeline and expert parallel training and Megatron (phase 7). The rest of the note was read against main
+`2b93527`. A design note: see [Design notes](README.md) for the others.
 
 Three questions: what it takes to train and serve many more model families and sizes; how training and inference
 spread over several GPUs and machines, and how weights move between them; and how a run's GPUs (type and count, for
@@ -39,16 +45,16 @@ The parts the three questions touch, as main has them:
 
 | Part | Now | Code |
 |---|---|---|
-| LoRA trainer | One process per step, on one CUDA device (`device_map={"": "cuda"}`); the model is loaded from its files at the start of every step. LoRA wraps every linear layer whose name ends in one of `TARGETS` (Qwen3.5's projections, linear attention included) inside `language_model` (an image-text model) or `layers`; the vision tower is dropped; the embedding table stays in its file | `rollout_lora.policy`, `.layers`, `.worker` |
-| Full-weight trainer | The same process per step; weights, gradients and Adam's two moments in FP32 on the one device (16 bytes a weight: Qwen3-0.6B takes about 10 GiB); image-text models refused; every step saves the whole model in FP32 | `rollout_lora.full` |
+| LoRA trainer | On one GPU, one process per step (`device_map={"": "cuda"}`); the model is loaded from its files at the start of every step. On several GPUs of one machine, a process per GPU kept between steps, the frozen model sharded or whole on each, the adapter sharded (FSDP2). LoRA wraps every linear layer whose name ends in one of `TARGETS` (Qwen3.5's projections, linear attention included) inside `language_model` (an image-text model) or `layers`; the vision tower is dropped; the embedding table stays in its file | `rollout_lora.policy`, `.layers`, `.worker` |
+| Full-weight trainer | On one GPU, the same process per step; weights, gradients and Adam's two moments in FP32 on the one device (16 bytes a weight: Qwen3-0.6B takes about 10 GiB); image-text models refused; every step saves the whole model in FP32. On several GPUs, all of it sharded over them and kept between steps; each step saves a BF16 serving copy, and the full state every `trainer.state_every` steps (PyTorch's distributed checkpoint) | `rollout_lora.full`, `.sharded`, `.resident`, `.workers` |
 | Engines | `VllmEngine`: one vLLM `AsyncLLM` per engine host, started with a fixed set of arguments (BF16, LoRA on, `max_loras`, sleep mode, `language_model_only`, optional `quantization`): no tensor, pipeline, data or expert parallel. Full weights are loaded from a path with `collective_rpc("reload_weights")`; sleep drops the weights (level 2) and waking reads them again | `rollout_vllm.engine` |
 | A run's gang | One `PACK` placement group: a bundle per engine replica, one for the trainer on the driver's node (a step's files are handed to it by path), one for the largest bridge. A bundle must fit on one node; more than one GPU is rounded up to whole GPUs. On Kubernetes the RayJob's head pod holds the driver, trainer and bridge, and each engine replica's bundle can be a worker pod | `rollout_train.demand`, `.submitting` |
 | Weights from trainer to engines | Files: the trainer writes a checkpoint into the blob store, the loop appends a serving record naming the files (or what a bridge made of them), and each follower fetches and loads them. A colocated trainer shares one GPU with the engines, which sleep while it steps | `rollout_train.serving`, `.following`, `.colocated` |
 | Renderers | `qwen35`, `qwen3` (`rollout_qwen`) and `gemma4` (`rollout_gemma`), found through the `rollout.renderers` entry point and chosen by the `renders` pattern of each; a renderer is a chat template plus a `ToolCallFormat` and a `ThinkingFormat`. The gateway renders and parses itself: engines see tokens only | `rollout_train.recorder.renderers` |
 | Bridges | `verbatim`, `full-reload`, `peft-from-tinker` (Tinker's names remapped to PEFT's, Qwen3.5's q, k and v joined into `in_proj_qkv`, rank factor 3), `merge-quantize` | `rollout_train.bridges`, `rollout_tinker.weights`, `rollout_lora.bridges` |
-| Providers | `vllm`, `vllm-servers`, `tinker`, `api`, `runpod-inference`, and the trainers `lora`, `full`, `tinker`, `runpod-trainer`. A RunPod provider names GPU types; `PodSpec.gpu_count` exists but no provider field sets it. In progress elsewhere: leases with scale to zero, `runpod-host`, `max_pods` | `rollout_train.providers`, `rollout_runpod` |
+| Providers | `vllm`, `vllm-servers`, `tinker`, `api`, `runpod-inference`, and the trainers `lora`, `full`, `tinker`, `runpod-trainer`. A RunPod provider names GPU types and `gpu_count` (a `runpod-trainer`'s pod steps on all of them; a host's has one). In progress elsewhere: leases with scale to zero, `runpod-host`, `max_pods` | `rollout_train.providers`, `rollout_runpod` |
 | What a model is | A model offer per provider: `context`, `base` (what a quantized model was made from), `max_lora_rank`, `cost`, engine `options`. Nothing says a model's parameter count, layers, attention layout or memory | `ModelOffer` |
-| Capacity and spend | The capacity rule counts GPUs (not their type or memory) against `[capacity]`; `spend_of` counts metered parts only. In progress elsewhere: a pod's hourly price times how long a step of its trainer and model took lately | `rollout_train.validation` |
+| Capacity and spend | The capacity rule counts GPUs (not their type or memory) against `[capacity]`; the `memory` rule estimates what each of a trainer's GPUs holds from the model's files and refuses one that cannot fit; `spend_of` counts metered parts only. In progress elsewhere: a pod's hourly price times how long a step of its trainer and model took lately | `rollout_train.validation` |
 
 ## 1. More models
 
@@ -327,10 +333,11 @@ eval subjects) are reached through hosted APIs or Tinker's sampler, as now.
 ### Where it breaks now
 
 - An engine host asked for two GPUs gets two, and vLLM uses one: `VllmEngine` takes no tensor-parallel size.
-- A trainer is one process on one device: nothing shards weights, gradients or optimizer state.
+- A trainer spans the GPUs of one machine at most (FSDP2): nothing shards it across machines, or by tensor, pipeline or
+  expert.
 - A bundle of a placement group must fit on one node, so nothing can span nodes; the trainer's bundle is pinned to the
   driver's node because a step's files are handed over by path.
-- A RunPod pod has one GPU: no provider field sets `gpu_count`.
+- A RunPod engine's pod serves on one GPU, whatever its `gpu_count`.
 - Weights move only as files, and full weights in FP32 every step.
 
 ### What each parallelism is for
@@ -726,7 +733,7 @@ Most value first. Each later phase waits for its trigger: a run someone wants th
 | 1. Know the model and the GPU | `ModelCard` from `config.json`; the GPU catalog file; the memory model as a `memory` rule of the check; scheduled parts priced by the hour in `spend_of` (joining the pod spend work in progress); RunPod's and Tinker's prices read into dated records; the planner over what the cluster offers today (provider, replicas, colocated or not), shown in the New run form and `rollout plan` | Now: it costs little, fails runs before they start instead of after, and answers "RunPod or Tinker for this run" with numbers, which is the question the RunPod work raises |
 | 2. Engines on several GPUs of one node | `VllmEngine` options passed through from an allow-list; tensor and expert parallel on a model offer; a replica's GPUs from its shape; RunPod providers with `gpu_count`; FP8 serving offers with `precision` | Now, with phase 1: it is a small change, and it lets a 27B to 35B model serve on two GPUs, a 70B on two to four, and any model on 8 H200 at FP8, which is most of the model range a single-node trainer can train |
 | 3. Families as packages | The `Architecture` declaration and its entry point; `TARGETS` and the Tinker remap read from it; the renderer conformance kit; `lora_targets` and `architecture` rules; one new family end to end (gpt-oss, which brings the harmony format and MoE LoRA, or a dense family such as Llama 3.3) | When a run wants a model outside Qwen3, Qwen3.5 and Gemma, or a MoE (Qwen3.5-35B-A3B, Qwen3.6-35B-A3B) trained locally with expert LoRA |
-| 4. A trainer on several GPUs of one node | FSDP2 in `rollout_lora` for `lora` and `full` (one process per GPU, sharded state, serving copy gathered); a resident trainer that keeps its state between steps and saves it every few steps; `trainer.gpus` within a provider's allowed counts; MoE expert LoRA with grouped kernels | When a run wants full weights above about 4B, or LoRA above about 30B, or a step on one GPU takes longer than the step time the run is willing to wait (the planner shows it) |
+| 4. A trainer on several GPUs of one node | Built: FSDP2 in `rollout_lora` for `lora` and `full` (one process per GPU, sharded state, serving copy gathered); a resident trainer that keeps its state between steps and saves it every `trainer.state_every` steps; a provider's `gpus` and `gpu_count`; the `memory` rule. Not built: MoE expert LoRA with grouped kernels | When a run wants full weights above about 4B, or LoRA above about 30B, or a step on one GPU takes longer than the step time the run is willing to wait (the planner shows it) |
 | 5. Weights pushed inside a gang | vLLM's weight transfer (`ipc` colocated, `nccl` disaggregated) beside the files; the engine host's "held by push"; deltas later | When publishing a full-weight checkpoint takes more than about a tenth of a step (full weights above about 8B through the blob store) |
 | 6. Several nodes | A placement group per spanning part (`STRICT_SPREAD`), worker groups per part, Kueue topology annotations; a trainer whose files do not go by path; RunPod Instant Clusters as one lease for a `runpod-trainer`; pipeline parallel engines across nodes | When a run needs more than 8 GPUs for its trainer: full weights above about 30B on H100 (60B on B200), LoRA on models above about 400B at BF16, or a step target one node cannot meet |
 | 7. Megatron for large MoE | A trainer kind over Megatron-Core through Megatron-Bridge (TP, PP, EP, CP), objectives ported from `rollout_objectives` or wrapped, `hf-from-megatron` for serving copies | When a run trains a MoE above about 100B in full, or LoRA on one above about 400B where Tinker lacks the model or costs more than the planner's best scheduled plan for a sustained run |
@@ -739,11 +746,15 @@ Most value first. Each later phase waits for its trigger: a run someone wants th
    on several GPUs) that costs more than the step. *Recommendation:* keep the fresh process for one-GPU trainers;
    make multi-GPU and full-weight trainers resident, writing the serving copy every step and the full state (FP32
    weights, optimizer) every `trainer.state_every` steps (default 1 for LoRA, 10 for full weights), so a crash costs
-   at most that many steps.
+   at most that many steps. *Built:* trainers on several GPUs are resident, with `trainer.state_every`; a trainer on
+   one GPU, full weights included, keeps the fresh process. A step whose parent's state lacks the full state starts
+   from the parent's serving copy with the optimizer afresh: the loop does not yet go back to the newest checkpoint
+   that holds it.
 2. **Our own FSDP2 trainer, or an existing framework's.** verl, NeMo-RL and SkyRL bring sharded trainers, but each
    brings its own loop, objectives and engine management, which overlap the platform's. *Recommendation:* FSDP2 in
    `rollout_lora` for one node (PyTorch's `fully_shard` over the same model code), so objectives stay one
-   implementation; Megatron-Core through Megatron-Bridge, not a whole framework, when phase 7 triggers.
+   implementation; Megatron-Core through Megatron-Bridge, not a whole framework, when phase 7 triggers. *Built:*
+   FSDP2 in `rollout_lora`, the step shared in `rollout_objectives`.
 3. **Very large models: Tinker or our own gang.** *Recommendation:* LoRA on models above about 200B total parameters
    on Tinker by default (it has Kimi-K2.6, Qwen3.5-397B, DeepSeek-V3.1, GLM-5.3); our own GPUs only where the planner
    shows a sustained run cheaper on a scheduled gang, or for full weights, which Tinker does not train.
@@ -752,7 +763,8 @@ Most value first. Each later phase waits for its trigger: a run someone wants th
 5. **Where topology knobs live.** In the cluster config (a provider per shape: `h100-tp2`, `h100-tp4`) or in a run's
    settings within what a provider allows. *Recommendation:* a provider declares a GPU type and the counts and shapes
    it allows; a run chooses `trainer.gpus` and `channels.NAME.replicas` among them; tensor parallel stays on the model
-   offer, since it follows from the model and the GPU.
+   offer, since it follows from the model and the GPU. *Built:* the counts are the provider's alone (`gpus` for a
+   local trainer, `gpu_count` for a RunPod one), a provider per shape; a run says none.
 6. **What a local GPU costs in a plan.** *Recommendation:* an optional `cost = { hour = … }` on local providers;
    nothing by default, and the plan says the local GPU was counted as free.
 7. **Reading prices automatically.** It needs the RunPod key wherever the task runs (read-only use).

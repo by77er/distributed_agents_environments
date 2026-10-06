@@ -46,7 +46,7 @@ released pod stays warm for a few minutes for the next run, and a reaper deletes
 | Kind | Table | Its pods run | What a run leases |
 |---|---|---|---|
 | `runpod-inference` | `[inference.NAME]` | `ghcr.io/by77er/rollout-inference`: vLLM and the follower | A pod for each replica of a channel on it |
-| `runpod-trainer` | `[trainers.NAME]` | `ghcr.io/by77er/rollout-trainer`: the training service | A pod for its steps |
+| `runpod-trainer` | `[trainers.NAME]` | `ghcr.io/by77er/rollout-trainer`: the training service, on every GPU of the pod | A pod for its steps |
 | `runpod-host` | `[inference.NAME]`, with a `runpod-trainer` whose `colocate_with` names it | `ghcr.io/by77er/rollout-host`: both on one GPU | One pod for the trained channel and the steps |
 
 RunPod keeps an image only on the machine that pulled it, so a new pod usually pulls its image whole. Each image is a
@@ -114,7 +114,7 @@ Beside what every provider has (`models`, `replicas`), a RunPod table says what 
 |---|---|---|
 | `image` | | The image its pods run, by digest (the images workflow's summary has each pushed digest) |
 | `gpu_types` | | RunPod's GPU type ids, in order of preference (`NVIDIA H100 80GB HBM3`) |
-| `gpu_count` | 1 | GPUs a pod has |
+| `gpu_count` | 1 | GPUs a pod has: a trainer's pod of more steps on all of them; a host's pod has one |
 | `cloud` | `secure` | RunPod's cloud tier: `secure` or `community` |
 | `regions` | any | RunPod's data centers its pods may be in (`["US-KS-2"]`) |
 | `price` | | Dollars an hour a pod is reckoned at before RunPod says its own: what estimates use |
@@ -130,8 +130,44 @@ Beside what every provider has (`models`, `replicas`), a RunPod table says what 
 | `sleep` | false | On a host: vLLM sleeps while a step is taken, for a GPU too small for both |
 | `max_logprobs` | 20 | The top-k logprobs its vLLM is started with |
 
-A `runpod-trainer` also says `trainer` (`lora` or `full`) and its `models`; one that takes its steps on a host's pods
+A `runpod-trainer` also says `trainer` (`lora` or `full`) and its `models`, and may say `gpu_memory_gib` (each GPU's
+memory, for the check's `memory` rule, where its GPU types do not say it); one that takes its steps on a host's pods
 says `colocate_with` and nothing of pods.
+
+### A trainer on several GPUs
+
+A `runpod-trainer` with a `gpu_count` above one rents one pod with that many GPUs of its `gpu_types`, and its training
+service steps on all of them: it is given `ROLLOUT_TRAINER_GPUS`, and its trainer runs a process per GPU under
+torchrun, the policy sharded over them with FSDP2 and kept between steps
+([several GPUs](../implementations/rollout-lora.md#several-gpus)). A step from the checkpoint the pod made last
+fetches none of its parent's files; the pod still writes every checkpoint's weights (and its full state every
+`trainer.state_every` steps) to the bucket, so another pod, or the same one started again, goes on from them. When
+another run takes the pod, or its lease is released, the processes end and free the GPUs. The check refuses a trainer
+whose estimate of each GPU's memory is more than a GPU's (`memory`), and says how many would hold it.
+
+Four H100 SXM for every weight of an 8B model (about $14 an hour on the secure cloud), beside a channel served
+elsewhere:
+
+```toml
+[trainers.h100x4-full]
+kind = "runpod-trainer"
+trainer = "full"
+image = "ghcr.io/by77er/rollout-trainer@sha256:DIGEST"
+gpu_types = ["NVIDIA H100 80GB HBM3"]
+gpu_count = 4
+cloud = "secure"
+price = 13.96                                  # four GPUs' worth: a pod's price
+max_pods = 1
+store = "r2"
+volume_gb = 400                                # the full state: about 100 GB every state_every steps
+container_disk_gb = 100
+step_ca = { url = "https://ca.example.com", provisioner = "launcher", trust = "system", key_file = "/etc/rollout-secrets/step-ca/provisioner.jwk", root = "/etc/rollout-secrets/step-ca/root_ca.crt" }
+models = ["Qwen/Qwen3-8B"]
+segment_tokens = 8192
+```
+
+A run on it says `trainer.provider = "h100x4-full"`, and may say `trainer.state_every` (10 by default for full weights;
+1 for an adapter). A host's pod (`runpod-host`) has one GPU: vLLM and the trainer share it.
 
 ### A pod that trains and samples
 

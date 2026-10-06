@@ -172,6 +172,32 @@ the top-k form of distillation. Which items, and with what advantages, is the
 5. **The update.** Gradients are clipped to `max_gradient_norm` and AdamW steps, with no weight decay, at the
    minibatch's (warmed-up) rate.
 
+### A step on several GPUs
+
+`PolicyStep(policy, settings, ranks=Ranks(rank, size, group))` shares a step among processes, one per GPU, over a model
+sharded among them (`rollout_lora.sharded`); one process (`Ranks()`, the default) shares nothing.
+
+- **The same plan.** Every process takes the whole batch and makes the same plan of it, shuffled by the step's seed, so
+  they agree on every minibatch without being told.
+- **Shares balanced by tokens.** Each minibatch's segments are shared out by `rollout_objectives.ranks.shares`: the
+  longest first, each to the process with the fewest tokens so far. Where the step starts, each process computes its
+  share of every segment's start (and reference) logprobs, and the processes gather them all.
+- **The same normalisation.** Each item's loss is divided by its minibatch's units counted over the whole minibatch
+  (its tokens for a token mean, its segments for a segment mean, `constant_tokens` for a constant, its items for a
+  preference loss), and the sharded model sums the gradients across processes rather than averaging them. The update
+  is the one a single process makes of the same minibatch, whatever the number of processes.
+- **Sums added up.** A minibatch's sums (its loss, tokens, the distance moved) are added up across processes before
+  anything reads them, so every process takes the same decisions: a minibatch with nothing to train on, the stop at
+  `max_kl`. A preference loss's logprobs are gathered, and every process computes the loss of the whole minibatch;
+  each moves its own segments by it. The gradient's norm is that of every shard's.
+- **Idle passes.** A sharded model's layers are gathered by every process at once, so each takes as many passes as the
+  others: a process whose share is shorter takes passes of a two-token sequence (`IDLE`, its loss times zero) for the
+  rest.
+- **No minibatch left out.** A minibatch that runs out of memory fails the step (the others wait on its passes).
+
+On the CPU over gloo, two processes take two steps of each objective's case to within about 1e-15 of one process's,
+in float64 (`test_shared.py`).
+
 ## Metrics
 
 A step returns these; a trainer adds its own (`peak_gpu_gib`, `billed_tokens`).
@@ -218,4 +244,5 @@ truncation, the token clip and the segment ratio. `test_distillation.py` covers 
 the whole vocabulary equal to the full one: GKD's JSD as TRL writes it, Hinton's softened KL, the reverse KL), tokens
 the teacher did not score, a teacher that gave fewer than k tokens, the importance mask, a KL in the reward and in the
 loss, a policy gradient's distillation term, and the step on a toy policy, whose every distillation preset moves it
-toward its teacher on its own samples.
+toward its teacher on its own samples. `test_shared.py` takes each objective's case on two processes under torchrun,
+a toy model sharded with FSDP2 over gloo, against one process, and checks how segments are shared out.

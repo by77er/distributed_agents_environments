@@ -300,7 +300,8 @@ class Gated(Curriculum):
 ## The trainer
 
 A [`Trainer`](../../guide/reference.md#trainer) takes a batch and makes new weights from given ones. It keeps
-nothing between steps that it cannot be given again, so any trainer can take any step from any checkpoint.
+nothing between steps that it cannot be given again, so any trainer can take any step from any checkpoint (one that
+keeps its policy in memory still leaves every file a later step needs: `Resident`, below).
 
 - **`budget`** ([`Budget`](../../guide/reference.md#budget)) is what the trainer can take: the longest segment, and
   how many segments a step can afford. It comes from the trainer's hardware, and nothing above the trainer chooses
@@ -318,8 +319,13 @@ nothing between steps that it cannot be given again, so any trainer can take any
   of them from its next step on (raising `ValueError` for one it does not take). They change neither what its weights
   are nor its `budget`. `LoraTrainer` and `FullTrainer` take `learning_rate`, `tokens_per_step`, `max_kl`,
   `max_gradient_norm` and the numbers of their objective (`objective.clip.low`, `objective.kl.coefficient`, ...,
-  named by the run settings' keys): each step runs in a process of its own, which reads them afresh (the optimizer's
-  saved state is given the learning rate then).
+  named by the run settings' keys): each step reads them afresh, in a process of its own on one GPU or sent to each
+  of its processes on several (the optimizer's state is given the learning rate then).
+- **`holding`** and **`close()`**, where a trainer keeps its policy and optimizer in memory between steps
+  ([`Resident`](../../guide/reference.md#resident): `LoraTrainer` and `FullTrainer` on several GPUs): the name it gave
+  what it holds, which the step's `state/held.txt` says too, so a later step whose parent is that checkpoint goes on
+  from memory and reads none of its files (a training pod fetches only that file); and a call that ends what it keeps
+  running, which a training pod makes when its lease is released or another run takes it.
 
 [`Colocated`](../../guide/reference.md#colocated) wraps a trainer that shares an accelerator with the engines of
 some channels. For each step it holds new requests back, waits for those in flight, puts the engines to sleep,
