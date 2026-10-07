@@ -209,6 +209,17 @@ class Remote(Protocol):
 
 
 @runtime_checkable
+class OnDemand(Protocol):
+    """A trainer whose machine is leased only once a step is coming (a training pod of the run's own:
+    `rollout_train.pods.LeasedTrainer`), not while the run waits for its first groups: told that a step is coming, it
+    starts getting its machine ready, and a step waits for it."""
+
+    def wanted(self) -> None:
+        """A step is coming: lease the machine now, unless it is leased already."""
+        ...
+
+
+@runtime_checkable
 class Keeps(Protocol):
     """A trainer that can keep the full state of its steps in a blob store itself, after each step returns, so a step's
     weights are kept and served while its state is still being kept (`rollout_lora`'s, with its processes kept between

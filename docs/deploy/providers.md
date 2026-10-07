@@ -65,6 +65,13 @@ has the public image pulls only the platform's layers. `deploy/images/README.md`
   waits and its launch says so. A pod is ready once RunPod's API has said its public address, which its lease keeps,
   and its beat says it is ready for the run; a pod not ready within the provider's `start_timeout` (1200 seconds unless
   said) is deleted, and the run fails saying which pod and why.
+- **A trainer's pod claimed once a step is coming.** A `runpod-trainer` with a pod of its own is not claimed with the
+  rest: until the first group with something to train is recorded, the run waits for no trainer and pays for none
+  (`rollout_train.pods.LeasedTrainer`, `rollout_train.trainer.OnDemand`). Meanwhile its trainer answers what the run's
+  settings make the pod's trainer (its kind's settings dataclass made with them: its budget and the settings it takes
+  between steps), and the pod, once there, must say the same. The claim runs while groups play, and the step waits for
+  it. A claim that fails (no GPU free, a pod not ready in time) fails that step; the next step claims again, and a run
+  fails after three failed steps. A trainer on a `runpod-host`'s pod is claimed with the host.
 - **Renewed while it runs.** Every 30 seconds the run renews each lease and the time it is charged for each pod. A lease
   that changed between the run's read and its write is read again and renewed at its version then, while it is still
   the run's; the run's log says so. A lease not renewed for 5 minutes is stale: its run is taken to be gone (its driver

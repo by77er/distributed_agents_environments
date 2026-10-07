@@ -17,7 +17,7 @@ do not edit by hand.
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#rollout_trainrolloutsplan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
 - **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
-- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Keeps`](#keeps), [`Labelled`](#labelled), [`Ledger`](#ledger), [`Made`](#made), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`Pair`](#pair), [`Preferences`](#preferences), [`Progress`](#progress), [`Progressing`](#progressing), [`record_serving`](#record_serving), [`Remote`](#remote), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`StateLost`](#statelost), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
+- **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Keeps`](#keeps), [`Labelled`](#labelled), [`Ledger`](#ledger), [`Made`](#made), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`OnDemand`](#ondemand), [`Pair`](#pair), [`Preferences`](#preferences), [`Progress`](#progress), [`Progressing`](#progressing), [`record_serving`](#record_serving), [`Remote`](#remote), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`StateLost`](#statelost), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#rollout_traininferencescores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
 - **[`rollout_train.inference.api`](#rollout_traininferenceapi)** — Channels on hosted APIs: by message, never trained on, spend counted. [`ApiChannel`](#apichannel), [`ATTEMPTS`](#attempts), [`Hosted`](#hosted), [`HostedEndpoint`](#hostedendpoint), [`priced`](#priced)
@@ -29,7 +29,7 @@ do not edit by hand.
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`POD_SECURITY`](#pod_security), [`pod_security`](#pod_security), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
 - **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
-- **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: identities, leases, a run's pods, the reaper, the trainer's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`HELD`](#held), [`IDLE`](#idle), [`LeaseLost`](#leaselost), [`live`](#live), [`LivePod`](#livepod), [`needs_of`](#needs_of), [`pod_identity`](#pod_identity), [`pod_leases_of`](#pod_leases_of), [`PodLease`](#podlease), [`PodLeases`](#podleases), [`PodNeed`](#podneed), [`Pods`](#pods), [`PodsDidNotStart`](#podsdidnotstart), [`PodTime`](#podtime), [`reap`](#reap), [`RemoteTrainer`](#remotetrainer), [`STARTING`](#starting), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
+- **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: identities, leases, a run's pods, the reaper, the trainer's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`HELD`](#held), [`IDLE`](#idle), [`LeasedTrainer`](#leasedtrainer), [`LeaseLost`](#leaselost), [`live`](#live), [`LivePod`](#livepod), [`needs_of`](#needs_of), [`pod_identity`](#pod_identity), [`pod_leases_of`](#pod_leases_of), [`PodLease`](#podlease), [`PodLeases`](#podleases), [`PodNeed`](#podneed), [`Pods`](#pods), [`PodsDidNotStart`](#podsdidnotstart), [`PodTime`](#podtime), [`reap`](#reap), [`RemoteTrainer`](#remotetrainer), [`STARTING`](#starting), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
 - **[`rollout_train.pki`](#rollout_trainpki)** — The certificates the platform holds, from the cluster's step-ca, published as Secrets. [`provisioner_key`](#provisioner_key), [`publish`](#rollout_trainpkipublish)
 - **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`CapacitySection`](#capacitysection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`KubernetesSection`](#kubernetessection), [`LedgerSection`](#ledgersection), [`load`](#load), [`located`](#located), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, allocation, routing. [`ALLOCATIONS`](#allocations), [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`POD_FIELDS`](#pod_fields), [`pod_table`](#pod_table), [`PodTable`](#podtable), [`ROUTING`](#routing), [`Routing`](#routing), [`RUNPOD`](#runpod), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
@@ -3326,6 +3326,22 @@ The files of a checkpoint, by their paths within it, each kept as a blob.
 | `files` | `Mapping[str, BlobReference]` | required |  |
 | `layout` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | How the weights are divided among the files, where they are divided: whoever wrote them says, so that a reader with the same division reads its own files and no others. |
 
+### `OnDemand`
+
+*class* · `libraries/rollout-train/src/rollout_train/trainer.py`
+
+```python
+class OnDemand(Protocol)
+```
+
+A trainer whose machine is leased only once a step is coming (a training pod of the run's own:
+`rollout_train.pods.LeasedTrainer`), not while the run waits for its first groups: told that a step is coming, it
+starts getting its machine ready, and a step waits for it.
+
+**Methods**
+
+- `def wanted(self) -> None` — A step is coming: lease the machine now, unless it is leased already.
+
 ### `Pair`
 
 *class* · `libraries/rollout-train/src/rollout_train/trainer.py`
@@ -5231,6 +5247,7 @@ A run being built from its settings, and what it started: everything the loop of
 | `asked_at` | `float \| None` | `None` | When it asked Ray for its placement group. |
 | `reserved_at` | `float \| None` | `None` | When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own). |
 | `pods` | `Any` | `None` | Its pods on RunPod (`rollout_train.pods.leasing.Pods`), where its providers give it any. |
+| `trainer_need` | `Any` | `None` | The pod its trainer's steps need of its own (`rollout_train.pods.leasing.PodNeed`), leased once a step is coming (`rollout_train.pods.LeasedTrainer`), not with the rest. |
 | `began` | `float` | `field(default_factory=time.time)` | When this start of it began: what `limits.hours` counts from. |
 
 **Methods**
@@ -6405,6 +6422,30 @@ IDLE = 'idle'
 ```
 
 A lease's state once its run released its pod: no run holds it, and it is kept warm.
+
+### `LeasedTrainer`
+
+*class* · `libraries/rollout-train/src/rollout_train/pods/trainer.py`
+
+```python
+class LeasedTrainer
+```
+
+A training pod leased once a step is coming (`wanted`): `lease` claims the pod and gives its `RemoteTrainer`.
+`weights`, `budget`, `objective` and `changeable` are what the run's settings make the pod's trainer, answered until
+it is there. A lease that fails fails the step that waits for it (`StepFailed`), and the next step leases again.
+
+**Methods**
+
+- `def __init__(self, lease: Callable[[], Awaitable[RemoteTrainer]], *, weights: str, budget: Budget, objective: Objective = DEFAULT, changeable: Mapping[str, JsonValue] | None = None) -> None`
+- `@property def changeable(self) -> Mapping[str, JsonValue]`
+- `def change(self, settings: Mapping[str, JsonValue]) -> None`
+- `def watch(self, told: Callable[[Progress], None] | None) -> None`
+- `def wanted(self) -> None`
+- `async def made(self, batch: Sequence[Item], *, seed: int, parent: Checkpoint | None, into: str) -> Made`
+- `async def state(self, into: str) -> Manifest`
+- `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
+- `async def aclose(self) -> None` — Stop a lease in progress, and close the pod's trainer where it was leased.
 
 ### `LeaseLost`
 

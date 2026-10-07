@@ -17,7 +17,7 @@ from rollout.harness import Blobs, FileBlobStore
 from rollout_train.checkpoints import Checkpoints, kept
 from rollout_train.colocated import Colocated
 from rollout_train.database import DatabaseLedger
-from rollout_train.pods import RemoteTrainer, TrainerBusy, TrainerRefused, TrainerUnreachable
+from rollout_train.pods import LeasedTrainer, RemoteTrainer, TrainerBusy, TrainerRefused, TrainerUnreachable
 from rollout_train.pods.training import (
     FAILED,
     MADE,
@@ -39,8 +39,10 @@ from rollout_train.trainer import (
     Budget,
     Files,
     Item,
+    OnDemand,
     Progress,
     Progressing,
+    Remote,
     Step,
     StepFailed,
     Weighted,
@@ -388,3 +390,59 @@ async def test_a_trainer_beside_an_engine_says_what_it_holds_and_is_closed_throu
     assert holding.given[1] == [f"{STATE}/{HELD}"]  # (held, as the wrapper said: the name alone was fetched)
     closed(wrapped)
     assert holding.closed == 1 and wrapped.holding is None
+
+
+async def test_a_leased_trainer_leases_its_pod_once_a_step_is_coming_and_steps_with_the_settings_said_meanwhile(
+    tmp_path: Path, blob_store: Blobs
+) -> None:
+    fake = Fake()
+    checkpoints = checkpoints_of(tmp_path, blob_store)
+    leased: list[float] = []
+    async with pod(TrainerService(fake, checkpoints, tmp_path / "pod")) as remote:
+
+        async def lease() -> RemoteTrainer:
+            leased.append(1.0)
+            return remote
+
+        trainer = LeasedTrainer(lease, weights="lora", budget=Budget(4096, 8), changeable={"learning_rate": 1e-4})
+        assert isinstance(trainer, OnDemand) and isinstance(trainer, Remote)
+        assert (trainer.weights, trainer.budget, trainer.changeable) == (
+            "lora",
+            Budget(4096, 8),
+            {"learning_rate": 1e-4},
+        )
+        trainer.change({"learning_rate": 3e-5})  # (said before the pod is there)
+        assert not leased and trainer.leased_at is None
+        trainer.wanted()
+        trainer.wanted()  # (once)
+        made = await trainer.made(BATCH, seed=1, parent=None, into="kmnopqrstuvwxyzk")
+        assert leased == [1.0] and trainer.leased_at is not None and made.weights.files
+        assert fake.settings == {"learning_rate": 3e-5}  # (the pod's trainer took what the run says now)
+        with pytest.raises(ValueError, match="cannot change between steps"):
+            trainer.change({"rank": 8})
+
+
+async def test_a_lease_that_fails_fails_its_step_and_the_next_step_leases_again(tmp_path: Path) -> None:
+    fake = Fake()
+    checkpoints = checkpoints_of(tmp_path)
+    tries: list[int] = []
+    async with pod(TrainerService(fake, checkpoints, tmp_path / "pod")) as remote:
+
+        async def lease() -> RemoteTrainer:
+            tries.append(1)
+            if len(tries) == 1:
+                raise RuntimeError("no H100 was free")
+            return remote
+
+        trainer = LeasedTrainer(lease, weights="lora", budget=Budget(4096, 8), changeable={"learning_rate": 1e-4})
+        with pytest.raises(StepFailed, match="the training pod was not leased: RuntimeError: no H100 was free"):
+            await trainer.made(BATCH, seed=1, parent=None, into="kmnopqrstuvwxyzk")
+        await trainer.made(BATCH, seed=1, parent=None, into="kmnopqrstuvwxyzk")
+        assert len(tries) == 2
+
+        other = LeasedTrainer(lambda: asyncio.sleep(0, remote), weights="lora", budget=Budget(8192, 8))
+        with pytest.raises(
+            ValueError, match="the run's settings said lora within"
+        ):  # (what the pod is must be what was said)
+            await other.made(BATCH, seed=2, parent=None, into="lmnopqrstuvwxyzk")
+        await trainer.aclose()

@@ -174,6 +174,30 @@ async def test_what_pods_cost_while_the_run_waited_for_them_is_told_with_the_fir
     await pods.release()
 
 
+async def test_a_pod_claimed_while_the_run_renews_its_others_is_renewed_by_them_alone(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    ledger, fake, _ = world
+    pods = pods_of("run_1", cluster_of(tmp_path), ledger, fake, renew=0.05)
+    (first,) = await pods.claim([NEED])
+    told: list[float] = []
+
+    async def spent(dollars: float) -> None:
+        told.append(dollars)
+
+    renewing = asyncio.create_task(pods.renewing(spent))
+    try:
+        await asyncio.sleep(0.1)
+        later = await pods.claim([NEED])  # (as a trainer's pod is claimed once a step is coming)
+        assert len(later) == 2 and first.pod in {each.pod for each in later} and len(pods.ready) == 2
+        await asyncio.sleep(0.2)
+        assert sum(told) == pytest.approx(pods.spent)  # (the later pod's time told too)
+    finally:
+        renewing.cancel()
+        await asyncio.gather(renewing, return_exceptions=True)
+        await pods.release()
+
+
 async def test_a_run_starts_a_pod_renews_it_and_releases_it_warm(
     tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
 ) -> None:

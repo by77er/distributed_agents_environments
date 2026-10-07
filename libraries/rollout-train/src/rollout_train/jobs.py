@@ -408,6 +408,9 @@ class Run:
     """When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own)."""
     pods: Any = None
     """Its pods on RunPod (`rollout_train.pods.leasing.Pods`), where its providers give it any."""
+    trainer_need: Any = None
+    """The pod its trainer's steps need of its own (`rollout_train.pods.leasing.PodNeed`), leased once a step is coming
+    (`rollout_train.pods.LeasedTrainer`), not with the rest."""
     began: float = field(default_factory=time.time)
     """When this start of it began: what `limits.hours` counts from."""
     _said: str | None = field(default=None, init=False, repr=False)
@@ -459,7 +462,9 @@ class Run:
     async def _leased(self, stack: contextlib.AsyncExitStack) -> None:
         """The run's pods on RunPod (`rollout_train.pods.leasing`): claimed now (each waited for until it is ready, or
         deleted and the run failed), renewed while the run runs, what they cost counted toward its `limits.spend`,
-        and released warm on the way out, however the run ends."""
+        and released warm on the way out, however the run ends. A pod of the trainer's own is claimed later, once a
+        step is coming (`_trainer`), and is not paid for while the run waits for its first groups."""
+        from rollout_train.pods.leasing import TRAINER as TRAINING_POD
         from rollout_train.pods.leasing import Pods, needs_of
 
         needs = needs_of(self.settings, self.cluster)
@@ -469,7 +474,8 @@ class Run:
         self.pods = pods
         stack.push_async_callback(pods.release)
         earlier = sum(each.dollars for each in await pods.store.times(self.run.id))  # (its starts before this one)
-        await pods.claim(needs)
+        self.trainer_need = next((each for each in needs if each.role == TRAINING_POD), None)
+        await pods.claim([each for each in needs if each is not self.trainer_need])
         await self._pods_spent(earlier)
         _background(stack, pods.renewing(self._pods_spent))
         if self.noted is not None:
@@ -536,7 +542,10 @@ class Run:
         if model is None:
             raise ValueError("the run says no model its trainer trains (trainer.model, or the trained channel's)")
         if provider.kind == "runpod-trainer":
-            self.trainer = await self._on_pod(provider)
+            if self.trainer_need is None:  # (its steps on a host pod the run holds)
+                self.trainer = await self._on_pod(provider)
+            else:
+                self.trainer = self._leased_trainer(provider)
             return
         model = await self._over(provider, model)
         given: dict[str, Any] = {
@@ -597,6 +606,29 @@ class Run:
             budget=budget, objective=objective_in(self.settings), changeable=dict(said.get("changeable") or {}),
             connection=connection,
         )  # fmt: skip
+
+    def _leased_trainer(self, provider: TrainerProvider) -> Trainer:
+        """The trainer of a `runpod-trainer` with a pod of its own: leased once a step is coming, answering until then
+        what the run's settings make the pod's trainer (its kind's settings dataclass made with them, as the pod makes
+        its trainer: its budget and the settings it takes between steps)."""
+        from rollout_train.pods import LeasedTrainer
+
+        need, pods = self.trainer_need, self.pods
+        made: Any = named(provider.runs.settings)
+        given = dict(cast(Mapping[str, Any], need.settings.get("trainer") or {}))
+        fields = {each.name for each in dataclasses.fields(made)}
+        settings = made(**{key: value for key, value in given.items() if key in fields})
+        budget = Budget(getattr(settings, "segment_tokens", None), getattr(settings, "segments_per_step", None))
+        changeable = settings.changeable() if callable(getattr(settings, "changeable", None)) else {}
+
+        async def lease() -> Any:
+            await pods.claim([need])
+            return await self._on_pod(provider)
+
+        return cast(Trainer, LeasedTrainer(
+            lease, weights=provider.capabilities.produces, budget=budget, objective=objective_in(self.settings),
+            changeable=changeable,
+        ))  # fmt: skip
 
     async def _over(self, provider: TrainerProvider, model: str) -> str:
         """What the trainer is made over: the model; for a run that starts from a full checkpoint (or an adapter over

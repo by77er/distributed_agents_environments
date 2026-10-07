@@ -257,6 +257,8 @@ class Pods:
         """Its time on each pod it holds, by pod."""
         self.ready: set[str] = set()
         self.spent = 0.0
+        self._renewing = False
+        """Whether `renewing` renews its leases (a claim made meanwhile, a trainer's pod leased later, leaves it to)."""
         """Dollars its pods cost it so far, as its renewals counted."""
 
     def api(self, provider: str) -> "RunPod":
@@ -481,7 +483,7 @@ class Pods:
             if not waiting:
                 return
             await self._say(waiting)
-            if time.monotonic() - renewed >= self.renew:
+            if not self._renewing and time.monotonic() - renewed >= self.renew:
                 await self.renewed()
                 renewed = time.monotonic()
             await asyncio.sleep(self.look)
@@ -562,6 +564,7 @@ class Pods:
         """Renew every `renew` seconds until cancelled, telling `spent` the dollars its pods cost that it has not told
         yet: first what they cost while the run waited for them to be ready (renewed then too), then each renewal's."""
         told = 0.0
+        self._renewing = True
         while True:
             await asyncio.sleep(self.renew)
             await self.renewed()

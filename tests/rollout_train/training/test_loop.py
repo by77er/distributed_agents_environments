@@ -37,7 +37,7 @@ from rollout_train.record import GROUPS, STARTS, STEPS, table
 from rollout_train.rollouts import Record, loaded
 from rollout_train.rollouts.scheduler import EPISODES
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
-from rollout_train.trainer import MINIBATCH, START, WEIGHTS, Item, Pair, Progress, Progressing
+from rollout_train.trainer import MINIBATCH, START, WEIGHTS, Item, OnDemand, Pair, Progress, Progressing
 from tests.rollout_train.rollouts.games import Words
 from tests.rollout_train.support import Counting, Notes, Running, Seen, answering, here, made_by
 
@@ -430,3 +430,29 @@ def test_progress_says_itself_in_one_line_and_reads_back_from_json() -> None:
     assert Progress(START, fraction=0.031, tokens_per_second=812.0).line() == "start · 3% · 812 tok/s"
     assert Progress.from_json({"phase": 3}) is None and Progress.from_json(None) is None
     assert Progress.from_json({"phase": MINIBATCH, "fraction": 0.5, "later": 1}) == Progress(MINIBATCH, fraction=0.5)
+
+
+class Wanting(Counting):
+    """A trainer leased on demand (`OnDemand`): it notes how many steps it had taken each time it was told a step is
+    coming."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.told: list[int] = []
+
+    def wanted(self) -> None:
+        self.told.append(len(self.batches))
+
+
+async def test_a_trainer_leased_on_demand_is_told_a_step_is_coming_once_a_group_has_something_to_train(
+    tmp_path: Path,
+) -> None:
+    checkpoints, trainer = checkpoints_in(tmp_path), Wanting()
+    recorder = answering()
+    async with here(checkpoints.ledger, recorder, checkpoints.blobs):
+        await train(
+            Words(), trainer, checkpoints, base="words-base", channel="policy", directory=tmp_path / "checkpoints",
+            publish=recorder.publish, groups=3, groups_per_step=2, seed=1,
+        )  # fmt: skip
+    assert isinstance(trainer, OnDemand) and trainer.batches
+    assert trainer.told and trainer.told[0] == 0  # (before its first step: its machine is leased while groups play)

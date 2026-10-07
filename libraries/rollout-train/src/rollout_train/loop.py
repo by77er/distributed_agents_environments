@@ -137,6 +137,7 @@ from rollout_train.trainer import (
     Changeable,
     Files,
     Item,
+    OnDemand,
     Progress,
     Progressing,
     Remote,
@@ -524,6 +525,8 @@ async def train(
         segments[number] = held(number, episodes)
         if segments[number]:
             queue.append(number)
+            if isinstance(trainer, OnDemand):  # (a step is coming: its machine leased now, while groups play)
+                trainer.wanted()
         else:
             done_with([number])
 

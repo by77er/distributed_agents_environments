@@ -277,3 +277,50 @@ def test_a_channels_servers_bound_thinking_where_every_provider_says_the_rendere
     assert not bounds_thinking(cluster, "policy", ["a"], "m", SimpleNamespace(thinking=None))
     with pytest.raises(ValueError, match="provider d's reasoning"):
         bounds_thinking(cluster, "policy", ["a", "d"], "m", renderer)
+
+
+async def test_a_trainer_pod_of_the_runs_own_is_answered_from_its_settings_and_leased_only_when_wanted() -> None:
+    import tomllib
+
+    from rollout_train.cluster import parsed
+    from rollout_train.pods import LeasedTrainer
+    from rollout_train.pods.leasing import PodNeed
+
+    cluster = parsed(tomllib.loads("""
+name = "test"
+[ledger]
+url = "sqlite:///ledger.db"
+[trainers.pod]
+kind = "runpod-trainer"
+trainer = "lora"
+image = "ghcr.io/by77er/rollout-trainer@sha256:0"
+gpu_types = ["NVIDIA H100 80GB HBM3"]
+models = ["m"]
+"""))  # fmt: skip
+    claimed: list[list[PodNeed]] = []
+
+    class Claims:
+        async def claim(self, needs: list[PodNeed]) -> None:
+            claimed.append(needs)
+
+    given: dict[str, JsonValue] = {
+        "segment_tokens": 65536,
+        "learning_rate": 2e-5,
+        "tokens_per_step": 131072,
+        "rank": 32,
+    }
+    need = PodNeed("pod", "trainer", 1, "m", None, {"implementation": "rollout_lora:LoraTrainer", "model": "m",
+                                                   "trainer": given})  # fmt: skip
+    remote = SimpleNamespace(weights="lora")
+
+    async def on_pod(provider: Any) -> Any:
+        return remote
+
+    run = SimpleNamespace(trainer_need=need, pods=Claims(), settings=RunSettings({"kind": "train"}), _on_pod=on_pod)
+    made = Run._leased_trainer(cast(Any, run), cluster.trainers["pod"])  # pyright: ignore[reportPrivateUsage]
+    assert isinstance(made, LeasedTrainer) and made.weights == "lora"
+    assert made.budget == Budget(65536, None)  # (what the pod's LoraTrainer makes of the same settings)
+    assert made.changeable["learning_rate"] == 2e-5 and made.changeable["tokens_per_step"] == 131072
+    assert not claimed  # (nothing leased while the run waits for its groups)
+    made.wanted()
+    assert await asyncio.wait_for(made._leasing, 1) is remote and claimed == [[need]]  # pyright: ignore[reportPrivateUsage, reportArgumentType]

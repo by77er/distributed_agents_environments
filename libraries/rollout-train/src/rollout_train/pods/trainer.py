@@ -9,6 +9,11 @@ the weights are kept; the rest of the state may still be being kept then (`Made.
 after the step until it is (or raises `StateLost` where it never will be). Asking again is safe: the pod knows a step by
 its checkpoint, so a step asked for again after a connection dropped, or by a loop started again, is the same step.
 
+`LeasedTrainer` is a training pod leased only once a step is coming (`rollout_train.trainer.OnDemand`): until the
+loop says so, it answers what the run's settings say the pod's trainer will be (`weights`, `budget`, the settings it
+takes between steps), and once told, it leases the pod in the background; a step waits for it, then goes to its
+`RemoteTrainer`, which the pod is checked against (what it says it is must be what was answered).
+
 As a plain `Trainer` (`step`, for a caller that works with files), it keeps the parent's files from disk in the blob
 store (content-addressed: files the store has are not written again), and fetches the whole step's files into `into`
 once the state is kept.
@@ -27,8 +32,9 @@ its own where the pod is the cause: `TrainerUnreachable` when it did not answer 
 """
 
 import asyncio
+import contextlib
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -231,6 +237,86 @@ class RemoteTrainer:
         """Close the client it made (one it was given is its giver's)."""
         if self._owned:
             await self._http.aclose()
+
+
+class LeasedTrainer:
+    """A training pod leased once a step is coming (`wanted`): `lease` claims the pod and gives its `RemoteTrainer`.
+    `weights`, `budget`, `objective` and `changeable` are what the run's settings make the pod's trainer, answered until
+    it is there. A lease that fails fails the step that waits for it (`StepFailed`), and the next step leases again."""
+
+    def __init__(
+        self,
+        lease: Callable[[], Awaitable[RemoteTrainer]],
+        *,
+        weights: str,
+        budget: Budget,
+        objective: Objective = DEFAULT,
+        changeable: Mapping[str, JsonValue] | None = None,
+    ) -> None:
+        self._lease = lease
+        self.weights = weights
+        self.budget = budget
+        self.objective = objective
+        self._changeable: dict[str, JsonValue] = dict(changeable or {})
+        self._told: Callable[[Progress], None] | None = None
+        self._leasing: asyncio.Task[RemoteTrainer] | None = None
+        self.leased_at: float | None = None
+        """When it was told a step is coming (`time.time()`), and began leasing the pod."""
+
+    @property
+    def changeable(self) -> Mapping[str, JsonValue]:
+        return dict(self._changeable)
+
+    def change(self, settings: Mapping[str, JsonValue]) -> None:
+        if unknown := sorted(set(settings) - set(self._changeable)):
+            known = ", ".join(self._changeable) or "none"
+            raise ValueError(f"{', '.join(unknown)} cannot change between steps (these can: {known})")
+        self._changeable.update(settings)
+
+    def watch(self, told: Callable[[Progress], None] | None) -> None:
+        self._told = told
+
+    def wanted(self) -> None:
+        if self._leasing is None:
+            self.leased_at = time.time()
+            self._leasing = asyncio.ensure_future(self._lease())
+
+    async def made(self, batch: Sequence[Item], *, seed: int, parent: Checkpoint | None, into: str) -> Made:
+        return await (await self._remote()).made(batch, seed=seed, parent=parent, into=into)
+
+    async def state(self, into: str) -> Manifest:
+        return await (await self._remote()).state(into)
+
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
+        return await (await self._remote()).step(batch, seed=seed, parent=parent, into=into)
+
+    async def _remote(self) -> RemoteTrainer:
+        """The pod's trainer, leased now if no step said it was coming, with the settings the run has now."""
+        self.wanted()
+        assert self._leasing is not None
+        try:
+            remote = await asyncio.shield(self._leasing)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # (the next step leases again)
+            self._leasing = None
+            raise StepFailed(f"the training pod was not leased: {type(error).__name__}: {error}") from error
+        said = (remote.weights, remote.budget)
+        if said != (self.weights, self.budget):
+            raise ValueError(f"the training pod's trainer makes {said[0]} within {said[1]}, and the run's settings "
+                             f"said {self.weights} within {self.budget}")  # fmt: skip
+        remote.change({key: value for key, value in self._changeable.items() if key in remote.changeable})
+        remote.watch(self._told)
+        return remote
+
+    async def aclose(self) -> None:
+        """Stop a lease in progress, and close the pod's trainer where it was leased."""
+        if self._leasing is None:
+            return
+        if not self._leasing.done():
+            self._leasing.cancel()
+        with contextlib.suppress(BaseException):
+            await (await self._leasing).aclose()
 
 
 class _Forgotten(Exception):

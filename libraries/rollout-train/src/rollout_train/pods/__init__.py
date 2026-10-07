@@ -23,7 +23,7 @@ The images that run these, and how the certificates are issued and renewed, are 
 from rollout_train.pods.identity import GATEWAY_IDENTITY, LivePod, live, pod_identity
 from rollout_train.pods.leases import HELD, IDLE, STARTING, PodLease, PodLeases, PodTime, pod_leases_of
 from rollout_train.pods.leasing import LeaseLost, PodNeed, Pods, PodsDidNotStart, needs_of, reap
-from rollout_train.pods.trainer import RemoteTrainer, TrainerBusy, TrainerRefused, TrainerUnreachable
+from rollout_train.pods.trainer import LeasedTrainer, RemoteTrainer, TrainerBusy, TrainerRefused, TrainerUnreachable
 
 __all__ = [
     "GATEWAY_IDENTITY",
@@ -31,6 +31,7 @@ __all__ = [
     "IDLE",
     "STARTING",
     "LeaseLost",
+    "LeasedTrainer",
     "LivePod",
     "PodLease",
     "PodLeases",
