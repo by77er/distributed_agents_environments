@@ -677,6 +677,7 @@ async def train(
             ):
                 numbers, queue[:] = list(queue), []
                 stepping = asyncio.create_task(take(max(steps, default=0) + 1, numbers))
+                continue  # (the groups it took are in no step's wait now: more are decided before it is waited on)
             waited: set[asyncio.Task[Any]] = {*outstanding, *([stepping] if stepping else [])}
             if not waited:
                 if paused:

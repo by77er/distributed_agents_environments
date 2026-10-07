@@ -17,7 +17,7 @@ from rollout_train.colocated import Colocated
 from rollout_train.evals import Schedule, make_suite, suite_entry
 from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.providers import TRAINER_KINDS, settings_of
-from rollout_train.record import EVALS, STEPS, table
+from rollout_train.record import EVALS, GROUPS, RESULTS, STEPS, table
 from rollout_train.run_settings import RunSettings
 from rollout_train.settings import (
     CHANGEABLE,
@@ -188,6 +188,25 @@ async def test_a_trainer_slower_than_play_holds_play_back_so_no_step_takes_more_
         assert max(taken) > 4
     else:  # (none: 2 times 1 + max_lag; never fewer than groups_per_step)
         assert max(taken) == most
+
+
+async def test_play_goes_on_while_a_step_takes_every_group_played_so_far(tmp_path: Path) -> None:
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    checkpoints, recorder = Checkpoints(ledger, blobs), answering()
+    async with here(ledger, recorder, blobs):
+        await train(
+            words, Slow(), checkpoints, base="tiny", channel="policy", directory=tmp_path / "files",
+            publish=recorder.publish, groups=8, groups_per_step=2, groups_ahead=2, episodes_at_once=24, seed=1,
+        )  # fmt: skip
+    groups: Any = await ledger.read(table("train", GROUPS))
+    steps: Any = await ledger.read(table("train", STEPS))
+    results: Any = await ledger.read(table("train", RESULTS))
+    made = {checkpoint.step: checkpoint.made for checkpoint in await made_by(checkpoints)}
+    taken = [str(each) for each in steps["1"]["groups"]]
+    played = max(float(results[key]["time"]) for key in taken)  # (when the last group the first step took ended)
+    during = [key for key, group in groups.items() if key not in taken and played - 0.1 <= float(group["decided"])
+              < float(made[1])]  # fmt: skip
+    assert during  # (the groups the first step took left room: more were decided while it trained, none waited)
 
 
 async def test_a_value_the_trainer_cannot_take_leaves_its_settings_as_they_were(tmp_path: Path) -> None:
