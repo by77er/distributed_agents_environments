@@ -316,7 +316,13 @@ models = ["m"]
     async def on_pod(provider: Any) -> Any:
         return remote
 
-    run = SimpleNamespace(trainer_need=need, pods=Claims(), settings=RunSettings({"kind": "train"}), _on_pod=on_pod)
+    noted: list[str] = []
+
+    async def note(said: str) -> None:
+        noted.append(said)
+
+    run = SimpleNamespace(trainer_need=need, pods=Claims(), settings=RunSettings({"kind": "train"}), _on_pod=on_pod,
+                          noted=note)  # fmt: skip
     made = Run._leased_trainer(cast(Any, run), cluster.trainers["pod"])  # pyright: ignore[reportPrivateUsage]
     assert isinstance(made, LeasedTrainer) and made.weights == "lora"
     assert made.budget == Budget(65536, None)  # (what the pod's LoraTrainer makes of the same settings)
@@ -324,3 +330,4 @@ models = ["m"]
     assert not claimed  # (nothing leased while the run waits for its groups)
     made.wanted()
     assert await asyncio.wait_for(made._leasing, 1) is remote and claimed == [[need]]  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+    assert noted == ["running"]  # (its launch no longer says what the claim waited for)

@@ -623,6 +623,8 @@ class Run:
 
         async def lease() -> Any:
             await pods.claim([need])
+            if self.noted is not None:  # (the claim said what it waited for: the run runs again)
+                await self.noted("running")
             return await self._on_pod(provider)
 
         return cast(Trainer, LeasedTrainer(
