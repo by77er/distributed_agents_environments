@@ -6,12 +6,24 @@ The trainer and the engine read the same checkpoint (compressed-tensors `pack-qu
 eight to an int32, one bf16 scale per group of input columns), so behavior and trainer logprobs agree. `Int4Linear`
 dequantizes its weight inside the matrix multiply, in forward and again in backward: only the packed weight is kept
 for backward, so at most one layer's bf16 weight exists at a time, whether or not activations are checkpointed.
+
+On a GPU, a Triton kernel (`rollout_lora.kernels`) dequantizes a weight in one pass, reading the packed words and
+writing the weight; torch's own operations, which the CPU runs, write and read whole int32, int8 and bf16 copies of
+it between. Both round each weight once, from its value times its scale in float32, and agree bit for bit.
 """
 
+import functools
+import importlib.util
 from typing import Any, cast
 
 import torch
 from torch import nn
+
+
+@functools.cache
+def _kernels() -> bool:
+    """Whether Triton is here to compile `rollout_lora.kernels`."""
+    return importlib.util.find_spec("triton") is not None
 
 
 def unpack_int4(packed: torch.Tensor, columns: int) -> torch.Tensor:
@@ -22,6 +34,12 @@ def unpack_int4(packed: torch.Tensor, columns: int) -> torch.Tensor:
 
 
 def dequantize(packed: torch.Tensor, scale: torch.Tensor, columns: int, dtype: torch.dtype) -> torch.Tensor:
+    """The weight in `dtype`: each int4 value times its group's scale (`scale`, one for each `columns // groups`
+    columns of a row), by the Triton kernel on a GPU, else by torch's operations."""
+    if packed.is_cuda and _kernels():
+        from rollout_lora.kernels import dequantized
+
+        return dequantized(packed, scale, columns, dtype)
     values = unpack_int4(packed, columns)
     group = columns // scale.shape[1]
     return (values.reshape(values.shape[0], -1, group).to(dtype) * scale.unsqueeze(-1).to(dtype)).reshape(

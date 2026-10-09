@@ -221,7 +221,7 @@ with linear attention a state for each run of a pack beside each chunk's.
 
 | Part | What `rollout_lora.policy` and `rollout_lora.quantized` do |
 |---|---|
-| Weights | The checkpoint's packed int4 weights stay packed. `Int4Linear` dequantizes a layer's weight inside the matrix multiply, in the forward and again in the backward pass, so at most one layer's bfloat16 weight exists at a time |
+| Weights | The checkpoint's packed int4 weights stay packed. `Int4Linear` dequantizes a layer's weight inside the matrix multiply, in the forward and again in the backward pass, so at most one layer's bfloat16 weight exists at a time. On a GPU a Triton kernel (`rollout_lora.kernels`) dequantizes it in one pass, bit for bit as torch's operations do on the CPU |
 | Adapter | LoRA on every attention, linear-attention and MLP projection of the language model (`TARGETS`). `B` starts at zero: a new adapter changes nothing |
 | Reference | `Policy.reference`: the logprobs with every LoRA layer switched off (`rollout_lora.layers.adapter_off`), without a gradient: the model trained over, at no memory cost |
 | Entropy | `Policy.logprobs_and_entropy`: each sampled position's entropy beside its logprob, from the same chunk of logits |
