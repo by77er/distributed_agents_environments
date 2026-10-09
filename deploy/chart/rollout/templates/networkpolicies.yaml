@@ -116,8 +116,8 @@ spec:
       ports: [{port: 9000}]
 {{- end }}
 ---
-# The monitors: one another (a monitor asks another for a run's episodes), and an Ingress where one has it. People
-# reach them through `kubectl port-forward`, which no policy stops.
+# The monitors: one another (a monitor asks another for a run's episodes), an Ingress where one has it, and the tunnel
+# where one has a hostname through it. People reach them through `kubectl port-forward`, which no policy stops.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -133,6 +133,9 @@ spec:
         {{- if $monitor.ingress }}
         - {{- toYaml $ingress | nindent 10 }}
         {{- end }}
+        {{- end }}
+        {{- if include "rollout.tunneledMonitors" $ }}
+        - {{- toYaml $tunnel | nindent 10 }}
         {{- end }}
       ports: [{port: 8765}]
 {{- range $kind, $pool := .Values.sandboxes }}

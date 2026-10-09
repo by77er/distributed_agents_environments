@@ -53,7 +53,7 @@ spec:
             - "8765"
             - --cluster
             {{- $service := printf "monitor-%s" $name }}
-            {{- range $host := concat (list $service (printf "%s.%s" $service $.Release.Namespace) (printf "%s.%s.svc" $service $.Release.Namespace) (printf "%s.%s.svc.cluster.local" $service $.Release.Namespace)) (ternary (list $monitor.host) (list) (and (eq true $monitor.ingress) (ne "" ($monitor.host | default "")))) ($monitor.hosts | default list) }}
+            {{- range $host := concat (list $service (printf "%s.%s" $service $.Release.Namespace) (printf "%s.%s.svc" $service $.Release.Namespace) (printf "%s.%s.svc.cluster.local" $service $.Release.Namespace)) (ternary (list $monitor.host) (list) (and (eq true $monitor.ingress) (ne "" ($monitor.host | default "")))) (compact (list ($monitor.tunnel | default ""))) ($monitor.hosts | default list) }}
             - --allow-host
             - {{ $host | quote }}
             {{- end }}

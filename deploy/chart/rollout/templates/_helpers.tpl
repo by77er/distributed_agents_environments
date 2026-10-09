@@ -105,6 +105,13 @@ after the cluster, and gives it to Ray's own pods itself). */}}
   valueFrom: {secretKeyRef: {name: {{ .Values.ray.name }}, key: auth_token}}
 {{- end }}
 
+{{/* Non-empty where the tunnel carries a hostname to a monitor (a monitor's `tunnel`, with the tunnel enabled). */}}
+{{- define "rollout.tunneledMonitors" -}}
+{{- if .Values.tunnel.enabled }}
+{{- range $_, $monitor := .Values.monitors }}{{ $monitor.tunnel | default "" }}{{ end }}
+{{- end }}
+{{- end }}
+
 {{/* An egress rule to the cluster's DNS (`networkPolicies.dns`). */}}
 {{- define "rollout.dnsEgress" -}}
 {{- $dns := .Values.networkPolicies.dns }}

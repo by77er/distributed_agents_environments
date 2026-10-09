@@ -1,7 +1,8 @@
-# A Cloudflare Tunnel: cloudflared carries public hostnames to Services of the cluster (the ledger service, step-ca),
-# with Cloudflare ending TLS at its edge with a publicly trusted certificate. Its token (the Secret `tunnel.secret`, key
-# `token`) is a locally managed tunnel's (`cloudflared tunnel create`, then `cloudflared tunnel token NAME`), whose
-# hostnames are routed to it in DNS (`cloudflared tunnel route dns NAME HOST`); the rules below say where each goes.
+# A Cloudflare Tunnel: cloudflared carries public hostnames to Services of the cluster (the ledger service, step-ca,
+# each monitor with a `tunnel` hostname), with Cloudflare ending TLS at its edge with a publicly trusted certificate.
+# Its token (the Secret `tunnel.secret`, key `token`) is a locally managed tunnel's (`cloudflared tunnel create`, then
+# `cloudflared tunnel token NAME`), whose hostnames are routed to it in DNS (`cloudflared tunnel route dns NAME HOST`);
+# the rules below say where each goes.
 {{- if .Values.tunnel.enabled }}
 apiVersion: v1
 kind: ConfigMap
@@ -19,6 +20,12 @@ data:
       - hostname: {{ . }}
         service: https://step-ca.{{ $.Release.Namespace }}:9000
         originRequest: {noTLSVerify: true}  # (step-ca's own certificate is the cluster's root's: inside the cluster)
+      {{- end }}
+      {{- range $name, $monitor := .Values.monitors }}
+      {{- with $monitor.tunnel }}
+      - hostname: {{ . }}
+        service: http://monitor-{{ $name }}.{{ $.Release.Namespace }}:8765
+      {{- end }}
       {{- end }}
       - service: http_status:404
 ---

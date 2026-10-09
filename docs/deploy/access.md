@@ -10,7 +10,7 @@ deployment to other people.
 
 | Service | Reached by | Exposed through an Ingress |
 |---|---|---|
-| The monitor | people, in a browser, through `kubectl port-forward`; it asks for its token | only with `monitors.NAME.ingress` |
+| The monitor | people, in a browser, through `kubectl port-forward`, or the tunnel at `monitors.NAME.tunnel`; it asks for its token | only with `monitors.NAME.ingress` |
 | The gateway | runs in the cluster, at its Service; harnesses outside the cluster | yes, if harnesses outside the cluster use it |
 | Ray's dashboard | operators | optional; it asks for the Ray cluster's token |
 | Postgres (the [ledger](../libraries/rollout-train/checkpoints.md#the-ledger)) | the platform's pods only | **never** |
@@ -76,6 +76,19 @@ spec:
 
 The gateway trusts the `X-Forwarded-*` headers of any proxy in front of it (the chart starts it with `--proxied '*'`),
 so reach its pods only through the ingress controller.
+
+## The monitor through the tunnel
+
+With the [tunnel](providers.md) on, `monitors.NAME.tunnel` names a public hostname the tunnel carries to that monitor,
+which then answers under it too. Route the hostname to the tunnel in DNS like the tunnel's others, and put it behind
+Cloudflare Access (a self-hosted application whose policy admits only the people who may use the monitor): the tunnel
+reaches it from the internet, and Access then refuses everyone else at Cloudflare's edge, before the token is asked
+for. Sign in once at `https://HOST/login?token=TOKEN`.
+
+```yaml
+monitors:
+  main: {tunnel: monitor.example.com}
+```
 
 ## Sign-in in front of the monitor
 

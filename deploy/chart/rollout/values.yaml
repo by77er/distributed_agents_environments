@@ -174,11 +174,14 @@ gateway:
 # environments from their source with its blob store and the long-lived Ray cluster. Its page and API ask for the
 # monitors' token (secrets.monitor); it answers under localhost, 127.0.0.1 and its Service's names (what `kubectl
 # port-forward` and other pods reach it by), and `hosts`. With `ingress`, an Ingress through Traefik at `host` too.
+# With `tunnel`, the tunnel carries that public hostname to it: put the hostname behind Cloudflare Access too, as the
+# page and the API then answer from the internet to whoever holds the token.
 monitors:
   main:
     ingress: false
     host: monitor.localhost
     hosts: []
+    tunnel: ""
     resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 3Gi}}
 
 ingress:

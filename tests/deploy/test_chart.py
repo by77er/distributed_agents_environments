@@ -277,6 +277,22 @@ def test_the_monitors_ask_for_a_token_the_chart_makes_and_answer_only_under_thei
     assert [each["metadata"]["name"] for each in named if each["kind"] == "Secret"] == ["page-token"]
 
 
+def test_a_monitor_with_a_tunnel_hostname_is_carried_there_by_the_tunnel_and_answers_under_it() -> None:
+    every = render("--set", "tunnel.enabled=true", "--set", "monitors.main.tunnel=monitor.example.com")
+    (config,) = [each for each in every if each["kind"] == "ConfigMap" and each["metadata"]["name"] == "tunnel"]
+    ingress = yaml.safe_load(config["data"]["config.yaml"])["ingress"]
+    assert {"hostname": "monitor.example.com", "service": "http://monitor-main.rollout:8765"} in ingress
+    assert ingress[-1] == {"service": "http_status:404"}
+    (monitor,) = containers_of(every, "monitor")
+    command = monitor["command"]
+    assert "monitor.example.com" in [command[at + 1] for at, each in enumerate(command) if each == "--allow-host"]
+    (policy,) = [each for each in every if each["kind"] == "NetworkPolicy" and each["metadata"]["name"] == "monitors"]
+    assert {"podSelector": {"matchLabels": {"app": "tunnel"}}} in policy["spec"]["ingress"][0]["from"]
+    without = render("--set", "monitors.main.tunnel=monitor.example.com")  # (no tunnel: nothing carries it)
+    (policy,) = [each for each in without if each["kind"] == "NetworkPolicy" and each["metadata"]["name"] == "monitors"]
+    assert {"podSelector": {"matchLabels": {"app": "tunnel"}}} not in policy["spec"]["ingress"][0]["from"]
+
+
 def workloads(rendered: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Every pod the chart makes, by its workload's name (`ray/GROUP` for the long-lived Ray cluster's, `rayjob/head`
     and `rayjob/submitter` for each run's, from files/rayjob.yaml), as its pod spec."""
