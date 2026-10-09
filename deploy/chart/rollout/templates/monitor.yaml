@@ -66,6 +66,8 @@ spec:
             {{- include "rollout.rayClientEnv" $ | nindent 12 }}
             - name: ROLLOUT_MONITOR_TOKEN
               valueFrom: {secretKeyRef: {name: {{ $.Values.secrets.monitor }}, key: ROLLOUT_MONITOR_TOKEN}}
+            # (it reads the ledger in worker threads; glibc's arena per thread keeps each one's peak after a read)
+            - {name: MALLOC_ARENA_MAX, value: "2"}
           ports: [{containerPort: 8765, name: http}]
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10}
           volumeMounts: {{- include "rollout.volumeMounts" (dict "root" $ "names" (list "state" "config")) | nindent 12 }}
