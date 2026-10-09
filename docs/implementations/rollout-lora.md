@@ -90,7 +90,7 @@ too), and these:
 | `whole_base` | For an adapter on several GPUs: each GPU holds the whole frozen model, gathered once (true), or its share, each layer gathered as it computes (false: a model too large for one GPU); none: whole where the model's files take at most half of the smallest GPU's memory, its memory by its name as the memory estimate counts it (`rollout_train.memory.holds_whole_base`) |
 
 The step's settings (`learning_rate`, `tokens_per_step`, `max_kl`, `max_gradient_norm`, `passes`, `warmup_updates`,
-`segment_tokens`, `segments_per_step`, `pack_tokens`, `share_prefixes`, `objective`) are
+`segment_tokens`, `segments_per_step`, `pack_tokens`, `share_prefixes`, `old_logprobs`, `objective`) are
 [`rollout_objectives`'](rollout-objectives.md#settings). The
 objective's components can be named by this trainer's own settings too (`ratio`, `clip_low`, `clip_high`,
 `segment_clip_low`, `segment_clip_high`, `truncate`, and `objective = "policy_gradient"` or `"likelihood"`), which say

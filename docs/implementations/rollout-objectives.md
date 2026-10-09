@@ -40,6 +40,7 @@ libraries; it is installed with either the `gpu` or the `tinker` extra.
 | `segments_per_step` | How many segments a step can afford (`None`: any number) |
 | `pack_tokens` | The most tokens one forward and backward pass runs: segments are packed into rows of up to this many (`None`: `segment_tokens`, or 8,192 where that is none, what the trainer's memory estimate allows for). A segment longer than it has a pack of its own |
 | `share_prefixes` | Whether segments of a pack that start with the same tokens share them (`True`) |
+| `old_logprobs` | Where old comes from for a segment sampled wholly on the weights the step starts from: `sampler` (the default), the behaviour logprobs the engine recorded, so the step does not compute them; `trainer`, computed by the trainer. A segment sampled on older weights, or with a token the engine gave no logprob, is computed either way |
 | `objective` | The objective: an `Objective`, a preset's name, or a table of `preset` and component overrides. A run's `objective.*` settings give it |
 
 A trainer's own settings can also name the objective by `ratio`, `clip_low`, `clip_high`, `segment_clip_low`,
@@ -57,12 +58,15 @@ Four logprobs of each sampled token meet in it:
 | Logprob | Computed by | When |
 |---|---|---|
 | behavior | the engine | while sampling, under whichever [checkpoint](../libraries/rollout-train/checkpoints.md) was served then (recorded in the segment) |
-| old | the trainer, without a gradient | at the start of the step, on the weights the step starts from |
+| old | the trainer, without a gradient; or the engine, where it sampled the segment on those weights (`old_logprobs`) | at the start of the step, on the weights the step starts from |
 | now | the trainer, with a gradient | in each minibatch, as the step updates the weights |
 | reference | the trainer, without a gradient | under the reference model: the base with the adapter switched off, or a frozen copy |
 
 Behavior and old differ because the data came from elsewhere: an older checkpoint, and the engine computing
-differently from the trainer. Old and now differ by how far the step has moved the policy. Now and reference differ by
+differently from the trainer. A segment sampled wholly on the weights the step starts from (the loop marks it,
+`sampled_at_start`) takes its behavior for its old unless `old_logprobs = "trainer"`: its ratios then start at the
+engine's numbers rather than exactly 1, about 0.01 nats a token off between vLLM's 4-bit kernels and the LoRA
+trainer's, and it needs no pass of its own. Old and now differ by how far the step has moved the policy. Now and reference differ by
 how far training has moved it from the base.
 
 ### A policy gradient
@@ -161,8 +165,9 @@ Which items, and with what advantages, is the [algorithm's](../libraries/rollout
    wrong kind for the objective, a behaviour logprob that is not finite where an importance correction reads it) is
    raised here, before anything is computed.
 2. **Where the step starts.** For a policy gradient, a distillation or a preference loss, every sampled token's
-   logprob on the weights the step starts from (old), without a gradient, and the reference's where it is read. The
-   first minibatch of a policy gradient or a distillation runs on those weights, so its segments' old is what it
+   logprob on the weights the step starts from (old), without a gradient, and the reference's where it is read; a
+   weighted or distilled segment sampled wholly on those weights takes its behaviour logprobs instead
+   (`old_logprobs`), and is computed in no pack here. The first minibatch of a policy gradient or a distillation runs on those weights, so its segments' old is what it
    computes itself (with a gradient, detached) rather than a pass of their own; the result is the same. Each other
    minibatch's start is computed in the packs that minibatch's own pass makes, so that on the weights the step starts
    from its ratios are exactly 1 (in other packs bfloat16 rounds a segment's logprobs a little differently). A
@@ -277,7 +282,8 @@ A step returns these; a trainer adds its own (`peak_gpu_gib`, `billed_tokens`).
 | Metric | Meaning |
 |---|---|
 | `loss` | The loss, over the units (per token, per segment, or per item) |
-| `kl_floor`, `mean_mismatch` | KL(behavior ‖ old) estimated on the sampled tokens, and the mean absolute difference: how far the data is from the policy the step starts from (tokens without a finite behaviour logprob left out) |
+| `kl_floor`, `mean_mismatch` | KL(behavior ‖ old) estimated on the sampled tokens, and the mean absolute difference: how far the data is from the policy the step starts from (tokens without a finite behaviour logprob left out, and the segments whose old is their behavior) |
+| `old_from_sampler_fraction` | Of the segments trained on, those whose old is the behaviour logprobs (`old_logprobs`) |
 | `mean_weight`, `truncated_fraction` | The mean importance weight, and the share of tokens whose weight was truncated or masked |
 | `clip_fraction`, `mean_ratio` | The share of tokens whose ratio was outside the clip's bounds, and the mean ratio |
 | `kl_moved` | KL(old ‖ now) by the k3 estimate the stop reads, as the last stepped minibatch found it: how far the step moved the policy (never below 0) |

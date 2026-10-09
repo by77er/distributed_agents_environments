@@ -47,9 +47,9 @@ do not edit by hand.
 - **[`rollout_train.testing`](#rollout_traintesting)** — Test doubles: a scripted engine and a readable token format. [`admitted`](#admitted), [`Characters`](#characters), [`gateway_endpoints`](#gateway_endpoints), [`keyring`](#keyring), [`LEDGER_TOKEN`](#ledger_token), [`plain_channel`](#plain_channel), [`plain_renderer`](#plain_renderer), [`PlainRenderer`](#plainrenderer), [`Policy`](#policy), [`sample_request`](#sample_request), [`scripted_engine`](#scripted_engine), [`scripted_top`](#scripted_top), [`ScriptedEngine`](#scriptedengine), [`ScriptedTrainer`](#scriptedtrainer), [`SECRETS`](#secrets), [`served_ledger`](#served_ledger)
 - **[`rollout_vllm`](#rollout_vllm)** — An engine on vLLM. [`VllmEngine`](#vllmengine)
 - **[`rollout_lora`](#rollout_lora)** — A trainer for 4-bit checkpoints with LoRA. [`FullTrainer`](#fulltrainer), [`LoraSettings`](#lorasettings), [`LoraTrainer`](#loratrainer)
-- **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`StepSettings`](#stepsettings)
+- **[`rollout_objectives.settings`](#rollout_objectivessettings)** — A policy step's settings, which the LoRA, full-weight and Tinker trainers take. [`CHANGEABLE`](#changeable), [`OBJECTIVE`](#objective), [`OLD_LOGPROBS`](#old_logprobs), [`StepSettings`](#stepsettings)
 - **[`rollout_objectives.terms`](#rollout_objectivesterms)** — An objective's loss composed from its components, in torch. [`importance_weight`](#importance_weight), [`kl_estimate`](#kl_estimate), [`labelled`](#labelled), [`likelihood`](#likelihood), [`moved_kl`](#moved_kl), [`pair`](#pair), [`policy_gradient`](#policy_gradient), [`reduced`](#reduced), [`Scored`](#scored), [`SUMS`](#sums), [`TALLIED`](#tallied), [`tally`](#tally), [`Terms`](#terms), [`terms`](#terms), [`units`](#units)
-- **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`GRADIENT_WORK`](#gradient_work), [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`PackingPolicy`](#packingpolicy), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`SharedPolicy`](#sharedpolicy), [`StepProgress`](#stepprogress), [`TrainablePolicy`](#trainablepolicy)
+- **[`rollout_objectives.step`](#rollout_objectivesstep)** — A step over a batch on a local policy, its plan of minibatches, and its statistics. [`from_sampler`](#from_sampler), [`GRADIENT_WORK`](#gradient_work), [`line`](#line), [`metrics`](#metrics), [`MINIBATCHES`](#minibatches), [`minibatches`](#minibatches), [`PackingPolicy`](#packingpolicy), [`Plan`](#rollout_objectivesstepplan), [`PolicyStep`](#policystep), [`preference_terms`](#preference_terms), [`sampled`](#sampled), [`SharedPolicy`](#sharedpolicy), [`StepProgress`](#stepprogress), [`TrainablePolicy`](#trainablepolicy)
 - **[`rollout_objectives.packing`](#rollout_objectivespacking)** — Many segments in one row of a model's input, a prefix several share once. [`binned`](#binned), [`Group`](#group), [`grouped`](#grouped), [`Pack`](#pack), [`packed`](#rollout_objectivespackingpacked), [`packs`](#packs), [`Run`](#rollout_objectivespackingrun), [`sampled_positions`](#sampled_positions), [`Scores`](#rollout_objectivespackingscores), [`SHARED_PREFIX`](#shared_prefix)
 - **[`rollout_objectives.ranks`](#rollout_objectivesranks)** — The processes a step is shared among, one per GPU, and how a minibatch is shared. [`Ranks`](#ranks), [`shares`](#shares)
 - **[`rollout_qwen`](#rollout_qwen)** — Renderers for the Qwen model families. [`qwen3`](#qwen3), [`qwen35`](#qwen35)
@@ -3036,6 +3036,7 @@ advantage (for a policy gradient with a distillation term; 0 for a distillation 
 | `scores` | `TeacherScores` | required | One for each sampled token, in the order of the segment's spans, and which teacher gave them. |
 | `advantage` | `float` | `0.0` |  |
 | `source` | `str` | `''` | `RUN/GROUP/EPISODE/SLOT/INDEX`. |
+| `sampled_at_start` | `bool` | `False` | Whether every token the policy sampled in it was sampled on the weights the step starts from. |
 
 ### `edit_suite`
 
@@ -3848,6 +3849,7 @@ A segment to train on, and its advantage: every token the policy sampled in it c
 | `segment` | `Segment` | required |  |
 | `advantage` | `float` | required |  |
 | `source` | `str` | `''` | Where the segment is from, for the record of what a step trained on: `RUN/GROUP/EPISODE/SLOT/INDEX`. |
+| `sampled_at_start` | `bool` | `False` | Whether every token the policy sampled in it was sampled on the weights the step starts from. |
 
 ## `rollout_train.inference`
 
@@ -9977,6 +9979,16 @@ OBJECTIVE = 'objective.'
 
 The start of a changeable setting that is a component of the objective, as the run's settings name it.
 
+### `OLD_LOGPROBS`
+
+*constant* · `implementations/rollout-objectives/src/rollout_objectives/settings.py`
+
+```python
+OLD_LOGPROBS = ('sampler', 'trainer')
+```
+
+Where a step takes the logprobs it starts from (`StepSettings.old_logprobs`).
+
 ### `StepSettings`
 
 *class* · `implementations/rollout-objectives/src/rollout_objectives/settings.py`
@@ -9999,6 +10011,7 @@ A policy step's settings (`rollout_objectives.step`), whichever trainer takes it
 | `pack_tokens` | `int \| None` | `None` | The most tokens one forward and backward pass runs: a step packs its segments into rows of up to this many (`rollout_objectives.packing`). None: `segment_tokens`, so that a pack takes about the memory the longest segment would alone (a pack's activations are those of a segment as long as its row, whatever prefixes its segments share), or 8,192 where that is none (what the trainer's memory estimate allows for, `rollout_train.memory.SEGMENT_TOKENS`). A segment longer than it has a pack of its own. |
 | `share_prefixes` | `bool` | `True` | Whether segments of a pack that start with the same tokens share them: the prefix is run once, and each segment's rest after it. |
 | `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch makes more optimizer updates (a supervised step on a small dataset, say). |
+| `old_logprobs` | `str` | `'sampler'` | Where the logprobs a step starts from (`old`: what its ratios are of, and its distance from the start) come from for a segment sampled wholly on the weights the step starts from (`sampled_at_start`, `rollout_train.trainer`): `sampler`, the behaviour logprobs the engine recorded as it sampled it, which the step then does not compute (a pass over the segment without a gradient, or the first minibatch's own); `trainer`, computed by the trainer. They differ by how the engine and the trainer compute (a step's `mean_mismatch` measures it on those it computed): about 0.01 nats a token between vLLM's 4-bit kernels and the LoRA trainer's. A segment sampled on older weights, or with a token the engine gave no logprob, is computed either way. |
 | `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every weight by about the full rate. A step that goes on from an optimizer's state is not warmed up. |
 | `objective` | `Objective \| str \| Mapping[str, Any]` | `DEFAULT` | The objective (`rollout_train.objectives`): an `Objective`, a preset's name, or a table of `preset` and component overrides (`rollout_train.objectives.objective_of`). The run's `objective.*` settings say it; `loss` is it, resolved. |
 | `ratio` | `InitVar[str]` | `_UNSAID` |  |
@@ -10224,6 +10237,18 @@ What a segment of `tokens` sampled tokens counts for in its minibatch's mean (a 
 
 A step over a batch on a local policy, its plan of minibatches, and its statistics.
 
+### `from_sampler`
+
+*function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
+
+```python
+def from_sampler(item: Item, settings: StepSettings) -> bool
+```
+
+Whether a step takes the logprobs the engine recorded as it sampled an item's segment as where it starts
+(`StepSettings.old_logprobs`): a weighted or distilled segment sampled wholly on the weights the step starts from,
+every sampled token of which has one.
+
 ### `GRADIENT_WORK`
 
 *constant* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
@@ -10251,13 +10276,14 @@ it.
 *function* · `implementations/rollout-objectives/src/rollout_objectives/step.py`
 
 ```python
-def metrics(totals: Mapping[str, float], starts: Sequence[tuple[torch.Tensor, torch.Tensor]], *, plan: Plan, given: int, moved: float, updates: int, settings: StepSettings, fresh: bool, stopped: bool, start_seconds: float) -> dict[str, float]
+def metrics(totals: Mapping[str, float], starts: Sequence[tuple[torch.Tensor, torch.Tensor]], *, plan: Plan, given: int, moved: float, updates: int, settings: StepSettings, fresh: bool, stopped: bool, start_seconds: float, from_sampler: int = 0) -> dict[str, float]
 ```
 
 A step's metrics: from the `SUMS` of the minibatches it stepped on (`totals`), each segment's behaviour and
 start logprobs (`starts`; a behaviour logprob that is not finite, from a provider without them, is left out of
-theirs), the plan of `given` items, how far the last minibatch stepped on found the policy from the step's start
-(`moved`), and how many `updates` it made.
+theirs; none of those whose old is their behaviour), the plan of `given` items, how far the last minibatch stepped
+on found the policy from the step's start (`moved`), how many `updates` it made, and of how many segments the
+sampler gave old (`from_sampler`).
 
 ### `MINIBATCHES`
 

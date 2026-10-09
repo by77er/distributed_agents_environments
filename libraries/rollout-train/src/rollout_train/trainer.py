@@ -17,11 +17,16 @@ itself after the step returns (`Keeps`) has its weights served first, and its ch
 
 A trainer may say how far the step it is taking has got, as it goes (`Progressing`, with `Progress`): the loop hands
 it to its hooks, and a training pod puts it in its beats and its answer about the step.
+
+The loop marks the weighted and distilled segments sampled wholly on the weights a step starts from
+(`sampled_at_start`, `marked_at_start`): their behaviour logprobs are where the step starts, up to how the engine and
+the trainer compute differently, so a trainer may take them for its own instead of computing them
+(`rollout_objectives.settings.StepSettings.old_logprobs`).
 """
 
 import math
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
@@ -40,6 +45,8 @@ class Weighted:
     advantage: float
     source: str = ""
     """Where the segment is from, for the record of what a step trained on: `RUN/GROUP/EPISODE/SLOT/INDEX`."""
+    sampled_at_start: bool = False
+    """Whether every token the policy sampled in it was sampled on the weights the step starts from."""
 
 
 @dataclass(frozen=True)
@@ -83,6 +90,8 @@ class Distilled:
     advantage: float = 0.0
     source: str = ""
     """`RUN/GROUP/EPISODE/SLOT/INDEX`."""
+    sampled_at_start: bool = False
+    """Whether every token the policy sampled in it was sampled on the weights the step starts from."""
 
 
 type Item = Weighted | Pair | Labelled | Distilled
@@ -92,6 +101,19 @@ type Item = Weighted | Pair | Labelled | Distilled
 def segments_of(item: Item) -> tuple[Segment, ...]:
     """The segments an item holds."""
     return (item.segment,) if isinstance(item, Weighted | Distilled) else item.segments
+
+
+def marked_at_start(items: Sequence[Item], depth: int) -> list[Item]:
+    """`items`, each weighted or distilled segment every span of which was sampled at `depth` (the depth of the weights
+    a step starts from: 0, the base model's) marked `sampled_at_start`."""
+    return [
+        replace(item, sampled_at_start=True)
+        if isinstance(item, Weighted | Distilled)
+        and item.segment.spans
+        and all(span.version == depth for span in item.segment.spans)
+        else item
+        for item in items
+    ]
 
 
 def weight_of(item: Item) -> float:

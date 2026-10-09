@@ -3,6 +3,7 @@
 writes them) moves a model exactly as `rollout_lora`'s own step does, for every objective and ratio, with one update or
 several, and its metrics are the same."""
 
+import dataclasses
 from pathlib import Path
 from typing import Any
 
@@ -104,6 +105,26 @@ async def test_one_update_needs_no_pass_for_where_the_step_starts(tmp_path: Path
     service = FakeService(vocabulary=24, seed=3)
     await stepped(service, {"tokens_per_step": 10**6}, tmp_path)
     assert "forward" not in service.calls  # (cispo against the behaviour: the update's own pass says where it started)
+
+
+async def test_segments_sampled_on_the_weights_the_step_starts_from_need_no_pass_and_move_it_as_the_lora_step(
+    tmp_path: Path,
+) -> None:
+    service = FakeService(vocabulary=24, seed=3)
+    settings = ours({"tokens_per_step": 40})
+    marked = [dataclasses.replace(each, sampled_at_start=True) for each in segments(service, 12)]
+    trainer = TinkerTrainer("tiny", service=service, **settings)
+    taken = await trainer.step(marked, seed=7, parent=None, into=tmp_path / "made")
+    assert "forward" not in service.calls and taken.metrics["old_from_sampler_fraction"] == 1.0
+    policy = Bigram(service)
+    expected = PolicyStep(policy, StepSettings(**settings)).step(
+        [dataclasses.replace(each, sampled_at_start=True) for each in segments(service, 12)], seed=7
+    )
+    state = pointer(tmp_path / "made" / WEIGHTS, "state")
+    assert state is not None
+    torch.testing.assert_close(service.table(state), policy.table.detach(), rtol=1e-6, atol=1e-9)
+    for key in SAME:
+        assert taken.metrics[key] == pytest.approx(expected[key], rel=1e-6, abs=1e-7), key
 
 
 async def test_a_stop_at_max_kl_comes_where_the_lora_step_stops_and_leaves_the_client_unused(tmp_path: Path) -> None:

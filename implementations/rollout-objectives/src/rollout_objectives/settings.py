@@ -9,13 +9,15 @@ from pydantic import JsonValue
 
 from rollout_train.objectives import COMPONENTS, DEFAULT, Objective, objective_of
 
-__all__ = ["CHANGEABLE", "OBJECTIVE", "StepSettings"]
+__all__ = ["CHANGEABLE", "OBJECTIVE", "OLD_LOGPROBS", "StepSettings"]
 
 CHANGEABLE = ("learning_rate", "tokens_per_step", "max_kl", "max_gradient_norm")
 """The settings a trainer takes between steps: each step reads them afresh, and none changes what its weights are or
 what a step can hold. Beside them, the components of its objective that may change (`objective.kl.coefficient`)."""
 OBJECTIVE = "objective."
 """The start of a changeable setting that is a component of the objective, as the run's settings name it."""
+OLD_LOGPROBS = ("sampler", "trainer")
+"""Where a step takes the logprobs it starts from (`StepSettings.old_logprobs`)."""
 _UNSAID: Any = object()
 
 
@@ -51,6 +53,14 @@ class StepSettings:
     passes: int = 1
     """Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch
     makes more optimizer updates (a supervised step on a small dataset, say)."""
+    old_logprobs: str = "sampler"
+    """Where the logprobs a step starts from (`old`: what its ratios are of, and its distance from the start) come from
+    for a segment sampled wholly on the weights the step starts from (`sampled_at_start`, `rollout_train.trainer`):
+    `sampler`, the behaviour logprobs the engine recorded as it sampled it, which the step then does not compute (a
+    pass over the segment without a gradient, or the first minibatch's own); `trainer`, computed by the trainer.
+    They differ by how the engine and the trainer compute (a step's `mean_mismatch` measures it on those it computed):
+    about 0.01 nats a token between vLLM's 4-bit kernels and the LoRA trainer's. A segment sampled on older weights,
+    or with a token the engine gave no logprob, is computed either way."""
     warmup_updates: int = 0
     """When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this
     many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every
@@ -80,6 +90,8 @@ class StepSettings:
     ) -> None:
         if self.passes < 1 or self.warmup_updates < 0:
             raise ValueError("passes is at least 1, and warmup_updates is not negative")
+        if self.old_logprobs not in OLD_LOGPROBS:
+            raise ValueError(f"old_logprobs is one of {', '.join(OLD_LOGPROBS)}, not {self.old_logprobs!r}")
         named = {
             "ratio": ratio, "clip_low": clip_low, "clip_high": clip_high, "segment_clip_low": segment_clip_low,
             "segment_clip_high": segment_clip_high, "truncate": truncate,

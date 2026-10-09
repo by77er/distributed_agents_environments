@@ -4,7 +4,9 @@
 name (`rollout_objectives.terms`).
 
 First every sampled token's logprob is computed on the weights the step starts from, without a gradient (`old`), and
-the reference's where the objective reads it (`reference`: an adapter switched off, or a frozen copy). Then the batch's
+the reference's where the objective reads it (`reference`: an adapter switched off, or a frozen copy); but a segment
+sampled wholly on those weights takes the logprobs the engine recorded as it sampled it for its `old`, unless
+`old_logprobs` says the trainer's (`from_sampler`). Then the batch's
 items (weighted segments, pairs, labelled examples or distilled segments) are taken in shuffled minibatches of about
 `tokens_per_step` sampled tokens, an optimizer step each. The first minibatch runs on the weights the step starts
 from, so its segments' `old` is what it computes (with a gradient, detached), not a pass of its own (but a preference
@@ -84,6 +86,7 @@ __all__ = [
     "SharedPolicy",
     "StepProgress",
     "TrainablePolicy",
+    "from_sampler",
     "line",
     "metrics",
     "minibatches",
@@ -389,6 +392,8 @@ class PolicyStep:
         self._capacity = 1
         self._ran = dict.fromkeys(("packs", "rows", "tokens"), 0)
         """Of the last step, in this process: the packs it ran, their rows' tokens, and their segments' tokens."""
+        self._sampled: set[int] = set()
+        """The segments of the step being taken whose `old` the sampler gave (`from_sampler`), by their `id`."""
         self._tracked = StepProgress()
         """How far the step being taken has got."""
         self._device = torch.device("cpu")
@@ -450,9 +455,10 @@ class PolicyStep:
         return packs, rows * GRADIENT_WORK
 
     def _start_planned(self, plan: Plan) -> tuple[int, float]:
-        """The packs the start runs (`_start`) and its work: each minibatch's segments' but the first minibatch's,
-        and every segment's under the reference where the objective reads it."""
+        """The packs the start runs (`_start`) and its work: each minibatch's segments' but the first minibatch's and
+        those whose `old` the sampler gives, and every segment's under the reference where the objective reads it."""
         folded = {id(each) for item in _first_minibatch(plan, self.settings) for each in segments_of(item)}
+        folded |= {id(segments_of(item)[0]) for item in plan.items if from_sampler(item, self.settings)}
         packs, rows = 0, 0
         for batch in minibatches(plan.items, self.settings.tokens_per_step):
             segments = self._segments(batch)
@@ -569,6 +575,7 @@ class PolicyStep:
         longest = max((len(each.tokens) for each in plan.segments), default=1)
         self._capacity = max(settings.pack_tokens or settings.segment_tokens or SEGMENT_TOKENS, longest)
         self._ran = dict.fromkeys(self._ran, 0)
+        self._sampled = set()
         reads_old = objective.family != LIKELIHOOD
         self._device, self._gauges = next(iter(self.policy.parameters())).device, []
         told = self.progress if self.ranks.rank == 0 else None
@@ -644,7 +651,7 @@ class PolicyStep:
         return {
             **metrics(
                 totals,
-                [(behaviors[key], old[key]) for key in old],
+                [(behaviors[key], old[key]) for key in old if key not in self._sampled],
                 plan=plan,
                 given=len(items),
                 moved=moved,
@@ -653,6 +660,7 @@ class PolicyStep:
                 fresh=self.fresh,
                 stopped=stopped,
                 start_seconds=started_pass - started,
+                from_sampler=len(self._sampled),
             ),
             "gradient_norm": sum(gradient_norms) / max(len(gradient_norms), 1),  # before clipping, mean over steps
             "minibatches_out_of_memory": float(out_of_memory),
@@ -703,14 +711,20 @@ class PolicyStep:
         rounds a segment's logprobs a little differently in different packs, and in the same packs a minibatch on the
         weights the step starts from finds its ratios exactly 1. An item a pack of which runs out of memory, and that
         runs out again a segment at a time, is left out of the plan; how many were. Shared, each process computes its
-        packs, and every process gathers every segment's."""
+        packs, and every process gathers every segment's. A segment whose `old` the sampler gives (`from_sampler`) is
+        given it here, and computed in no pack."""
         folded = {id(each) for item in _first_minibatch(plan, self.settings) for each in segments_of(item)}
+        for item in plan.items:
+            if from_sampler(item, self.settings):
+                segment = segments_of(item)[0]
+                _started(segment, torch.tensor(segment.logprobs, device=self._device), old, behaviors)
+                self._sampled.add(id(segment))
         failed: set[int] = set()
         idle_reference = functools.partial(self._idle, reference=True)
         with torch.no_grad():
             for batch in minibatches(plan.items, self.settings.tokens_per_step):
                 segments = self._segments(batch)
-                starting = [each for each in segments if id(each) not in folded]
+                starting = [each for each in segments if id(each) not in folded and id(each) not in old]
                 if starting:
                     for index, found in self._computed(starting, self._logprobs, self._idle, failed).items():
                         _started(starting[index], found, old, behaviors)
@@ -902,6 +916,18 @@ def _first_minibatch(plan: Plan, settings: StepSettings) -> list[Item]:
     return (minibatches(plan.items, settings.tokens_per_step) or [[]])[0]
 
 
+def from_sampler(item: Item, settings: StepSettings) -> bool:
+    """Whether a step takes the logprobs the engine recorded as it sampled an item's segment as where it starts
+    (`StepSettings.old_logprobs`): a weighted or distilled segment sampled wholly on the weights the step starts from,
+    every sampled token of which has one."""
+    return (
+        settings.old_logprobs == "sampler"
+        and isinstance(item, Weighted | Distilled)
+        and item.sampled_at_start
+        and all(math.isfinite(each) for each in item.segment.logprobs)
+    )
+
+
 def _started(
     segment: Segment, logprobs: torch.Tensor, old: dict[int, torch.Tensor], behaviors: dict[int, torch.Tensor]
 ) -> None:
@@ -943,11 +969,13 @@ def metrics(
     fresh: bool,
     stopped: bool,
     start_seconds: float,
+    from_sampler: int = 0,
 ) -> dict[str, float]:
     """A step's metrics: from the `SUMS` of the minibatches it stepped on (`totals`), each segment's behaviour and
     start logprobs (`starts`; a behaviour logprob that is not finite, from a provider without them, is left out of
-    theirs), the plan of `given` items, how far the last minibatch stepped on found the policy from the step's start
-    (`moved`), and how many `updates` it made."""
+    theirs; none of those whose old is their behaviour), the plan of `given` items, how far the last minibatch stepped
+    on found the policy from the step's start (`moved`), how many `updates` it made, and of how many segments the
+    sampler gave old (`from_sampler`)."""
     tokens = max(totals["tokens"], 1.0)
     finite = [(behavior, old) for behavior, old in starts if bool(torch.isfinite(behavior).all())]
     start_tokens = max(sum(float(old.numel()) for _, old in finite), 1.0)
@@ -978,6 +1006,8 @@ def metrics(
         "warmup_updates": float(settings.warmup_updates if fresh else 0),
         "stopped_at_max_kl": float(stopped),
         "start_seconds": start_seconds,
+        # Of the segments trained on, those whose old is the logprobs the engine recorded (`old_logprobs`).
+        "old_from_sampler_fraction": from_sampler / max(len(plan.segments), 1),
     }
     if totals["items"]:
         items = totals["items"]

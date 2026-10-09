@@ -143,6 +143,7 @@ from rollout_train.trainer import (
     Remote,
     StepFailed,
     Trainer,
+    marked_at_start,
     objective_of,
     weight_of,
 )
@@ -569,6 +570,7 @@ async def train(
             if isinstance(used := intent.get("settings"), dict):  # (the settings it was decided with, taken again too)
                 trained_with(_trainers(used))
             seed_of = int(str(intent["seed"]))
+            given = marked_at_start(given, parent.depth if parent is not None else 0)
             watching = key
             if isinstance(trainer, Progressing):
                 trainer.watch(watched(key))

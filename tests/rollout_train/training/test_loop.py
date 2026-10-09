@@ -123,6 +123,10 @@ async def test_the_loop_records_each_group_and_steps_on_what_it_played(
         for weighted in batch:  # whoever said the word is above the group's mean, and the others below it
             said = "".join(chr(token) for token in weighted.segment.tokens[weighted.segment.spans[0].start :]).strip()
             assert (weighted.advantage > 0) == (said == word)
+            # Marked where it was sampled on the weights the step starts from: its parent's depth (the base's, 0).
+            at_start = all(span.version == checkpoint.depth - 1 for span in weighted.segment.spans)
+            assert weighted.sampled_at_start == at_start
+    assert all(weighted.sampled_at_start for weighted in trainer.batches[0])  # (the first step's: the base sampled)
     assert notes.kinds.count("result") == 3 and notes.kinds.count("step") == notes.kinds.count("published")
     assert notes.kinds.count("published") == len(played)
     assert notes.kinds.count("started") == notes.kinds.count("ended") == 12

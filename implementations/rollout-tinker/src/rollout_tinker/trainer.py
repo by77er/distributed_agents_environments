@@ -58,7 +58,16 @@ from pydantic import JsonValue
 from tinker import AdamParams, Datum, ForwardBackwardOutput
 
 from rollout_objectives.distillation import distilled
-from rollout_objectives.step import GRADIENT_WORK, MINIBATCHES, Plan, StepProgress, line, metrics, preference_terms
+from rollout_objectives.step import (
+    GRADIENT_WORK,
+    MINIBATCHES,
+    Plan,
+    StepProgress,
+    from_sampler,
+    line,
+    metrics,
+    preference_terms,
+)
 from rollout_objectives.terms import SUMS, Terms, moved_kl, tally, terms, units
 from rollout_tinker.data import datum, rows
 from rollout_tinker.service import Service, Trainable, Unpaid, said, service_of, unpaid
@@ -222,16 +231,23 @@ class TinkerTrainer:
         single = len(updates) == 1
         way = route(objective, single)
         billed = 0.0
-        starts = objective.family != LIKELIHOOD and not single and bool(segments)
+        # Where the step starts, when more than one update needs it: a segment sampled on these weights at the
+        # logprobs the engine recorded (`old_logprobs`), and every other one's computed in a forward pass.
+        sampled: set[int] = set()
+        if objective.family != LIKELIHOOD and not single:
+            sampled = {id(segments_of(item)[0]) for item in plan.items if from_sampler(item, settings)}
+            for key in sampled:
+                segments[key].old = segments[key].behavior
+        starting = [part for key, part in segments.items() if key not in sampled]
+        starts = objective.family != LIKELIHOOD and not single and bool(starting)
         stops = objective.family != LIKELIHOOD and settings.max_kl is not None
         tracked = StepProgress(self._told, max_kl=settings.max_kl if stops else None)
         sizes = [float(sum(len(each.tokens) for each in _segments(minibatch))) for minibatch in updates]
-        whole = float(sum(len(each.tokens) for each in plan.segments))
+        whole = float(sum(len(part.segment.tokens) for part in starting))
         tracked.plan((1, whole) if starts else (0, 0.0), [(1, each * GRADIENT_WORK) for each in sizes])
 
-        # Where the step starts, when more than one update needs it: each sampled token's logprob on these weights.
         if starts:
-            parts = list(segments.values())
+            parts = starting
             data = [datum(part.segment.tokens, [], {"weights": []}) for part in parts]
             out = await (await client.forward_async(data, "cross_entropy"))
             billed += sum(len(part.segment.tokens) - 1 for part in parts)
@@ -284,7 +300,11 @@ class TinkerTrainer:
 
         found = metrics(
             totals,
-            [(part.behavior, part.old) for part in segments.values() if part.old is not None],
+            [
+                (part.behavior, part.old)
+                for key, part in segments.items()
+                if part.old is not None and key not in sampled
+            ],
             plan=plan,
             given=len(batch),
             moved=moved,
@@ -293,6 +313,7 @@ class TinkerTrainer:
             fresh=fresh,
             stopped=stopped,
             start_seconds=started_pass - started,
+            from_sampler=len(sampled),
         )
         found["billed_tokens"] = billed
         norms = next((values for key, values in optimizer.items() if "grad" in key and "norm" in key), None)

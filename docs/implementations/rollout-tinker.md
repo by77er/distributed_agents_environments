@@ -139,7 +139,7 @@ changing `trainer.provider`.
 | `learning_rate` | AdamW's rate (1e-4). Tinker scales its adapters by its own `lora_alpha / rank`, and its archives say an alpha of 32 (the live test's), half our scale at rank 32, so twice `LoraTrainer`'s rate moves the weights as far |
 | `objective` | The objective, as [`StepSettings`](rollout-objectives.md#settings) takes it (a run's `objective.*` settings give it). One that reads the reference or the entropy is refused: Tinker gives neither here |
 | `tokens_per_step` | Sampled tokens per optimizer step (65,536). A step that is one optimizer step needs no pass for where it starts (below) |
-| `max_kl`, `max_gradient_norm`, `passes`, `warmup_updates`, `segment_tokens`, `segments_per_step` | As `LoraSettings` |
+| `max_kl`, `max_gradient_norm`, `passes`, `warmup_updates`, `segment_tokens`, `segments_per_step`, `old_logprobs` | As `LoraSettings` |
 | `project` | A Tinker project's id |
 
 Adam's numbers are torch's AdamW's, as in the LoRA step (0.9, 0.999, 1e-8; Tinker's own defaults are 0.95 and 1e-12),
@@ -185,7 +185,9 @@ objective, in value and in gradient, where it is one (`rollout_tinker.trainer.ro
 Anything else is a segment ratio, dual clipping, a mask, a KL penalty or a preference loss. `ppo` and `cispo` are
 clipped to 1 - `clip.low` .. 1 + `clip.high`; `s` is 1 for a token mean or a sum, one over the segment's tokens for a
 segment mean, one over `constant_tokens` for `constant`. With one update `old` is the logprob now, so a ratio is 1 and
-unclipped, every clipped surrogate's gradient is the weighted advantage's, and no forward pass is needed. A custom loss
+unclipped, every clipped surrogate's gradient is the weighted advantage's, and no forward pass is needed. With several,
+a segment sampled wholly on the weights the step starts from takes its behaviour logprobs for its `old`
+(`old_logprobs`), and the forward pass runs only the others: none, where every segment was. A custom loss
 is the objective itself (`rollout_objectives.terms`, or the preference loss of the minibatch's pairs or examples),
 computed here from the logprobs Tinker returns; Tinker then takes a pass on a linear stand-in with that loss's
 gradient: a forward pass more than a built-in loss. Each minibatch's statistics are the objective's terms of the
