@@ -240,7 +240,7 @@ min_vcpus_per_gpu = 16                         # room for 12 worlds beside vLLM 
 [sandboxes.minecraft]
 provider = "minecraft_team.worlds:worlds"
 url = "http://sandboxes-minecraft.rollout:8710"   # the cluster's own pool, for when the pods are full
-on_pods = true
+on_pods = { memory_gib = 2.4 }                 # a world, roaming far
 ```
 
 - **What a pod is given.** When the run's driver takes a pod, it writes into the pod's lease (its settings,
@@ -249,18 +249,25 @@ on_pods = true
   content), pins of what they need at the platform's versions, and the Python version. For a cluster's own kind, the
   projects are the provider's (`environments/minecraft`; for `minecraft_horizons.worlds:worlds`, also
   `environments/minecraft-horizons`) and `rollout`; with `on_pods.version = "NAME@VERSION"`, a published version's
-  zip. A source holds no secret.
+  zip (read from the store versions are published to), with the platform's projects its dependencies name. Every
+  other distribution is pinned at the platform's version and installed with nothing resolved; one the platform holds
+  neither as a project nor installed is refused, so a pod never fetches a distribution by a name alone. A source holds
+  no secret.
 - **On the pod**, the sandbox host makes each kind's Python environment with uv, once per digest of its source, on the
-  volume; runs each kind's pool in a process of its own, given a home on the volume and nothing of the pod's secrets;
-  and serves them behind the pod's Envoy (`/v1/sandboxes/KIND/...`). `deploy/images/host/README.md` has the routes,
-  the sizing, the supervision and the variables.
+  volume; runs each kind's pool in a process and as a user of its own, given a home on the volume and nothing of the
+  pod's secrets, on a socket only the host reaches; and serves them behind the pod's Envoy (`/v1/sandboxes/KIND/...`).
+  The processes can still reach vLLM and the training service on the pod's loopback interface, which take requests
+  without a key: a run's sandbox code must be code the cluster trusts beside its trainer.
+  `deploy/images/host/README.md` has the routes, the sizing, the supervision and the variables.
 - **In the run's driver**, the pods the run leases whose provider serves the kind are one pool
   ([on a run's pods](../libraries/rollout/sandboxes.md#on-a-runs-pods)), reached over mutual TLS with the gateway's
   certificate and each pod's identity checked, as the gateway reaches their engines. A new sandbox goes to a pod with
   room, the most first, then to the pool at `url` when every pod is full. The run's keeper releases the leases of
-  lapsed claims on their pods.
+  lapsed claims on their pods. Without a `url`, a run none of whose pods serves the kind for 30 minutes ends failed,
+  saying so (until then its beat and its launch say it waits for one).
 - **`on_pods`** is `true`, or a table: `size` (the most a pod holds; by default as many as fit), `cpus` and
-  `memory_gib` (what one sandbox takes: 1 and 2.4 by default, a Minecraft world's), `share` (the part of a pod's spare
+  `memory_gib` (what one sandbox takes: 1 vCPU and 1 GiB by default; a Minecraft world, 2.4 GiB), `share` (the part
+  of a pod's spare
   CPUs and memory its sandboxes may take), `settings` (the provider's settings on a pod, over the section's) and
   `version`. A provider that lists several kinds needs each to say its `size` or its `share`, and their shares add up
   to 1 at most. A kind served from pods is named with lowercase letters, digits and hyphens.

@@ -8,6 +8,7 @@ import io
 import tomllib
 import zipfile
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -17,6 +18,7 @@ from rollout_train.cluster import Cluster, KubernetesSection, parsed
 from rollout_train.pods.leasing import PodNeed, needs_of, serving, with_sandboxes
 from rollout_train.pods.sources import SandboxSource, local_projects, sources_of
 from rollout_train.providers import pod_table
+from rollout_train.published import EnvironmentVersion
 from rollout_train.run_settings import RunSettings
 from rollout_train.validation import EnvironmentFacts, LedgerFacts, check, spend_of
 
@@ -142,13 +144,53 @@ async def test_a_host_pod_is_given_the_sources_of_the_kinds_it_serves_for_its_ru
             io.BytesIO(await blobs.read(BlobReference.model_validate(dict(project.blob))))
         ).namelist()
         assert "pyproject.toml" in names and not [name for name in names if "node_modules" in name]
-    assert any(each.startswith("pyyaml==") for each in source.constraints)  # (minecraft-team's, at the platform's)
-    assert any(each.startswith("uvicorn==") for each in source.constraints)  # (what serves the pool)
+    assert any(each.startswith("pyyaml==") for each in source.pins)  # (minecraft-team's, at the platform's)
+    assert any(each.startswith("uvicorn==") for each in source.pins)  # (what serves the pool)
     assert (await sources_of(cluster, {"minecraft"}, blobs))["minecraft"].digest == source.digest
     needs = needs_of(RunSettings(SETTINGS), cluster)
     (given,) = with_sandboxes(needs, cluster, {"minecraft": source.to_json()})
     assert given.settings["sandboxes"] == {"minecraft": source.to_json()} and given.settings["model"]
     assert SandboxSource.from_json(source.to_json()) == source
+
+
+class Versions:
+    """Published versions, by `NAME@VERSION`."""
+
+    def __init__(self, *versions: EnvironmentVersion) -> None:
+        self.versions = {each.reference: each for each in versions}
+
+    async def get(self, reference: str) -> EnvironmentVersion | None:
+        return self.versions.get(reference)
+
+
+async def test_a_published_versions_source_ships_its_zip_and_every_project_it_needs_and_pins_the_rest(
+    tmp_path: Path,
+) -> None:
+    published, pods = FileBlobStore(tmp_path / "published"), FileBlobStore(tmp_path / "pods")
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w") as archive:
+        archive.writestr("pyproject.toml", '[project]\nname = "boxes-world"\nversion = "0"\n')
+    blob = (await published.put(zipped.getvalue(), "application/zip")).model_dump(mode="json")
+    version = EnvironmentVersion(
+        name="boxes-world", version="abc", source="https://example.com/boxes.git", ref=None, commit="0",
+        subdirectory="",
+        entry_point="boxes_world.environment:environment", blob=blob, runtime_env={},
+        dependencies=("rollout", "minecraft-team", "pyyaml>=6"),
+    )  # fmt: skip
+    text = SERVED.replace('provider = "minecraft_team.worlds:worlds"', 'provider = "boxes_world.worlds:worlds"')
+    cluster = cluster_of(host=text.replace("on_pods = { ", 'on_pods = { version = "boxes-world@abc", '))
+    (source,) = (await sources_of(cluster, {"minecraft"}, pods, cast(Any, Versions(version)),
+                                  published=published)).values()  # fmt: skip
+    assert source.provider == "boxes_world.worlds:worlds"  # (the platform holds no such module: never imported)
+    names = [each.name for each in source.projects]
+    assert names == ["minecraft-team", "rollout", "boxes-world"]  # (minecraft-team shipped, never fetched by name)
+    code = next(each for each in source.projects if each.name == "boxes-world")
+    assert code.sha256 == blob["sha256"] and await pods.read(BlobReference.model_validate(dict(code.blob)))
+    assert any(each.startswith("pyyaml==") for each in source.pins)
+    unknown = dataclasses.replace(version, version="def", dependencies=("rollout", "no-such-distribution-here"))
+    with pytest.raises(ValueError, match="no-such-distribution-here is needed, and the platform holds it neither"):
+        await sources_of(cluster_of(host=text.replace("on_pods = { ", 'on_pods = { version = "boxes-world@def", ')),
+                         {"minecraft"}, pods, cast(Any, Versions(unknown)), published=published)  # fmt: skip
 
 
 def test_a_provider_in_no_project_of_its_own_is_not_packed() -> None:

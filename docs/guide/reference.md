@@ -5282,7 +5282,8 @@ A run being built from its settings, and what it started: everything the loop of
 | `group` | `Any` | `None` | The placement group that reserves them. |
 | `asked_at` | `float \| None` | `None` | When it asked Ray for its placement group. |
 | `reserved_at` | `float \| None` | `None` | When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own). |
-| `pods` | `Any` | `None` | Its pods on RunPod (`rollout_train.pods.leasing.Pods`), where its providers give it any. |
+| `pods` | `Any` | `None` |  |
+| `unserved` | `'asyncio.Future[str] \| None'` | `None` | Done, saying why, once no pod of the run's has served a kind of sandbox it needs for `UNSERVED` seconds. |
 | `trainer_need` | `Any` | `None` | The pod its trainer's steps need of its own (`rollout_train.pods.leasing.PodNeed`), leased once a step is coming (`rollout_train.pods.LeasedTrainer`), not with the rest. |
 | `began` | `float` | `field(default_factory=time.time)` | When this start of it began: what `limits.hours` counts from. |
 
@@ -7098,8 +7099,8 @@ CPUs and memory hold (`rollout_train.pods.sandboxes`).
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `size` | `int \| None` | `None` | The most sandboxes a pod holds (none: as many as its spare CPUs and memory hold). |
-| `cpus` | `float` | `1.0` | The vCPUs one sandbox takes (a Minecraft world: about one while it plays). |
-| `memory_gib` | `float` | `2.4` | The memory one sandbox takes, in GiB (a Minecraft world: up to 2.4 when its bots roam far). |
+| `cpus` | `float` | `1.0` | The vCPUs one sandbox takes. |
+| `memory_gib` | `float` | `1.0` | The memory one sandbox takes, in GiB. |
 | `share` | `float \| None` | `None` | The part of a pod's spare CPUs and memory its sandboxes may take, where a pod serves several kinds. |
 | `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The provider's settings on a pod, over the section's own. |
 | `version` | `str \| None` | `None` | A published version (`NAME@VERSION`) whose code the pods run the provider from (none: the platform's own). |

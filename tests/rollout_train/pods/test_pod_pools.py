@@ -118,11 +118,11 @@ async def test_an_acquire_whose_answer_is_lost_leaves_no_sandbox_behind(tmp_path
     losing = Losing(pods.pools["a"])
     pods.pools["a"] = cast(Any, losing)
     pool = pod_pools(pods, tmp_path)
-    with pytest.raises(httpx.ReadTimeout):
+    with pytest.raises(NoCapacity):  # (passed on to the next pod: there is none)
         await pool.acquire(BOX, "r/1/1/1/box")
     assert pods.sandboxes["a"].sandboxes == {} and await pool.held() == []  # (released on its pod at once)
     losing.failing = True  # (and where that release fails too, the next sweep releases it)
-    with pytest.raises(httpx.ReadTimeout):
+    with pytest.raises(NoCapacity):
         await pool.acquire(BOX, "r/1/2/1/box")
     (kept,) = await FilePlacements(tmp_path / "pods" / "fake.json").all()
     assert (kept.key, kept.state) == ("r/1/2/1/box", ACQUIRING) and len(pods.sandboxes["a"].sandboxes) == 1
@@ -158,6 +158,48 @@ async def test_a_pod_that_does_not_answer_holds_no_acquire_up(tmp_path: Path) ->
     pool = pod_pools(pods, tmp_path)
     await pool.acquire(BOX, "r/1/1/1/box")
     assert len(pods.sandboxes["b"].sandboxes) == 1 and await pool.capacity() == Capacity(size=1, leased=1)
+
+
+async def test_a_pod_that_does_not_answer_an_acquire_passes_it_to_the_next(tmp_path: Path) -> None:
+    pods = Pods(a=4, b=1)
+
+    class Dropping(Losing):
+        async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Any:
+            await self.pool.acquire(spec, key, environment)
+            raise httpx.ConnectError("the connection dropped")
+
+    pods.pools["a"] = cast(Any, Dropping(pods.pools["a"]))
+    pool = pod_pools(pods, tmp_path)
+    lease = await pool.acquire(BOX, "r/1/1/1/box")
+    assert lease.pool == "fake@b" and pods.sandboxes["a"].sandboxes == {}  # (released on a, as far as it could be)
+
+
+async def test_a_run_whose_pods_serve_no_kind_it_needs_and_no_pool_behind_says_so_and_fails_in_time(
+    tmp_path: Path,
+) -> None:
+    from rollout_train.jobs import Run, SandboxesUnserved, _within_limits  # pyright: ignore[reportPrivateUsage]
+    from rollout_train.run_settings import RunSettings
+    from rollout_train.stores import Stores
+    from tests.rollout_train.clusters import POLICY, WORDS, a_cluster
+
+    cluster = a_cluster(tmp_path, more=HOST.replace('url = "http://sandboxes-fake:8710"\n', ""))
+    stores = Stores.open(cluster)
+    settings = RunSettings({**POLICY, "kind": "train", "environment": WORDS, "name": "unserved"})
+    told: list[str] = []
+    run = Run(cluster, stores, settings, await stores.registry.create("unserved"), directory=tmp_path / "run")
+
+    async def said(detail: str) -> None:
+        told.append(detail)
+
+    run.noted = said
+    pods = Pods()  # (the run's pods: none serves the kind now)
+    run.unserved = asyncio.get_running_loop().create_future()
+    watching = asyncio.ensure_future(run._served_by_pods("fake", pod_pools(pods, tmp_path), run.unserved,  # pyright: ignore[reportPrivateUsage]
+                                                         every=0.01, within=0.05))  # fmt: skip
+    with pytest.raises(SandboxesUnserved, match="no pod of the run's served fake sandboxes"):
+        await _within_limits(run, asyncio.sleep(30))
+    await watching
+    assert told and "a pod that serves fake sandboxes" in told[0]
 
 
 async def test_a_new_lease_goes_to_the_pod_with_the_most_room(tmp_path: Path) -> None:

@@ -163,7 +163,7 @@ sandboxes:
     provider: minecraft_team.worlds:worlds
     size: 4
     port: 8710
-    onPods: ""                # e.g. 'true', or '{ size = 8 }'
+    onPods: ""                # e.g. '{ memory_gib = 2.4 }': a world, roaming far
     resources: {requests: {cpu: "4", memory: 7680Mi}, limits: {memory: 10Gi}}
 
 gateway:

@@ -23,6 +23,11 @@ FROM base
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
 COPY --from=step /usr/local/bin/step /usr/local/bin/step
 COPY --from=uv /uv /uvx /usr/local/bin/
+# The users the sandbox host runs each kind's pool as, one a kind: no home, no shell, nothing of root's.
+RUN for number in 1 2 3 4 5 6 7 8; do \
+        useradd --system --uid $((20000 + number)) --user-group --no-create-home --home-dir /nonexistent \
+            --shell /usr/sbin/nologin "sandbox$number"; \
+    done
 RUN envoy --version && step version && uv --version
 RUN --mount=from=locked,source=/locked.txt,target=/locked.txt \
     --mount=type=bind,source=deploy/images/common/install.sh,target=/install.sh \

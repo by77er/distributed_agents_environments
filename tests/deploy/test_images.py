@@ -142,6 +142,11 @@ def test_the_host_image_holds_no_environment_and_none_of_an_environments_system_
     for absent in ("java", "temurin", "node", "npm", "minecraft", "environments/"):
         assert absent not in dockerfile.lower(), absent
     assert "COPY --from=uv /uv /uvx /usr/local/bin/" in dockerfile  # (what makes each kind's Python on the pod)
+    from rollout_train.pods.sandboxes import USERS
+
+    made = re.search(r"for number in ([0-9 ]+); do", dockerfile)
+    assert made is not None and tuple(f"sandbox{each}" for each in made.group(1).split()) == USERS
+    assert "useradd --system" in dockerfile and "--shell /usr/sbin/nologin" in dockerfile  # (a user a kind runs as)
 
 
 @pytest.mark.parametrize("role", ROLES)

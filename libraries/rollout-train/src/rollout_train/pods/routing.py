@@ -17,6 +17,7 @@ the pod's beat is fresh and names the identity named for it. A pod's pool takes 
 ready.
 """
 
+import asyncio
 from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING
 
@@ -110,8 +111,13 @@ class LeasedPools:
         self.auth = auth
         self.tls = tls
         self._pools: dict[tuple[str, str], RemotePool] = {}
+        self._looking = asyncio.Lock()
 
     async def __call__(self) -> dict[str, Reached]:
+        async with self._looking:  # (one look at a time: clients are opened and closed by it)
+            return await self._looked()
+
+    async def _looked(self) -> dict[str, Reached]:
         leases = pod_leases_of(self.ledger)
         presence = presence_of(self.ledger)
         if leases is None or presence is None:

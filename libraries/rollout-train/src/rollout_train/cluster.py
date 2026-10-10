@@ -202,9 +202,9 @@ class OnPods:
     size: int | None = None
     """The most sandboxes a pod holds (none: as many as its spare CPUs and memory hold)."""
     cpus: float = 1.0
-    """The vCPUs one sandbox takes (a Minecraft world: about one while it plays)."""
-    memory_gib: float = 2.4
-    """The memory one sandbox takes, in GiB (a Minecraft world: up to 2.4 when its bots roam far)."""
+    """The vCPUs one sandbox takes."""
+    memory_gib: float = 1.0
+    """The memory one sandbox takes, in GiB."""
     share: float | None = None
     """The part of a pod's spare CPUs and memory its sandboxes may take, where a pod serves several kinds."""
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
@@ -862,7 +862,7 @@ def _on_pods(where: str, given: Any) -> OnPods | None:
         )
     said = _Table(dict(cast(dict[str, Any], given)), f"{where} on_pods")
     size = said.whole("size", None, least=1)
-    cpus, memory, share = said.number("cpus", 1.0), said.number("memory_gib", 2.4), said.number("share", None)
+    cpus, memory, share = said.number("cpus", 1.0), said.number("memory_gib", 1.0), said.number("share", None)
     settings = said.take("settings", {})
     version = said.text("version", None)
     said.done()

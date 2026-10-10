@@ -6,10 +6,11 @@ through `PodPools`, which the runner holds as it holds any pool (docs/research/r
   holds, at the addresses their leases say: those that beat fresh are live and take new leases; the rest still answer
   for the leases they hold.
 - **Acquiring.** A key with no lease goes to a live pod with room, the one with the most first (its pool's `capacity`,
-  asked of every pod at once and never while another acquire chooses, less the acquires on their way to it, which
-  only orders the pods); a pod that answers full (or does not answer) passes it to the next; when every pod is full, to
-  the cluster's own pool of the kind (`fallback`, the section's `url`), where there is one; else `NoCapacity`. A key
-  with a lease goes to where its lease is, and only there: its sandbox is never made again elsewhere.
+  asked of every pod at once and never while another acquire chooses, less the acquires on their way to it or sent
+  since, which only orders the pods); a pod that answers full (or does not answer) passes it to the next; when every
+  pod is full, to the cluster's own pool of the kind (`fallback`, the section's `url`), where there is one; else
+  `NoCapacity`. A pod that does not answer an acquire passes it on too, once it is asked to release what it may have
+  made. A key with a lease goes to where its lease is, and only there: its sandbox is never made again elsewhere.
 - **Where each lease is** is kept (`placements`, in the run's directory) before the pod is asked, as `acquiring`, and
   as `held` once it answers, so a driver started again routes the leases of the runs it adopts. An acquire whose
   answer was lost (a timeout) is released on its pod at once, or, failing that, at the next sweep: no world is left
@@ -35,6 +36,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpx
 from pydantic import JsonValue
 
 from rollout.contracts import ToolResult, ToolSpecification
@@ -178,8 +180,11 @@ class PodPools:
         self._held: dict[str, Placement] = {}
         self._loaded = False
         self._making: set[str] = set()
+        self._sent: Counter[str] = Counter()
+        """Acquires sent to each pod, ever."""
         self._pending: Counter[str] = Counter()
-        """Acquires on their way to each pod: they order the pods, so acquires at once spread, and exclude none."""
+        """Acquires on their way to each pod now. With those sent since a pod's room was asked, they order the pods (a
+        pod's room less the more of the two), so acquires at once spread; they exclude none."""
         self._choosing = asyncio.Lock()
         self._locks: dict[str, asyncio.Lock] = {}
         self._found: tuple[float, Mapping[str, Reached]] | None = None
@@ -289,19 +294,28 @@ class PodPools:
         """A new lease of `key` (hold its lock): on a live pod with room, the most first, the next while each answers
         full or does not answer, then the fallback."""
         live = {where: each.pool for where, each in (await self._reached()).items() if each.live}
+        before = dict(self._sent)  # (what was sent to each pod before its room was asked: its answer counts those)
         asked = await asyncio.gather(*(pool.capacity() for pool in live.values()), return_exceptions=True)
         free = {where: found.free for where, found in zip(live, asked, strict=True) if isinstance(found, Capacity)}
         async with self._choosing:  # (no network here: only the order, from what was asked)
-            order = sorted((where for where in free if free[where] > 0),
-                           key=lambda each: (-(free[each] - self._pending[each]), each))  # fmt: skip
+
+            def room(where: str) -> int:
+                return free[where] - max(self._pending[where], self._sent[where] - before.get(where, 0))
+
+            order = sorted((where for where in free if free[where] > 0), key=lambda each: (-room(each), each))
             if order:
+                self._sent[order[0]] += 1
                 self._pending[order[0]] += 1
         for number, where in enumerate(order):
             if number:
+                self._sent[where] += 1
                 self._pending[where] += 1
             try:
                 lease = await self._asked(where, live[where], spec, key, environment)
             except NoCapacity:
+                continue
+            except httpx.TransportError as error:  # (the pod did not answer: released there, as far as it can be)
+                log.warning("acquiring %s on %s failed: %s; trying the next pod", key, where, error)
                 continue
             finally:
                 self._pending[where] -= 1

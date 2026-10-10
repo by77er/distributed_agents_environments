@@ -139,6 +139,14 @@ class HoursReached(LimitReached):
     """A run ran as long as its `limits.hours` allows."""
 
 
+class SandboxesUnserved(RuntimeError):
+    """No pod of a run's served a kind of sandbox it needs for `UNSERVED` seconds, and no pool of the cluster's does."""
+
+
+UNSERVED = 1800.0
+"""Seconds a run waits for a pod of its to serve a kind of sandbox it needs, where no pool of the cluster's does."""
+
+
 def available_memory_gib() -> float:
     meminfo = Path("/proc/meminfo")
     if not meminfo.exists():
@@ -407,6 +415,8 @@ class Run:
     reserved_at: float | None = None
     """When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own)."""
     pods: Any = None
+    unserved: "asyncio.Future[str] | None" = None
+    """Done, saying why, once no pod of the run's has served a kind of sandbox it needs for `UNSERVED` seconds."""
     """Its pods on RunPod (`rollout_train.pods.leasing.Pods`), where its providers give it any."""
     trainer_need: Any = None
     """The pod its trainer's steps need of its own (`rollout_train.pods.leasing.PodNeed`), leased once a step is coming
@@ -865,7 +875,11 @@ class Run:
         kinds = {kind for kind in self.sandboxes if kind in self.cluster.sandboxes}
         if not any(serving(self.cluster, kind) for kind in kinds):
             return list(needs)
-        sources = await sources_of(self.cluster, kinds, self.stores.blobs, environment_versions_of(self.ledger))
+        from rollout_train.stores import blobs_at, opened
+
+        published = opened(blobs_at(self.cluster))  # (where versions are published: the cluster's own store)
+        sources = await sources_of(self.cluster, kinds, self.stores.blobs, environment_versions_of(self.ledger),
+                                   published=published)  # fmt: skip
         return with_sandboxes(needs, self.cluster, {kind: each.to_json() for kind, each in sources.items()})
 
     def _on_pods(self, stack: contextlib.AsyncExitStack, kind: str, url: str | None) -> Pool | None:
@@ -893,7 +907,33 @@ class Run:
         )  # fmt: skip
         stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
         _background(stack, keep(pool, self.ledger, beats))
+        if fallback is None:  # (no pool of the cluster's to fall back on: the run waits for its pods, but not for ever)
+            self.unserved = self.unserved or asyncio.get_running_loop().create_future()
+            _background(stack, self._served_by_pods(kind, pool, self.unserved))
         return pool
+
+    async def _served_by_pods(self, kind: str, pool: Pool, unserved: "asyncio.Future[str]", *, every: float = 30.0,
+                              within: float = UNSERVED) -> None:  # fmt: skip
+        """Watch that some pod of the run's serves `kind`: while none does, say so (in the run's beat and on its
+        launch); once none has for `within` seconds, say why in `unserved`, which ends the run failed."""
+        since: float | None = None
+        while not unserved.done():
+            try:
+                size = (await pool.capacity()).size
+            except Exception:  # (nothing answers: none serves it)
+                size = 0
+            if size > 0:
+                if since is not None and self.noted is not None:
+                    await self.noted("running")
+                since = None
+            else:
+                since = since if since is not None else time.monotonic()
+                await self._told([f"a pod that serves {kind} sandboxes (none of the run's does now)"])
+                if time.monotonic() - since >= within:
+                    unserved.set_result(f"no pod of the run's served {kind} sandboxes for {within / 60:.0f} minutes, "
+                                        f"and no pool of the cluster's does ([sandboxes.{kind}] url)")  # fmt: skip
+                    return
+            await asyncio.sleep(every)
 
     def _about(self) -> dict[str, JsonValue]:
         """What the runner says in each beat: its machine, the run, what each channel serves, what the run holds of
@@ -1225,7 +1265,9 @@ async def _within_limits[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
     """Do a run's work, ending it once it reaches a limit its settings set: what it and the runs it plays spent reaches
     `limits.spend` (`SpendReached`: their turns on hosted APIs, and its pods' hours at their price), or it has run for
     `limits.hours` since it began (`HoursReached`). The run ends stopped, with the reason (`ending`), and the parts it
-    played end failed with the same reason. Without a limit, just do it."""
+    played end failed with the same reason. A run whose pods have served a kind of sandbox it needs for none of
+    `UNSERVED` seconds, with no pool of the cluster's behind them, ends failed (`SandboxesUnserved`). Without a limit,
+    just do it."""
 
     def number(value: Any) -> float | None:
         return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
@@ -1239,6 +1281,9 @@ async def _within_limits[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
         watched["spend"] = asyncio.ensure_future(_pods_reach(live, spend))
     if hours is not None:
         watched["hours"] = asyncio.ensure_future(asyncio.sleep(max(0.0, live.began + hours * 3600 - time.time())))
+    unserved: asyncio.Future[str] | None = getattr(live, "unserved", None)
+    if unserved is not None:
+        watched["sandboxes"] = unserved
     if not watched:
         return await work
     task = asyncio.ensure_future(work)
@@ -1251,6 +1296,11 @@ async def _within_limits[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
         return task.result()
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
+    if unserved is not None and unserved.done() and not unserved.cancelled():
+        failed = SandboxesUnserved(str(unserved.result()))
+        for each in sorted(live.runs - {live.run.id}):
+            await end(live.ledger, each, RUN_FAILED, f"{type(failed).__name__}: {failed}")
+        raise failed
     reached: LimitReached
     if "spend" in watched and watched["spend"].done() and not watched["spend"].cancelled():
         total = await spending.total(live.runs) if spending is not None else float(getattr(live.pods, "spent", 0.0))

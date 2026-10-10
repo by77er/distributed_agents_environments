@@ -186,25 +186,35 @@ data, resolved on the pod into cached Python environments, each kind run in a pr
 
 | Part | Where | What it does |
 |---|---|---|
-| The source | Made by the run's driver; given in the pod's lease's settings (`sandboxes`, by kind) | The provider (`module:name`) and its settings; projects' zips in the pods' blob store, packed as an imported environment is (`rollout_train.publishing.packed`, stored once per content); pins of what they need at the platform's versions; the Python (3.13); what a pool is sized by. For a cluster's own kind, the provider's project, the platform's projects it depends on (`minecraft_horizons` → `environments/minecraft-horizons` and `environments/minecraft`) and `rollout`; for `on_pods.version`, a published version's zip and `rollout` |
-| The sandbox host | The pod, `127.0.0.1:8710`, under `supervise.sh`'s `restarting` | Follows the lease every 15 seconds; makes each kind's Python environment with uv (a uv-managed Python 3.13, the projects installed editable, constrained to the pins), once per digest of the zips, the pins and the Python, under a file lock, kept on the volume; runs each kind's process, watched and started again with a growing wait; passes `/KIND/...` on to it |
-| A kind's process | The pod, its own loopback port, its own Python, a made environment (a home on the volume, nothing of the pod's secrets) | `python -m rollout.harness.pool_server`: a `SandboxPool` over the provider for one run at a time, its leases kept on the volume |
+| The source | Made by the run's driver; given in the pod's lease's settings (`sandboxes`, by kind) | The provider (`module:name`) and its settings; projects' zips in the pods' blob store, packed as an imported environment is (`rollout_train.publishing.packed`, stored once per content); pins of everything else at the platform's versions; the Python (3.13); what a pool is sized by. For a cluster's own kind, the provider's project, the platform's projects it depends on (`minecraft_horizons` → `environments/minecraft-horizons` and `environments/minecraft`) and `rollout`; for `on_pods.version`, a published version's zip (read from the store versions are published to), the platform's projects its dependencies name and `rollout`. A distribution the platform holds neither as a project nor installed is refused, so no name is ever resolved on the pod |
+| The sandbox host | The pod, `127.0.0.1:8710`, as root, under `supervise.sh`'s `restarting` | Follows the lease every 15 seconds; makes each kind's Python environment with uv (a uv-managed Python 3.13, the projects installed editable with `--no-sources`, the pins with `--no-deps`), once per digest of the zips, the pins and the Python, under a file lock, kept on the volume and deleted after 14 days unused; runs each kind's process, watched and started again with a growing wait; passes `/KIND/...` on to it |
+| A kind's process | The pod, as its own user, on a Unix socket only the host reaches, its own Python, a made environment (a home of its own on the volume, nothing of the pod's secrets) | `python -P -m rollout.harness.pool_server`: a `SandboxPool` over the provider for one run at a time, its leases kept on the volume |
 | Envoy | The pod's one public port | Passes `GET /v1/sandboxes/KIND/operations` and `.../capacity`, `POST .../acquire`, `.../release` and `.../call` to the host as `/KIND/...`, from the gateway's certificate alone; acquire may take 600 s (a world starts in a minute or more), an operation 120 s (a window is 20 s) |
 | `PodPools` | The run's driver, in the cluster | The run's pods' pools as one: a new lease on a live pod with room, the most first, then the cluster's pool (`url`); releases and operations where the lease is; capacity summed; where each lease is kept before a pod is asked, so no sandbox is left unnamed when an answer is lost |
 | `LeasedPools` | The run's driver | The run's leased pods of providers that serve the kind, at their leases' addresses, over mutual TLS with the gateway's certificate, each pod's identity checked, as `LeasedServers` reaches their engines; 5 seconds to connect, 10 to say how full a pool is |
 
 **Caches and system dependencies** are each environment's, made at first use into a cache keyed by digest: a kind's
-process has `HOME` on the volume, so a provider's `~/.cache` is kept across restarts. Minecraft uses the machine's
-`java` and `node` where they are on the path (the platform's image) and otherwise downloads a JDK and Node 22 into its
-cache, each checked against its published checksum ([Minecraft team](../products/minecraft-team.md#the-worlds)).
+process has its own `HOME` on the volume, so a provider's `~/.cache` is kept across restarts. Minecraft uses the
+machine's `java` and `node` where they are on the path (the platform's image) and otherwise downloads the JDK and the
+Node it pins, each checked against its pinned SHA-256 ([Minecraft team](../products/minecraft-team.md#the-worlds)).
+First use also downloads a Python (GitHub) and the pinned wheels (PyPI); a failure there is waited out and tried
+again, never given up on.
+
+**Isolation.** Each kind's process runs as a user of its own (the image makes `sandbox1` to `sandbox8`), so it cannot
+read the environments of the processes that hold the pod's secrets (the host, the follower, the training service and
+the container's first process run as root), the certificates (root's alone), the environments and zips it runs from
+(root's, read-only to it), or another kind's directory, and it reaches no other kind's process (their sockets are
+root's). It can still reach vLLM and the training service on the loopback interface, which take requests without a
+key: the code a run gives a pod must be code the cluster trusts beside its trainer.
 
 **How many sandboxes a pod holds.** One per spare vCPU, bounded by memory: the pod's vCPUs less 4 (vLLM, the trainer,
 the follower, Envoy), at the kind's `cpus` (1 for a world), and no more than its memory less 64 GiB at its
 `memory_gib` (2.4 GiB for a world roaming far, [Minecraft memory](minecraft-memory.md)), nor than its `size`. A PRO 6000
 pod (16 vCPUs, 188 GB) holds 12 worlds; the cheapest H100 SXM pod (8 vCPUs, 125 GB), 4. A provider that lists several
-kinds has each say its `size` or its `share` of what is spare. The pod's vCPUs and memory are the lesser of what RunPod's
-API says it gave it (`vcpuCount`, `memoryInGb`, which its lease records when it is started and at each renewal) and its
-container's cgroup limits, read again at each look; a pool whose size changes is started again once it holds nothing. A
+kinds has each say its `size` (taken first) or its `share` (of what the sizes left). The pod's vCPUs and memory are
+the lesser of what RunPod's API says it gave it (`vcpuCount`, `memoryInGb`, which its lease records when it is started
+and at each renewal) and its container's cgroup limits, read again at each look; a pool whose size changes is told so
+in place. A
 provider may ask RunPod for more (`min_vcpus_per_gpu`, `min_memory_gb_per_gpu`: RunPod's `minVCPUPerGPU`,
 `minRAMPerGPU`).
 
@@ -216,11 +226,12 @@ follow only its lease:
   sweeps it like any pool of the run's (`keep`): a lease whose claim it found lapsed twice running is ended in the
   ledger and released on its pod. A release that fails is kept and tried again at each sweep.
 - On the pod, a kind's process admits only keys of the run the lease names (and its evals'). When the lease names
-  another run, the other runs' leases are forgotten. When it names none, or its `renewed` is older than 5 minutes (the
-  driver renews it every 30 seconds, so the driver is gone; a long step does not stop renewals), every lease is marked
-  lost: its key gets `SandboxLost` (410) until its run releases it, so its episode is played again, never in a fresh
-  sandbox under the same key. Leases are kept on the volume, so a process started again answers `SandboxLost` for what
-  it lost.
+  another run, the other runs' leases are forgotten. When its `renewed` is older than 5 minutes (the driver renews it
+  every 30 seconds; a renewal asks RunPod's API, and the driver can stall), no new sandbox is made and those held go on.
+  When it names no run, is idle, or `renewed` is older than 30 minutes (the driver is gone), every lease is marked
+  lost: its key gets `SandboxLost` (410) until its run releases it, so its episode is played again (adopted or not),
+  never in a fresh sandbox under the same key. Leases are kept on the volume, so a process started again answers
+  `SandboxLost` for what it lost.
 
 A narrow new pod scope (reading the run's claims and beats) would let the pod check claims itself, but would widen what
 a pod's token reads to every runner's beat and the run's claims, for a check the driver makes already. Correctness
@@ -229,7 +240,9 @@ does not rest on the pod: an episode whose claim lapsed is refused its records b
 **Supervision.** The sandbox host is not vital to the pod: `restarting` starts it again after 5 seconds, doubling up to
 5 minutes while it keeps ending within a minute, and gives up after 10 such ends; vLLM, the trainer and the follower
 never go down with it. Inside it, each kind's process is watched the same way (5 quick ends running and the kind is
-given up on until its source changes), and one kind failing leaves the others served.
+given up on until its source or run changes, or 15 minutes pass), dies with the host, and is ended with its process
+group; one kind failing leaves the others served. A run whose pods serve none of a kind it needs, with no pool of the
+cluster's behind them, says so in its beat and on its launch, and ends failed after 30 minutes.
 
 **Kinds not served from pods.** A kind whose specs name model slots: a harness inside reaches its model at the run's
 gateway, on the driver's loopback interface, which a pod cannot reach. Container sandboxes: a pod cannot run containers.
@@ -245,7 +258,7 @@ min_vcpus_per_gpu = 16
 [sandboxes.minecraft]
 provider = "minecraft_team.worlds:worlds"
 url = "http://sandboxes-minecraft.rollout:8710"   # the cluster's own pool, for when the pods are full
-on_pods = true                                 # or { size, cpus, memory_gib, share, settings, version }
+on_pods = { memory_gib = 2.4 }                 # also: size, cpus, share, settings, version
 ```
 
 The round trip of a sandbox operation from the cluster's runners to the pod is not measured: each round of an episode
