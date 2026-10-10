@@ -16,8 +16,12 @@ Everything is cached under `~/.cache/rollout/minecraft` (not `/tmp`, which may b
 - `servers/`: temporary servers, copies of a template, deleted when stopped. A server ends with the process that
   started it, and what such a process left behind is removed by the next one (`sweep`).
 
-A JDK, only to compile the plugin when there is no `javac` on the path (a Java runtime is enough to run Paper), is
-downloaded beside it, to `~/.cache/rollout/jdk`.
+The runtimes are the machine's where it has them on the path (`java`, `javac`, `node` and `npm`). Where it does not,
+they are downloaded once beside the cache and used from there: a JDK (Eclipse Temurin 21, checked against its published
+SHA-256) to `~/.cache/rollout/jdk`, whose `java` runs Paper where there is no `java` and whose `javac` compiles the
+plugin where there is no `javac`; and Node 22 (nodejs.org's newest 22.x for this machine, checked against the release's
+`SHASUMS256.txt`) to `~/.cache/rollout/node`, whose `node` runs the bots and whose `npm` installs their packages. A
+machine that only runs processes (a rented GPU pod) needs nothing installed for Minecraft.
 
 Starting a server means accepting the Minecraft EULA (https://aka.ms/MinecraftEULA) for a local, offline server.
 """
@@ -26,14 +30,17 @@ import asyncio
 import contextlib
 import fcntl
 import hashlib
+import io
 import json
 import os
+import platform
 import random
 import shutil
 import signal
 import socket
 import subprocess
 import tarfile
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -64,6 +71,8 @@ GENERATED_CHUNKS = 19
 within 240 blocks of it and reach 40 further."""
 SHARED = ("libraries", "versions", "cache")
 """Directories every server shares with the bootstrap server, so none downloads or patches anything."""
+NODE = "https://nodejs.org/dist/latest-v22.x"
+"""Where Node 22's newest release is published, with its `SHASUMS256.txt`."""
 HEAP = "1536M"
 """A server's largest heap. Four bots roaming apart through terrain the template does not hold keep up to 1 GiB live
 (docs/research/minecraft-memory.md); in 15 turns of a task the live set grows from 214 MiB to 420 to 560 MiB."""
@@ -108,7 +117,49 @@ class Installation:
     def command(self, heap: str, *options: str) -> list[str]:
         """How Java starts a server in its directory: `heap` its largest heap, `options` more of Java's options (the
         plugin's system properties)."""
-        return [self.java, f"-Xmx{heap}", *JVM, *options, "-jar", str(self.paper_jar()), "--nogui"]
+        return [self.java_executable(), f"-Xmx{heap}", *JVM, *options, "-jar", str(self.paper_jar()), "--nogui"]
+
+    # The runtimes: the machine's on the path, else downloaded once beside the cache
+
+    def java_executable(self) -> str:
+        """The `java` that runs Paper: the machine's on the path, else the downloaded JDK's (`jdk`)."""
+        return shutil.which(self.java) or str(self.jdk() / "java")
+
+    def node(self) -> Path:
+        """The directory of the `node` and `npm` that run the bots and install their packages: the machine's on the
+        path, else Node 22's, downloaded once (`_node`)."""
+        if (system := shutil.which("node")) and shutil.which("npm"):
+            return Path(system).parent
+        with self._lock("node"):
+            return self._node()
+
+    def _node(self) -> Path:
+        arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64", "arm64": "arm64"}[platform.machine().lower()]
+        target = self.root.parent / "node"
+        found = sorted(target.glob(f"node-v22.*-linux-{arch}/bin/node"))
+        if found:
+            return found[-1].parent
+        sums = _fetch(f"{NODE}/SHASUMS256.txt").decode()
+        digest, name = next(
+            line.split() for line in sums.splitlines() if line.strip().endswith(f"-linux-{arch}.tar.xz")
+        )
+        data = _fetch(f"{NODE}/{name}")
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise RuntimeError(f"the Node download {name} does not match its checksum in SHASUMS256.txt")
+        target.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(dir=target, prefix=".partial-"))
+        try:
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:xz") as tar:
+                tar.extractall(staging, filter="data")
+            (unpacked,) = [each for each in staging.iterdir() if each.is_dir()]
+            unpacked.replace(target / unpacked.name)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return target / unpacked.name / "bin"
+
+    def node_environment(self) -> dict[str, str]:
+        """This process's environment with the `node` and `npm` it uses first on the path (npm runs `node` by name)."""
+        return {**os.environ, "PATH": f"{self.node()}{os.pathsep}{os.environ.get('PATH', '')}"}
 
     @contextlib.contextmanager
     def _lock(self, name: str) -> Generator[None]:
@@ -228,9 +279,10 @@ class Installation:
         directory.mkdir(parents=True)
         for path in manifests:
             shutil.copy2(path, directory / path.name)
+        npm = str(self.node() / "npm")
         installed = subprocess.run(
-            ["npm", "ci", "--omit=dev", "--no-audit", "--no-fund"], cwd=directory, capture_output=True, text=True,
-            check=False,
+            [npm, "ci", "--omit=dev", "--no-audit", "--no-fund"], cwd=directory, capture_output=True, text=True,
+            check=False, env=self.node_environment(),
         )  # fmt: skip
         if installed.returncode != 0:
             raise RuntimeError(f"npm ci failed for the harness:\n{installed.stderr[-4000:]}")

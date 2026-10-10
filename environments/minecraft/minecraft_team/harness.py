@@ -5,7 +5,6 @@ import asyncio
 import contextlib
 import itertools
 import json
-import os
 from pathlib import Path
 from typing import Any, Self
 
@@ -30,17 +29,19 @@ class Harness:
 
     @classmethod
     async def start(cls, *, log: Path | None = None, installation: Installation | None = None) -> Self:
-        """Start the harness with its packages from `installation` (`Installation.harness_packages`: installed
-        the first time); its standard error goes to `log`."""
+        """Start the harness with its packages and its `node` from `installation` (`Installation.harness_packages`
+        and `Installation.node`: installed or downloaded the first time); its standard error goes to `log`."""
+        installed = installation or Installation()
         try:
-            packages = await asyncio.to_thread((installation or Installation()).harness_packages)
+            packages = await asyncio.to_thread(installed.harness_packages)
+            node = await asyncio.to_thread(installed.node)
         except RuntimeError as error:
             raise HarnessError(str(error)) from error
         stderr = log.open("a") if log is not None else asyncio.subprocess.DEVNULL
         process = await asyncio.create_subprocess_exec(
-            "node", *NODE_FLAGS, str(HARNESS / "harness.js"), cwd=HARNESS,
+            str(node / "node"), *NODE_FLAGS, str(HARNESS / "harness.js"), cwd=HARNESS,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=stderr,
-            limit=16 * 1024 * 1024, env={**os.environ, "NODE_PATH": str(packages)},
+            limit=16 * 1024 * 1024, env={**installed.node_environment(), "NODE_PATH": str(packages)},
         )  # fmt: skip
         assert process.stdout is not None
         async with asyncio.timeout(30):
