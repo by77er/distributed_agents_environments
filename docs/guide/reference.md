@@ -8318,6 +8318,8 @@ Every key a run takes, beside the trainer's own (`trainer.FIELD`).
 KINDS = ('train', 'eval', 'imitate', 'check')
 ```
 
+The kinds of run: training, an eval of one subject, supervised steps on a dataset, an environment's check.
+
 ### `layered`
 
 *function* · `libraries/rollout-train/src/rollout_train/run_settings.py`

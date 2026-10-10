@@ -70,6 +70,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>GET /state: every player's position, health, food, inventory and diamonds; the team's total diamonds, the
  *       advancements it earned since the baseline, what it got hold of since then (picked up, crafted, smelted), and
  *       the most the dragon was hurt.</li>
+ *   <li>GET /holdings: every item the team holds, what members carry and what is stored in the containers they
+ *       placed since the baseline.</li>
+ *   <li>POST /blocks {"positions": [[x, y, z], …], "world": w}: the block at each position, in order.</li>
  *   <li>GET /tick, POST /tick {"action": "freeze" | "step" | "run" | "stop", "ticks": n}: a step runs n
  *       ticks of a frozen game and answers when they have run; a run starts n ticks and answers at once, and a stop
  *       ends it early and says how many ran. While the game is frozen and not stepping, team members are held as

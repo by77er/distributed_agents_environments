@@ -27,9 +27,9 @@ Then, as you need them:
 - **The harness in depth.** [The harness](../libraries/rollout/README.md) (the loop, programs and runners),
   [sandboxes](../libraries/rollout/sandboxes.md), [determinism](../libraries/rollout/determinism.md),
   [hooks](../libraries/rollout/hooks.md), and [memory for long episodes](../libraries/rollout/memory.md).
-- **Example environments.** The [Minecraft team](../products/minecraft-team.md), the
-  [gridworld](../products/gridworld.md), and [judging](../products/judging.md), where a judge scores open-ended
-  answers.
+- **Example environments.** The [Minecraft team](../products/minecraft-team.md),
+  [Minecraft horizons](../products/minecraft-horizons.md), the [gridworld](../products/gridworld.md), and
+  [judging](../products/judging.md), where a judge scores open-ended answers.
 
 ## The ideas this section uses
 

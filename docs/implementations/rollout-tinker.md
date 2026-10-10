@@ -21,16 +21,16 @@ the platform's own: Tinker holds the weights and does the arithmetic.
 ## Installing
 
 `implementations/rollout-tinker` is a member of the workspace, installed by its `tinker` extra. Beyond the workspace's
-libraries and `rollout-objectives` (torch, for the objective, with no GPU code) its dependency is Tinker's SDK, pinned at
-`tinker==0.32.0`.
+libraries and `rollout-objectives` (torch, for the objective, with no GPU code) its dependency is Tinker's SDK, pinned
+at `tinker==0.32.0`.
 
 ```bash
 uv sync --extra tinker                  # or --all-extras, with vLLM to serve Tinker's adapters here (its bridge)
 uv run pytest tests/rollout_tinker      # on a fake Tinker: no key, no network
 ```
 
-Every command of the workspace (`uv run rollout ...`) then has Tinker's SDK: a run's gateway samples a Tinker channel beside
-channels on engine hosts.
+Every command of the workspace (`uv run rollout ...`) then has Tinker's SDK: a run's gateway samples a Tinker channel
+beside channels on engine hosts.
 
 ## The key
 
@@ -52,8 +52,9 @@ out, or billing is not set up) will be refused again until someone adds money, s
 - the trainer raises `Unpaid` rather than `StepFailed`, so the run stops instead of going on to a step that would be
   refused too.
 
-No call of the SDK, documented or in its REST client, reads the balance. `RestClient.get_billing_usage` (`tinker billing usage`) gives usage by hour, each
-row with an estimated cost at list prices, up to several hours late: what has been spent, not what is left.
+No call of the SDK, documented or in its REST client, reads the balance. `RestClient.get_billing_usage`
+(`tinker billing usage`) gives usage by hour, each row with an estimated cost at list prices, up to several hours late:
+what has been spent, not what is left.
 
 ## In a cluster config
 
@@ -137,7 +138,7 @@ changing `trainer.provider`.
 |---|---|
 | `rank` | The adapter's rank |
 | `learning_rate` | AdamW's rate (1e-4). Tinker scales its adapters by its own `lora_alpha / rank`, and its archives say an alpha of 32 (the live test's), half our scale at rank 32, so twice `LoraTrainer`'s rate moves the weights as far |
-| `objective` | The objective, as [`StepSettings`](rollout-objectives.md#settings) takes it (a run's `objective.*` settings give it). One that reads the reference or the entropy is refused: Tinker gives neither here |
+| `objective` | The objective, as [`StepSettings`](rollout-objectives.md#settings) takes it (a run's `objective.*` settings give it). One that reads the reference, the entropy or the logprobs of tokens not sampled (the top-k form of distillation) is refused: Tinker gives none of them here |
 | `tokens_per_step` | Sampled tokens per optimizer step (65,536). A step that is one optimizer step needs no pass for where it starts (below) |
 | `max_kl`, `max_gradient_norm`, `passes`, `warmup_updates`, `segment_tokens`, `segments_per_step`, `old_logprobs` | As `LoraSettings` |
 | `project` | A Tinker project's id |
@@ -182,16 +183,17 @@ objective, in value and in gradient, where it is one (`rollout_tinker.trainer.ro
 | token ratio, unclipped | several | a forward pass for `old`, then `importance_sampling` | old; A·w·s/U |
 | anything else | any | (a forward pass for `old` if several) then a custom loss | |
 
-Anything else is a segment ratio, dual clipping, a mask, a KL penalty or a preference loss. `ppo` and `cispo` are
-clipped to 1 - `clip.low` .. 1 + `clip.high`; `s` is 1 for a token mean or a sum, one over the segment's tokens for a
-segment mean, one over `constant_tokens` for `constant`. With one update `old` is the logprob now, so a ratio is 1 and
-unclipped, every clipped surrogate's gradient is the weighted advantage's, and no forward pass is needed. With several,
-a segment sampled wholly on the weights the step starts from takes its behaviour logprobs for its `old`
-(`old_logprobs`), and the forward pass runs only the others: none, where every segment was. A custom loss
-is the objective itself (`rollout_objectives.terms`, or the preference loss of the minibatch's pairs or examples),
-computed here from the logprobs Tinker returns; Tinker then takes a pass on a linear stand-in with that loss's
-gradient: a forward pass more than a built-in loss. Each minibatch's statistics are the objective's terms of the
-logprobs its forward-backward returns (the policy before that update), so the metrics are the LoRA step's.
+Anything else is a segment ratio, dual clipping, a mask, a KL penalty, a preference loss or a distillation in its
+policy-gradient form (alone, or as a policy gradient's term). `ppo` and `cispo` are clipped to 1 - `clip.low` .. 1 +
+`clip.high`; `s` is 1 for a token mean or a sum, one over the segment's tokens for a segment mean, one over
+`constant_tokens` for `constant`. With one update `old` is the logprob now, so a ratio is 1 and unclipped, every clipped
+surrogate's gradient is the weighted advantage's, and no forward pass is needed. With several, a segment sampled wholly
+on the weights the step starts from takes its behaviour logprobs for its `old` (`old_logprobs`), and the forward pass
+runs only the others: none, where every segment was. A custom loss is the objective itself (`rollout_objectives.terms`,
+or the preference loss of the minibatch's pairs or examples), computed here from the logprobs Tinker returns; Tinker
+then takes a pass on a linear stand-in with that loss's gradient: a forward pass more than a built-in loss. Each
+minibatch's statistics are the objective's terms of the logprobs its forward-backward returns (the policy before that
+update), so the metrics are the LoRA step's.
 
 What crosses to Tinker is float32 (its `TensorData` takes no other float): the logprobs a built-in loss compares with,
 the advantages, and a custom loss's gradient. A built-in loss and the custom loss of the same objective agree to that
@@ -206,9 +208,10 @@ precision: on the tests' fixed batch, after several Adam updates at a rate of 0.
 - A parent not trained on Tinker: the step fails. No call takes an adapter trained elsewhere into a Tinker run.
 
 **The stop at `max_kl`.** A minibatch that finds the policy further than `max_kl` from where the step began stops the
-pass, by the k3 estimate the LoRA step reads ([the step](rollout-objectives.md#the-step)). Each minibatch after the first reads that distance before its update is sent, which takes two of Tinker's clock
-cycles; the first, and every minibatch when nothing is checked, sends its update beside its forward-backward. Its gradient was accumulated where no call clears it, so that client is not used again: the next step resumes
-the saved state.
+pass, by the k3 estimate the LoRA step reads ([the step](rollout-objectives.md#the-step)). Each minibatch after the
+first reads that distance before its update is sent, which takes two of Tinker's clock cycles; the first, and every
+minibatch when nothing is checked, sends its update beside its forward-backward. Its gradient was accumulated where no
+call clears it, so that client is not used again: the next step resumes the saved state.
 
 **Failures.** Any error of the step (Tinker's, or a batch it refuses) raises `StepFailed` with the error's type and
 message: the weights stay as they were and the run goes on. A step retried after a crash makes a new checkpoint id, so
@@ -264,9 +267,9 @@ largest rank, which an engine's `max_lora_rank` must reach. Then:
 A rank-32 adapter of `Qwen/Qwen3.5-9B` without the output layer has 86.5 million parameters, about 0.35 GB in
 float32.
 
-On a 16 GB card (measured with a synthetic adapter in Tinker's layout, converted so), vLLM loads the
-joined adapter and samples from it. The full model does not fit at an 8,192-token context even in FP8: its weights take
-10.8 GiB, leaving 0.25 GiB of cache at 0.88 of the card, not one turn. The 4-bit checkpoint one-gpu.toml serves does:
+On a 16 GB card (measured with a synthetic adapter in Tinker's layout, converted so), vLLM loads the joined adapter and
+samples from it. The full model does not fit at an 8,192-token context even in FP8: its weights take 10.8 GiB, leaving
+0.25 GiB of cache at 0.88 of the card, not one turn. The 4-bit checkpoint the `minecraft-one-gpu` preset serves does:
 85,000 tokens of cache at 0.78 of the card with a rank-32 adapter, 15,600 with `max_lora_rank = 128` (for q, k and v
 joined at rank 96). Serving an adapter trained over bfloat16 on 4-bit weights widens the gap `kl_floor` and
 `mean_mismatch` measure.
@@ -336,16 +339,17 @@ documentation writes them. The tests (`tests/rollout_tinker`) show, with no netw
   fresh optimizer;
 - a datum's rows: the shift by one, spans across turns, forced tokens left out;
 - the engine's contract, and a published version sampled at once through the channel and the gateway;
-- Tinker's bridge: the renaming and the joining of q, k and v, on a tiny model laid out as Qwen3.5, in this process
-  and as a Ray task on the session's Ray, and `rollout merge` folding the bridged adapter in exactly; and on the names and shapes of a real archive of `Qwen/Qwen3.5-4B`'s
-  (`qwen35_archive.json`), the adapter `tinker_cookbook` 0.5.7's converter made of it, name for name and shape for
-  shape;
+- Tinker's bridge: the renaming and the joining of q, k and v, on a tiny model laid out as Qwen3.5, in this process and
+  as a Ray task on the session's Ray, and `rollout merge` folding the bridged adapter in exactly; and on the names and
+  shapes of a real archive of `Qwen/Qwen3.5-4B`'s (`qwen35_archive.json`), the adapter `tinker_cookbook` 0.5.7's
+  converter made of it, name for name and shape for shape;
 - the loop over the trainer and the engine, playing groups and stepping on the fake.
 
-`tests/rollout_tinker/test_live.py` runs only when asked (`ROLLOUT_TINKER=1`) and is skipped without a key. On `Qwen/Qwen3.5-4B` it checks the tokenizer
-against our renderer, the sampling contract, the sampler's logprobs against a training pass's, a step's round trip to a
-new sampler, and the adapter downloaded, converted and served by this machine's vLLM; it deletes what it made and
-writes what it found to `~/.cache/rollout/tinker-smoke.json`. It costs well under ten cents:
+`tests/rollout_tinker/test_live.py` runs only when asked (`ROLLOUT_TINKER=1`) and is skipped without a key. On
+`Qwen/Qwen3.5-4B` it checks the tokenizer against our renderer, the sampling contract, the sampler's logprobs against a
+training pass's, a step's round trip to a new sampler, and the adapter downloaded, converted and served by this
+machine's vLLM; it deletes what it made and writes what it found to `~/.cache/rollout/tinker-smoke.json`. It costs well
+under ten cents:
 
 ```bash
 ROLLOUT_TINKER=1 flock ~/.cache/rollout/gpu.lock uv run pytest -s tests/rollout_tinker/test_live.py

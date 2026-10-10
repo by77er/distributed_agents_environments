@@ -40,10 +40,10 @@ follows that record. See [channels and engines](../libraries/rollout-train/chann
 records each turn token for token. It speaks the OpenAI and Anthropic APIs, so an existing agent harness can
 generate training data unchanged. See [the gateway](../libraries/rollout-train/gateway.md).
 
-**Ledger.** Append-only tables in SQLite or Postgres that hold every decision and result: the groups a run asks for,
-which runner claimed each episode, the steps, the checkpoints, the evals. Processes never share memory; they
-coordinate through the ledger and the blob store, so any of them can stop and be replaced without losing work. See
-[the ledger](../libraries/rollout-train/checkpoints.md#the-ledger).
+**Ledger.** Append-only tables, as files of JSON lines or in SQLite or Postgres, that hold every decision and result:
+the groups a run asks for, which runner claimed each episode, the steps, the checkpoints, the evals. Processes never
+share memory; they coordinate through the ledger and the blob store, so any of them can stop and be replaced without
+losing work. See [the ledger](../libraries/rollout-train/checkpoints.md#the-ledger).
 
 **Suite.** A named, versioned set of starts from an environment, with the episodes to play for each. An eval plays
 one version of a suite with one checkpoint or a base model, and trains nothing. See

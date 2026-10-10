@@ -58,19 +58,24 @@ not built. The facts about verifiers were read from its source (the pinned `0.3.
 ## The spike
 
 Run on 2026-10-04 on one RTX 5080, from `implementations/rollout-verifiers`, on GSM8K
-(`rollout_verifiers.environments:gsm8k`) with the profile `examples/gsm8k_vllm.toml`, with every run in the shared
-ledger.
+(`rollout_verifiers.environments:gsm8k`) with Qwen3-0.6B sampled by a local `vllm` provider and the LoRA trainer,
+with every run in the shared ledger.
 
 **Installing and running it.** `implementations/rollout-verifiers` is a uv project of its own, locked apart from the
 workspace, with the Hub's `gsm8k` 0.1.4 wheel among its dependencies; its `platform` group adds vLLM, the LoRA and
-Tinker trainers, the objectives and the Qwen renderers (all by path from the workspace). From that directory:
+Tinker trainers, the objectives and the Qwen renderers (all by path from the workspace). From that directory, the
+spike's runs in today's commands ([verifiers environments](../implementations/rollout-verifiers.md) has the cluster
+config's entry for the project):
 
 ```bash
-uv sync --group spike
-uv run rollout suite make math --environment rollout_verifiers.environments:gsm8k --data gsm8k-test-100 --ledger sqlite:///$HOME/.cache/rollout/ledger.db
-uv run --group spike rollout eval examples/gsm8k_vllm.toml math --directory ~/.cache/rollout/runs/e2e-prime-eval-base --name e2e-prime-eval-base
-uv run --group spike rollout train examples/gsm8k_vllm.toml rollout_verifiers.environments:gsm8k --groups 8 --groups-per-step 2 --directory ~/.cache/rollout/runs/e2e-prime-lora --name e2e-prime-lora
-uv run --group spike rollout eval examples/gsm8k_vllm.toml math --checkpoint e2e-prime-lora:3 --directory ~/.cache/rollout/runs/e2e-prime-eval-lora --name e2e-prime-eval-lora
+uv sync --group platform
+uv run rollout suite make math --environment rollout_verifiers.environments:gsm8k --data gsm8k-test-100
+uv run rollout eval math --model Qwen/Qwen3-0.6B --provider local-vllm --renderer rollout_qwen:qwen3 \
+    --name e2e-prime-eval-base
+uv run rollout train rollout_verifiers.environments:gsm8k --model Qwen/Qwen3-0.6B --provider local-vllm \
+    --renderer rollout_qwen:qwen3 --trainer local-lora --groups 8 --groups-per-step 2 --name e2e-prime-lora
+uv run rollout eval math --checkpoint e2e-prime-lora:3 --model Qwen/Qwen3-0.6B --provider local-vllm \
+    --renderer rollout_qwen:qwen3 --name e2e-prime-eval-lora
 ```
 
 The environment's eval data is the whole test split (`gsm8k-test`) and its first 100 tasks (`gsm8k-test-100`), which
@@ -103,7 +108,7 @@ rates below were measured then, and are limited partly by finishing within that 
 | `e2e-prime-eval-base` | `rollout eval`, the base model, 1 episode a start | solved 36 of 100 (mean reward 0.36) |
 | `e2e-prime-lora` | `rollout train`, 8 groups of 4, 2 groups a step | 3 steps (2 groups had equal rewards and taught nothing); checkpoints `mkzlyrlnmwumvzlp` (released), `lmrzxkonrylyznox`, `vmwqpuouttquvwpx` |
 | `e2e-prime-eval-lora` | `rollout eval`, checkpoint `e2e-prime-lora:3` | solved 31 of 100 (mean reward 0.31) |
-| `e2e-prime-eval-standalone` | `rollout eval`, the base model again, from the adapter's own project and lock (`uv run --group spike`) | solved 39 of 100 (mean reward 0.39) |
+| `e2e-prime-eval-standalone` | `rollout eval`, the base model again, from the adapter's own project and lock | solved 39 of 100 (mean reward 0.39) |
 | `vf-eval` (not in the ledger) | verifiers' own eval of the suite's 93 tasks, its client pointed at a gateway serving the same channel, `--no-push` | mean reward 0.387 (0.390 over the suite's 100 starts) |
 
 The two evals of the base model played each task once with the same channel and sampling, so they differ only by

@@ -15,7 +15,8 @@ to build it and push it where the nodes pull from, for whoever deploys on Kubern
 - a Java runtime for Minecraft's Paper servers, and Node.js for the Minecraft harness;
 - `git`, for importing environments from git, and `rsync`.
 
-The Ray cluster, the [gateway](../libraries/rollout-train/gateway.md) and the monitor all run it. It is large, because
+Each run's RayJob, the long-lived Ray cluster, the sandbox pools, the
+[gateway](../libraries/rollout-train/gateway.md), the ledger service and the monitors all run it. It is large, because
 of CUDA, torch and vLLM: leave tens of GB for the build cache and the registry.
 
 ## Build with BuildKit in the cluster
@@ -72,8 +73,8 @@ in `/etc/rancher/k3s/registries.yaml`).
     kubectl -n rollout rollout restart deployment
     ```
 
-    Ray's worker pods pull it whenever the autoscaler starts one. The Ray head pulls it when its pod is deleted and
-    made again (`kubectl -n rollout delete pod -l app=ray-head`), which stops every run on the Ray cluster: do it
-    when none is running.
+    Each run's RayJob pulls it when its pods start, so runs asked for after the push use it. The long-lived Ray
+    cluster's workers pull it whenever the autoscaler starts one, and its head when its pod is deleted and made again
+    (`kubectl -n rollout delete pod -l app=ray-head`), which stops any environment check running on it.
 
 The pods for GPUs rented elsewhere have images of their own, built in CI: see [remote providers](providers.md).

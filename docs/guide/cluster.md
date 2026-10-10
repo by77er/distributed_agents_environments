@@ -54,16 +54,19 @@ A file it names that is not there is an error, which says where it looked. `load
 `Cluster`. An unknown key is an error, and so are:
 
 - an unknown kind;
-- a trainer whose `colocate_with` is not a `vllm` provider;
+- a trainer whose `colocate_with` is not a `vllm` provider (for a `runpod-trainer`, not a `runpod-host` provider);
 - a provider reached with no auth at an address that is not this machine;
-- a provider reached over mutual TLS when the cluster has no `[tls]`.
+- a provider reached over mutual TLS when the cluster has no `[tls]` `ca` and `certificate`;
+- a provider whose `store` names no `[stores.NAME]`;
+- a sandbox kind with `on_pods` that no `runpod-host` provider's `sandboxes` lists, or one listed without `on_pods`.
 
 A run's job is handed the config it was submitted with, as JSON in `ROLLOUT_CLUSTER_JSON`; `located` reads that
 first, and finds the file as above otherwise.
 
 `deploy/clusters/example.toml` is a config for one machine with one 16 GB GPU: SQLite, files, vLLM engines, the LoRA
-trainer, Tinker, the Minecraft worlds, the gridworld and GSM8K in its own Python. `deploy/chart/rollout/files/cluster.toml`
-is the chart's, for a Kubernetes cluster ([on Kubernetes](deploying.md#on-kubernetes)).
+and full-weight trainers, Tinker, OpenAI's and Anthropic's APIs, the Minecraft worlds, the gridworld and GSM8K in its
+own Python. `deploy/chart/rollout/files/cluster.toml` is the chart's, for a Kubernetes cluster
+([on Kubernetes](deploying.md#on-kubernetes)).
 
 ```toml title="cluster.toml"
 name = "home"                                 # Ray namespace rollout-home; what runs record as where they ran
@@ -119,7 +122,7 @@ provider = "minecraft_team.worlds:worlds"
 size = 6
 
 [environments."rollout_verifiers.environments:gsm8k"]
-project = "~/Code/distributed_agents_environments/implementations/rollout-verifiers"
+project = "/srv/rollout/implementations/rollout-verifiers"   # a uv project: its own lock, in its own Python
 ```
 
 ### Every section
@@ -127,20 +130,20 @@ project = "~/Code/distributed_agents_environments/implementations/rollout-verifi
 | Section | Fields | Notes |
 |---|---|---|
 | top | `name` | Required; lowercase letters, digits and `-` |
-| `[ray]` | `address` (`auto`), `jobs`, `temp_dir`, `memory_threshold`, `python` (`platform`) | `address`: the Ray cluster a run's driver joins, as its GCS's `host:port`; `auto` is the one Ray finds (in a Ray job, the cluster the job runs on). Name it where a machine runs more than one Ray cluster. `jobs`: the job server runs' jobs are submitted to. `python`: the interpreter a run's job starts in (`platform`: `python` on the job's `PATH`) |
+| `[ray]` | `address` (`auto`), `jobs` (`http://127.0.0.1:8265`), `temp_dir` (`~/.cache/ray`), `memory_threshold` (0.85), `python` (`platform`) | `address`: the Ray cluster a run's driver joins, as its GCS's `host:port`; `auto` is the one Ray finds (in a Ray job, the cluster the job runs on). Name it where a machine runs more than one Ray cluster. `jobs`: the job server runs' jobs are submitted to. `memory_threshold`: the share of a machine's memory past which Ray's memory monitor kills a task. `python`: the interpreter a run's job starts in (`platform`: `python` on the job's `PATH`; or a path) |
 | `[kubernetes]` | `namespace`, `rayjob`, `api` (`https://kubernetes.default.svc`), `queue` | With it, each run's job is a RayJob made from the template `rayjob` names (relative to the config file's directory), sized from the run's demand, in `namespace`, through the API server `api` with the pod's service account ([launching](../libraries/rollout-train/launching.md#a-rayjob)). `queue`: the Kueue LocalQueue that admits each RayJob whole; it is made suspended, and starts once admitted ([Kueue](../libraries/rollout-train/launching.md#kueue)) |
 | `[capacity]` | `cpus`, `memory_gib`, `gpus` | The most the cluster schedules for one run (with Kueue, the queue's quota). A run whose Ray cluster would ask for more (its own parts: never its sandboxes, which are their pool's) is refused, with the numbers ([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)); each is unbounded where it is not said |
 | `[ledger]` | `url`, or `url_env` / `url_file`; `token_env` / `token_file`; `public` | A URL holding a password is refused: name it instead. `url` is a database's, or the ledger service's (`https://…`), which needs the platform's token (`token_env`). The ledger service checks tokens against the same token. `public`: where pods outside the cluster reach the ledger service ([the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http)) |
-| `[blobs]` | `kind` (`files` or `module:name`), `directory` or the store's settings; `access_key_id_env`, `secret_access_key_env` | A setting that looks like a credential is refused. The store's key is its environment's, or read from the two variables it names |
+| `[blobs]` | `kind` (`files` or `module:name`), `directory` (`~/.cache/rollout/blobs`) or the store's settings; `access_key_id_env`, `secret_access_key_env` | A store of files takes only `directory`. A setting that looks like a credential is refused. The store's key is its environment's, or read from the two variables it names (both, or neither) |
 | `[stores.NAME]` | as `[blobs]`, and `reader = { access_key_id_env, secret_access_key_env }` | A blob store beside the default: an R2 bucket that RunPod's pods reach. A run whose trainer or servers are RunPod's writes its blobs to the store its RunPod providers name (`store`); a reader finds each blob in the store its reference names. `reader` names the read-only key inference pods are given; trainer pods get the store's own |
-| `[scratch]` | `directory` | Node-local |
+| `[scratch]` | `directory` (`~/.cache/rollout/scratch`) | Node-local: checkpoints in use, fetched bases, bridges' work, built Pythons |
 | `[tls]` | `ca`, `certificate`, `key`, `identity` (`spiffe://rollout/gateway`) | The cluster's CA, and the client certificate it presents; paths |
-| `[gateway]` | `url`, `listen`, `replicas`, `keys_file` / `keys_env`, `lifetime` | |
-| `[monitor]` | `listen`, `feed_episodes`, `token_env` or `token_file` | The monitor's token, which its page and every client of its API present ([signing in](../libraries/rollout-train/monitor.md#signing-in)); by default `ROLLOUT_MONITOR_TOKEN` |
-| `[runners]` | `places` | |
-| `[guards]` | `runs_gib`, `training_gib` | |
+| `[gateway]` | `url` (`http://127.0.0.1:8830`), `listen` (`127.0.0.1:8830`), `replicas` (1), `keys_file` / `keys_env`, `lifetime` (21600) | `url`: how runners and harnesses reach it; `listen`: where a replica serves; the keys' secrets; `lifetime`: seconds a key minted for a slot is good for |
+| `[monitor]` | `listen` (`127.0.0.1:8765`), `feed_episodes` (80), `token_env` or `token_file` | `feed_episodes`: episodes kept in a run's live feed. The monitor's token, which its page and every client of its API present ([signing in](../libraries/rollout-train/monitor.md#signing-in)); by default `ROLLOUT_MONITOR_TOKEN` |
+| `[runners]` | `places` (8) | Episodes one runner plays at once |
+| `[guards]` | `runs_gib`, `training_gib` (0) | System memory a node must have free before a runner claims an episode, and before a colocated step starts |
 | `[inference.NAME]` | `kind`, `auth`, `gpus`, `replicas`, `allocation`, `concurrency`, `models`, and the kind's own | Below |
-| `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, `costs`, `allocation`, `concurrency`, and the kind's own (`gpu_memory_gib`, for `lora`, `full` and `runpod-trainer`) | Below |
+| `[trainers.NAME]` | `kind`, `auth`, `models`, `segment_tokens`, `gpus`, `colocate_with`, `cost`, `costs`, `allocation`, `concurrency`, and the kind's own: `implementation` (`lora`, `full`, `tinker`), `gpu_memory_gib` (`lora`, `full`, `runpod-trainer`), `project` (`tinker`), `trainer` and its pods' table (`runpod-trainer`) | Below |
 | `[sandboxes.KIND]` | `provider`, `python`, `size`, `url`, `pools`, `on_pods`, the provider's settings | A pool of sandboxes of the kind, which a run reaches only through the claiming interface. Without `url`, each run makes it in its driver from `provider`, `size` and the settings; with `url`, runs acquire from the pool served there (`rollout pool --kind KIND`, [sandboxes](../libraries/rollout/sandboxes.md#over-http)), and make none. With `on_pods` (`true`, or `{ size, cpus, memory_gib, share, settings, version }`), the host pods a run leases whose provider lists the kind serve it, each kind in a Python environment made on the pod from a source the run gives it, and `url` takes what they have no room for ([on a run's pods](../libraries/rollout/sandboxes.md#on-a-runs-pods)). What its sandboxes run and hold is the pool's business: a run's demand counts none of it. On Kubernetes a pool needs `url`, or pods of the run's that serve it ([Where sandboxes run](../research/sandbox-placement.md)) |
 | `[tools.NAME]` | `url`, `auth` | Tool sets served elsewhere |
 | `[environments."NAME"]` | `python = "platform"` or `project = PATH`; `interpreter` | A relative project is from the config file's directory. A run on it starts in `interpreter`, by default `PROJECT/.venv/bin/python` for a project and the platform's for `python = "platform"` |
@@ -165,20 +168,20 @@ what was sampled) or per `hour`. Where the price depends on the model, `costs` g
 (`spend_of`) is one step's on its metered parts: every trained token at a metered trainer's price for the model, and
 the sampled and prompt tokens at the dearest metered provider's prices, prompts uncached. An eval's is the whole
 eval's: every episode of the suite's starts, each turn's thinking and answer budgets sampled and its prompt read at the
-dearest metered provider of the channel it plays. Their tokens are the episodes (for a step, the groups it waits for times
-the episodes of a group), times the turns an episode plays and the samples a turn takes, as the environment's
+dearest metered provider of the channel it plays. Their tokens are the episodes (for a step, the groups it waits for
+times the episodes of a group), times the turns an episode plays and the samples a turn takes, as the environment's
 description says them (`turns`, `samples_per_turn`: every agent of a team samples each turn), each sample its
-thinking and answer budgets and its `prompt_tokens`. A training run's step on RunPod's pods costs each pod's `price` for
-as long as a step of the same trainer and model took here lately (a host's pod once); where no such run made three
+thinking and answer budgets and its `prompt_tokens`. A training run's step on RunPod's pods costs each pod's `price`
+for as long as a step of the same trainer and model took here lately (a host's pod once); where no such run made three
 checkpoints, the estimate says it is not known yet.
 
 **Metered or scheduled.** Each inference provider and trainer says how it is allocated (`allocation`), by default as
 its kind is: `tinker` and `api` are `metered`; `vllm`, `vllm-servers`, `runpod-inference`, `runpod-host`,
-`runpod-trainer`, `lora` and `full` are `scheduled`. RunPod's pods are leased by the runs that use them, outside the
-capacity rule and Kueue's quota; a provider's `max_pods` caps them. A metered one is always available: a run is bounded by its `limits.spend`, the provider's rate
-limits and its `concurrency` (requests sent at once; none: unbounded), which only a metered one takes. A scheduled
-one is capacity a run is placed on: its GPUs count toward the capacity rule. One that asks for the cluster's GPUs is
-scheduled.
+`runpod-trainer`, `lora` and `full` are `scheduled`. RunPod's pods are leased by the runs that use them, outside
+`[capacity]` and Kueue's quota; a provider's `max_pods` caps them. A metered one is always available: a run is bounded
+by its `limits.spend`, the provider's rate limits and its `concurrency` (requests sent at once; none: unbounded), which
+only a metered one takes. A scheduled one is capacity a run is placed on: its GPUs count toward the capacity rule. One
+that asks for the cluster's GPUs is scheduled.
 
 ### Secrets
 
@@ -186,8 +189,9 @@ A secret appears only by name: a key `NAME_env` (an environment variable) or `NA
 like a secret but holds a value (`api_key = "sk-…"`, `token = "…"`) is refused, and so is a ledger URL with a
 password. So the parsed `Cluster` holds no secret: its `repr` and its JSON (`Cluster.described`, which `parsed` reads
 back for a job or an actor) are safe to show. A `Secret` is resolved where it is used, at the moment it is needed
-(`Secret.resolve`). `Cluster.secrets()` lists every reference. `inspect(cluster)` says, on this node, which
-references do not resolve (by name, never by value) and which environment projects have no `uv.lock`.
+(`Secret.resolve`). `Cluster.secrets()` lists every reference, and `Cluster.secrets_of(role)` those one role reads
+(`run`, `gateway`, `monitor`, `ledger`, `pool`, `reaper`). `inspect(cluster, role=...)` says, on this node, which of a
+role's references do not resolve (by name, never by value) and which environment projects have no `uv.lock`.
 
 ### The stores
 
@@ -212,8 +216,9 @@ the ledger are reached through it: `checkpoints`, `registry` and `presets`.
 rollout cluster check                      # the config found as above: its providers, trainers, pools, environments,
                                            # and each secret or project that does not resolve here (exit 1 if any)
 rollout cluster check --cluster lab        # ~/.config/rollout/clusters/lab.toml
-rollout cluster check --role gateway       # only what the gateway reads (run, gateway, monitor, ledger, pool, reaper);
-                                           # in a pod with [kubernetes], also the namespace's Pod Security labels
+rollout cluster check --role gateway       # only the secrets the gateway reads (a role: run, the default, gateway,
+                                           # monitor, ledger, pool, reaper); in a pod with [kubernetes], also the
+                                           # namespace's Pod Security labels
 rollout checkpoints --cluster              # a command over a ledger, on the cluster's ledger
 rollout bookmark diamonds first:20 --cluster lab
 ```
@@ -233,8 +238,8 @@ rollout bookmark diamonds first:20 --cluster lab
 | loads | `peft`, `full` | `peft` | `tinker` | nothing | `peft` |
 | bills | nothing | nothing | tokens | tokens | hours |
 | allocation | scheduled | scheduled | metered | metered | scheduled (leased pods) |
-| auth | `none`, `bearer`, `mtls` (default `none`) | `none`, `bearer`, `mtls` (must say) | `vendor` | `vendor`, `bearer` (default `vendor`: the key `api_key_env` names) | `mtls` (each pod's identity from its heartbeat) |
-| its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs` | `addresses`, `via`, `loader`, `max_logprobs` | `project` / `project_env` | `endpoint`, `base_url`, `api_key_env` / `api_key_file` | its pods' table ([GPU pods on RunPod](../deploy/providers.md#the-providers-table)): `image`, `gpu_types`, `gpu_count`, `cloud`, `regions`, `price`, `max_pods`, `idle_stop`, `start_timeout`, `volume_gb`, `container_disk_gb`, `store`, `step_ca`, `secrets`, `api_key_env`, `memory_fraction` (and `sleep`, on a host), `max_logprobs` |
+| auth | `none`, `bearer`, `mtls` (default `none`) | `none`, `bearer`, `mtls` (must say) | `vendor` | `vendor`, `bearer` (default `vendor`: the key `api_key_env` names) | `mtls` (each pod checked by the identity named for the pod its lease names, `spiffe://rollout/pod/NAME`) |
+| its own fields | `engine` (what makes its engines, `module:name`: `rollout_vllm:VllmEngine` unless said), `listen`, `max_logprobs` | `addresses`, `via`, `loader`, `max_logprobs` | `project` / `project_env` | `endpoint`, `base_url`, `api_key_env` / `api_key_file` | its pods' table ([GPU pods on RunPod](../deploy/providers.md#the-providers-table)): `image`, `gpu_types`, `gpu_count`, `cloud`, `regions`, `cuda_versions`, `min_vcpus_per_gpu`, `min_memory_gb_per_gpu`, `price`, `max_pods`, `idle_stop`, `start_timeout`, `volume_gb`, `container_disk_gb`, `store`, `step_ca`, `secrets`, `api_key_env`, `memory_fraction` (and `sleep` and `sandboxes`, on a host), `max_logprobs` |
 
 Tinker's prompt and top-k logprobs are declared as its SDK says (`Capabilities.unchecked`): the SDK takes prompt
 logprobs and a top k at prompt and sampled positions, whose width Tinker's server bounds without the SDK saying how
@@ -250,8 +255,10 @@ provider's pods are started with it.
 a `runpod-trainer` whose `colocate_with` names the host, on one GPU. A run leases its pods when it starts (warm ones
 first), renews them, and releases them when it ends; a released pod stays warm for `idle_stop` seconds, and
 `rollout pods reap` deletes what no run holds ([GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod)). A run
-is refused more pods than a provider's `max_pods`, pods without `step_ca`, or a cluster whose pods cannot reach the
-ledger service (`[ledger] public` and `token_env`).
+is refused more pods than a provider's `max_pods`, pods without `step_ca`, pods with no bucket to reach (no `store`,
+and a `[blobs]` of files), or a cluster whose pods cannot reach the ledger service (`[ledger] public` and
+`token_env`). A `runpod-host` provider's `sandboxes` names the kinds of sandboxes its pods serve beside its engine and
+trainer ([sandboxes on a host pod](../deploy/providers.md#sandboxes-on-a-host-pod)).
 
 **Auth.** `auth` is a kind or a table: `auth = "none"`, `auth = { kind = "bearer", token_env = "ENGINES_TOKEN" }`,
 `auth = { kind = "vendor", key_env = "OPENAI_API_KEY" }`, `auth = { kind = "mtls", identity = "spiffe://…" }`.
@@ -259,7 +266,7 @@ ledger service (`[ledger] public` and `token_env`).
 
 | Kind | Server verified by | Host name or identity | Client certificate | Token |
 |---|---|---|---|---|
-| `mtls` | the cluster's CA (`[tls] ca`) | the SPIFFE identity, where said (a pod's from its heartbeat); else the host name | `[tls] certificate`, `key` | |
+| `mtls` | the cluster's CA (`[tls] ca`) | the SPIFFE identity, where said (`identity = "leased"`: each pod's, named for the pod its lease names); else the host name | `[tls] certificate`, `key` | |
 | `bearer` | the system's CAs, or the cluster's with `trust = "cluster"` | the host name | | `token_env` / `token_file` |
 | `vendor` | the vendor's SDK | | | the SDK reads its own key |
 | `none` | only for addresses on this machine | | | |
@@ -271,10 +278,11 @@ ledger service (`[ledger] public` and `token_env`).
 ### Hosted APIs
 
 A provider of the kind `api` is a hosted model's API: OpenAI's Responses API (`endpoint = "rollout_openai:hosted"`)
-or Anthropic's Messages API (`endpoint = "rollout_anthropic:hosted"`, [rollout-anthropic](../implementations/rollout-anthropic.md)).
-It is metered, takes messages and returns text, with no exact tokens and no behaviour logprobs: what it samples is
-never trained on. It serves evals of its models and the slots of a run that are not trained (a judge, a fixed
-opponent); validation refuses it for a trained channel or one following it, and asks no renderer of its channels.
+or Anthropic's Messages API (`endpoint = "rollout_anthropic:hosted"`,
+[rollout-anthropic](../implementations/rollout-anthropic.md)). It is metered, takes messages and returns text, with
+no exact tokens and no behaviour logprobs: what it samples is never trained on. It serves evals of its models and the
+slots of a run that are not trained (a judge, a fixed opponent); validation refuses it for a trained channel or one
+following it, and asks no renderer of its channels.
 
 ```toml
 [inference.anthropic]
@@ -323,7 +331,7 @@ models priced from each vendor's pricing page, with the date the prices were che
 | starts from | `peft`, `full` | `full` | `tinker` | as the trainer it runs |
 | auth | `none` | `none` | `vendor` | `mtls` |
 | allocation | scheduled | scheduled | metered | scheduled (a leased pod: its own, or a `runpod-host`'s it names in `colocate_with`) |
-| settings | `rollout_lora.settings:LoraSettings`, less `frozen_reference` | the same, less `rank` | `rollout_tinker.settings:TinkerSettings`, less `project` and `weights` | `LoraSettings` |
+| settings | `rollout_lora.settings:LoraSettings`, less `frozen_reference` | the same, less `rank` and `whole_base` | `rollout_tinker.settings:TinkerSettings`, less `project` (its table's) | `LoraSettings` |
 
 `settings_of(kind)` reads a trainer's settings from its dataclass, without importing the trainer or torch: each field
 is `trainer.FIELD`, with its type and default, changeable when its module's `CHANGEABLE` names it. A trainer's
@@ -432,8 +440,8 @@ serves an eval of the same channels), then the settings given, then its kind and
 ledger)` checks them against the cluster with the facts gathered now: the environment's (`environment_facts`: imported
 here, its programs' sandboxes and slots; a published version's sandboxes as its record says; none for an environment
 in a project's Python, which this process does not import) and the ledger's (`ledger_facts`: the checkpoints the
-settings name and their formats, the suites, the names other runs have). The monitor checks a run when it is asked
-for, the CLI before it submits it, and the run's driver again before it claims anything
+settings name and their formats, the suites, the names other runs have, the GPUs known to be free). The monitor
+checks a run when it is asked for, the CLI before it submits it, and the run's driver again before it claims anything
 ([launching](../libraries/rollout-train/launching.md)).
 
 The run's start records its settings as it runs (`run_settings`: `recorded`, with the settings its trainer declares
@@ -480,6 +488,7 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | `bridge` | no bridge from the trainer's format (or a checkpoint's) to what a provider of the channel loads |
 | `weights` | a trainer that makes the other kind than the run's `weights`; a provider serving the run's checkpoints that cannot serve them (a LoRA without adapters; full weights, or a LoRA merged by `merge-quantize`, without full-weight reload); a checkpoint a fixed channel serves on a provider that cannot |
 | `models` | `trainer.model` not among the trainer's; a channel's model not among its provider's; a channel serving the run's checkpoints with a model that is neither `trainer.model` nor quantized from it; a start trained over another model |
+| `renderer` | a channel that samples tokens with no `renderer` said, where no renderer says it renders its model or several do; a renderer said that says it renders other models (than the model, or the base it was quantized from) |
 | `rank` | `trainer.rank` times the bridge's rank factor above the provider model's `max_lora_rank` |
 | `segment` | `trainer.segment_tokens` above the trainer's here, or above the trained channel's context |
 | `memory` | a trainer of its own GPUs (`lora`, `full`, `runpod-trainer`) whose estimate of what each GPU holds (weights, gradients, optimizer state and activations, sharded over its GPUs: `rollout_train.memory`) is more than a GPU's memory, its `gpu_memory_gib` or its RunPod GPU types' least; the reason says the estimate's parts and how many GPUs would hold it. Within a tenth of a GPU's memory: a note. Where the GPUs' memory or the model's size is not known, nothing is said |
@@ -487,9 +496,9 @@ something could not be estimated. `refusals(findings)` keeps the ones that refus
 | `objective` | a component the objective's family does not accept, or a combination that means nothing (a clip with no ratio, a KL to the reference with none, a reference for a loss that compares likelihoods alone, a k1 KL penalty in the loss); a family the trainer does not take; a policy gradient for an imitate run; a reference the trainer cannot give (Tinker: none; the full-weight trainer: only with `trainer.frozen_reference`); an entropy bonus on a trainer without entropies; the top-k form of distillation on a trainer that gives the sampled tokens' logprobs only (Tinker). A policy gradient without an importance correction while turns may begin behind the newest checkpoint (`max_lag` above 0): a note |
 | `evals` | a suite that does not exist (a name never becomes a suite by itself), a version it lacks, a suite's environment not offered |
 | `distillation` | a distillation (or a policy gradient's distillation term) with no teachers, a teacher channel without a provider, or no route for the environment the run plays (routes for some of its rows only: a note); a teacher's provider without prompt logprobs, with fewer top logprobs than `objective.distillation.top_k`, or with them only unchecked (Tinker); the trainer does not score; the teacher's renderer family differs |
-| `environment` | not offered, does not load, needs a sandbox kind with no pool or a tool set not served; on Kubernetes, needs a sandbox kind whose pool has no `url` (it would run in the run's pod, where nothing accounts its memory) |
-| `capacity` | more CPUs, memory or GPUs than `[capacity]` gives one run, counting the run's scheduled parts and room for Ray's own processes; more GPUs than the cluster has (more than are free: a note, it waits) |
-| `spend` | a training run's `limits.spend` below one step's estimated cost on its metered parts (`spend_of`); a note where it cannot be estimated yet, or where the run uses metered parts and sets no `limits.spend`. For an eval, notes only: no limit on a metered provider, or a limit below the eval's estimate (it ends early) |
+| `environment` | not offered (nor a published version that exists), does not load, needs a sandbox kind with no pool or a tool set not served; needs a sandbox kind whose sandboxes name model slots, from a pool served on pods (`on_pods`: a harness inside reaches its model at the run's gateway, which a pod cannot reach); on Kubernetes, needs a sandbox kind whose pool has no `url` (it would run in the run's pod, where nothing accounts its memory), unless it is served on the pods of a provider the run leases |
+| `capacity` | more CPUs, memory or GPUs than `[capacity]` gives one run, counting the run's scheduled parts and room for Ray's own processes; more GPUs than the cluster has (more than are free: a note, it waits); more of a RunPod provider's pods than its `max_pods`, pods without `step_ca`, pods with no bucket to reach, or pods that cannot reach the ledger service |
+| `spend` | a training run's `limits.spend` below one step's estimated cost on its metered parts (`spend_of`); a note where it cannot be estimated yet, or where the run uses metered parts or pods paid by the hour and sets no `limits.spend`. For an eval, notes only: no limit on a metered provider, or a limit below the eval's estimate (it ends early) |
 | `name` | not a name, or taken |
 
 ```python

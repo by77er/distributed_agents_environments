@@ -5,8 +5,9 @@ declaring sandboxes, pools and leases, and serving pools over HTTP.
 
 **Read first:** [the harness](README.md). **Next:** [Determinism](determinism.md).
 
-Code: `rollout.harness.sandboxes`, `rollout.harness.pool_server`, `rollout_train.sandboxes`, `rollout_train.pods` (`sources`, `sandboxes`, `pools`) · See [tools](../../guide/tools.md),
-[rollouts](../rollout-train/rollouts.md), [API reference](../../guide/reference.md#sandboxspec)
+Code: `rollout.harness.sandboxes`, `rollout.harness.pool_server`, `rollout_train.sandboxes`, `rollout_train.pods`
+(`sources`, `sandboxes`, `pools`) · See [tools](../../guide/tools.md), [rollouts](../rollout-train/rollouts.md), [API
+reference](../../guide/reference.md#sandboxspec)
 
 A sandbox is something a program runs against for the length of one run, outside its own code: a Minecraft world, a
 container a coding agent works in, a computer, the worker process of an environment. A program declares the sandboxes
@@ -246,7 +247,7 @@ can be: a pod's image holds no environment's code, and what it serves is data it
 | Which pods | At each look (`LeasedPools`), the pods whose leases the run holds with an `https` address, of the providers that serve the kind, each a `RemotePool` at `ADDRESS/v1/sandboxes/KIND` reached over mutual TLS with the gateway's certificate, the pod's identity (`spiffe://rollout/pod/NAME`) checked in the handshake; given up on in 5 seconds where it does not connect. A pod whose beat is fresh is live |
 | `acquire` | A key with a lease: from where its lease is, and only there. A new key: on a live pod with room, the most first (every pod asked at once, outside any lock; the acquires on their way to a pod, or sent since it was asked, order the pods and exclude none), the next while each answers full, is not taking new keys, or does not answer, then the pool at the section's `url` (the cluster's own, where it says one); else `NoCapacity`. Where it goes is kept before the pod is asked, so an acquire whose answer is lost is released on its pod, at once or at the next sweep |
 | `release`, `call` | On the pod (or the cluster's pool) that holds the key's lease. A release that fails is kept and tried again at each sweep |
-| `capacity` | The live pods' pools' summed, and the cluster's pool's: the runner asks one pool for room, as before |
+| `capacity` | The live pods' pools' summed, and the cluster's pool's: the runner asks one pool for room, as it asks any pool |
 | A lost pod | A lease whose pod the run no longer holds (released, deleted, taken by another run) is lost: its key gets `SandboxLost`, and its episode is played again. A pod that only misses beats takes no new lease and keeps answering for its own |
 | Where each lease is | Kept in the run's directory (`pods/KIND.json`): a driver started again sends the leases of the runs it adopts to where they are |
 | No pod serves it | Where the section has no `url`, the driver says in the run's beat and on its launch that it waits for a pod that serves the kind, and ends the run failed once none has for 30 minutes (`SandboxesUnserved`); a run would otherwise wait for ever, claiming no episode. A `url` is not required: a run on one pod may rather fail than play its worlds in the cluster |

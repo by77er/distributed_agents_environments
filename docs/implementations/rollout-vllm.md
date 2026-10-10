@@ -9,8 +9,9 @@ trainer](rollout-lora.md).
 Code: `rollout_vllm`
 
 `VllmEngine` implements the [`Engine`](../guide/reference.md#engine) protocol on vLLM: tokens in; tokens, their
-logprobs and a finish reason out, or the logprobs of tokens it is given ([scoring](#scoring)). A [channel](../libraries/rollout-train/channels.md) holds one or more of them and
-knows nothing else about vLLM. The package is installed with `uv sync --all-extras` and needs Linux and an NVIDIA GPU.
+logprobs and a finish reason out, or the logprobs of tokens it is given ([scoring](#scoring)). A
+[channel](../libraries/rollout-train/channels.md) holds one or more of them and knows nothing else about vLLM. The
+package is installed with `uv sync --all-extras` and needs Linux and an NVIDIA GPU.
 
 ## In a cluster config
 
@@ -35,7 +36,7 @@ An engine host makes `VllmEngine(model, max_model_len=context, **options, max_lo
 | `max_model_len` | The most tokens, prompt and completion together, that the engine accepts. The channel reads it as `Engine.max_model_len` |
 | `max_num_seqs` | How many requests are sampled at once; further requests queue |
 | `max_num_batched_tokens` | How many tokens one scheduling step of vLLM processes |
-| `max_lora_rank` | The highest adapter rank the engine loads; at least the trainer's `rank` |
+| `max_lora_rank` | The highest adapter rank the engine loads; at least the trainer's `rank`. vLLM allocates room for ranks 1, 8, 16, 32, 64, 128, 256, 320 and 512 only, so another is rounded up to the next of them (`LORA_RANKS`), and one above 512 is refused |
 | `max_loras` | How many adapters one batch may mix. A channel keeps its run's `max_lag + 1` loaded (two by default: the one it samples from and the one before it), and an engine host serving several runs holds each one's side by side, so this is at least the sum of their windows |
 | `language_model_only` | Load only the language model of a multimodal [checkpoint](../libraries/rollout-train/checkpoints.md) |
 | `speculative` | vLLM's speculative decoding, as its `speculative_config`: for Qwen3.5, whose checkpoints carry a multi-token prediction layer, `{ method = "qwen3_5_mtp", num_speculative_tokens = 2 }`. The draft is not adapted with the channel's LoRA (low-rank adaptation), so fewer drafted tokens are accepted as the policy moves from the base; what is sampled keeps the target model's distribution. Whether the logprobs it returns are the target model's, as the trainer needs, is to be checked before training on them. Off unless given |

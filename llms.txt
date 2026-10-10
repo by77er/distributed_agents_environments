@@ -38,7 +38,7 @@ with what it covers and who it is for, then "Read first" and "Next" links.
 - [Test with a scripted model](docs/guide/testing.md): `ScriptedModelEndpoint` and helpers, checking an environment
 - [Import an environment from git](docs/guide/publishing.md): the entry point, dependencies on the platform, what an
   import from git checks, versions
-- [The harness](docs/libraries/rollout/README.md): the loop, programs, runners, message routing, failures
+- [The harness](docs/libraries/rollout/README.md): the loop, programs, runners, failures
 - [Sandboxes](docs/libraries/rollout/sandboxes.md): declaring sandboxes, pools, leases, pools over HTTP
 - [Determinism](docs/libraries/rollout/determinism.md): time, randomness and effect identity in task code
 - [Hooks](docs/libraries/rollout/hooks.md): observers of every run's events and model samples

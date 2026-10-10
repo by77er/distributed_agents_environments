@@ -3,17 +3,17 @@
 Code: `environments/minecraft`
 
 **Read first:** [Example environments](README.md) and [the cluster config and run settings](../guide/cluster.md).
-**Next:** [Gridworld](gridworld.md).
+**Next:** [Minecraft horizons](minecraft-horizons.md).
 
 One to four agents share a Minecraft world, offline. They are trained with reinforcement learning on a curriculum that
 runs from picking up diamonds lying in a lit room to beating the game: one 4-bit Qwen3.5-9B with a LoRA adapter plays
 them all, and every agent is rewarded equally with the team's score.
 
 The environment is the package `minecraft-team` (import `minecraft_team`), which depends on `rollout` alone. It is
-its tasks as the rows of an [environment](../guide/perspectives.md#building-an-environment), a program that plays one episode, and a
-[sandbox](../libraries/rollout/sandboxes.md) provider that makes its worlds. It knows nothing of the model, the trainer or where anything runs: the
-[cluster config and a run's settings](../guide/cluster.md) say that, and the
-[training loop](../libraries/rollout-train/training.md) is the library's.
+its tasks as the rows of an [environment](../guide/perspectives.md#building-an-environment), a program that plays one
+episode, and a [sandbox](../libraries/rollout/sandboxes.md) provider that makes its worlds. It knows nothing of the
+model, the trainer or where anything runs: the [cluster config and a run's settings](../guide/cluster.md) say that,
+and the [training loop](../libraries/rollout-train/training.md) is the library's.
 
 ```bash
 uv sync --all-extras
@@ -21,24 +21,26 @@ uv run ray start --head --node-ip-address 127.0.0.1 --dashboard-host 127.0.0.1 -
 uv run rollout preset load deploy/chart/rollout/files/presets --cluster
 uv run rollout train minecraft_team.environment:environment --preset minecraft-one-gpu --name team-8
 uv run rollout train minecraft_team.environment:environment --preset minecraft-tinker --name team-tinker   # on Tinker
-uv run rollout monitor --cluster                             # the page over the cluster's runs; it prints its sign-in link
-uv run minecraft-team server --seed 12345                   # a temporary server to look at (join with any client)
+uv run rollout monitor --cluster            # the page over the cluster's runs; it prints its sign-in link
+uv run minecraft-team server --seed 12345   # a temporary server to look at (join with any client)
 ```
 
 The cluster config needs a pool of its worlds (`[sandboxes.minecraft]`, `provider = "minecraft_team.worlds:worlds"`,
 `size = 6`) and the environment among its `[environments]` (`deploy/clusters/example.toml` has both). On one machine
 the pool is made in the run's driver; on Kubernetes the chart serves it from a pod of its own, which runs reach at its
-`url` ([Where sandboxes run](../research/sandbox-placement.md)). The presets are `deploy/chart/rollout/files/presets/minecraft-one-gpu.toml` (the 4-bit Qwen3.5-9B on the
-cluster's vLLM engines and a LoRA trainer sharing their card) and `minecraft-tinker.toml` (the full Qwen3.5-9B trained and sampled at Tinker), each
+`url` ([Where sandboxes run](../research/sandbox-placement.md)). The presets are
+`deploy/chart/rollout/files/presets/minecraft-one-gpu.toml` (the 4-bit Qwen3.5-9B on the cluster's vLLM engines and a
+LoRA trainer sharing their card) and `minecraft-tinker.toml` (the full Qwen3.5-9B trained and sampled at Tinker), each
 commented with why its numbers are what they are. The run's driver writes the monitor's feed into its directory, and
-`rollout monitor` serves the page over the ledger (every run in it) and that feed. The page shows the run's steps and the groups that went into each, every episode of every group and, for each agent, what
-it sees (the map included), what it thinks, what it does and what comes back
-([monitor](../libraries/rollout-train/monitor.md)).
+`rollout monitor` serves the page over the ledger (every run in it) and that feed. The page shows the run's steps and
+the groups that went into each, every episode of every group and, for each agent, what it sees (the map included),
+what it thinks, what it does and what comes back ([monitor](../libraries/rollout-train/monitor.md)).
 
-Servers run on the `java` on the path and the bots on the `node` and `npm` on the path. Where there are none (a rented
-GPU pod), a JDK and Node 22 are downloaded on first use and used from the cache; so are Paper, a JDK to compile the
-plugin if there is no `javac`, and the harness's packages ([where they are kept](#imported-from-git)). Starting a
-server accepts the Minecraft EULA for a local, offline server.
+Servers run on the `java` on the path, the plugin is compiled with the `javac` on the path, and the bots run on the
+`node` and `npm` on the path. Where they are missing (a rented GPU pod), a JDK (Eclipse Temurin 21) and Node 22 are
+downloaded on first use, for an x86-64 or ARM64 machine, and used from the cache; on another architecture they must be
+on the path. Paper and the harness's packages are downloaded the same way ([where they are kept](#imported-from-git)).
+Starting a server accepts the Minecraft EULA for a local, offline server.
 
 ## The pieces
 
@@ -387,7 +389,7 @@ sleeps, the trainer) is kept inside it by these:
 
 | Concern | What the system does |
 |---|---|
-| System memory between steps | The [trainer](../implementations/rollout-lora.md#a-fresh-process-per-step) exits after every step, and the [engine](../implementations/rollout-vllm.md#sleep-and-wake) drops its weights when it sleeps |
+| System memory between steps | The [trainer](../implementations/rollout-lora.md#processes) beside the engine ends its processes after every step, and the [engine](../implementations/rollout-vllm.md#sleep-and-wake) drops its weights when it sleeps |
 | System memory for episodes | Each Paper server has a heap of its own, at most `heap` (`[sandboxes.minecraft]`), and its Java is held to what its world needs ([the worlds](#the-worlds)). The cluster config's `[guards]` say what must be available before episodes are admitted (short of it, the runner waits) and before a colocated step starts (short of it, the run stops with a message) |
 | GPU memory in a step | No turn is longer than the trainer can hold, which is settled when the turn is sampled: a long prompt leaves less room to think. The trainer is held to the GPU memory that is free when it starts ([the memory bound](../implementations/rollout-lora.md#the-memory-bound)). With the engine asleep, what other programs hold of the card stays in use |
 | A failed step | It is written down with its error, the adapter stays as it was, and play goes on ([training](../libraries/rollout-train/training.md#the-loop)) |
@@ -420,11 +422,11 @@ under a file lock so that episodes starting together make it once:
 | A JDK, for `javac` and `java` | `jdk/` | Downloaded once (Eclipse Temurin 21, the release `JDK_RELEASE` pins, for the machine's architecture, checked against the SHA-256 pinned beside it) where no `javac` is on the path (the platform image has a Java runtime only); its `java` runs Paper where no `java` is on the path |
 | Node 22, for the bots | `node/` | Downloaded once (the release `NODE_VERSION` pins, for the machine's architecture, checked against the SHA-256 pinned beside it) where no `node` and `npm` are on the path; its `npm` installs the harness's packages |
 | The plugin | `minecraft/plugin/` | Compiled from the version's `plugin/` once per digest of its sources and the Paper version |
-| A template per world seed | `minecraft/templates/` | Generated once per seed and digest of `config/`: half a minute on 20 cores |
+| A template per world seed | `minecraft/templates/` | Generated once per seed, digest of `config/` and Paper build: half a minute on 20 cores |
 
 The network is needed for the first four: the npm registry, PaperMC's downloads, Adoptium's and nodejs.org.
 
 ## Reporting
 
-`rollout report RUN_DIRECTORY minecraft_team.environment:environment` charts the climb through the curriculum, every group's rewards
-and what each step did ([reporting](../libraries/rollout-train/training.md#reporting)).
+`rollout report RUN_DIRECTORY minecraft_team.environment:environment` charts the climb through the curriculum, every
+group's rewards and what each step did ([reporting](../libraries/rollout-train/training.md#reporting)).

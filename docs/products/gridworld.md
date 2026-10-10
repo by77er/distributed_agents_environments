@@ -30,10 +30,11 @@ to 4,096 tokens a step). [Training it](#training-it) says why. It needs no sandb
 config lists it under `[environments]`, in the platform's Python, and serves the model (`deploy/clusters/example.toml`
 and the chart's config both do).
 
-In the K3s cluster (deploy/chart/rollout), a run asked for from the monitor with this preset is a RayJob of its own. Its project declares its environment for an
-import from git (`[project.entry-points."rollout.environments"]`, [writing an environment others can
-import](../guide/publishing.md)): imported from this repository with the subdirectory `environments/gridworld`, it is
-the version `gridworld@VERSION`, which runs in the platform's Python too, since `rollout` is its only dependency.
+On the chart's Kubernetes cluster (`deploy/chart/rollout`), a run asked for from the monitor with this preset is a
+RayJob of its own. Its project declares its environment for an import from git
+(`[project.entry-points."rollout.environments"]`, [writing an environment others can import](../guide/publishing.md)):
+imported from this repository with the subdirectory `environments/gridworld`, it is the version `gridworld@VERSION`,
+which runs in the platform's Python too, since `rollout` is its only dependency.
 
 ## The game
 

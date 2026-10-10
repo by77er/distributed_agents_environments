@@ -17,7 +17,7 @@ direct call, recorded as run events.
 | Kind | Requested through | Performed by | Completes with |
 |---|---|---|---|
 | `model.sample` | `run.models[slot].sample` | the slot's model endpoint | the sample result: message, finish reason, usage |
-| `tool.call` | `run.tools.call`, which the default `respond` uses for imported tools | the import's tool set | the tool result |
+| `tool.call` | `run.tools.call`, which the default `respond` uses for imported tools; `run.sandbox(name).call` | the import's tool set; the sandbox's [pool](../sandboxes.md#pools) | the tool result |
 | `output.emit` | `run.emit` | the run context | nothing. An `output.emitted` event follows it. |
 
 `@tool` methods are task code, not effects. The effects they request, such as imported tool calls, are.
@@ -35,11 +35,11 @@ Every effect has an `effect_id` and an `arguments_digest`.
 | Kind | Arguments |
 |---|---|
 | `model.sample` | the `session_id`, the context digest, the spec hashes of the tools offered, `max_output_tokens`, `tool_choice` |
-| `tool.call` | the tool's name and the call's arguments |
+| `tool.call` | the tool's name and the call's arguments, and for a sandbox's operation the sandbox's name |
 | `output.emit` | `kind` and `payload` |
 
 Both identifiers go to whatever performs the effect: a model endpoint receives them in the `SampleRequest`, a tool
-set as arguments of `call` (and in the body of `POST /call` when it is served over HTTP).
+set or a pool as arguments of `call` (and in the body of `POST /call` when it is served over HTTP).
 
 ## Completion
 
@@ -68,12 +68,13 @@ safe to request again depends on its receiver:
 
 A tool set says that it deduplicates with a `deduplicates` attribute. One that does not say is treated as one that
 does not. A tool set served over HTTP reports the attribute of the tool set behind it, so a `ToolBinding(url=...)`
-keeps the guarantee ([tools](../../../guide/tools.md#retry-classes)).
+keeps the guarantee ([tools](../../../guide/tools.md#retry-classes)). A sandbox's operations follow the same rules, with
+its pool's `deduplicates` in place of a tool set's ([sandboxes](../sandboxes.md#what-a-program-sees)).
 
-A receiver that deduplicates is sent the `arguments_digest` so that it can tell a repeat from a different call: a
-tool set that finds a known `effect_id` with a different digest raises
-[`Conflict`](../../../guide/reference.md#conflict), because the two requests were not the same effect. The gateway
-looks a recorded turn up by its `effect_id` alone.
+A receiver that deduplicates is sent the `arguments_digest` so that it can tell a repeat from a different call: a tool
+set that finds a known `effect_id` with a different digest raises
+[`Conflict`](../../../guide/reference.md#rolloutcontractsconflict), because the two requests were not the same effect.
+The gateway looks a recorded turn up by its `effect_id` alone.
 
 ## Rules
 

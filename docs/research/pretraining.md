@@ -1,12 +1,12 @@
 # Pretraining and continued pretraining
 
-**Status: proposed.** Nothing here is built. It is read against main `fa49b1b`. Sharded data parallel training
-(FSDP2) on one multi-GPU machine is being built on another branch (`gpu_count` on `runpod-trainer`, a resident
-trainer, checkpoints in PyTorch's distributed checkpoint format) and is named as in progress where it matters. A
-design note: see [Design notes](README.md) for the others.
+**Status: proposed.** Nothing here is built. It is read against main `fa49b1b`. What it builds on is built: sharded
+data parallel training (FSDP2) on one multi-GPU machine in `rollout_lora` (`gpu_count` on `runpod-trainer`, a
+resident trainer, full state in PyTorch's distributed checkpoint format, packed segments). A design note: see
+[Design notes](README.md) for the others.
 
 Can the platform also pretrain a model from nothing, and continue the pretraining of an existing one on text of a
-domain, once its trainer shards across the GPUs of a machine? This note says what pretraining needs, how open
+domain, now that its trainer shards across the GPUs of a machine? This note says what pretraining needs, how open
 pretraining systems provide it, what the platform has that fits and what does not apply, three ways to do it, the one
 recommended and its phases, what it costs at the sizes within reach, and the decisions left open. The roles of
 [the architecture](../architecture/overview.md) do not change: a pretraining run is a run with a trainer and a data
@@ -212,7 +212,7 @@ clock or an update count, and log metrics every few updates.
 | Leases, scale to zero, `limits` | A pod leased for the run, released when it ends however it ends, reaped if the run goes away; spend and hours bounded | A run that outlives one pod: a new lease after a lost one, resumed from the newest state |
 | Kueue gangs, placement groups | Admission of a run's GPUs whole | A trainer of several nodes (the [scaling note](scaling-models-and-topologies.md)'s phase 6) |
 | `runpod-trainer` and its training service | A trainer on a pod of `gpu_count` GPUs, asked for a step by the checkpoint it makes, idempotent by it, polled until made | Steps that last an hour |
-| FSDP2 trainer (in progress) | Sharded full weights over a node's GPUs, a resident process, DCP state | A packed, compiled, throughput-first path for text |
+| FSDP2 trainer (`rollout_lora`) | Sharded full weights over a node's GPUs, resident processes, DCP state, packs of segments | A compiled, throughput-first path for fixed-length text read by the ranks |
 
 ### What does not apply
 
@@ -230,9 +230,10 @@ published checkpoint by an ordinary eval run, which builds its own engines.
 ### What does not fit: the trainer's contract
 
 The `Trainer` protocol says a step is a batch in, a parent's files in, a checkpoint's files out, and that a trainer
-"keeps nothing between steps that it cannot be given again". `rollout_lora`'s trainers take each step in a fresh
-process that loads the model, train one segment at a time with gradient accumulation, and save the whole model and
-optimizer every step. That is right for RL, where a step is minutes of generation and seconds to minutes of training
+"keeps nothing between steps that it cannot be given again". `rollout_lora`'s trainer, with its GPUs to itself,
+keeps its processes, policy and optimizer between steps (`Resident`), packs many segments into each row, and writes
+its full state every `state_every` steps; each step is still a batch of segments handed over by the driver, and
+leaves a serving copy. That is right for RL, where a step is minutes of generation and seconds to minutes of training
 on a few thousand segments. For pretraining:
 
 - **The driver cannot hand over the batch.** Pretraining reads hundreds of thousands to millions of tokens a second.
@@ -240,11 +241,10 @@ on a few thousand segments. For pretraining:
 - **A step cannot be an optimizer update.** At one update a second, a checkpoint each update is impossible and a
   ledger step each update is noise. The unit the ledger should see is a **stretch**: thousands of updates between two
   checkpoints, decided before it is taken and made by its checkpoint, like a step now.
-- **The process must stay.** Loading 16 bytes a parameter at every stretch is minutes for a 9B model; a resident
-  trainer keeps its state and loads a parent only when it does not already hold it (the scaling note's open decision
-  1, being built with FSDP2).
-- **The inner loop is per segment.** One segment at a time, positions picked out for sampled spans, logits in chunks
-  of 128 rows: built for correctness on RL's ragged segments, not for throughput on packed batches.
+- **The process must stay.** Loading 16 bytes a parameter at every stretch is minutes for a 9B model; the resident
+  trainer keeps its state and loads a parent only when it does not already hold it (built with FSDP2).
+- **The inner loop is built for RL's segments.** Packs of ragged segments, positions picked out for sampled spans,
+  logits in chunks of 128 rows: built for correctness on RL's segments, not for throughput on fixed-length text.
 
 So pretraining needs a second trainer contract beside `Trainer`, not a change to it.
 
@@ -252,7 +252,7 @@ So pretraining needs a second trainer contract beside `Trainer`, not a change to
 
 ### (a) Extend the platform's own trainer
 
-The resident FSDP2 full-weight trainer in `rollout_lora` gains a packed text path: batches of fixed-length sequences
+The resident FSDP2 full-weight trainer in `rollout_lora` gains a text path: batches of fixed-length sequences
 from the data source, one fused forward and backward per micro-batch, `torch.compile`, FlashAttention through the
 model's attention implementation, a chunked fused cross-entropy, schedules, clipping, z-loss, spike handling, async
 DCP saves and a Hugging Face serving copy. It runs over Hugging Face's model code, as the rest of the platform does.
@@ -291,7 +291,7 @@ takes the updates.
 
 | | (a) Own trainer | (b) A framework wrapped | (c) Outside |
 |---|---|---|---|
-| Effort | The platform side, plus the packed path in a trainer being built anyway. The throughput work (compile, fused loss, attention kernels) is where the time goes; FP8 is a library call and a comparison run | The platform side, plus the image, the launcher, the data plug or a corpus format, progress reports and checkpoint conversion. Less tuning, more integration; every upgrade of the framework is checked again | None here; every run's pods, data and checkpoints by hand |
+| Effort | The platform side, plus a text path in the trainer that exists. The throughput work (compile, fused loss, attention kernels) is where the time goes; FP8 is a library call and a comparison run | The platform side, plus the image, the launcher, the data plug or a corpus format, progress reports and checkpoint conversion. Less tuning, more integration; every upgrade of the framework is checked again | None here; every run's pods, data and checkpoints by hand |
 | Correctness risk | Medium: data order on resume, schedule position on resume, gradient accumulation and loss scaling across ranks, precision. Each is testable on CPU or one GPU against a known curve | Lower for the loop and its precision recipes (used at scale by their authors), higher at the seams: resume, the data plug, conversion of names to Hugging Face's | The user's, every time |
 | Models | Any family Hugging Face's code runs, including Qwen3.5's hybrid attention; the checkpoints are what vLLM and the trainers already load | The families the framework implements, with its own model code and a conversion; a family it lacks is a port | Any |
 | Precision | bf16, FP8 and MXFP8 (torchao) | Also NVFP4 (Megatron-Bridge, through Transformer Engine) | As the framework |
@@ -311,7 +311,7 @@ than it saves; above a few thousand, or for FP4 at all, it is the way.
 
 1. A run kind `pretrain` (from nothing, or continued from any checkpoint or base model), corpora and mixtures as
    records, a data source library, and the stretch contract below.
-2. Its first implementation: the resident FSDP2 full-weight trainer being built, with a packed text path, in bf16 and
+2. Its first implementation: the resident FSDP2 full-weight trainer, with a text path, in bf16 and
    FP8 (torchao). Continued pretraining of the models the platform already trains and serves comes first, and those
    are Hugging Face models; the RTX 5080 and one H100 test the whole path before a node is rented.
 3. Megatron-Bridge as a second implementation of the same contract, for NVFP4, for TP, PP or CP, or when a run's size
@@ -481,7 +481,7 @@ Each phase waits for its trigger.
 | Phase | Build | Trigger |
 |---|---|---|
 | 1. Corpora and the data source | The `corpora` table and manifests; `rollout corpus make` and `add`; mixtures as named versioned bundles; the data source library, tested on CPU: the same batches at any world size, after any resume, with skips | The first continued pretraining someone wants to run. It needs no GPU and no change to a trainer |
-| 2. Pretraining on one node, bf16 and FP8 | The `pretrain` kind and its settings; the stretch contract and its records; the packed path in the resident FSDP2 trainer (bf16, compile, FlashAttention, chunked cross-entropy, schedules, clipping, z-loss, skipping); FP8 and MXFP8 through torchao; async DCP saves and the serving copy; held-out loss per stretch; a new lease after a lost one; the monitor's page | Phase 1, and the FSDP2 trainer merged. Accepted when a small model from nothing reproduces a published curve on one node (GPT-2 124M on FineWeb 10B tokens to validation loss 3.28, the target llm.c and modded-nanogpt use), its FP8 twin lands within noise of it, and a continued pretraining of a Qwen3 model on a domain corpus lowers its domain loss while its general held-out loss stays within a set margin |
+| 2. Pretraining on one node, bf16 and FP8 | The `pretrain` kind and its settings; the stretch contract and its records; the text path in the resident FSDP2 trainer (bf16, compile, FlashAttention, chunked cross-entropy, schedules, clipping, z-loss, skipping); FP8 and MXFP8 through torchao; async DCP saves and the serving copy; held-out loss per stretch; a new lease after a lost one; the monitor's page | Phase 1. Accepted when a small model from nothing reproduces a published curve on one node (GPT-2 124M on FineWeb 10B tokens to validation loss 3.28, the target llm.c and modded-nanogpt use), its FP8 twin lands within noise of it, and a continued pretraining of a Qwen3 model on a domain corpus lowers its domain loss while its general held-out loss stays within a set margin |
 | 3. Scoring evals and the estimate | Scoring sets and their multiple-choice evals at each stretch's end; the planner's estimate of a pretraining run (tokens a second measured per model size and GPU type) in the New run form and the check | A run longer than a day, where held-out loss alone does not say whether it is worth going on |
 | 4. Megatron-Bridge as a second trainer | A trainer kind over Megatron-Core through Megatron-Bridge behind the stretch contract: the image, the launcher, corpora read as Megatron's token shards or through the data source, progress reports, checkpoints into stretches, `AutoBridge` to Hugging Face; Transformer Engine's NVFP4 and MXFP8 recipes, with the layers kept in bf16 and the switch to bf16 late in the run recorded | The first run that wants NVFP4 (B200 or B300); or one that needs TP, PP or CP (sequences of 64K and up); or a planned run whose cost at the own trainer's measured throughput is more than about $1,000 above its cost at Megatron's or torchtitan's published throughput for that size. Accepted when an NVFP4 run and its FP8 twin of the same model, data and seed differ in loss by no more than the 1% to 1.5% the NVFP4 paper reports |
 | 5. Several nodes | An Instant Cluster as one trainer lease, HSDP across its nodes (the scaling note's phase 6) | A run that would take more than about a week on one node, or a model whose state does not fit one node |

@@ -1,17 +1,17 @@
 """The cluster's certificate authority, step-ca, for the pods a cluster rents: one-time tokens for pods' first
 certificates, and revoking a pod's certificate.
 
-A pod gets its first certificate with a one-time token minted before the pod is asked for: a JWT signed by
-one of step-ca's JWK provisioners, naming the pod's identity (`spiffe://rollout/pod/NAME`) as its subject and its only
-SAN, good for 15 minutes, and once (step-ca keeps the token's id). The pod makes its key itself, sends a certificate
-request with the token (`step ca certificate`), and gets a certificate for that identity and no other, good for 24
-hours. From then on the pod renews it itself, over mutual TLS with the certificate it has (`step ca renew --daemon`),
-at about two thirds of its life.
+A pod gets its first certificate with a one-time token minted before the pod is asked for: a JWT signed by one of
+step-ca's JWK provisioners, naming the pod's identity (`spiffe://rollout/pod/NAME`) as its subject and its only SAN,
+good for 15 minutes, and once (step-ca keeps the token's id). The pod makes its key itself, sends a certificate request
+with the token (`step ca certificate`), and gets a certificate for that identity and no other, good for 24 hours. From
+then on the pod renews it itself, over mutual TLS with the certificate it has (`step ca renew --daemon`), at about two
+thirds of its life.
 
 step-ca renews any certificate it has not revoked, so which pods are the cluster's own reaches the CA as revocations:
 when a pod is stopped or deleted, or is no longer counted as the cluster's, the certificate its beats name is revoked
-(`revoke`). Revocation in step-ca is passive: the certificate is not renewed, and
-lapses within a day. A pod that is gone cannot renew anyway, so its certificate lapses all the same.
+(`revoke`). Revocation in step-ca is passive: the certificate is not renewed, and lapses within a day. A pod that is
+gone cannot renew anyway, so its certificate lapses all the same.
 
 A certificate for a client of the platform's own (the gateway's, `spiffe://rollout/gateway`) is issued here the same
 way (`certificate`): a key made here, a request for the identity, a one-time token. `decrypted_key` reads a JWK

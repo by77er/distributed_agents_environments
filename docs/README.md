@@ -37,10 +37,11 @@ train on).
 
 | Directory | Import | What it is | Implements |
 |---|---|---|---|
-| `libraries/rollout` | `rollout` (`rollout.harness`, `rollout.contracts`, `rollout.local`, `rollout.environment`, `rollout.testing`) | What environments are written against: tasks, agents, programs, tools, conversations, and a runner in this process | |
-| `libraries/rollout-train` | `rollout_train` (and `.rollouts`, `.inference`, `.recorder`, `.monitor`, `.jobs`, `.submitting`, `.cli`, `.testing`) | Reinforcement learning on `rollout`: episode runners and episodes, the training loop, channels, the gateway, runs built from settings and their jobs | |
+| `libraries/rollout` | `rollout` (`rollout.harness`, `rollout.contracts`, `rollout.local`, `rollout.environment`, `rollout.curriculum`, `rollout.testing`) | What environments are written against: tasks, agents, programs, tools, sandboxes, and a runner in this process | |
+| `libraries/rollout-train` | `rollout_train` (and `.rollouts`, `.inference`, `.recorder`, `.gateway`, `.monitor`, `.jobs`, `.submitting`, `.cli`, `.testing`) | Reinforcement learning on `rollout`: episode runners and episodes, the training loop, channels, the gateway, runs built from settings and their jobs | |
 | `implementations/rollout-vllm` | `rollout_vllm` | vLLM as an engine | `Engine` |
 | `implementations/rollout-lora` | `rollout_lora` | A trainer for 4-bit checkpoints with LoRA (low-rank adaptation), and a full-weight trainer | `Trainer` |
+| `implementations/rollout-objectives` | `rollout_objectives` | Objectives in torch: an objective's loss from its components, a trainer's step over a batch, the plan of minibatches and the step's statistics, for the LoRA, full-weight and Tinker trainers | |
 | `implementations/rollout-tinker` | `rollout_tinker` | A trainer and an engine at Thinking Machines (Tinker); the `tinker` extra | `Trainer`, `Engine` |
 | `implementations/rollout-qwen` | `rollout_qwen` | The Qwen families' token formats | `Renderer` |
 | `implementations/rollout-gemma` | `rollout_gemma` | Gemma 4's token format | `Renderer` |
@@ -54,8 +55,9 @@ train on).
 | `environments/gridworld` | `gridworld` | Two to four agents on a grid level, with plates, doors, a gate and a lever; depends on `rollout` only | `Environment` |
 | `environments/judging` | `judging` | Open-ended requests answered by the policy and scored by a judge against a rubric; depends on `rollout` only | `Environment` |
 
-`uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora`,
-`rollout-qwen` and `rollout-gemma` (`--extra gemma` installs that one alone), and `rollout-tinker` (`--extra tinker`).
+`uv sync` installs every package that needs no GPU. `uv sync --all-extras` adds `rollout-vllm`, `rollout-lora` and
+`rollout-qwen` (`--extra gpu` installs these alone), `rollout-gemma` (`--extra gemma`), and `rollout-tinker`
+(`--extra tinker`); `rollout-objectives` comes with the `gpu` and the `tinker` extras.
 `implementations/rollout-verifiers` is a project of its own, with its own lock, outside the workspace.
 
 ## Conventions

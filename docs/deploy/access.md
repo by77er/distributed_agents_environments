@@ -13,6 +13,9 @@ deployment to other people.
 | The monitor | people, in a browser, through `kubectl port-forward`, or the tunnel at `monitors.NAME.tunnel`; it asks for its token | only with `monitors.NAME.ingress` |
 | The gateway | runs in the cluster, at its Service; harnesses outside the cluster | yes, if harnesses outside the cluster use it |
 | Ray's dashboard | operators | optional; it asks for the Ray cluster's token |
+| The ledger service | GPU pods outside the cluster (RunPod's), each with its own token, through the tunnel, an Ingress or a Service of another type (`ledger.service`) | only with `ledger.ingress` |
+| step-ca | GPU pods outside the cluster, through the tunnel | never |
+| The sandbox pools | runs in the cluster only | never |
 | Postgres (the [ledger](../libraries/rollout-train/checkpoints.md#the-ledger)) | the platform's pods only | **never** |
 | The S3 store | the platform's pods only | **never** |
 
@@ -146,4 +149,4 @@ reach them ([network policies](helm.md#network-policies)). Never give them an In
 whoever reaches the ledger's database can rewrite any run's record. To reach them from your machine for a copy or a
 backup, use `kubectl port-forward`, which goes through the Kubernetes API with your credentials. Processes outside the
 cluster, such as GPU pods elsewhere, never connect to the database: they are given scoped access through the ledger
-service the [runtime design](../research/runtime-design.md#decisions-after-review) describes.
+service ([the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http)).

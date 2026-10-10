@@ -1,8 +1,9 @@
 # Example environments
 
-Three environments built on `rollout` alone, each trained with the platform: they show what an environment holds
-(rows, a program, eval data, sandboxes, slots that are not trained) and the run settings and presets that train it.
-This section is for whoever writes an environment and wants a worked one to read.
+Four environments, each trained with the platform: they show what an environment holds (rows, a program, eval data,
+sandboxes, slots that are not trained) and the run settings and presets that train it. Each depends on `rollout`
+alone, except Minecraft horizons, which also depends on the Minecraft team's package. This section is for whoever
+writes an environment and wants a worked one to read.
 
 **Read first:** [Write a task](../guide/tasks.md). **Next:** [Minecraft team](minecraft-team.md).
 

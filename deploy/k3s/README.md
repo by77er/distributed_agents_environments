@@ -4,12 +4,13 @@ A one-node Kubernetes cluster on a WSL2 machine, with KubeRay and the NVIDIA GPU
 platform in it: the chart `deploy/chart/rollout`. Nothing here locks the card: Kubernetes only accounts for it, and
 processes outside the cluster keep using it. The deployment guide in [docs/deploy/](../../docs/deploy/README.md)
 describes each step for any cluster: [preparing it](../../docs/deploy/kubernetes.md), the
-[image](../../docs/deploy/image.md), the [chart](../../docs/deploy/helm.md) and [starting runs](../../docs/deploy/runs.md).
+[image](../../docs/deploy/image.md), the [chart](../../docs/deploy/helm.md) and
+[starting runs](../../docs/deploy/runs.md).
 
 | File | Does |
 |---|---|
 | `install-wsl.sh` | As root: installs NVIDIA's container toolkit with a CDI spec for WSL2's GPU (`/dev/dxg`), installs K3s with a kubeconfig your user can read, and moves containerd's stream server to port 9910, outside Ray's worker ports (10002-19999) |
-| `device-plugin.yaml` | Values for NVIDIA's device plugin chart: the node advertises its card as one `nvidia.com/gpu`, for one Ray worker pod, and Ray shares it among its actors with fractional `num_gpus` |
+| `device-plugin.yaml` | Values for NVIDIA's device plugin chart: the node advertises its card as one `nvidia.com/gpu`, for one pod at a time (a run's, or the Ray cluster's GPU worker), and Ray shares it among that pod's processes with fractional `num_gpus` |
 | `storage-class.yaml` | The StorageClass `local-path-retain`: K3s's local-path volumes, kept when their claims are deleted |
 | `build.yaml` | Building images in the cluster: a registry the node pulls from at `localhost:30500`, and BuildKit |
 
@@ -52,22 +53,26 @@ The chart installs into the namespace `rollout`, by role:
 | Stores | StatefulSets `postgres` (the ledger) and `s3` (versitygw, the bucket `rollout-blobs`), each on its own volume | `postgresql://rollout@postgres.rollout:5432/rollout` (the password: `PGPASSWORD`), `http://s3.rollout:7070` |
 | Ray cluster | RayCluster `ray`, where the monitors check environments imported from git: a head that runs no tasks, a GPU group (`runtimeClassName: nvidia`, one GPU, 14 GiB) and a CPU group (4 GiB), each from zero to one pod by the autoscaler, with token auth | `http://ray-head-svc.rollout:8265`, `http://ray.localhost` |
 | Runs | A RayJob for each run asked for, made from `files/rayjob.yaml`: a Ray cluster of its own, one head pod sized from what the run needs (the card only for a run with a local trainer or engine host), where the run's driver, trainer and engine hosts run; with `kueue.enabled`, admitted by Kueue's queue `runs` once its quota has room; submitted again up to `rayjob.backoffLimit` times when its driver is lost, and removed `rayjob.ttlSeconds` after it ends | the monitor's Runs and Machines tabs |
+| Sandboxes | Deployment `sandboxes-minecraft`: `rollout pool --kind minecraft --cluster`, at most four Minecraft worlds at once (`sandboxes.minecraft.size`), its leases kept beside the ledger | `http://sandboxes-minecraft.rollout:8710` (the cluster config's `[sandboxes.minecraft] url`) |
 | Gateway | Deployment `gateway`: `rollout gateway --cluster` | `http://gateway.rollout:8900`, `http://gateway.localhost` |
+| Ledger service | Deployment `ledger`: `rollout ledger serve --cluster`, the ledger over HTTP for pods outside the cluster (RunPod's), each with a token signed with the Secret `ledger`'s | `http://ledger.rollout:8840` |
 | Monitor | A Deployment `monitor-NAME` for each of `monitors` (`main`): `rollout monitor --cluster` over the cluster config's ledger, or over `monitors.NAME.where` where it names one (a run's directory on the state volume, or a ledger's URL), importing environments from git with the cluster config's blob store and Ray cluster; it asks for the token in the Secret `monitor-token`, which the chart makes | `kubectl -n rollout port-forward svc/monitor-main 8765:8765`, then `http://localhost:8765/login?token=TOKEN` once ([opening the monitor](../../docs/deploy/access.md#opening-the-monitor)) |
 | Presets | The Job `presets`, a hook at every install and upgrade: `rollout preset load /etc/rollout/presets --cluster` saves each of `files/presets` as a preset, a new version only where its newest one holds other settings | |
 
-A monitor asks for each run from its page as a RayJob, under the ServiceAccount `monitor` (`templates/rbac.yaml`: create,
-get, list, watch and delete on `rayjobs` in the release's namespace, and with Kueue get, list and watch on
-`workloads`), reads its status, and deletes it to stop the run.
+A monitor asks for each run from its page as a RayJob, under the ServiceAccount `monitor` (`templates/rbac.yaml`:
+create, get, list, watch and delete on `rayjobs` in the release's namespace, and get on the namespace itself; with
+Kueue, also get, list and watch on `workloads`, get on the chart's LocalQueue and ClusterQueue, and Kueue's pending
+Workloads), reads its status, and deletes it to stop the run.
 
 Kueue 0.19.7 (installed above, after KubeRay, so its RayJob integration finds KubeRay's resources) admits runs' RayJobs
 whole once the chart makes its queue: install or upgrade with `--set kueue.enabled=true`. The chart then makes the
-ResourceFlavor `rollout`, the ClusterQueue `rollout` (12 CPUs, 16 GiB and one GPU for runs, `kueue.quota`) and the
+ResourceFlavor `rollout`, the ClusterQueue `rollout` (12 CPUs, 9 GiB and one GPU for runs, `kueue.quota`) and the
 LocalQueue `runs` in the namespace, and the cluster config names the queue and the quota
 ([Kueue](../../docs/deploy/helm.md#kueue)). A run waiting for admission says so on its launch tile;
 `kubectl -n rollout get workloads` lists what Kueue holds.
 
-Each role is given only what its code reads ([what each role is given](../../docs/deploy/helm.md#what-each-role-is-given)):
+Each role is given only what its code reads
+([what each role is given](../../docs/deploy/helm.md#what-each-role-is-given)):
 
 - the ConfigMap `rollout` at `/etc/rollout`, for every role but the long-lived Ray cluster: `cluster.toml` (the cluster
   config, [docs/guide/cluster.md](../../docs/guide/cluster.md); `ROLLOUT_CLUSTER` names it), `rayjob.yaml` (what its

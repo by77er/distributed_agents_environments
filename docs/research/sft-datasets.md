@@ -48,7 +48,7 @@ what an SFT (supervised fine-tuning) step learns from; every example also carrie
 | **Solved, capped per task** | solved, at most 3 episodes per task, highest reward first | 39 episodes, 13 tasks, 1.54M sampled tokens | evens out the tasks | thinner on the hard tasks than their share of play |
 | **Guided to unguided** (exists: `rollout imitate`) | solved episodes that were guided; the `way` guidance cut from their prompts | 40 episodes, 9 tasks, 1.56M sampled tokens | teaches what guidance showed, without it | only guided tasks; a cut that cannot be made exactly drops the turn |
 | **Actions that worked** (a turn filter) | of any of the above, only turns whose action came back ok | about 50% of their turns | stops the model imitating its own mistakes | "ok" is not "useful": a move or a mine that worked can still be aimless |
-| **Repairs** | a failed turn, then the same agent's next turn that worked | 5,158 pairs | teaches recovering from a failure, with the failure in the prompt | as SFT it is a subset of "actions that worked"; as pairs it needs a preference loss we do not have |
+| **Repairs** | a failed turn, then the same agent's next turn that worked | 5,158 pairs | teaches recovering from a failure, with the failure in the prompt | as SFT it is a subset of "actions that worked"; as pairs it needs a turn-pair rule, which `rollout dataset make` does not have (its preference rules pair episodes) |
 | **Progress turns** (proposed filter, not measured) | turns after which the team's inventory or score moved toward the task (a diamond, a tool it needed) | – | the turns that mattered | needs a per-task notion of progress from the observations |
 | **Team agreement** (proposed, not measured) | turns where agents' plans agreed and the agreed action worked | – | coordination | hard to define from the logs; chat is short and rare (650 chats in 46K turns) |
 | **Frontier distillation** | a frontier model's solved episodes, rendered with our renderer into our model's format | 2 episodes, 424 turns | play far above our policy (28 diamonds in t013) | another model's style and reasoning; its prompts were made by the same harness, but rendered differently; tiny |
@@ -87,7 +87,7 @@ A dataset is a record like a checkpoint, made once and never changed.
   trainer (`rollout_lora:FullTrainer`), through the same `Weighted` segments.
 
 The commands: `rollout dataset make RULE --run RUN [--turns FILTER ...] [--name NAME]` writes the record and the
-manifest; `rollout imitate PROFILE --dataset REF` takes the step.
+manifest; `rollout imitate --dataset REF` (with the trainer and model as run settings) takes the step.
 
 ## The first dataset
 

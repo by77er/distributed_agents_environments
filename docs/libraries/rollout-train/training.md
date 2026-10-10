@@ -251,11 +251,12 @@ segment is scored from its first sampled token to its last, within the teacher's
 [`TeacherScores`](../../guide/reference.md#teacherscores)). A token beyond the teacher's context has no score and adds
 nothing to the loss; a position where the teacher gave fewer tokens than asked keeps the fewer.
 
-The loop does not ask teachers yet. Where runs are built, after each episode ends, each trained segment is routed,
-scored by `taught` with a scorer that calls `Gateway.score` for its teacher's channel (recorded as a turn that is
-never trained on), and kept in the episode's trajectories (`Segment.teacher` is stored with the segment), where
-`Distillations` reads it. A dataset of teacher samples ([datasets](datasets.md#teacher-samples)) holds segments scored
-the same way.
+Neither the loop nor a runner asks a teacher: a training run's episodes carry no teacher's scores, so `Distillations`
+trains nothing from them, each group skipped saying which channel no teacher scored. A segment scored by `taught`, with
+a scorer that calls `Gateway.score` for its teacher's channel (recorded as a turn that is never trained on), carries
+its scores in an episode's trajectories (`Segment.teacher` is stored with the segment), where `Distillations` reads
+them. A dataset of teacher samples ([datasets](datasets.md#teacher-samples)) holds segments that carry their teacher's
+scores, and a step on it distills.
 
 ## The curriculum
 
@@ -337,6 +338,11 @@ steps: `Resident`, below).
   the metrics, the weights, and the state, whole or, `complete` false, only what was kept with the weights), and the
   whole state once it is kept. The loop records, serves and thins such a trainer's checkpoints without reading their
   files ([a training pod's checkpoints](checkpoints.md#a-training-pods-checkpoints)).
+- **`wanted()`**, where a trainer's machine is leased only once a step is coming
+  ([`OnDemand`](../../guide/reference.md#ondemand): `rollout_train.pods.LeasedTrainer`, a `runpod-trainer` with a pod
+  of its own): the loop calls it when a group with something to train on joins the queue, the trainer starts leasing
+  its machine while groups play, and the step waits for it. A lease that fails fails the step that waits for it, and
+  the next step leases again.
 - **`keep_in(location)`** and **`kept(into)`**, where a trainer can keep a step's full state itself after the step
   returns ([`Keeps`](../../guide/reference.md#keeps): `LoraTrainer` and `FullTrainer` with their processes kept, told
   by a training pod): the blob store to keep it in, and what it kept of a step's (raising `StateLost` where it never
@@ -353,20 +359,21 @@ step should not start. It adds `waited_for_requests_seconds` and `update_seconds
 the trainer it wraps holds, and closes it, where that trainer is `Resident`, and has it say how far a step has got
 where it is `Progressing`.
 
-`LoraTrainer` is the trainer this repository gives: [LoRA trainer](../../implementations/rollout-lora.md).
+`LoraTrainer` and `FullTrainer` are the trainers this repository gives for a local GPU
+([LoRA trainer](../../implementations/rollout-lora.md)); `TinkerTrainer` trains at Thinking Machines
+([Tinker](../../implementations/rollout-tinker.md)), and `RemoteTrainer` on a training pod.
 
 ## Changing a running run's settings
 
-A run's settings are named by dotted key ([run settings](../../guide/cluster.md#run-settings)), and are of two
-kinds.
-**Changeable** ones can change between two steps without breaking the run: `groups_per_step`, `max_lag` (written into what the channel should serve with each
-checkpoint it serves, so runners elsewhere take it with that checkpoint), the evals it makes
-(`evals.suite`: a suite by name, which follows its newest version, a version by id, or none for no evals;
-`evals.every`; `evals.episodes`, none for the suite's own), and its trainer's (`trainer.NAME` for each of its
-`changeable`, and the numbers of its objective by their own keys, `objective.kl.coefficient`). **Fixed** ones make what the run is: its trainer and model, the
-adapter's rank and the trainer's other settings, the channels and their providers, how many episodes it plays at once,
-and the groups and seed the loop was started with. The run's start records both (`run_settings`: `fixed`, and
-`changeable` with their values as it starts).
+A run's settings are named by dotted key ([run settings](../../guide/cluster.md#run-settings)), and are of two kinds.
+**Changeable** ones can change between two steps without breaking the run: `groups_per_step`, `groups_ahead`, `max_lag`
+(written into what the channel should serve with each checkpoint it serves, so runners elsewhere take it with that
+checkpoint), the evals it makes (`evals.suite`: a suite by name, which follows its newest version, a version by id, or
+none for no evals; `evals.every`; `evals.episodes`, none for the suite's own), and its trainer's (`trainer.NAME` for
+each of its `changeable`, and the numbers of its objective by their own keys, `objective.kl.coefficient`). **Fixed**
+ones make what the run is: its trainer and model, the adapter's rank and the trainer's other settings, the channels and
+their providers, how many episodes it plays at once, and the groups and seed the loop was started with. The run's start
+records both (`run_settings`: `fixed`, and `changeable` with their values as it starts).
 
 What someone wants of a run's changeable settings (its **desired settings**) is ordinary state beside the ledger,
 changed in place and not appended: `settings.json` beside a ledger of files, the `run_settings` table in a database
@@ -374,18 +381,19 @@ ledger's database (`DatabaseDesiredSettings`); `desired_settings_of(ledger)` fin
 the keys given and keeps the others. The monitor's run page writes them ([a run's settings](monitor.md#a-runs-settings)).
 
 The loop (`train(desired=…, scheduled=…)`) reads them each time it is about to decide a step. Each one it has, with a
-value it can take (`checked`: a whole number of 1 at least for `groups_per_step`, `evals.every` and
-`evals.episodes`, which may also be none; 0 at least for `max_lag`), is taken in place of what it used (`applied`); its trainer is told its own (`change`), and one the
-trainer refuses leaves the trainer's as they were, noted to the hooks as a `settings` note with the error. A change is
-noted as a `settings` note with what changed. The step is decided with the settings then in effect, and its record in
-`steps` says them (`settings`), with the version of the suite they name as its name points then (`suite_version`); a
-step taken again after a stop is taken with those. Whether a step's checkpoint is evaluated is that step's evals, and
-the version played is the one its record names: `scheduled(suite, every, episodes)` gives the schedule of a suite by
-name (the version its name points to now) or of a version by id. A run's driver gives the
-ledger's version; for a name the ledger has no suite of (asking for one is refused: a name never becomes a suite by
-itself), or a suite whose environments do not all load where the run is, there is none, and nothing is evaluated.
-An edit of the suite (a new version, [versions](evals.md#versions)) is played from the next step decided. So a change made while a step is being taken applies from
-the next one, and a run that is stopped takes it when it is started again.
+value it can take (`checked`: a whole number of 1 at least for `groups_per_step`, `groups_ahead`, `evals.every` and
+`evals.episodes`, of which `groups_ahead` and `evals.episodes` may also be none; 0 at least for `max_lag`), is taken in
+place of what it used (`applied`); its trainer is told its own (`change`), and one the trainer refuses leaves the
+trainer's as they were, noted to the hooks as a `settings` note with the error. A change is noted as a `settings` note
+with what changed. The step is decided with the settings then in effect, and its record in `steps` says them
+(`settings`), with the version of the suite they name as its name points then (`suite_version`); a step taken again
+after a stop is taken with those. Whether a step's checkpoint is evaluated is that step's evals, and the version played
+is the one its record names: `scheduled(suite, every, episodes)` gives the schedule of a suite by name (the version its
+name points to now) or of a version by id. A run's driver gives the ledger's version; for a name the ledger has no suite
+of (asking for one is refused: a name never becomes a suite by itself), or a suite whose environments do not all load
+where the run is, there is none, and nothing is evaluated. An edit of the suite (a new version,
+[versions](evals.md#versions)) is played from the next step decided. So a change made while a step is being taken
+applies from the next one, and a run that is stopped takes it when it is started again.
 
 ## Pausing and resuming
 
@@ -419,8 +427,8 @@ recorded episode is played again. A training run is asked for the groups it had 
 play, less those it has played since; an eval, the version of its suite its start and subject say. The settings are
 checked against the cluster config first, as any run's are.
 
-A run whose start records no providers (one started before runs recorded them) resumes only with a preset whose
-settings match what its start recorded (`rollout resume RUN --preset NAME --cluster`, or the monitor's resume with a
+A run whose start records no channel's provider resumes only with a preset whose settings match what its start
+recorded (`rollout resume RUN --preset NAME --cluster`, or the monitor's resume with a
 preset): every setting both say must be equal, the preset's trainer's implementation must be the start's `trainer.kind`,
 and each channel's provider's engine its `channels.NAME.engine`. A difference is refused with each setting that
 differs (`channels.policy.thinking_tokens: the run has 64, the preset 128`). The launch then carries the preset's

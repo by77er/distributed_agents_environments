@@ -15,8 +15,9 @@ By role, in the namespace it is installed into (these pages use `rollout`):
   17) and `s3` (versitygw, an S3 gateway whose buckets are directories), each on a volume of its own, behind Services at
   `postgres.rollout:5432` and `s3.rollout:7070`. A hook Job, `buckets`, makes the blob bucket after every install and
   upgrade if it is missing.
-- **The Ray cluster.** A RayCluster `ray`: a head that runs no tasks, a GPU worker group and a CPU worker group, each
-  started from zero by the autoscaler when work waits and removed after `ray.idleSeconds` without work. Clients
+- **The Ray cluster.** A RayCluster `ray`, where the monitors check environments imported from git: a head that runs
+  no tasks, a GPU worker group and a CPU worker group, each started from zero by the autoscaler when work waits and
+  removed after `ray.idleSeconds` without work. Clients
   present the cluster's token, which KubeRay keeps in a Secret named after the cluster. Its job server is at
   `ray-head-svc.rollout:8265`.
 - **The gateway.** A Deployment of stateless replicas behind a Service at `gateway.rollout:8900` and an Ingress.
@@ -42,7 +43,6 @@ By role, in the namespace it is installed into (these pages use `rollout`):
   state volume and the Secrets, what it uses ([what each role is given](#what-each-role-is-given)).
 - **Network policies** (with `networkPolicies.enabled`, the default): nothing reaches a pod but the roles that use it
   ([network policies](#network-policies)).
-
 - **Each run's job.** A RayJob made by a monitor when a run is asked for from its page (or by `rollout train
   --cluster` with Kubernetes credentials), from `files/rayjob.yaml`: a head pod of the platform's image sized from
   what the run needs (its driver, trainer, engine hosts and bridge, and room for Ray's own processes), within
@@ -53,7 +53,8 @@ By role, in the namespace it is installed into (these pages use `rollout`):
 - **Kueue's queue** (with `kueue.enabled`): a ResourceFlavor, a ClusterQueue with `kueue.quota` and a LocalQueue in the
   namespace (`templates/kueue.yaml`), [below](#kueue).
 - **The monitors' account.** A ServiceAccount `monitor` with a Role that may create, get, list, watch and delete
-  `rayjobs`, and get its own namespace (whose Pod Security labels `rollout cluster check` reads); with Kueue, also get, list and watch `workloads` and get the chart's LocalQueue, and a ClusterRole
+  `rayjobs`, and get its own namespace (whose Pod Security labels `rollout cluster check` reads); with Kueue, also
+  get, list and watch `workloads` and get the chart's LocalQueue, and a ClusterRole
   (`NAMESPACE-monitor`) that may get the chart's ClusterQueue and its pending Workloads through Kueue's visibility API
   (`templates/rbac.yaml`, [what the monitor shows](#what-the-monitor-shows)).
 - **The admission policy** (with `admission.enabled`, the default): a ValidatingAdmissionPolicy and its binding,
@@ -98,6 +99,7 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `sandboxes.minecraft.onPods` | none | The section's `on_pods`, as TOML (`true`, or `'{ memory_gib = 2.4 }'`): the worlds are also served from the host pods a run leases whose provider (in `clusterExtra`) lists `sandboxes = ["minecraft"]`, with this pool behind them ([sandboxes on a host pod](providers.md#sandboxes-on-a-host-pod)) |
 | `gateway.replicas`, `gateway.port`, `gateway.host` | `1`, `8900`, `gateway.localhost` | The gateway's replicas, port and Ingress host |
 | `monitors.NAME.ingress`, `.host`, `.hosts` | `false`, `monitor.localhost`, none | Whether a monitor has an Ingress, its host, and more names the monitor answers under (beside `localhost`, `127.0.0.1` and its Service's names) |
+| `monitors.NAME.tunnel` | none | A public hostname the tunnel carries to the monitor ([the monitor through the tunnel](access.md#the-monitor-through-the-tunnel)) |
 | `secrets.monitor` | `monitor-token` | The monitors' token (`ROLLOUT_MONITOR_TOKEN`), which the chart makes where it is missing |
 | `ingress.className`, `ingress.rayHost` | `traefik`, `ray.localhost` | The ingress controller, and the host of Ray's dashboard |
 | `admission.enabled` | `true` | The admission policy that holds what a RayJob in the namespace may ask for ([Pod Security](kubernetes.md#pod-security)) |
@@ -225,8 +227,9 @@ uninstalled ([opening the monitor](access.md#opening-the-monitor)). Make the oth
 
     The chart gives these keys only to what samples hosted APIs: the gateway's pods and each run's job (its RayJob's
     pods, through `files/rayjob.yaml`), as environment variables read from the Secret by reference
-    (`rollout.providerEnv` in `templates/_helpers.tpl`, [what each role is given](#what-each-role-is-given)). They are never in the ConfigMap: the cluster config names
-    them (`api_key_env`), and the RayJob template holds only the reference. To change a key, update the Secret and
+    (`rollout.providerEnv` in `templates/_helpers.tpl`, [what each role is given](#what-each-role-is-given)). They are
+    never in the ConfigMap: the cluster config names them (`api_key_env`), and the RayJob template holds only the
+    reference. To change a key, update the Secret and
     restart the gateway (`kubectl -n rollout rollout restart deploy/gateway`); runs started after read the new one.
 
 6. **For RunPod's pods**, only to rent them ([GPU pods on RunPod](providers.md#what-a-deployment-provides)):
@@ -243,9 +246,9 @@ uninstalled ([opening the monitor](access.md#opening-the-monitor)). Make the oth
 
     The chart gives `ROLLOUT_LEDGER_TOKEN` to the ledger service and runs' jobs, the `R2_*` keys to runs' jobs (and
     the writer's to the monitors, which read episodes kept there), and `RUNPOD_API_KEY` to runs' jobs and the reaper
-    ([what each role is given](#what-each-role-is-given)). The Secrets `step-ca` and `gateway-tls` are written by the chart's
-    `rollout pki publish`; with a step-ca of your own, make them yourself (`root_ca.crt`, `provisioner.jwk`; `tls.crt`,
-    `tls.key`, `ca.crt`).
+    ([what each role is given](#what-each-role-is-given)). The Secrets `step-ca` and `gateway-tls` are written by the
+    chart's `rollout pki publish`; with a step-ca of your own, make them yourself (`root_ca.crt`, `provisioner.jwk`;
+    `tls.crt`, `tls.key`, `ca.crt`).
 
 Another provider's key (a tool set's token, say) is named in the cluster config by environment variable (`token_env`,
 `key_env`). Put each in a Secret, and add it to the environment of the roles that use it (`templates/_helpers.tpl`):
@@ -292,7 +295,7 @@ it, picked by the labels the chart sets (`app`, and KubeRay's `ray.io/cluster`):
 | The gateway | runs, and harnesses inside sandboxes; the ingress controller (its Ingress) |
 | The ledger service | the tunnel; the ingress controller with `ledger.ingress`; anything with a `ledger.service.type` other than `ClusterIP`; the roles `networkPolicies.ledgerFrom` names |
 | step-ca (with `stepCa.enabled`) | the tunnel, the `pki-publish` jobs, runs, the reaper |
-| The monitors (8765) | one another; the ingress controller where a monitor's Ingress is on |
+| The monitors (8765) | one another; the ingress controller where a monitor's Ingress is on; the tunnel where a monitor has a hostname through it |
 | Each sandbox pool | runs, at the pool's port |
 | The long-lived Ray cluster | its own pods and KubeRay's operator; the monitors and the ingress controller at its job server and dashboard (8265) |
 | Each run's Ray cluster and the pod that submits its job | one another (every run's), KubeRay's operator, the gateway |
@@ -304,9 +307,10 @@ through one ([backups](backups.md)).
 
 With `networkPolicies.egress` (the default), the pods that run code from elsewhere reach out only where they must:
 the long-lived Ray cluster's workers (where imported environments are checked) reach their own cluster, the cluster's
-DNS and the internet (to build an environment's Python); the sandbox pools reach Postgres, the gateway (a harness inside a
-sandbox samples through it), the DNS and the internet (Minecraft's server and JDK). Neither reaches any other address in `networkPolicies.privateRanges`: not the stores,
-the gateway, a run, the Kubernetes API or the node. The other roles' egress is not limited.
+DNS and the internet (to build an environment's Python); the sandbox pools reach Postgres, the gateway (a harness
+inside a sandbox samples through it), the DNS and the internet (Minecraft's server and JDK). Neither reaches any other
+address in `networkPolicies.privateRanges`: not the S3 store, a run, the Kubernetes API or the node, and the Ray workers
+not Postgres or the gateway either. The other roles' egress is not limited.
 
 ## The cluster config
 
@@ -341,9 +345,9 @@ file and the S3 endpoint (`AWS_ENDPOINT_URL`) in `templates/_helpers.tpl`: see [
 
 The chart makes an Ingress for the gateway (`gateway.host`), for each monitor whose `monitors.NAME.ingress` is on
 (`monitors.NAME.host`) and for Ray's dashboard (`ingress.rayHost`), all of class `ingress.className`. A monitor is
-opened through a port-forward otherwise ([opening the monitor](access.md#opening-the-monitor)). The default hosts end in `.localhost`, which
-browsers send to the machine they run on. Set real host names, TLS and sign-in before anyone else reaches them:
-[Ingress, TLS and sign-in](access.md).
+opened through a port-forward otherwise ([opening the monitor](access.md#opening-the-monitor)). The default hosts end
+in `.localhost`, which browsers send to the machine they run on. Set real host names, TLS and sign-in before anyone
+else reaches them: [Ingress, TLS and sign-in](access.md).
 
 ## Volumes
 

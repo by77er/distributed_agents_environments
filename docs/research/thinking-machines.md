@@ -32,8 +32,8 @@ Vendors change prices, model lists and APIs often (Tinker retired 22 models in J
   ratio (GSPO) with more than one optimizer step per step needs the custom-loss path, which costs more.
 - **It needed no change to `Trainer`, `Engine`, `Channel`, the checkpoints or the loop.** A checkpoint's weights
   directory holds a small pointer file naming its Tinker checkpoints (optionally beside a downloaded PEFT
-  (parameter-efficient fine-tuning) adapter). The engine reads the pointer when the channel publishes. A profile
-  switches backends by naming `rollout_tinker` classes.
+  (parameter-efficient fine-tuning) adapter). The engine reads the pointer when the channel publishes. A run
+  switches backends by naming a `tinker` trainer and inference provider of the cluster config in its settings.
 - **Prime Intellect offers no equivalent API today.** Its shared hosted LoRA training stops taking new runs on
   2026-10-05. Its hosted training runs its own rollouts and loss through `verifiers` environments. Its useful pieces
   for us are GPU pods and the open-source `prime-rl` ([Prime Intellect, for contrast](#prime-intellect-for-contrast)).
@@ -193,7 +193,7 @@ billed at the training price.
 
 | Tinker ID | Context | Prefill (cached) | Sample | Train | Relevance |
 |---|---|---|---|---|---|
-| `Qwen/Qwen3.5-9B` | 64K | 0.66 (0.132) | 1.995 | 1.463 | The base of our profile's `cyankiwi/Qwen3.5-9B-AWQ-4bit`, in BF16 |
+| `Qwen/Qwen3.5-9B` | 64K | 0.66 (0.132) | 1.995 | 1.463 | The base of minecraft-one-gpu's `cyankiwi/Qwen3.5-9B-AWQ-4bit`, in BF16 |
 | `Qwen/Qwen3.5-4B` | 64K | 0.33 (0.066) | 1.005 | 0.737 | A cheaper relative for tests |
 | `Qwen/Qwen3-8B` | 32K | 0.195 (0.039) | 0.60 | 0.44 | `rollout_qwen:qwen3`'s family; the cheapest |
 | `Qwen/Qwen3.6-35B-A3B` | 64K | 0.54 (0.108) | 1.335 | 1.177 | A larger mixture-of-experts model, at about the 9B's cost |
@@ -223,10 +223,11 @@ Qwen3-30B-A3B and the Llama models went on 2026-06-12
   ([OpenAI-compatible](https://tinker-docs.thinkingmachines.ai/tinker/compatible-apis/openai/index.md)).
 - **Serverless inference** is in beta, for Inkling only.
 
-## Where a hosted backend plugs in (the repository as it is)
+## Where a hosted backend plugs in (the repository as read)
 
-What the loop asks of training and serving is already behind four seams. A profile picks every implementation
-by `module:name`.
+This section is the repository as it was read for this design; [training](../libraries/rollout-train/training.md)
+and [channels and engines](../libraries/rollout-train/channels.md) describe the code now. What the loop asks of
+training and serving is already behind four seams, each implementation picked by `module:name`.
 
 | Seam | Protocol (as written) | Today |
 |---|---|---|
@@ -378,10 +379,11 @@ model, for each row of [the table above](#the-objective-on-tinker): the models m
 
 The checkpoints, their manifests and the ledger are unchanged: the pointers are blobs like any weights.
 
-### A profile
+### A preset
 
-`environments/minecraft/profiles/tinker.toml` trains and samples the full `Qwen/Qwen3.5-9B` at Tinker with
-one-gpu.toml's turn budgets, segment budget and shared ledger, and has the local-serving alternative commented.
+The preset `minecraft-tinker` (`deploy/chart/rollout/files/presets/minecraft-tinker.toml`) trains and samples the full
+`Qwen/Qwen3.5-9B` at Tinker with minecraft-one-gpu's settings where they still apply, and says the local-serving
+alternative in its comments.
 
 ### Retention (proposed)
 
@@ -459,11 +461,11 @@ logprobs, since the Qwen3.5 family shares a tokenizer (*unverified* across sizes
   base strands a remote policy unless its adapters were downloaded (`weights = "peft"` keeps a local copy in the blob
   store).
 - **Secrets.**
-  - The key comes from `TINKER_API_KEY` or `~/.tinker/credentials.json` and never appears in a profile, a ledger
+  - The key comes from `TINKER_API_KEY` or `~/.tinker/credentials.json` and never appears in run settings, a ledger
     record or a log line.
   - `[trainer] project` holds a project id, which is not a secret.
   - Errors are reduced to their type and message before they reach `StepFailed` (whose text the ledger keeps).
-  - Every machine that opens the profile's channel (each episode runner's) needs the key in its environment.
+  - A run's driver (which samples a Tinker channel) and its trainer actor need the key in their environment.
   - A narrower credential for runners (a Project Sampler) would limit what a leaked key can do. Per-role API keys are
     *unverified*.
 - **Vendor lock-in.** It is limited by design: the ledger, the recorder's segments, the renderer and the objective
@@ -533,7 +535,7 @@ its `llms-full.txt` and OpenAPI spec), the live inference model list, and the `p
 |---|---|---|
 | Trainer | A `prime-rl` trainer behind our `Trainer` | Possible but heavy. `Weighted` becomes `TrainingSample`; we write its batch files, acknowledge its handshake and copy `broadcasts/step_N` into the blob store. Its trainer is a long-running lockstep process, not a call per step, and its internal formats are young (v0.9.0) |
 | Engine | `prime-rl`'s vLLM server | Natural: token-in generation and `/load_lora_adapter`. Its sleep and wake must be checked |
-| Compute | GPU pods running our own `LoraTrainer` and `VllmEngine` | The lowest-risk way to use Prime: nothing in our design changes, and it scales the one-GPU profile up |
+| Compute | GPU pods running our own `LoraTrainer` and `VllmEngine` | The lowest-risk way to use Prime: nothing in our design changes, and it scales the one-GPU preset up |
 | Training | Hosted training through a verifiers-wrapped environment | Not recommended. It closes to LoRA in two days. It would also hand the loop, the advantages, the loss, the staleness policy and token recording to Prime, giving up the ledger, the recorder's exact segments, `ID@N` versions and our renderer |
 
 Prime Intellect is a source of GPUs and open-source parts. Tinker is the managed service that keeps our loop.
@@ -565,9 +567,9 @@ run on a fake service (a bigram whose losses are the documented formulas), with 
 - a datum's alignment, the engine's contract and a publish through `Channel` and `Recorder`;
 - the conversion with q, k and v joined, and `rollout merge` folding it in exactly, on a tiny model laid out as
   Qwen3.5;
-- a profile naming `rollout_tinker`'s classes, the loop playing groups and stepping.
+- a run naming `rollout_tinker`'s trainer and engine, the loop playing groups and stepping.
 
-**First real run.** A short Minecraft run on `Qwen/Qwen3.5-9B` (`environments/minecraft/profiles/tinker.toml`, five
+**First real run.** A short Minecraft run on `Qwen/Qwen3.5-9B` (the preset `minecraft-tinker`, five
 groups, two steps), audited before anything longer:
 
 - Check the launch flags.

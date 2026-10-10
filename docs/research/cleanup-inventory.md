@@ -33,7 +33,8 @@ The sections below describe the code at `0f90a2b`. Of the commits [section 6](#6
 | 18 | in part: `@user_errors`, `--ledger` once, `registry.run_id`; no parent parsers or dispatch table | `ac758ae` |
 | 19 | in part: the harness's variables and the hooks rule said once | `151e85b` |
 | 21, 22 | made: rollout-tinker joined the workspace with the `tinker` SDK alone, and Ray is a dependency of rollout-train; rollout-verifiers stays a project of its own | `6fdda88`, `b54e4cf` |
-| 14, 16, 20, 23–32 | open: the [runtime design](runtime-design.md#8-the-implementation-sequence) carries most of them (profiles, `hosting.py`, the process backend, the in-process bridge path, the file ledger) | |
+| 23, 26 | made: runs submit their own Ray jobs, with no launcher; profiles, `Platform` and `hosting.py` deleted for the cluster config, run settings and presets | `41284fb`, `cba76be`, `6fdd69b` |
+| 14, 16, 20, 24, 25, 27–32 | open: the [runtime design](runtime-design.md#8-the-implementation-sequence) carries most of them (the in-process bridge path, the file ledger) | |
 
 The appendix's bug is fixed: an eval's start says its suite version as `suite_version` (`54d6827`).
 

@@ -58,7 +58,7 @@ engine runs in this process's care, or is a client of a server elsewhere.
 `RemoteEngine` is a vLLM server on another machine, over its OpenAI-compatible API
 ([engines elsewhere](#engines-elsewhere)).
 `ScriptedEngine` stands for one in tests ([training](training.md#trying-it-without-a-gpu)). `TinkerEngine` neither
-scores nor gives the most likely tokens: Tinker's SDK takes both, and they wait for a live test.
+scores nor gives the most likely tokens: asked for either, it raises `NotImplementedError`.
 
 A channel scores as it samples: `Channel.score` on the session's engine, once a load in progress has ended, counted
 in its throughput with the tokens scored as tokens in and none out; `Channel.scored(…, name=)` scores what is served
@@ -229,7 +229,9 @@ down), a CA bundle, a client certificate. A server must give logprobs of the dis
 A `RemoteChannel` is one run's channel as the gateway samples it, in place of a `Channel`
 (`Sampler`: a name, a renderer, limits, a context limit, `weights(session)`, `generate` and `score`). Its servers are
 one URL (a router, a proxy, a server) or a list, of URLs or of any `CheckpointServer` (`models()`, `generate` and
-`score` by checkpoint name: `RemoteEngine`, or an engine host's `HostServer`). It scores as it samples: on the
+`score` by checkpoint name: `RemoteEngine`, or an engine host's `HostServer`); with `discover`, servers that come and
+go are asked for again at each look, beside those given (the pods a run leases:
+`rollout_train.pods.routing.LeasedServers`, [the gateway](gateway.md#which-checkpoint)). It scores as it samples: on the
 session's server, under the checkpoint named, with the same refusals. Every `every` seconds (2) it reads every checkpoint the run has said the
 channel serves (`serving_of`) and asks each server which models it has; then:
 

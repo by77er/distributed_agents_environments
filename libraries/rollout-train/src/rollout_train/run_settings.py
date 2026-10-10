@@ -2,7 +2,7 @@
 or changeable from its next step on, and which kinds of run take it.
 
 A run's settings are a flat mapping of dotted keys (`trainer.provider`, `channels.policy.model`, `evals.suite`).
-Keys that starts recorded before runs recorded their providers have too are named as there (`groups_per_step`,
+Keys that a start recorded without its providers also holds keep the names it gave them (`groups_per_step`,
 `max_lag`, `evals.*`, `channels.NAME.thinking_tokens`), so such a start compares key by key (`rollout_train.resuming`).
 A key may have a part that names something (`channels.NAME.provider`, `slots.SLOT`), written `*` in the schema
 (`KEYS`). Keys under `trainer.` other than `trainer.provider`, `trainer.model` and `trainer.channel` are the trainer's
@@ -58,9 +58,9 @@ __all__ = [
 ]
 
 KINDS = ("train", "eval", "imitate", "check")
+"""The kinds of run: training, an eval of one subject, supervised steps on a dataset, an environment's check."""
 WEIGHTS = ("lora", "full")
 """What a run trains: a LoRA (low-rank adapter) over its model, or every weight."""
-"""The kinds of run: training, an eval of one subject, supervised steps on a dataset, an environment's check."""
 TRAINED = frozenset({"train"})
 TRAINING = frozenset({"train", "imitate"})
 SAMPLING = frozenset({"train", "eval", "check"})

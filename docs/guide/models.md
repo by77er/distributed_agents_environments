@@ -70,7 +70,8 @@ runner = LocalRunner(providers={
   two parameters whatever their value.
 - **Output cap.** A request's `max_output_tokens` is sent where the backend accepts it, which its credentials say
   (`Credentials.accepts_max_output_tokens`). The public API accepts it, and counts reasoning tokens against it. The
-  Codex backend rejects the parameter, so `CodexLogin` leaves it out.
+  Codex backend rejects the parameter, so `CodexLogin` leaves it out. A request that gives none is capped at the
+  sum of the binding's `thinking_tokens` and `answer_tokens`, where both are set.
 - **Tool choice.** A request's `tool_choice` is sent to the provider.
 - **Results.** Text and tool calls come back as canonical blocks. The finish reason is `TOOL_USE` when the reply
   makes tool calls and `LENGTH` when the response was cut off. Usage reports the provider's token counts, with the

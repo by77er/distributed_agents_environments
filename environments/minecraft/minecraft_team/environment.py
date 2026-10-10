@@ -49,4 +49,4 @@ class Teams:
 
 
 environment = Teams()
-"""`rollout train PROFILE minecraft_team.environment:environment`."""
+"""`rollout train minecraft_team.environment:environment --preset minecraft-one-gpu`."""

@@ -1,7 +1,8 @@
 # Ledger guarantees
 
-**Status: built.** Each guarantee is held by a test. The last section, the HTTP ledger service, is proposed. A design
-note: see [Design notes](README.md) for the others.
+**Status: built.** Each guarantee is held by a test. The HTTP ledger service (`rollout_train.ledger_service`) is
+built; the last section says what it keeps today, and what else it must keep as more roles use it is proposed. A
+design note: see [Design notes](README.md) for the others.
 
 Code: `rollout_train.ledger`, `rollout_train.database`, `rollout_train.rollouts.scheduler`, `rollout_train.sandboxes`,
 `rollout.harness.sandboxes`, `rollout_train.checkpoints`, `rollout_train.loop` · Tests:
@@ -18,7 +19,7 @@ Processes on one machine or many cooperate through three kinds of shared state:
 This page checks, guarantee by guarantee, what the code promises and whether it keeps the promise. Each section gives
 the claim, the mechanism, the assumptions it rests on, and the verdict, with file and line evidence. Where the
 guarantee fails, it gives a scenario and a proposed fix. The last section says what the HTTP ledger service, which
-every role is to reach the ledger through ([runtime design](runtime-design.md#decisions-after-review)), must guarantee
+every role can reach the ledger through ([runtime design](runtime-design.md#decisions-after-review)), must guarantee
 for all of this to carry over.
 
 The analysis is of `main` at `6ec3721`, and line numbers are of that commit. Findings 1, 2, 3, 4, 5, 7, 8, 10, 11, 12,
@@ -400,7 +401,8 @@ in the ledger (`ending`, below). `sweep` deletes sandboxes the provider has that
 - **Leaks.** A lease of a run the ledger does not know ends only when released (documented). The leases of a pool name
   that is never opened again (a host renamed, a directory moved) are never swept. Neither are their sandboxes, for a
   provider whose sandboxes outlive the process (a cloud API). A fix would be a sweep, by any keeper, of the leases of
-  pools that have not beaten for a long time; pools opened by a profile do not beat today, so it needs that first.
+  pools that have not beaten for a long time; a keeper beats only when it has a name to beat under (a pool served from
+  a machine of its own).
 - **The keeper reads the claim again and ends it before releasing (finding 13).** At `6ec3721` `ended` read the
   ledger and `sweep` released afterwards, so an adoption appended in between made the claim hold again while the
   release still happened. Now, for each lease found lapsed at two looks, `ending` reads the claim again just before
@@ -733,8 +735,8 @@ by it ([clocks](#3-clocks)); a service in front of Postgres keeps that as it is.
 | Role | Takes | Appends to | Mutable writes | Reads |
 |---|---|---|---|---|
 | Runner `NAME` | `runners/NAME` (and per-episode scopes) | `runs/*/claims`, `episodes`, `interrupted`, `adopted`, with `runner = NAME` | its own beat; blob puts | every run's `plans`, `groups`, `results`, `claims`, `episodes`; fences; beats |
-| Training loop of run `R` | `runs/R` | `runs/R/*`, `checkpoints`, `checkpoints/released`, `checkpoints/resharding`, `checkpoints/resharded` | the bookmarks its profile names; blob puts | everything |
-| Pool `NAME` | `pools/NAME` (proposed) | nothing | its own leases (`pool = NAME`), its beat | claims, fences, beats |
+| Training loop of run `R` | `runs/R` | `runs/R/*`, `checkpoints`, `checkpoints/released`, `checkpoints/resharding`, `checkpoints/resharded` | the bookmark its settings name (`bookmark`); blob puts | everything |
+| Pool `NAME` | `pools/NAME` | nothing | its own leases (`pool = NAME`), its beat | claims, fences, beats |
 | Launcher `NAME` | nothing | nothing | claim and note launches; `note` only on launches it claimed; its beat | launches |
 | Monitor or operator | `suites/*`, `datasets/*`, `merges` | suites' versions, datasets, merged checkpoints | ask and stop launches, run settings, registry (suite names among it) | everything |
 | Retention | none | none | **blob deletes**: no client role deletes blobs | everything |

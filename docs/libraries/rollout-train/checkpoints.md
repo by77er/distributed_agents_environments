@@ -212,7 +212,7 @@ Two ledgers are provided:
 | Ledger | Keeps | Shared by |
 |---|---|---|
 | `FileLedger(directory)` | each table as a file of JSON lines | the processes of one machine |
-| `DatabaseLedger(url)` (`rollout_train.database`) | every table in two SQL tables, `ledger_records` and `ledger_fences` (`sqlite:///path`, `~` allowed, or `postgresql://…`) | every run and machine using the database |
+| `DatabaseLedger(url)` (`rollout_train.database`) | every table in two SQL tables, `ledger_records` and `ledger_fences`, beside `ledger_takes`, the number each take that came with a request id took (`sqlite:///path`, `~` allowed, or `postgresql://…`) | every run and machine using the database |
 
 - **`FileLedger`** holds a lock on its directory for every operation, in a thread, so the event loop goes on while it
   waits. An append is on disk (`fsync`) before it is acknowledged. A last line left unfinished, by a writer that died
@@ -225,8 +225,9 @@ Two ledgers are provided:
   they commit, one number each. SQLite runs one write at a time.
 
 The cluster config says which (`[ledger]`: `sqlite:///…` on one machine, `postgresql://…` for several). A run's
-directory from before keeps where its ledger is (`ledger.json`), so the monitor and the report open the same one from
-the directory alone (`of_run`). Each run is kept
+directory may say where its ledger is (`ledger.json`, which `rollout ledger copy --point` writes), else its ledger is
+the files under `DIRECTORY/ledger`, so the monitor and the report open the same one from the directory alone
+(`of_run`). Each run is kept
 under its own id ([runs](#runs)), so the runs sharing a ledger keep apart, and they share one graph of checkpoints.
 
 Moving a ledger to Postgres (or from files to SQLite) is a copy and a changed URL, with nothing writing to it:

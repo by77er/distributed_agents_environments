@@ -50,7 +50,7 @@ prefix = "blobs/"
 The credentials never appear in the cluster config: the store reads boto3's usual sources, such as
 `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, and the endpoint from `AWS_ENDPOINT_URL` (or `AWS_ENDPOINT_URL_S3`)
 when the config gives none. The chart sets these from the Secret `stores`
-([what every pod is given](helm.md#what-every-pod-is-given)).
+([what each role is given](helm.md#what-each-role-is-given)).
 
 To use a managed Postgres or a cloud bucket with the chart, edit `[ledger]` and `[blobs]` in the chart's
 `files/cluster.toml`, and set `AWS_ENDPOINT_URL` and the credentials in `templates/_helpers.tpl`.

@@ -3,19 +3,18 @@
 """A step over a batch: the logprobs the step starts from, then passes of updates, under the objective the settings
 name (`rollout_objectives.terms`).
 
-First every sampled token's logprob is computed on the weights the step starts from, without a gradient (`old`), and
-the reference's where the objective reads it (`reference`: an adapter switched off, or a frozen copy); but a segment
-sampled wholly on those weights takes the logprobs the engine recorded as it sampled it for its `old`, unless
-`old_logprobs` says the trainer's (`from_sampler`). Then the batch's
-items (weighted segments, pairs, labelled examples or distilled segments) are taken in shuffled minibatches of about
-`tokens_per_step` sampled tokens, an optimizer step each. The first minibatch runs on the weights the step starts
-from, so its segments' `old` is what it computes (with a gradient, detached), not a pass of its own (but a preference
-loss's, which computes its logprobs without a gradient first either way). The pass stops early if a minibatch finds
-the policy further than `max_kl` from where the step began, by the k3 estimate of KL(old || now) on its sampled tokens
-(`rollout_objectives.terms.moved_kl`; a likelihood step reads no `old`, and does not stop). A step takes `passes`
-passes, each shuffled anew; a fresh optimizer's rate is warmed up over its first `warmup_updates` updates. Only tokens
-the policy sampled are trained on. The numbers are `StepSettings`'; which items, and with what advantages, is the
-algorithm's business (`rollout_train.algorithm`).
+First every sampled token's logprob is computed on the weights the step starts from, without a gradient (`old`), and the
+reference's where the objective reads it (`reference`: an adapter switched off, or a frozen copy); but a segment sampled
+wholly on those weights takes the logprobs the engine recorded as it sampled it for its `old`, unless `old_logprobs`
+says the trainer's (`from_sampler`). Then the batch's items (weighted segments, pairs, labelled examples or distilled
+segments) are taken in shuffled minibatches of about `tokens_per_step` sampled tokens, an optimizer step each. The first
+minibatch runs on the weights the step starts from, so its segments' `old` is what it computes (with a gradient,
+detached), not a pass of its own (but a preference loss's, which computes its logprobs without a gradient first either
+way). The pass stops early if a minibatch finds the policy further than `max_kl` from where the step began, by the k3
+estimate of KL(old || now) on its sampled tokens (`rollout_objectives.terms.moved_kl`; a likelihood step reads no `old`,
+and does not stop). A step takes `passes` passes, each shuffled anew; a fresh optimizer's rate is warmed up over its
+first `warmup_updates` updates. Only tokens the policy sampled are trained on. The numbers are `StepSettings`'; which
+items, and with what advantages, is the algorithm's business (`rollout_train.algorithm`).
 
 Every pass over segments runs them in packs (`rollout_objectives.packing`): rows of up to `pack_tokens` tokens, each
 segment seeing only itself, segments that start alike sharing their prefix (`share_prefixes`). A minibatch's gradient

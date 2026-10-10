@@ -2,7 +2,8 @@
 
 Code: `environments/judging`
 
-**Read first:** [Example environments](README.md) and [more model slots](../guide/tasks.md#more-model-slots-judges-and-other-players). **Next:**
+**Read first:** [Example environments](README.md) and
+[more model slots](../guide/tasks.md#more-model-slots-judges-and-other-players). **Next:**
 [Suites and evals](../libraries/rollout-train/evals.md).
 
 The policy answers open-ended requests that have no exact answer: explain a concept to a ten-year-old in under 80
@@ -15,8 +16,8 @@ The environment is the package `judging` (import `judging`), which depends on `r
 tool set and no GPU of its own, but a run needs a channel for the judge.
 
 ```bash
-uv run rollout env check judging.environment:environment                    # without a model
-uv run rollout train judging.environment:environment --settings judged.toml --name judged   # (judged.toml: the settings shown next)
+uv run rollout env check judging.environment:environment                           # without a model
+uv run rollout train judging.environment:environment --settings judged.toml --name judged   # judged.toml: below
 ```
 
 ## The requests

@@ -15,22 +15,28 @@ deployment.
   are the platform's only lasting state besides the state volume.
 - **The state volume.** Node-local files the roles that keep files mount at `~/.cache/rollout`: run directories,
   Minecraft's servers and worlds, the Hugging Face cache (`HF_HOME`) and scratch space.
-- **The Ray cluster.** Runs every run's work. On Kubernetes it is a RayCluster that KubeRay keeps: a head that runs no
-  tasks, a GPU worker group and a CPU worker group, each started from zero by the autoscaler when work waits for it
-  and removed when idle. Bridges between checkpoint formats, merges and environment builds run on it as Ray tasks.
-- **Runs.** Each training run, eval, supervised step or environment check is a Ray job: on Kubernetes a RayJob with a
-  Ray cluster of its own, sized from what the run needs. Its driver runs the loop and its episode runners; its
+- **Runs.** Each training run, eval or supervised step is a Ray job: on Kubernetes a RayJob with a Ray cluster of its
+  own, sized from what the run needs and torn down when it ends. Its driver runs the loop and its episode runners; its
   trainer, inference engines and bridges run beside it, reserved together as one placement group
   ([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)).
+- **The long-lived Ray cluster.** On Kubernetes, a RayCluster that KubeRay keeps, where the monitor checks
+  environments imported from git: a head that runs no tasks, a GPU worker group and a CPU worker group, each started
+  from zero by the autoscaler when a check waits for it and removed when idle. Its pods hold no store's key and no
+  Secret. On one machine, runs and checks share the machine's Ray head.
+- **The sandbox pools.** One pod for each kind of sandbox the cluster serves (the Minecraft worlds' pool), outside the
+  runs' Ray clusters, from which runs acquire their episodes' sandboxes
+  ([Where sandboxes run](../research/sandbox-placement.md)). Runs that lease GPU pods on RunPod may also play
+  sandboxes there ([sandboxes on a host pod](providers.md#sandboxes-on-a-host-pod)).
 - **The gateway.** A stateless HTTP service that every model request goes through. It renders messages to tokens,
   samples a [channel](../libraries/rollout-train/channels.md), and records each turn in the ledger and the blob store
   ([the gateway](../libraries/rollout-train/gateway.md)). It holds no session, so it scales to any number of replicas.
 - **The monitor.** A web page over a ledger and every run in it, which also imports environments from git and asks
-  for runs ([the monitor](../libraries/rollout-train/monitor.md)). It reads the ledger and the blob store, and reaches
-  the Ray cluster's job server.
-- **Shared inference pools** (designed, not built yet). A long-lived Ray cluster of inference engines that serves
-  every run bound to it, each run's checkpoints loaded side by side as adapters
-  ([runtime design](../research/runtime-design.md#decisions-after-review)).
+  for runs ([the monitor](../libraries/rollout-train/monitor.md)). It reads the ledger and the blob store, makes each
+  run's RayJob, and reaches the long-lived Ray cluster's job server.
+- **The ledger service.** The ledger over HTTP, for pods outside the cluster (RunPod's), each with a token scoped to
+  its run ([the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http)). With RunPod, the
+  cluster also runs step-ca, which certifies the pods, and optionally a Cloudflare Tunnel that carries both to the
+  internet.
 - **Remote providers.** Training and sampling outside the cluster: Tinker at Thinking Machines, GPU pods on RunPod,
   and hosted model APIs ([remote providers](providers.md)).
 
@@ -39,19 +45,24 @@ How they reach each other:
 - runs, the gateway and the monitor each read and write the ledger and the blob store directly;
 - episode runners send every model request to the gateway, and the gateway samples the inference engines or a
   remote provider;
-- the monitor submits jobs to the Ray cluster's job server;
-- inference engines load the checkpoints a run says its channel should serve from the blob store.
+- the monitor asks Kubernetes for each run's RayJob, and submits environment checks to the long-lived Ray cluster's
+  job server;
+- runs acquire sandboxes from the sandbox pools, whose harnesses sample through the gateway;
+- inference engines load the checkpoints a run says its channel should serve from the blob store;
+- pods outside the cluster reach only the ledger service, step-ca and their bucket.
 
 ```mermaid
 flowchart TB
-    Monitor -- submits jobs --> Ray[Ray cluster: runs, trainers, engines, runners]
-    Ray -- model requests --> Gateway
-    Gateway -- samples --> Ray
+    Monitor -- makes RayJobs --> Runs[Runs: driver, runners, trainer, engines]
+    Monitor -- submits checks --> Ray[Long-lived Ray cluster]
+    Runs -- model requests --> Gateway
+    Runs -- acquire sandboxes --> Pools[Sandbox pools]
+    Gateway -- samples --> Runs
     Gateway -- samples --> Remote[Remote providers]
     Monitor --> Ledger[(Ledger: Postgres)]
     Monitor --> Blobs[(Blob store: S3)]
-    Ray --> Ledger
-    Ray --> Blobs
+    Runs --> Ledger
+    Runs --> Blobs
     Gateway --> Ledger
     Gateway --> Blobs
 ```
@@ -65,15 +76,17 @@ Raise them for bigger models or more episodes at once.
 |---|---|---|---|---|
 | Postgres (the ledger) | 0.25 | 512 MiB / 2 GiB | none | 20 GiB volume |
 | S3-compatible store (blobs) | 0.25 | 256 MiB / 2 GiB | none | 200 GiB volume |
-| Ray head | 0.5 | 2 GiB / 3 GiB | none | none |
-| Ray autoscaler | 0.1 | 256 MiB / 1 GiB | none | none |
-| Ray GPU worker (one per run that asks for a GPU) | 4 | 8 GiB / 14 GiB | 1 | none |
-| Ray CPU worker (runs that use no local GPU) | 1, advertising 4 to Ray | 2 GiB / 4 GiB | none | none |
+| Long-lived Ray head | 0.5 | 2 GiB / 3 GiB | none | none |
+| Its autoscaler | 0.1 | 256 MiB / 1 GiB | none | none |
+| Ray GPU worker (environment checks that ask for a GPU) | 4 | 8 GiB / 14 GiB | 1 | none |
+| Ray CPU worker (environment checks) | 1, advertising 4 to Ray | 2 GiB / 4 GiB | none | none |
 | A run's Ray cluster (one head pod, sized from the run) | the run's demand and 0.25 more (3.75 for the acceptance run) | its demand and 2 GiB (5 GiB for the acceptance run) / 14 GiB | the whole cards its engine hosts and trainer take | the state volume |
 | The pod that submits a run's job | 0.1 | 256 MiB / 512 MiB | none | none |
 | The Minecraft worlds' pool (`sandboxes-minecraft`, four worlds) | 4 | 7.5 GiB / 10 GiB | none | the state volume |
-| Gateway, per replica | 0.25 | 512 MiB / 2 GiB | none | none |
-| Monitor | 0.25 | 512 MiB / 3 GiB | none | none |
+| Gateway, per replica | 0.25 | 512 MiB / 2 GiB | none | the state volume |
+| Monitor | 0.25 | 512 MiB / 3 GiB | none | the state volume |
+| Ledger service | 0.1 | 256 MiB / 1 GiB | none | none |
+| step-ca, the tunnel and the pods' reaper (with RunPod) | 0.05 each | 128, 64 and 256 MiB / 512, 256 and 512 MiB | none | 1 GiB volume for step-ca |
 | State volume, shared by the pods that mount it | | | | 200 GiB |
 | In-cluster registry and BuildKit (K3s only) | 1 for BuildKit | 1 GiB / 8 GiB for BuildKit | none | 100 GiB and 150 GiB |
 
@@ -84,7 +97,7 @@ What drives the numbers:
   measurements](../implementations/rollout-lora.md#measurements),
   [vLLM's](../implementations/rollout-vllm.md#measurements)). A run trained and sampled on Tinker needs no GPU.
 - **Episodes.** Each Minecraft episode's world runs a Paper server and its bots' Node process: about 1 to 2 CPUs, and
-  1.1 to 1.75 GiB ([measured](../research/minecraft-memory.md)), in the worlds' pool, not in the run's pods
+  1.1 to 1.85 GiB ([measured](../research/minecraft-memory.md)), in the worlds' pool, not in the run's pods
   ([Where sandboxes run](../research/sandbox-placement.md)). A run's own parts wait on the model and the ledger: its
   driver uses a tenth of a CPU, however many episodes it plays
   ([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)). The cluster config's `[guards]`

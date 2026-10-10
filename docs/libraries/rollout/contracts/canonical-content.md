@@ -34,8 +34,9 @@ and [`Reasoning`](../../../guide/reference.md#reasoning), told apart by its `typ
   `meta["effect_id"]` to tie a sampled reply to the sample that produced it.
 - **`call_id`** is unique within a context. Whatever parses a model's output makes it; the tool result repeats it.
 - **Reasoning** is portable: plain text that a renderer may render or drop. The gateway's renderer parses a model's
-  thinking into a reasoning block and renders it back for the model family's template. The Responses adapter does
-  not carry reasoning from one turn to the next.
+  thinking into a reasoning block and renders it back for the model family's template. Neither the Responses nor
+  the Messages adapter sends reasoning in the context back to its provider; the Messages adapter returns a reply's
+  summarized thinking as a reasoning block.
 - **Media** holds a [`BlobReference`](../../../guide/reference.md#blobreference), never bytes. The reference depends
   only on the bytes, so storing a blob is not an effect ([media and blobs](../../../guide/content.md#media-and-blobs)).
 

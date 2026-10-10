@@ -1,14 +1,13 @@
 """RunPod's pods API (`https://rest.runpod.io/v1`): create, start, stop and terminate a pod, list pods, and read a
 pod's public address.
 
-The API key is read from an environment variable (`RUNPOD_API_KEY`) when a request is made, sent as a bearer token,
-and never kept on the client, written down, logged or put in an error. Every request says who sends it
+The API key is read from an environment variable (`RUNPOD_API_KEY`) when a request is made, sent as a bearer token, and
+never kept on the client, written down, logged or put in an error. Every request says who sends it
 (`User-Agent: rollout/VERSION`): RunPod's front refuses a request without a User-Agent it accepts (403). A pod's
-environment is given in two parts:
-values (`PodSpec.env`), and references to secrets kept in RunPod's console (`PodSpec.secrets`: a variable's value is
-then `{{ RUNPOD_SECRET_name }}`, which RunPod fills in on the pod). A value that must not be logged but is not a
-console secret (a one-time token minted for this pod alone, which RunPod's API cannot store as a secret) goes in
-`PodSpec.sensitive`: sent, never logged, never in the pod's `repr`.
+environment is given in two parts: values (`PodSpec.env`), and references to secrets kept in RunPod's console
+(`PodSpec.secrets`: a variable's value is then `{{ RUNPOD_SECRET_name }}`, which RunPod fills in on the pod). A value
+that must not be logged but is not a console secret (a one-time token minted for this pod alone, which RunPod's API
+cannot store as a secret) goes in `PodSpec.sensitive`: sent, never logged, never in the pod's `repr`.
 
 How many pods a cluster may have, and when an idle pod is stopped, are the caller's rules: this client does what it is
 asked.

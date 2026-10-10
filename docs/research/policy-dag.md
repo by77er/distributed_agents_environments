@@ -1,7 +1,9 @@
 # The checkpoint graph
 
-**Status: proposed.** The monitor's view of the checkpoints that exist is built. A design note: see [Design
-notes](README.md) for the others.
+**Status: proposed.** The monitor's view of the checkpoints that exist is built. The distillation family and the
+scoring of segments by teacher channels are built as library code ([objectives
+design](objectives-design.md#distillation)); distillation as steps in this graph is proposed. A design note: see
+[Design notes](README.md) for the others.
 
 Code: `rollout_train.monitor.lineage` (the view of what exists) · See [checkpoints, runs and the
 ledger](../libraries/rollout-train/checkpoints.md),
@@ -25,9 +27,9 @@ no code writes or reads it.
 - **Imitation** (`rollout imitate`) takes a supervised step on a [dataset](../libraries/rollout-train/datasets.md) of
   episodes. The checkpoint it makes names the dataset, and its parents after the first are the checkpoints that
   sampled the dataset's examples. A **merge** (`rollout merge`) makes a full checkpoint from an adapter.
-- **Serving**: the loop writes down what each channel should serve (`runs/RUN/serving`). Engines in its process load
-  it; engine hosts elsewhere follow it, keeping the run's `max_lag + 1` newest adapters loaded. A checkpoint whose
-  files the engines cannot load as written is bridged first (`checkpoints/resharding`, `checkpoints/resharded`:
+- **Serving**: the loop writes down what each channel should serve (`runs/RUN/serving`). Engine hosts follow it,
+  keeping the run's `max_lag + 1` newest adapters loaded. A checkpoint whose files the engines cannot load as written
+  is bridged first (`checkpoints/resharding`, `checkpoints/resharded`:
   [bridges](../libraries/rollout-train/checkpoints.md#bridges)).
 - **Evals**: suites and their versions, played by a checkpoint or a base model, by hand or on a run's schedule, with
   each episode's result recorded ([evals](../libraries/rollout-train/evals.md)). The Evals page shows them, and a

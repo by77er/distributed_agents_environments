@@ -9,8 +9,8 @@ One to four agents share a Minecraft world and race a budget of game time for as
 whole or in segments). Nothing caps the count, so a team can always do better; the agents see the clock, so what
 pays depends on how much time there is. With five minutes the way to the most iron is the nearest ore. With two hours
 it may be better tools first, an enchanting table for Fortune, or an iron farm. Every objective comes at every budget
-of a ladder that doubles from 5 to 160 minutes, so what a policy gets as its budget grows is a curve, and a strategy
-that pays only given time shows where the curve bends.
+of a ladder that doubles (from 5 to 160 minutes for an amount), so what a policy gets as its budget grows is a curve,
+and a strategy that pays only given time shows where the curve bends.
 
 The environment is the package `minecraft-horizons` (import `minecraft_horizons`). It depends on `rollout` and on
 `minecraft-team`, whose Paper servers, bots, ground-truth plugin, observations, tools and starts' builders it uses as
@@ -20,8 +20,17 @@ they are. Its tasks, prompts, episode, scoring and sandbox kind are its own.
 uv run rollout train minecraft_horizons.environment:environment --preset minecraft-one-gpu --name horizons-1
 ```
 
-The cluster config needs a pool of its worlds, a sandbox kind of its own (`[sandboxes.minecraft-horizons]`, `provider =
-"minecraft_horizons.worlds:worlds"`), and the environment among its `[environments]`.
+The cluster config needs a pool of its worlds, a sandbox kind of its own, and the environment among its
+`[environments]`; `deploy/clusters/example.toml` and the chart declare neither:
+
+```toml
+[sandboxes.minecraft-horizons]
+provider = "minecraft_horizons.worlds:worlds"
+size = 6                                      # no more worlds at once than the machine's memory holds
+
+[environments."minecraft_horizons.environment:environment"]
+python = "platform"
+```
 
 ## Objectives
 
@@ -72,16 +81,15 @@ A task is an objective, a setting and a budget (`minecraft_horizons.tasks`):
 | `fortress` | In the nether beside a fortress, with iron armor, a sword, a bow and arrows, food and blocks | A blaze rod |
 | `stronghold-area` | A few hundred blocks from a stronghold, with iron armor and tools and twelve eyes of ender | Into a stronghold |
 | `portal-room` | Inside a stronghold beside the end portal's frame, with eyes of ender | Into the end |
-| `end` | On the end's arrival platform with diamond armor and sword, a bow, arrows, blocks and a water bucket | The ender dragon |
+| `end` | On the end's arrival platform with diamond armor, sword and pickaxe, a bow, arrows, blocks, food and a water bucket | The ender dragon |
 
 The fresh start also hosts the speedruns to an iron pickaxe, into the nether, and the whole game to the dragon. Each
 objective comes from each of its settings at each budget of its ladder: `LADDER` (5, 10, 20, 40, 80 and 160 minutes of
-game time) for amounts and the iron pickaxe, `SEGMENT_LADDER` (5 to 80) for a speedrun's other segments, and
-`GAME_LADDER` (80, 160, 320 and 640) for the whole game: 112 tasks, with ids like `iron-underground-40m` and
-`dragon-fresh-320m`. Settings are laid out by the team package's builders
-(`minecraft_team.tasks.build`, as natural survival worlds: a real day and night and weather). As for the team's tasks,
-turns are capped at 12 a minute of the budget. Game time passes only while actions happen, so a team can let it pass
-(`wait`) while a furnace or a farm works, at a turn's cost.
+game time) for amounts and the iron pickaxe, `SEGMENT_LADDER` (5 to 80) for the other speedruns, and `GAME_LADDER`
+(80, 160, 320 and 640) for the whole game: 112 tasks, with ids like `iron-underground-40m` and `dragon-fresh-320m`.
+Settings are laid out by the team package's builders (`minecraft_team.tasks.build`, as natural survival worlds: a real
+day and night and weather). As for the team's tasks, turns are capped at 12 a minute of the budget. Game time passes
+only while actions happen, so a team can let it pass (`wait`) while a furnace or a farm works, at a turn's cost.
 
 The rows are the tasks, shortest budgets first. A start is a world seed of 12, a layout and the names of a team of one
 to four, drawn at random; episodes given the same start begin identically, so a group compares teams in the same
@@ -101,7 +109,7 @@ ends the game and that finishing sooner is always better.
 Every observation, and every turn an agent remembers, begins with the clock (`prompts.clock`):
 
 ```text
-Time left: 37.4 of 60 minutes of game time; 412 of 720 turns.
+Time left: 57.4 of 80 minutes of game time; 652 of 960 turns.
 ```
 
 The rest of the observation, the tools and memory are the team package's.

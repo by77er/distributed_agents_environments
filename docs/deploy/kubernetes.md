@@ -1,20 +1,22 @@
 # Prepare a Kubernetes cluster
 
 What a Kubernetes cluster needs before the chart can be installed: the KubeRay operator, GPUs that pods can use, a
-storage class, an ingress controller, and the namespace's Pod Security level. This page is for whoever sets up the cluster, on one machine with K3s or on
-an existing cluster.
+storage class, an ingress controller, and the namespace's Pod Security level. This page is for whoever sets up the
+cluster, on one machine with K3s or on an existing cluster.
 
 **Read first:** [Choose a setup](setups.md). **Next:** [Build the platform image](image.md).
 
 ## What the chart expects
 
 - **Helm 3** on the machine you install from, and `kubectl` with access to the cluster.
-- **The KubeRay operator**, which adds the `RayCluster` and `RayJob` resources and keeps the chart's Ray cluster
-  running. These pages use operator 1.7.1; the chart runs Ray 2.59.0, the version the workspace locks.
+- **The KubeRay operator**, which adds the `RayCluster` and `RayJob` resources, keeps the chart's Ray cluster
+  running, and makes each run's Ray cluster from its RayJob. These pages use operator 1.7.1; the chart runs Ray 2.59.0,
+  the version the workspace locks.
 - **NVIDIA GPUs that pods can request.** Each GPU node needs:
     - the NVIDIA driver;
     - the NVIDIA container toolkit, so that containerd can give a container the GPU;
-    - a RuntimeClass named `nvidia`, which the chart's GPU workers name (`runtimeClassName: nvidia`);
+    - a RuntimeClass named `nvidia`, which the chart's GPU pods name (`runtimeClassName: nvidia`): the Ray cluster's GPU
+      workers and runs' pods;
     - NVIDIA's device plugin, which advertises each card as an `nvidia.com/gpu` resource.
 
     The NVIDIA GPU Operator installs all of these on a cluster that has none. K3s registers the `nvidia` RuntimeClass

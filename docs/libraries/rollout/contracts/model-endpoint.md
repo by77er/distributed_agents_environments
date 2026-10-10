@@ -41,7 +41,8 @@ code cannot depend on them and a trainer can reproduce the distribution a channe
 - **`max_output_tokens`** never exceeds the contract's: `Model.sample` raises `ContractViolation` before it
   requests anything.
 - **`tool_choice`** says whether the model may, must not or must call a tool, or names the tool it must call. The
-  Responses adapter sends it to the provider. The gateway ignores it.
+  Responses and Messages adapters send it to the provider (the Messages adapter sends `auto` in place of a forced
+  choice for a model that takes none). The gateway ignores it.
 - **`links`** say how the request follows from earlier ones of its session (`SampleLink`: a type and the earlier
   request's `effect_id`). The gateway keeps them with the turn; a direct adapter ignores them.
 
@@ -70,9 +71,10 @@ An endpoint raises a [`ModelEndpointError`](../../../guide/reference.md#modelend
 | `InternalError` | the endpoint failed | retries the same way, then raises it |
 | `ContextOverflow(context_limit)` | the context does not fit | raises it. An agent compacts and samples again; `Memory.sample` does. |
 | `ContractViolation` | the request exceeds the capability contract | raises it |
-| `ModelEndpointError` itself | the provider refused the request as it is (credentials it does not take, a request it rejects): asking again would not change the answer | raises it |
+| `ModelEndpointError` itself | the provider refused the request as it is: asking again would not change the answer | raises it |
 
-The retries happen inside one effect, under one `effect_id`. Any other exception propagates unchanged. An exception
+The retries happen inside one effect, under one `effect_id`. Any other exception propagates unchanged: the Responses
+and Messages adapters raise `PermissionError` for credentials the provider refuses. An exception
 that leaves the program fails the run ([failures](../README.md#failures)).
 
 ## Guarantees

@@ -70,10 +70,10 @@ Where a budget is set:
 3. A second phase samples the answer, unless the turn already ended.
 
 Where the channel's engines bound thinking themselves (`Sampler.bounds_thinking`: vLLM started with a reasoning config,
-the provider's `reasoning`) and the prompt opens the thinking (Qwen3.5), the turn is one generation: the engine is told
-how many tokens it may think after the prompt's open (`thinking_budget`, the prompt's own tokens after it counted),
-forces the renderer's close there and samples the answer on. It is the same turn without sampling the prompt and the
-thinking a second time, which the second phase does:
+the `reasoning` of the model's `options` in its provider) and the prompt opens the thinking (Qwen3.5), the turn is one
+generation: the engine is told how many tokens it may think after the prompt's open (`thinking_budget`, the prompt's own
+tokens after it counted), forces the renderer's close there and samples the answer on. It is the same turn without
+sampling the prompt and the thinking a second time, which the second phase does:
 
 - The forced tokens are masked as in phases. Where the last token sampled begins the close (a newline before
   `</think>`), the engine forces only the rest, and only that is masked.

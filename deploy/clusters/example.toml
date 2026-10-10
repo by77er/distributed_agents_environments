@@ -8,7 +8,7 @@ name = "home"
 
 [ray]
 address = "auto"                              # the head this machine runs
-temp_dir = "~/.cache/ray"                     # on disk: /tmp is memory on this machine
+temp_dir = "~/.cache/ray"                     # on disk (a machine's /tmp may be memory)
 
 [ledger]
 url = "sqlite:///~/.cache/rollout/ledger.db"  # every run on this machine shares it
@@ -132,4 +132,4 @@ python = "platform"
 [environments."gridworld.environment:environment"]
 python = "platform"
 [environments."rollout_verifiers.environments:gsm8k"]    # its own lock, built into a cached virtualenv
-project = "~/Code/distributed_agents_environments/implementations/rollout-verifiers"
+project = "../../implementations/rollout-verifiers"      # from this file's directory

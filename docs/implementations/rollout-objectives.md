@@ -7,8 +7,7 @@ step, and its metrics.
 engine](rollout-tinker.md).
 
 Code: `rollout_objectives` · See [objectives](../libraries/rollout-train/training.md#objectives), [LoRA
-trainer](rollout-lora.md),
-[Tinker trainer](rollout-tinker.md)
+trainer](rollout-lora.md), [Tinker trainer](rollout-tinker.md)
 
 `rollout_objectives` computes what [`rollout_train.objectives`](../libraries/rollout-train/training.md#objectives)
 declares: an objective's loss composed from its components, the step a local trainer takes over a batch, the plan of
@@ -24,6 +23,7 @@ libraries; it is installed with either the `gpu` or the `tinker` extra.
 | `distillation` | The loss of one distilled segment (`distillation`, and `distilled` for either family): the policy-gradient form, the top-k divergences (`top_k_divergence`), and a policy gradient's distillation term |
 | `packing` | `Pack`: segments laid out in one row of a model's input, a prefix several share once; `packs`, segments cut into packs (`grouped`, then `packed`) |
 | `step` | `PolicyStep`, a step over a batch on a local policy; `Plan`, which items a step takes and in which minibatches; `metrics` and `line`, a step's and a minibatch's statistics |
+| `ranks` | `Ranks`: the processes a step is shared among, one per GPU; `shares`, a pass's packs shared out among them ([a step on several GPUs](#a-step-on-several-gpus)) |
 
 ## Settings
 
@@ -62,12 +62,12 @@ Four logprobs of each sampled token meet in it:
 | now | the trainer, with a gradient | in each minibatch, as the step updates the weights |
 | reference | the trainer, without a gradient | under the reference model: the base with the adapter switched off, or a frozen copy |
 
-Behavior and old differ because the data came from elsewhere: an older checkpoint, and the engine computing
-differently from the trainer. A segment sampled wholly on the weights the step starts from (the loop marks it,
-`sampled_at_start`) takes its behavior for its old unless `old_logprobs = "trainer"`: its ratios then start at the
-engine's numbers rather than exactly 1, about 0.01 nats a token off between vLLM's 4-bit kernels and the LoRA
-trainer's, and it needs no pass of its own. Old and now differ by how far the step has moved the policy. Now and reference differ by
-how far training has moved it from the base.
+Behavior and old differ because the data came from elsewhere: an older checkpoint, and the engine computing differently
+from the trainer. A segment sampled wholly on the weights the step starts from (the loop marks it, `sampled_at_start`)
+takes its behavior for its old unless `old_logprobs = "trainer"`: its ratios then start at the engine's numbers rather
+than exactly 1, about 0.01 nats a token off between vLLM's 4-bit kernels and the LoRA trainer's, and it needs no pass of
+its own. Old and now differ by how far the step has moved the policy. Now and reference differ by how far training has
+moved it from the base.
 
 ### A policy gradient
 
@@ -137,11 +137,11 @@ old and behavior; NeMo-RL's `icepop` is `mask`), each sampled token's loss is, b
 The student's logprob in the policy-gradient form's advantage is old, the step's start, as NeMo-RL's MOPD takes
 `prev_logprobs`; at the first minibatch it is the logprob now. The forward KL and the JSD renormalize over the teacher's
 top k: the teacher's mass outside them is dropped rather than spread, so the student is fitted to the teacher's top-k
-distribution, which is the teacher's own where its top k hold nearly all its mass; at k = the vocabulary each is the full
-divergence. The reverse KL of the top-k form needs no renormalization (its terms are those of the full reverse KL's sum
-over `V`, with `q - p` keeping each at least 0). A token the teacher did not score (beyond its context) adds nothing,
-and counts in the mean. A KL penalty is added to each token's loss, or, in the policy-gradient form, taken from its
-advantage (`kl.placement = reward`). `aggregate` reduces a segment's tokens as a policy gradient's.
+distribution, which is the teacher's own where its top k hold nearly all its mass; at k = the vocabulary each is the
+full divergence. The reverse KL of the top-k form needs no renormalization (its terms are those of the full reverse KL's
+sum over `V`, with `q - p` keeping each at least 0). A token the teacher did not score (beyond its context) adds
+nothing, and counts in the mean. A KL penalty is added to each token's loss, or, in the policy-gradient form, taken from
+its advantage (`kl.placement = reward`). `aggregate` reduces a segment's tokens as a policy gradient's.
 
 A policy gradient with a distillation term (`distillation.coefficient`) is the policy gradient's loss of a distilled
 segment (its episode's advantage) plus the coefficient times the distillation term, reduced the same way, weighed by the
@@ -164,15 +164,16 @@ Which items, and with what advantages, is the [algorithm's](../libraries/rollout
    before. With `passes` above 1, each further pass shuffles them anew. What would fail the step (an item of the
    wrong kind for the objective, a behaviour logprob that is not finite where an importance correction reads it) is
    raised here, before anything is computed.
-2. **Where the step starts.** For a policy gradient, a distillation or a preference loss, every sampled token's
-   logprob on the weights the step starts from (old), without a gradient, and the reference's where it is read; a
-   weighted or distilled segment sampled wholly on those weights takes its behaviour logprobs instead
-   (`old_logprobs`), and is computed in no pack here. The first minibatch of a policy gradient or a distillation runs on those weights, so its segments' old is what it
-   computes itself (with a gradient, detached) rather than a pass of their own; the result is the same. Each other
-   minibatch's start is computed in the packs that minibatch's own pass makes, so that on the weights the step starts
-   from its ratios are exactly 1 (in other packs bfloat16 rounds a segment's logprobs a little differently). A
-   behaviour logprob that is not finite fails the step only where an importance correction reads it. A pack that does
-   not fit the GPU here runs again a segment at a time, and a segment that does not fit alone is left out and counted.
+2. **Where the step starts.** For a policy gradient, a distillation or a preference loss, every sampled token's logprob
+   on the weights the step starts from (old), without a gradient, and the reference's where it is read; a weighted or
+   distilled segment sampled wholly on those weights takes its behaviour logprobs instead (`old_logprobs`), and is
+   computed in no pack here. The first minibatch of a policy gradient or a distillation runs on those weights, so its
+   segments' old is what it computes itself (with a gradient, detached) rather than a pass of their own; the result is
+   the same. Each other minibatch's start is computed in the packs that minibatch's own pass makes, so that on the
+   weights the step starts from its ratios are exactly 1 (in other packs bfloat16 rounds a segment's logprobs a little
+   differently). A behaviour logprob that is not finite fails the step only where an importance correction reads it. A
+   pack that does not fit the GPU here runs again a segment at a time, and a segment that does not fit alone is left out
+   and counted.
 3. **Each minibatch.** A weighted or distilled segment's loss is computed and its gradient accumulated a pack at a
    time (for the top-k form, with the policy's logprobs of the teacher's top-k tokens at each position). A
    preference loss is a function of each side's whole likelihood, so its gradient is taken in two parts that also
@@ -316,23 +317,22 @@ composed loss and gradient with a direct transcription of the paper's formula on
 preset composes it on samples taken elsewhere, the paper's loss with each token weighed by its truncated importance
 weight.
 `test_components.py` covers each component alone (clipping by kind, the importance corrections, the KL estimators and
-their placement, the entropy bonus, aggregation), the default against the step's loss as it was written before
-components (to the last bit), and the step over pairs and labelled examples (its two-part gradient equal to the
-gradient of the whole loss, the direction of DPO's, SimPO's and KTO's updates, the stop at `max_kl`). `test_step.py`
-covers the step on a toy policy: the direction of an update, minibatches, warmup, forced tokens, segments left out, the
-KL stop (also where every advantage pushes the same way, REINFORCE's and a policy-gradient distillation's, whose k1
-estimate falls below 0 as the policy moves), a missing logprob, the likelihood objective, the importance weight and its
-truncation, the token clip and the segment ratio. `test_distillation.py` covers distillation's terms against their definitions (each top-k divergence over
-the whole vocabulary equal to the full one: GKD's JSD as TRL writes it, Hinton's softened KL, the reverse KL), tokens
-the teacher did not score, a teacher that gave fewer than k tokens, the importance mask, a KL in the reward and in the
-loss, a policy gradient's distillation term, and the step on a toy policy, whose every distillation preset moves it
-toward its teacher on its own samples. `test_step.py` also covers how far a step says it has got: its phases, the
-start's share of the work, its packs against the step's metrics, and the fraction rising to 1. `test_shared.py` takes
-each objective's case on two processes under torchrun,
-a toy model sharded with FSDP2 over gloo, one segment at a time and in packs, against one process, and checks how
-passes are shared out. `test_packing.py` covers packs' layout (first-fit-decreasing, a shared prefix once, each
-segment's tokens at its own positions), a segment grouped only where that spares tokens (two environments' turns, each
-under its own prompt), a token at position 0 refused, a pack that runs out of memory running again a segment at a time,
-the start computed in each minibatch's own packs, and what fails a step raised before it computes anything; packs on
-real models are `tests/rollout_lora/test_packing.py`'s
-([LoRA trainer](rollout-lora.md#packs)).
+their placement, the entropy bonus, aggregation), the default preset against a word-for-word transcription of its loss
+(to the last bit), and the step over pairs and labelled examples (its two-part gradient equal to the gradient of the
+whole loss, the direction of DPO's, SimPO's and KTO's updates, the stop at `max_kl`). `test_step.py` covers the step on
+a toy policy: the direction of an update, minibatches, warmup, forced tokens, segments left out, the KL stop (also where
+every advantage pushes the same way, REINFORCE's and a policy-gradient distillation's, whose k1 estimate falls below 0
+as the policy moves), a missing logprob, the likelihood objective, the importance weight and its truncation, the token
+clip and the segment ratio. `test_distillation.py` covers distillation's terms against their definitions (each top-k
+divergence over the whole vocabulary equal to the full one: GKD's JSD as TRL writes it, Hinton's softened KL, the
+reverse KL), tokens the teacher did not score, a teacher that gave fewer than k tokens, the importance mask, a KL in the
+reward and in the loss, a policy gradient's distillation term, and the step on a toy policy, whose every distillation
+preset moves it toward its teacher on its own samples. `test_step.py` also covers how far a step says it has got: its
+phases, the start's share of the work, its packs against the step's metrics, and the fraction rising to 1.
+`test_shared.py` takes each objective's case on two processes under torchrun, a toy model sharded with FSDP2 over gloo,
+one segment at a time and in packs, against one process, and checks how passes are shared out. `test_packing.py` covers
+packs' layout (first-fit-decreasing, a shared prefix once, each segment's tokens at its own positions), a segment
+grouped only where that spares tokens (two environments' turns, each under its own prompt), a token at position 0
+refused, a pack that runs out of memory running again a segment at a time, the start computed in each minibatch's own
+packs, and what fails a step raised before it computes anything; packs on real models are
+`tests/rollout_lora/test_packing.py`'s ([LoRA trainer](rollout-lora.md#packs)).

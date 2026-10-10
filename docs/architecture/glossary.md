@@ -29,7 +29,7 @@ One execution of a program under a `RunBinding`, identified by `run_id`: one epi
 
 ### RunSpecification / RunBinding
 
-What to run (a program reference and parameters) / how it is served here (model endpoints, imported tool sets, sandbox pools).
+What to run: a program reference (`module:QualifiedName` and its parameters) and its binding / how the run is served here: an endpoint for each model slot (direct, or a channel through the gateway), imported tool sets, sandbox pools.
 
 ### Runner
 
@@ -45,7 +45,7 @@ How an episode ended: `TERMINATED` (a real end state) or `TRUNCATED` (stopped by
 
 ### Model slot
 
-A named model a program uses (`policy`, `user`, …); each is bound to an endpoint and recorded as its own session.
+A named model a program uses (`policy`, `user`, …), declared as a `ModelSlot`: whether a run may train on its turns (`trained`) and whether it judges the others (`judge`). A run's binding serves each, directly or through the gateway, which records each slot as its own session.
 
 ### Effect
 
@@ -89,7 +89,7 @@ What a run is: its environment, trainer, each channel's provider, model and rend
 
 ### Library / implementation / environment
 
-The three kinds of package in the repository: what code is written against; one implementation of an interface a library defines; something to train on. See [overview](overview.md#layers).
+The three kinds of package in the repository: what code is written against; something a library defines (an interface, or the losses it declares), implemented for one backend; something to train on. See [overview](overview.md#layers).
 
 ### Environment
 
@@ -111,11 +111,11 @@ What a run trains on and an eval measures: its program, its rows (easiest first)
 
 ### Eval data
 
-An environment's named lists of starts (`evals()`), which training never draws (`train_start`); a suite is made of one with `rollout suite make`. See [train and eval](../libraries/rollout-train/rollouts.md#train-and-eval).
+An environment's named lists of starts (`evals()`), which training never draws (`train_start`); a suite's entry can play one (`rollout suite make`), and a suite of its name is made of it the first time it is played. See [train and eval](../libraries/rollout-train/rollouts.md#train-and-eval).
 
 ### Description / version
 
-What an environment's results say: the range of its rewards, whether they say `solved` and `saturated`, what `duration` counts, how its observations are shown / a name for what an environment is now, changed whenever its rows, starts, eval data or scoring change. Each run's start records both; each version of a suite records the version.
+What an environment's results say: the range of its rewards, whether they say `solved` and `saturated`, what `duration` counts, how its observations are shown, and how much an episode samples, for estimating a run's spend / a name for what an environment is now, changed whenever its rows, starts, eval data or scoring change. Each run's start records both; each version of a suite records the version.
 
 ### Published environment
 
@@ -155,15 +155,15 @@ What a rollout leaves to train on: its segments and its rewards (`Trajectory`).
 
 ### Segment
 
-A piece of a trajectory: tokens that only grew by appending, with the spans the policy sampled, their behavior logprobs and weights checkpoints (`Segment`). An edited context (a compaction, thinking dropped) starts the next.
+A piece of a trajectory: tokens that only grew by appending, with the spans the policy sampled, their behaviour logprobs and weights versions (`Segment`, `Span`), what its turns were sampled with, and a teacher's scores where one scored it. An edited context (a compaction, thinking dropped) starts the next.
 
-### Behavior logprob
+### Behaviour logprob
 
 The log-probability of a sampled token under the distribution it was sampled from.
 
 ### Plan
 
-How a training run's episodes are played: its program and its binding, in the run's `plans` table.
+How a run's episodes are played: its program and its binding, in the run's `plans` table.
 
 ### Episode runner
 
@@ -175,7 +175,7 @@ An episode runner's append under `GROUP/EPISODE/ATTEMPT` in a run's `claims` tab
 
 ### Heartbeat
 
-What a runner, an engine host, a gateway replica, a pool served on its own or a run's driver waiting for its resources writes every 15 seconds beside the ledger: its host, its machine's measurements, its engines and channels (a gateway replica's: where it listens and each channel it samples), how full its pools are, or what it waits for. One silent for 90 seconds is taken to be gone. See [heartbeats](../libraries/rollout-train/rollouts.md#heartbeats).
+What a runner, an engine host, a gateway replica, a pool served on its own, a pod or a run's driver waiting for its resources writes every 15 seconds beside the ledger: its host, its machine's measurements, its engines and channels (a gateway replica's: where it listens and each channel it samples), how full its pools are, or what it waits for. One silent for 90 seconds is taken to be gone. See [heartbeats](../libraries/rollout-train/rollouts.md#heartbeats).
 
 ### Launch / job / driver
 
@@ -183,19 +183,19 @@ A run asked for (its kind, name, settings and preset), the run it is and the job
 
 ### Suite / eval
 
-An eval configuration, by name: an environment, its starts (its eval data of a name, each of some rows' start drawn with each of some seeds, or starts given), episodes per start and the eval channel's sampling limits; kept in versions (`NAME@N`), each never changed, an edit making the next, and the name pointing to the newest / one version of a suite played by one checkpoint or the base model, training nothing: a run of its own whose start says `kind: eval` and the version, recording each episode's outcome under `evaluations/SUITE/EVAL/results`. See [evals](../libraries/rollout-train/evals.md).
+An eval configuration, by name: a list of entries, one for each environment it plays, each with the environment and its version, its starts (its eval data of a name, each of some rows' start drawn with each of some seeds, or starts given), episodes per start and its sampling limits, each entry scored apart; kept in versions (`NAME@N`), each never changed, an edit making the next, and the name pointing to the newest / one version of a suite played by one checkpoint or the base model, training nothing: a run of its own whose start says `kind: eval` and the version (with a run for each entry, its parts, where it has several), recording each episode's outcome under `evaluations/SUITE/EVAL/results`. A training run can evaluate its own checkpoints on a schedule. See [evals](../libraries/rollout-train/evals.md).
 
 ### Dataset
 
-Examples to imitate, chosen from runs' episodes by an episode rule and turn filters, made once: a record in the ledger's `datasets` table and a manifest blob of one line per example, and a name if it is given one. A supervised step on one makes a checkpoint whose parents after the first sampled its examples. See [datasets](../libraries/rollout-train/datasets.md).
+Examples chosen from runs' episodes, made once: examples to imitate, by an episode rule and turn filters, or pairs and labelled examples for a preference loss, by a preference rule; a record in the ledger's `datasets` table and a manifest blob of one line per example, and a name if it is given one. Its supervision says what a step can do with it: `importance`, `supervised`, or `teacher` (examples a teacher scored, for distillation). A step on one makes a checkpoint whose parents after the first sampled its examples. See [datasets](../libraries/rollout-train/datasets.md).
 
 ### Bridge
 
-How a checkpoint's files in its trainer's format (`peft`, `full`, `tinker`) become files a provider loads: a task named `module:name`, run once per checkpoint and bridge, noted in `checkpoints/resharding` and `checkpoints/resharded` under `CHECKPOINT@BRIDGE`; in the calling process or as a Ray task. See [bridges](../libraries/rollout-train/checkpoints.md#bridges).
+How a checkpoint's files in its trainer's format (`peft`, `full`, `tinker`) become files a provider loads: a named bridge between two formats (`verbatim`, `full-reload`, `peft-from-tinker`, `merge-quantize`, `none`), or a chain of them, each a task named `module:name`, run once per checkpoint and bridge, noted in `checkpoints/resharding` and `checkpoints/resharded` under `CHECKPOINT@BRIDGE`; in the calling process or as a Ray task. See [bridges](../libraries/rollout-train/checkpoints.md#bridges).
 
 ### Checkpoint
 
-Weights a step (or imitation) made: a node of a graph, with an id of its own (shown by its shortest unique start), its parents (what it was trained from, and any others it learned from), its base model, its depth, and the run and step that made it. See [checkpoints](../libraries/rollout-train/checkpoints.md).
+Weights a step (or a supervised step, or a merge) made: a node of a graph, with an id of its own (shown by its shortest unique start), its parents (what it was trained from, and any others it learned from), its base model, its depth, and the run and step that made it. See [checkpoints](../libraries/rollout-train/checkpoints.md).
 
 ### Base model
 
@@ -219,15 +219,19 @@ What a run is kept under, which never changes / what it is called, which can be 
 
 ### Ledger
 
-Append-only tables that hold a training run's decisions and results and the checkpoints, with fences so that one writer holds each.
+Append-only tables that hold every run's decisions and results and the checkpoints, with fences so that one writer holds each: files, a database (SQLite or Postgres), or a database through the ledger service.
+
+### Ledger service
+
+The ledger and the stores beside it over HTTP (`rollout_train.ledger_service`), for every role that reaches the ledger by URL (`HttpLedger`): a request carries a token, the platform's (which may do everything) or a pod's (which reads its run's serving records and checkpoints and writes its own beat).
 
 ### Channel
 
-A trainable model being served, by name: its engines, its limits, and the checkpoint it samples from.
+A model being served under a name in a run (`RUN/NAME`): its providers, its limits, and the checkpoint it samples from. The trained channel serves what the run trains; a `follows` channel serves another channel's checkpoint, `lag` checkpoints back; a `fixed` channel serves one checkpoint or the base model. A channel on a hosted API samples by message, and its turns are never trained on.
 
 ### Engine
 
-One replica serving a model: tokens in; tokens, logprobs and a finish reason out. `VllmEngine` is one ([vLLM engine](../implementations/rollout-vllm.md)); `RemoteEngine` is a vLLM server elsewhere, a request naming the checkpoint it samples from as its model.
+One replica serving a model: tokens in; tokens, logprobs and a finish reason out; it also scores given tokens. `VllmEngine` is one ([vLLM engine](../implementations/rollout-vllm.md)); `RemoteEngine` is a vLLM server elsewhere, a request naming the checkpoint it samples from as its model.
 
 ### What a channel should serve
 
@@ -235,7 +239,11 @@ A run's record, in its `serving` table, that its channel (`RUN/NAME`) serves a c
 
 ### Follower / engine host
 
-Keeps a process's channels serving what a run says, loading each checkpoint from the blob store, named by its id / what does that for a replica's engines, and nothing else: an `EngineHost`, a Ray actor that serves every run bound to it, or a follower beside a vLLM server. See [deploying](../guide/deploying.md#engines-on-other-machines) and [engine hosts](../libraries/rollout-train/channels.md#engine-hosts).
+Keeps a process's channels serving what a run says, loading each checkpoint from the blob store, named by its id / what does that for a replica's engines, and nothing else: an `EngineHost`, a Ray actor that serves every run bound to it, or a follower beside a vLLM server (`InferencePod`). See [deploying](../guide/deploying.md#engines-on-other-machines) and [engine hosts](../libraries/rollout-train/channels.md#engine-hosts).
+
+### Pod
+
+A GPU machine rented by the hour from RunPod for a run: it serves a channel beside a vLLM server, takes the run's training steps, or hosts its sandboxes, and is reached over mutual TLS at the address its lease says. A pod's lease, beside the ledger, says which run holds it; a released pod stays warm for the next run for a while, and the reaper deletes the pods no run holds. See [pods on RunPod](../guide/deploying.md#pods-on-runpod).
 
 ### Max lag
 
@@ -243,16 +251,24 @@ How many checkpoints behind what its channel should serve a sample may be, where
 
 ### Gateway
 
-The model endpoint for channels, as a service that keeps no session: renders contexts to tokens, samples, and records every turn in the ledger and the blob store; in a run's driver, or replicas of the cluster's.
+The model endpoint for channels, as a service that keeps no session: verifies a request's signed key, renders contexts to tokens, samples, and records every turn in the ledger and the blob store before it replies; it samples channels on hosted APIs by message. It runs in a run's driver, or as replicas of the cluster's.
 
 ### Renderer
 
 The chat template, tokenizer and parser of one model family ([Qwen](../implementations/rollout-qwen.md), [Gemma](../implementations/rollout-gemma.md)).
 
-### Weights checkpoint
+### Weights version
 
-The depth of the checkpoint a channel serves; every sampled span carries the one it was sampled at.
+The depth of the checkpoint a channel serves; every sampled span carries the one it was sampled at (`Span.version`).
 
 ### Trainer
 
-Turns weighted segments into new weights, within a budget it states. `LoraTrainer` is one ([LoRA trainer](../implementations/rollout-lora.md)).
+Turns a batch (weighted segments, pairs, labelled or distilled segments, as its objective's family takes) into new weights, within a budget it states. `LoraTrainer` is one ([LoRA trainer](../implementations/rollout-lora.md)); `RemoteTrainer` takes its steps on a training pod.
+
+### Objective
+
+What a trainer's loss is: a family (`policy_gradient`, `preference`, `likelihood`, `distillation`), which fixes what a batch item is, and components that compose the loss (`objective.clip.low`, say), as `rollout_train.objectives` declares them; a preset (`objective.preset`) is the literature's objective as a family and component values. A run's start records the objective it resolved to; `rollout_objectives` computes it. See [objectives](../libraries/rollout-train/training.md#objectives).
+
+### Teacher
+
+A channel whose scores of a segment's sampled tokens (their logprobs, and its most likely tokens at each) a distillation trains toward. An objective's routes give each episode one teacher, by its environment or row. See [distillation](../libraries/rollout-train/training.md#distillation).

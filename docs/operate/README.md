@@ -1,7 +1,7 @@
 # Operate the platform
 
 This section is for people who keep a deployed platform running: watching runs, changing them while they go, keeping
-checkpoints, checking the cluster's configuration, and backing up what it records.
+checkpoints, watching the GPU pods runs lease, checking the cluster's configuration, and backing up what it records.
 
 **Read first:** [Deploy the platform](../deploy/README.md). **Next:** [The
 monitor](../libraries/rollout-train/monitor.md).
@@ -43,6 +43,13 @@ echo "http://localhost:8765/login?token=$token"
   and move bookmarks.
 - Saves thin out with age, and a checkpoint a bookmark names is kept
   ([checkpoints](../libraries/rollout-train/checkpoints.md#checkpoints)).
+
+## Watch GPU pods
+
+A run that leases pods on RunPod renews their leases every 30 seconds and releases them when it ends; a lease taken
+from it ends the run failed. `rollout pods list` shows every pod's lease: who holds it, since when, at what price;
+`rollout pods reap` (the chart's CronJob, every minute) deletes the pods no run holds
+([GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod)).
 
 ## Check the configuration
 

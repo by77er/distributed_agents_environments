@@ -46,11 +46,12 @@ reads goes in the project, read relative to its module (`Path(__file__).parent`)
 
 ## What a version makes where it runs
 
-A version is its files: nothing built from them is in the zip (a repository does not hold `node_modules`, compiled
-jars or downloads, and a `node_modules` directory is left out where one is there). An environment that needs more than its Python makes it the first time it needs it, on the machine
-where it runs, into a cache keyed by what it is made from (a digest of its sources or its lock file), under a file lock
-so that episodes starting together make it once. On the chart's cluster that cache is on the state volume, which every
-pod mounts as `~/.cache/rollout`: it is made once per cluster, and versions made from the same sources share it.
+A version is its files: nothing built from them is in the zip (a repository does not hold `node_modules`, compiled jars
+or downloads, and a `node_modules` directory is left out where one is there). An environment that needs more than its
+Python makes it the first time it needs it, on the machine where it runs, into a cache keyed by what it is made from (a
+digest of its sources or its lock file), under a file lock so that episodes starting together make it once. On the
+chart's cluster that cache is on the state volume, which every pod mounts as `~/.cache/rollout`: it is made once per
+cluster, and versions made from the same sources share it.
 
 The [Minecraft team](../products/minecraft-team.md#imported-from-git) works so: its Node harness's packages are
 installed with `npm ci` once per `package-lock.json`, its plugin is compiled from the version's sources once per
@@ -95,11 +96,11 @@ An import is refused, with the reason the monitor shows under its form, where:
   environment](testing.md#checking-an-environment)). The episode is not played where the environment's program imports a
   tool set or declares a sandbox, which an import cannot serve: that finding passes, flagged.
 
-The checks run in a Ray job on the cluster, in the version's runtime environment, so an environment that imports in
-the job is one a run can play. The job is handed the project's zip by the monitor itself, and the cluster it runs on
-holds no key to any store and reaches nothing in the platform but itself: an imported environment is code from
-anywhere ([what each role is given](../deploy/helm.md#what-each-role-is-given)). Before pushing, the same checks run in a checkout of the platform, with the project's
-directory (or its `src/`) on the path:
+The checks run in a Ray job on the cluster, in the version's runtime environment, so an environment that imports in the
+job is one a run can play. The job is handed the project's zip by the monitor itself, and the cluster it runs on holds
+no key to any store and reaches nothing in the platform but itself: an imported environment is code from anywhere ([what
+each role is given](../deploy/helm.md#what-each-role-is-given)). Before pushing, the same checks run in a checkout of
+the platform, with the project's directory (or its `src/`) on the path:
 
 ```bash
 PYTHONPATH=path/to/say-the-word uv run rollout env check words:environment
@@ -118,5 +119,5 @@ it was imported.
 A cluster offers every version the ledger keeps, by `NAME@VERSION`, beside the environments its config names
 (`GET /api/offers`), and the New run form lists them; a run on one is asked for as on any environment, and is refused
 where the version declares a kind of sandbox the cluster has no pool of. A run on one is a Ray job in the version's
-runtime environment ([launching runs](../libraries/rollout-train/launching.md#the-job)), and its start records the version (`published`: its name, id, source, ref, commit,
-subdirectory and entry point).
+runtime environment ([launching runs](../libraries/rollout-train/launching.md#the-job)), and its start records the
+version (`published`: its name, id, source, ref, commit, subdirectory and entry point).

@@ -22,10 +22,11 @@ where it calls tools, else `stop`. Usage counts every input token (uncached, rea
 read from the cache, every output token and those spent thinking.
 
 Errors map to the contract: rate limits and an API that is down or overloaded (429, 500, 502, 503, 504, 529, and an
-`overloaded_error` in the stream) are `Overloaded`, with the API's `retry-after`; a prompt too long for the context is
-`ContextOverflow`; credentials refused raise `PermissionError`; any other refusal (a request the API rejects) is a
-`ModelEndpointError`, which asking again does not change; a connection that fails is an `InternalError`. The SDK
-retries nothing itself: whoever holds the endpoint decides (the gateway's API channels back off and ask again).
+`overloaded_error`, `rate_limit_error` or `api_error` in the stream) are `Overloaded`, with the API's `retry-after`; a
+prompt too long for the context is `ContextOverflow`; credentials refused raise `PermissionError`; any other refusal (a
+request the API rejects) is a `ModelEndpointError`, which asking again does not change; a connection that fails is an
+`InternalError`. The SDK retries nothing itself: whoever holds the endpoint decides (the gateway's API channels back off
+and ask again).
 """
 
 import base64

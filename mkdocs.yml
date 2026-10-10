@@ -114,7 +114,7 @@ nav:
       - "Episode runners": libraries/rollout-train/rollouts.md
       - "Episodes": libraries/rollout-train/episodes.md
       - "The training loop and objectives": libraries/rollout-train/training.md
-      - "Launch runs": libraries/rollout-train/launching.md
+      - "Launching runs": libraries/rollout-train/launching.md
       - "Checkpoints, runs and the ledger": libraries/rollout-train/checkpoints.md
       - "Datasets and supervised steps": libraries/rollout-train/datasets.md
       - "Channels and engines": libraries/rollout-train/channels.md

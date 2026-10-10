@@ -33,7 +33,8 @@ turns them into checkpoints, which objectives it can optimise, and how checkpoin
 
 ## Choose a trainer and an objective
 
-- The trainers are the [LoRA and full-weight trainers](../implementations/rollout-lora.md) on your own GPU, and
+- The trainers are the [LoRA and full-weight trainers](../implementations/rollout-lora.md) on your own GPU or on a
+  pod rented from RunPod ([GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod)), and
   [Tinker](../implementations/rollout-tinker.md) at Thinking Machines. Their capabilities are compared in
   [the cluster config](../guide/cluster.md#trainers).
 - A run's objective is a preset (`default`, `grpo`, `dapo`, `sft`, `dpo`, `distillation` and others) with components you

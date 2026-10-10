@@ -17,8 +17,8 @@ serves is trained on: the API returns text, not tokens.
 
 ## Installing
 
-`implementations/rollout-anthropic` is a member of the workspace and a dependency of the platform: `uv sync` installs
-it, with the `anthropic` SDK. The platform image has it.
+`implementations/rollout-anthropic` is a member of the workspace and a dependency of the platform: every `uv sync`
+installs it, with the `anthropic` SDK. The platform image has it.
 
 ```bash
 uv run pytest tests/rollout_anthropic   # against a fake Messages API on this machine: no key, no network
@@ -42,11 +42,12 @@ cost = { input = 1.0, cached_input = 0.10, output = 5.0 }
 options = { max_output_tokens = 64000, thinking = "budget" }
 ```
 
-`hosted(model, api_key=…, context_limit=…, max_output_tokens=…, options=…, base_url=…)` makes the endpoint from the
-provider's key and the model's catalog entry; the gateway calls it the first time a channel on the provider samples
-([hosted APIs](../libraries/rollout-train/gateway.md#hosted-apis)). Without a key it raises `PermissionError`, which
-the gateway reports with the variable's name. `base_url` reaches another server that speaks the API (none:
-Anthropic's own). The SDK retries nothing (`max_retries=0`): the gateway's channel backs off and asks again.
+`hosted(model, api_key=…, context_limit=…, max_output_tokens=…, options=…, base_url=…, blobs=…, timeout=…)`
+makes the endpoint from the provider's key and the model's catalog entry, with the blob store it reads images and PDFs
+from and the SDK's timeout for a request (600 s by default); the gateway calls it the first time a channel on the
+provider samples ([hosted APIs](../libraries/rollout-train/gateway.md#hosted-apis)). Without a key it raises
+`PermissionError`, which the gateway reports with the variable's name. `base_url` reaches another server that speaks the
+API (none: Anthropic's own). The SDK retries nothing (`max_retries=0`): the gateway's channel backs off and asks again.
 
 ## What each model takes
 

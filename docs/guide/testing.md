@@ -24,7 +24,7 @@ It records what it was asked:
 | `cancelled` | the `effect_id`s it was asked to cancel |
 
 The endpoint raises `AssertionError` when the script runs out, so an episode that samples more than expected fails
-loudly. Pass `contract=CapabilityContract(...)` to test behavior near limits.
+loudly. Pass `contract=CapabilityContract(...)` to test behaviour near limits.
 
 ## Helpers
 
@@ -193,7 +193,7 @@ Tests that need what a test cannot start alone are marked `live`, and the worksp
 | Where | Needs |
 |---|---|
 | `environments/minecraft/tests/test_paper.py`, `test_harness.py`, `test_episode.py` (the tests that start a world) | Java (and Node for the harness), and the network once, to fetch Paper |
-| `tests/rollout_lora/test_on_gpu.py`, `test_small_on_gpu.py`, `tests/rollout_train/gateway/test_on_gpu.py` | the GPU, with nothing else on it |
+| `tests/rollout_lora/test_on_gpu.py`, `test_small_on_gpu.py`, `test_packing_on_gpu.py`, `test_resident_on_gpu.py`, one test of `test_keeping.py`, and `tests/rollout_train/gateway/test_on_gpu.py` | the GPU, with nothing else on it |
 
 Ask for them with `-m live`, by path:
 

@@ -77,4 +77,4 @@ class Horizons:
 
 
 environment = Horizons()
-"""`rollout train PROFILE minecraft_horizons.environment:environment`."""
+"""`rollout train minecraft_horizons.environment:environment --preset minecraft-one-gpu`."""

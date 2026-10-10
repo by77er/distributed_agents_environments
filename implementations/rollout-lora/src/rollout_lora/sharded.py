@@ -10,12 +10,12 @@ to the shards in float32, added up rather than averaged (`summed`: the step divi
 minibatch's units, `rollout_objectives.step`). Activations are checkpointed as on one GPU.
 
 - **An adapter** (`shard_adapter`): the frozen model is sharded with the adapter. Each decoder layer's adapter layers
-  are a unit of their own, inside the layer's, kept in float32 and computed in float32 as on one GPU, gathered for
-  each pass. Where each GPU holds the whole frozen model (`LoraSettings.whole_base`), the frozen layers are gathered
-  once and kept, and the adapter's gradients are kept in each process until a minibatch's last pass, which reduces
-  them once (`gradient_sync`); else each layer's frozen weights are gathered as it computes, and each pass's gradients
-  reduced. The output layer is frozen, and kept once gathered. The frozen model is held in bfloat16, so gathering it
-  casts nothing.
+  are a unit of their own, inside the layer's, gathered for each pass, kept in float32 and multiplied in the
+  activations' dtype as on one GPU. Where each GPU holds the whole frozen model (`LoraSettings.whole_base`), the
+  frozen layers are gathered once and kept, and the adapter's gradients are kept in each process until a minibatch's
+  last pass, which reduces them once (`gradient_sync`); else each layer's frozen weights are gathered as it computes,
+  and each pass's gradients reduced. The output layer is frozen, and kept once gathered. The frozen model is held in
+  bfloat16, so gathering it casts nothing.
 - **Every weight** (`shard_full`, on one GPU too, so that one GPU computes as several do): the weights, their
   gradients and Adam's moments in float32, sharded, each unit's weights gathered in bfloat16 (`MixedPrecisionPolicy`:
   the forward and backward passes in bfloat16, the residual stream and norms too); a frozen reference, where one is

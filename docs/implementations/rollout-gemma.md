@@ -7,7 +7,8 @@ For whoever trains a Gemma model: the token format of Gemma 4.
 Code: `rollout_gemma`
 
 A [`Renderer`](../guide/reference.md#renderer) is a model family's token format (see [Qwen renderers](rollout-qwen.md)
-for what one does). This package has the renderer of Gemma 4. It is installed with `uv sync --extra gemma`.
+for what one does). This package has the renderer of Gemma 4. It is the workspace's `gemma` extra, installed with
+`uv sync --all-extras`.
 
 ```toml
 [channels.policy]
@@ -19,8 +20,10 @@ renderer = "rollout_gemma:gemma4"
 [checkpoint](../libraries/rollout-train/checkpoints.md)'s name or path, whose tokenizer it loads with
 [`tokenizer_of`](../guide/reference.md#tokenizer_of), or a tokenizer) and returns a
 [`ChatTemplateRenderer`](../guide/reference.md#chattemplaterenderer) over the tokenizer's own chat template, which Gemma
-4 ships beside its weights. It renders the models whose name holds `gemma4` or `gemma-4`
-([`renders`](../guide/reference.md#renders)).
+4 ships beside its weights. It renders the models whose name holds `gemma4` or `gemma-4`, case ignored
+([`renders`](../guide/reference.md#renders)). The package declares it in the entry-point group `rollout.renderers`
+(`gemma4 = "rollout_gemma:gemma4"`), so a channel whose model it renders gets it without naming a renderer
+([Qwen renderers](rollout-qwen.md#what-a-renderer-function-is-called-with)).
 
 ## The format
 

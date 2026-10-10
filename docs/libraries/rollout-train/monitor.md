@@ -26,7 +26,7 @@ on whichever machines they run. Its pages are switched along the top:
 ```bash
 rollout monitor --cluster                             # http://localhost:8765: the cluster's ledger; it asks for runs
 rollout monitor sqlite:///~/.cache/rollout/ledger.db  # a database's runs (or postgresql://…, or a ledger's directory)
-rollout monitor RUN                                   # a run's directory from before: its ledger, and every run in it
+rollout monitor RUN                                   # a run's directory: its ledger, and every run in it
 ```
 
 It says where its page is, and how to sign in ([signing in](#signing-in)). `WHERE` is a database's URL, a ledger's
@@ -79,7 +79,8 @@ package (`rollout_train/monitor/static`), and the monitor serves it as files: `r
 page draws each view from what it has read, and reads again only what the monitor says changed.
 
 - **Topics.** Each thing a view shows is a topic (`rollout_train.monitor.stream`): `system` (where every run stands),
-  `feeds`, `machines`, `queue`, `launches`, `statistics`, `checkpoints`, `checkpoint-evals/ID`, `path/ID`, `environments`,
+  `feeds`, `machines`, `queue`, `launches`, `offers`, `presets`, `preset/NAME`, `statistics`, `checkpoints`,
+  `checkpoint-evals/ID`, `path/ID`, `environments`,
   `environment/MODULE:NAME` (a published one's `environment/NAME@VERSION`), `environment-versions`,
   `environment-version/VERSION`, `imports`, `evals`, `eval-subjects`, `history/checkpoint/ID`, `history/model/NAME`,
   `settings/RUN`, `group/RUN/N`, `episode/RUN_ID`. The monitor reads a topic at most once a beat (1.5 seconds), whoever
@@ -324,22 +325,22 @@ the evals' subjects and results.
 
 ## A run's settings
 
-A training run's page ends with its settings (`/api/runs/RUN/settings`, `System.settings`), as its newest start
-records them ([run settings](training.md#changing-a-running-runs-settings)). **Changeable** is a form of the settings it
-takes between steps: `groups_per_step`, `evals.suite` (a suite, or none), `evals.every`, `evals.episodes` (empty for
-the suite's own), and its
-trainer's (`trainer.learning_rate`, say), each holding what is wanted of it, else what the newest step used; one wanted
-and not yet used says what the run uses now. Under it, each step that used other settings than the step before, with
-what changed. **Save** asks the monitor (`POST /api/runs/RUN/settings`, `{"settings": {KEY: VALUE}}`, only those
+A training run's page ends with its settings (`/api/runs/RUN/settings`, `System.settings`), as its newest start records
+them ([run settings](training.md#changing-a-running-runs-settings)). **Changeable** is a form of the settings it takes
+between steps: `groups_per_step`, `evals.suite` (a suite, or none), `evals.every`, `evals.episodes` (empty for the
+suite's own), then the rest its start records as changeable, by key (`groups_ahead`, `max_lag`, its objective's numbers
+and its trainer's, `trainer.learning_rate` say), each holding what is wanted of it, else what the newest step used; one
+wanted and not yet used says what the run uses now. Under it, each step that used other settings than the step before,
+with what changed. **Save** asks the monitor (`POST /api/runs/RUN/settings`, `{"settings": {KEY: VALUE}}`, only those
 changed), which checks each (`System.want`: a setting the run can change, a whole number of 1 at least where one is
-needed, no version a suite does not have; a suite may play other environments than the run's, each on the run's
-channel; a name the ledger has no suite of evaluates nothing) and keeps it beside the ledger; a fixed setting, or one the run does not have, is
-refused (409) and the page says why. The run takes them when it next decides a step (or, stopped, when it is started
-again). **Fixed** lists where its checkpoints go (the store its newest start wrote to, in the New run form's words),
-then the rest as they are: the trainer and its model, the adapter's rank, the channels and their
-providers (each channel's `thinking_tokens` and `answer_tokens`, "none" for no budget), how many
-episodes it plays at once, the groups and seed it was started with; a value that is unset reads "none". A run whose
-start records no settings shows none.
+needed, no version a suite does not have; a suite may play other environments than the run's, each on the run's channel;
+a name the ledger has no suite of evaluates nothing) and keeps it beside the ledger; a fixed setting, or one the run
+does not have, is refused (409) and the page says why. The run takes them when it next decides a step (or, stopped, when
+it is started again). **Fixed** lists where its checkpoints go (the store its newest start wrote to, in the New run
+form's words), then the rest as they are: the trainer and its model, the adapter's rank, the channels and their
+providers (each channel's `thinking_tokens` and `answer_tokens`, "none" for no budget), how many episodes it plays at
+once, the groups and seed it was started with; a value that is unset reads "none". A run whose start records no settings
+shows none.
 
 ## Pausing, resuming and stopping
 
@@ -587,12 +588,11 @@ lanes:
 A checkpoint that something here starts from and that this ledger does not have stands in a lane of its own at the top.
 
 `rollout_train.monitor.lineage` reads it from the ledger's tables and the runners' heartbeats, at `/api/checkpoints`. What
-a ledger has today is read as it is: the checkpoints, the runs' steps, bookmarks. Each checkpoint says what its weights
+a ledger has is read as it is: the checkpoints, the runs' steps, bookmarks. Each checkpoint says what its weights
 are (a LoRA adapter, or full weights: a bridge makes those into the engines' files on their way there). A run's steps
 stand for its trainer's queue (a run takes one step at a time), whose weights are what the run's checkpoints are, and
 the checkpoints its runners' beats say it published for what its engines serve: each until the next. Evals are on the
-Evals page ([a subject's history](#a-subjects-history)). Tables for distillation, shared trainers and inference workers
-are proposed in [the checkpoint graph](../../research/policy-dag.md).
+Evals page ([a subject's history](#a-subjects-history)).
 
 ## The feed
 

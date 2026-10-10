@@ -77,8 +77,8 @@ because `--reuse-values` was passed, render a different spec.
 
 ## A GPU pod stays pending
 
-**What you see.** A Ray GPU worker pod stays `Pending`, and its events say `Insufficient nvidia.com/gpu`; or the pod
-fails to start with `RuntimeClass "nvidia" not found`.
+**What you see.** A run's head pod or the Ray cluster's GPU worker pod stays `Pending`, and its events say
+`Insufficient nvidia.com/gpu`; or the pod fails to start with `RuntimeClass "nvidia" not found`.
 
 **Why, and the fix for each cause:**
 
@@ -88,8 +88,9 @@ fails to start with `RuntimeClass "nvidia" not found`.
   namespace `nvidia-device-plugin`.
 - **No `nvidia` RuntimeClass.** K3s registers it when it finds NVIDIA's container toolkit as it starts: install the
   toolkit, then restart K3s. On other clusters, the GPU Operator makes it.
-- **Every GPU is taken.** Another pod holds the card: a run still on its GPU worker, or a process outside Kubernetes
-  that the device plugin does not see. `ray.gpu.maxReplicas` caps the GPU workers at once.
+- **Every GPU is taken.** Another pod holds the card: another run's pod (a finished run's, for `rayjob.ttlSeconds`),
+  the long-lived Ray cluster's GPU worker while it is up (`ray.gpu.maxReplicas` caps them), or a process outside
+  Kubernetes that the device plugin does not see.
 - **Time-slicing not applied.** A node that should report several GPUs per card reports one: the device plugin did
   not read its configuration. Check its log, and that the upgrade passed `--set-file config.map.config=…`
   ([share GPUs](gpus.md)).

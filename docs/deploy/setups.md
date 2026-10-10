@@ -17,8 +17,8 @@ two setups.
 - One machine's memory and GPU are the limit, and nothing restarts a process that dies.
 
 **One machine with K3s.** A one-node Kubernetes cluster ([K3s](https://k3s.io/)) running the Helm chart: Postgres, an
-S3-compatible store, a Ray cluster kept by KubeRay, the [gateway](../libraries/rollout-train/gateway.md) and the
-monitor.
+S3-compatible store, a RayJob for each run, the Minecraft worlds' pool, the
+[gateway](../libraries/rollout-train/gateway.md) and the monitor.
 
 - Use it for a lab machine that several people use, or to run the cluster setup before buying more nodes.
 - Kubernetes restarts what dies, every container has a memory limit, and the stores are the ones a bigger cluster
@@ -30,7 +30,8 @@ monitor.
 Postgres, and S3 or an S3-compatible service.
 
 - Use it for a team, for several runs at once on several GPUs, and for anything that must keep running.
-- The autoscaler adds Ray workers on GPU nodes when runs wait for them.
+- Each run's RayJob gets pods sized from what it needs, on whichever node has room; with Kueue, runs wait in a
+  queue until the quota holds all of a run ([Kueue](helm.md#kueue)).
 - Every pod of the chart mounts one state volume, so on several nodes it needs a storage class that several nodes
   can mount at once ([volumes](helm.md#volumes)).
 
@@ -43,7 +44,7 @@ Postgres, and S3 or an S3-compatible service.
     ```
 
 2. Write the cluster config. `deploy/clusters/example.toml` describes one machine with one 16 GB GPU: the ledger in
-   SQLite, blobs in files, a vLLM pool on the GPU, a LoRA (low-rank adaptation) trainer that shares it, Tinker, the
+   SQLite, blobs in files, vLLM engines on the GPU, a LoRA (low-rank adaptation) trainer that shares it, Tinker, the
    Minecraft worlds and GSM8K. Copy it to where the commands look for it, and edit the paths and models ([the cluster
    config](../guide/cluster.md#the-cluster-config) describes every field):
 

@@ -67,10 +67,10 @@ rate is at least ½. A row's weight is a moving average (`smoothing` 0.5) of whe
 differed, plus `floor` (0.05). Untried rows weigh 1.0. A group counts for its row and for every row in `counts_for`.
 A group in which no episode completed counts for nothing until `FAILED_GROUPS` (3) of them in a row.
 
-An environment may supply its own. The gridworld's ([gridworld](../products/gridworld.md#the-curriculum)) unlocks a row
-once two of its groups are recorded and its success average reaches ½ or its progress average 0.7, and weighs rows
-by mixed outcomes: 0.1 plus the "rewards differed" average scaled by 0.5 + 0.5 × 4p(1−p). Its rewards give progress
-credit, so its rows that nobody solves still differ.
+An environment may supply its own. The gridworld's ([gridworld](../products/gridworld.md#the-curriculum)) counts a row
+learned once two of its groups are recorded and its success average reaches ½ or its progress average 0.7, unlocks
+two rows past the hardest learned, and weighs rows by mixed outcomes: 0.1 plus the "rewards differed" average scaled
+by 0.5 + 0.5 × 4p(1−p). Its rewards give progress credit, so its rows that nobody solves still differ.
 
 | Right | Wrong |
 |---|---|

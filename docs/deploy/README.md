@@ -7,8 +7,8 @@ choose, how to install it on Kubernetes with the Helm chart, where its data live
 
 ## Read in this order
 
-1. [What runs where](roles.md): the platform's roles (the stores, the Ray cluster, the gateway, the monitor, runs as
-   jobs, shared inference pools) and the CPU, GPU, memory and storage each needs.
+1. [What runs where](roles.md): the platform's roles (the stores, runs as jobs, the Ray cluster, the sandbox pools,
+   the gateway, the monitor, the ledger service) and the CPU, GPU, memory and storage each needs.
 2. [Choose a setup](setups.md): one machine without Kubernetes, one machine with K3s, or a cluster of several nodes,
    and when to use each.
 3. [Prepare a Kubernetes cluster](kubernetes.md): the KubeRay operator, the NVIDIA device plugin and GPU runtime, a
@@ -37,7 +37,7 @@ Also in this section:
 
 | Path | What it holds |
 |---|---|
-| `deploy/chart/rollout` | The Helm chart: the stores, a Ray cluster, the gateway and the monitor, in one namespace |
+| `deploy/chart/rollout` | The Helm chart: the stores, a Ray cluster, the sandbox pools, the gateway, the monitors, the ledger service and what each run's RayJob is made from, in one namespace |
 | `deploy/images/platform` | The image every pod of the platform runs |
 | `deploy/images/inference`, `deploy/images/trainer`, `deploy/images/host` | Images for GPU pods rented elsewhere, reached over mutual TLS |
 | `deploy/k3s` | A one-node K3s cluster with a GPU: values for the device plugin, a retaining storage class, an in-cluster registry and BuildKit |

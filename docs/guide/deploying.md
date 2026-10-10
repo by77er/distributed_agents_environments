@@ -23,7 +23,7 @@ cp deploy/clusters/example.toml ~/.config/rollout/cluster.toml   # then edit it 
 uv run rollout cluster check                           # what of it does not resolve here
 uv run ray start --head --node-ip-address 127.0.0.1 --dashboard-host 127.0.0.1 --num-gpus 1 --temp-dir ~/.cache/ray
 uv run rollout preset load deploy/chart/rollout/files/presets --cluster   # the presets shipped with the platform
-uv run rollout monitor --cluster                       # the page over the cluster's ledger; it prints its sign-in link
+uv run rollout monitor --cluster                       # the page over the cluster's ledger; it prints where to sign in
 uv run rollout train minecraft_team.environment:environment --preset minecraft-one-gpu --name team-8
 ```
 
@@ -64,18 +64,18 @@ read as JSON, then TOML, then as text), then its flags. The flags of every such 
 | `--detach` | return once the job is submitted |
 | `--here` | record the launch and run its job in this process, on the cluster config's Ray (`[ray] address`) |
 
-Their own flags: `train ENVIRONMENT` takes `--groups`, `--groups-per-step` and `--seed`; `eval SUITE` takes
-`--checkpoint` (a bookmark, `RUN:STEP`, `RUN` or an id; its channel's model, renderer, providers and budgets are those
-of the run that made it, unless the settings say others) and `--episodes`; `imitate` takes `--dataset`, `--start`,
-`--limit`, `--seed`, `--learning-rate`, `--warmup`, `--passes` and `--resume-optimizer`; `env check ENVIRONMENT` takes
-`--row`, `--reply`, `--tools NAME=WHERE`, `--pools KIND=WHERE` (for the scripted episode), and `--groups` (4) and
-`--episodes` for a check run, which it asks for only where the settings name a model's channel (a preset, `--provider`,
-`--settings`, `--set`).
+Their own flags: `train ENVIRONMENT` (`module:name`, or a published `NAME@VERSION`) takes `--groups`,
+`--groups-per-step` and `--seed`; `eval SUITE` (by name, or `NAME@N`) takes `--checkpoint` (a bookmark, `RUN:STEP`,
+`RUN` or an id; its channel's model, renderer, providers and budgets are those of the run that made it, unless the
+settings say others) and `--episodes`; `imitate` takes `--dataset`, `--start`, `--limit`, `--seed`, `--learning-rate`,
+`--warmup`, `--passes` and `--resume-optimizer`; `env check ENVIRONMENT` takes `--row`, `--reply`, `--tools NAME=WHERE`,
+`--pools KIND=WHERE` (for the scripted episode), and `--groups` (4), `--episodes` and `--seed` for a check run, which it
+asks for only where the settings name a model's channel (a preset, `--provider`, `--settings`, `--set`).
 
-Settings that refuse are said with the setting each is about, and nothing is asked for. Otherwise the run is
-submitted ([launching runs](../libraries/rollout-train/launching.md#asking-for-a-run)) and, unless `--detach`, followed:
-the command prints each change of its launch (`submitted: waits for …`, `running`, `ended`), and an interrupt asks it to
-stop. It exits 0 once the run ended, 1 if it failed, 130 if it was stopped.
+Settings that refuse are said with the setting each is about, nothing is asked for, and the command exits 2.
+Otherwise the run is submitted ([launching runs](../libraries/rollout-train/launching.md#asking-for-a-run)) and, unless
+`--detach`, followed: the command prints each change of its launch (`submitted: waits for …`, `running`, `ended`), and
+an interrupt asks it to stop. It exits 0 once the run ended, 1 if it failed, 130 if it was stopped.
 
 `rollout COMMAND --help` lists each command's options. The other commands:
 
@@ -87,20 +87,30 @@ uv run rollout preset list --cluster                                    # preset
 uv run rollout preset save faster --from-run first --set trainer.learning_rate=1e-4 --cluster
 uv run rollout suite make words-v1 --environment ENVIRONMENT --seeds 1,2,3 --cluster   # an eval configuration
 uv run rollout suite edit words-v1 --seeds 1,2,3,4 --cluster                          # its next version
+uv run rollout merge diamonds --bookmark diamonds-full --cluster        # fold a LoRA checkpoint into its base
+uv run rollout dataset make solved-all --run first --cluster            # examples chosen from runs' episodes
 uv run rollout report RUN_DIRECTORY ENVIRONMENT --watch                 # charts; posted to DISCORD_WEBHOOK_URL if set
-uv run rollout pool --kind minecraft --cluster --host 0.0.0.0 --port 8710   # [sandboxes.minecraft], served on a machine of its own
+uv run rollout pool --kind minecraft --cluster --host 0.0.0.0 --port 8710   # [sandboxes.minecraft], served apart
 uv run rollout tools FACTORY --directory DATA --port 8700               # a tool set on a machine of its own
 uv run rollout gateway --cluster --listen 0.0.0.0:8900                  # a replica of the cluster's gateway
-uv run rollout cluster check                                            # what of the cluster config does not resolve here
+uv run rollout ledger serve --cluster --listen 0.0.0.0:8840             # the ledger service, for pods outside
+uv run rollout ledger copy RUN_DIRECTORY sqlite:///ledger.db            # a ledger copied into a database
+uv run rollout pods list --cluster                                      # every RunPod pod's lease and who holds it
+uv run rollout cluster check                                            # what of the cluster config fails to resolve
 ```
 
 `rename` names a run again, by its name or its id; `pause` and `resume` pause a run and resume it, in place or by
 submitting it again ([pausing and resuming](../libraries/rollout-train/training.md#pausing-and-resuming)); `bookmark`
 names a checkpoint by any reference, and `checkpoints` lists them all ([checkpoints, runs and the
-ledger](../libraries/rollout-train/checkpoints.md#the-command-line)). `suite` makes, edits and lists suites
-([evals](../libraries/rollout-train/evals.md)); `env check` checks an environment before anything trains on it
-([checking an environment](../libraries/rollout-train/rollouts.md#checking-an-environment)); `report` and `imitate` are in
-[reporting](../libraries/rollout-train/training.md#reporting) and [imitation](../libraries/rollout-train/training.md#imitation).
+ledger](../libraries/rollout-train/checkpoints.md#the-command-line)); `merge` makes a full checkpoint of a LoRA one
+([full weights and merges](../libraries/rollout-train/checkpoints.md#full-weights-and-merges)). `suite` makes, edits
+and lists suites ([evals](../libraries/rollout-train/evals.md)); `env check` checks an environment before anything
+trains on it ([checking an environment](../libraries/rollout-train/rollouts.md#checking-an-environment)); `dataset`
+makes and lists [datasets](../libraries/rollout-train/datasets.md); `report` and `imitate` are in
+[reporting](../libraries/rollout-train/training.md#reporting) and
+[imitation](../libraries/rollout-train/training.md#imitation). `ledger serve` is
+[the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http); `pods` and `pki publish` are in
+[GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod).
 
 ## What a run is made of
 
@@ -108,13 +118,14 @@ A run's job is `python -m rollout_train.jobs LAUNCH` ([the driver](../libraries/
 Its driver, from the cluster config and the run's settings:
 
 - imports the environment, and checks the settings again with what it finds now;
-- asks Ray for an engine host per replica of each channel on a `vllm` provider, and for the trainer, on its own node,
-  colocated with the trained channel's engine hosts where the trainer's `colocate_with` names their provider;
-- samples every channel through a gateway in its own process: engine hosts and servers elsewhere by checkpoint name,
-  Tinker through engines in its process;
+- reserves the run's scheduled parts as one Ray placement group, and leases the pods its RunPod providers give it;
+- starts an engine host per replica of each channel on a `vllm` provider, and the trainer, on the driver's node,
+  sharing the trained channel's engine hosts' GPU where the trainer's `colocate_with` names their provider;
+- samples every channel through a gateway in its own process: engine hosts, servers elsewhere and RunPod's pods by
+  checkpoint name, Tinker through engines in its process, a hosted API through its provider's endpoint;
 - plays the run's episodes with a runner in its own process, with the sandbox pools the environment's programs declare
-  (from `[sandboxes]`: made in its process, or reached at their `url`), the tool sets of `[tools]` and the memory
-  guards of `[guards]`;
+  (from `[sandboxes]`: made in its process, reached at their `url`, or served on its pods), the tool sets of `[tools]`
+  and the memory guards of `[guards]`;
 - runs the loop of the run's kind, its bridges as Ray tasks.
 
 While Ray has not given it what it asked for, the run waits: the driver beats as `run/RUN` saying what it waits for,
@@ -127,14 +138,14 @@ fetched bases. Everything else is in the ledger and the blob store: a run on any
 ## What can change while a run goes
 
 Some of a run's settings can change between two steps without breaking it, and are taken from its next step on:
-`groups_per_step`, `max_lag` (how many checkpoints behind the newest a turn of the trained channel may begin), the evals
-(`evals.suite`, `evals.every`, `evals.episodes`; an edit of the suite, too, as a new version its name points to),
-`limits.spend`, `share`, the numbers of the objective's components, and the settings its trainer takes between steps
-(`trainer.learning_rate`, and for `rollout_lora`'s trainers `tokens_per_step`, `max_kl` and `max_gradient_norm`). The
-rest are fixed when it starts. The monitor's run page changes the changeable ones and shows the fixed ones; what is
-wanted is kept beside the ledger, and each step's record says the settings it used ([changing a running run's
-settings](../libraries/rollout-train/training.md#changing-a-running-runs-settings)). A run submitted again starts from
-its recorded settings and takes what is wanted at its next step.
+`groups_per_step`, `groups_ahead`, `max_lag` (how many checkpoints behind the newest a turn of the trained channel may
+begin), the evals (`evals.suite`, `evals.every`, `evals.episodes`; an edit of the suite, too, as a new version its name
+points to), `limits.spend`, the numbers of the objective's components, and the settings its trainer takes between steps
+(`trainer.learning_rate`, `trainer.tokens_per_step`, `trainer.max_kl` and `trainer.max_gradient_norm`). The rest are
+fixed when it starts. The monitor's run page changes the changeable ones and shows the fixed ones; what is wanted is
+kept beside the ledger, and each step's record says the settings it used
+([changing a running run's settings](../libraries/rollout-train/training.md#changing-a-running-runs-settings)). A run
+submitted again starts from its recorded settings and takes what is wanted at its next step.
 
 ## Runners
 
@@ -160,7 +171,7 @@ the blob store, wherever each runs:
 | Role | Does |
 |---|---|
 | The run's loop | writes down, under the run's fence, what each of its channels should serve: the checkpoint, its depth and kind, and the files the engines load ([what a channel should serve](../libraries/rollout-train/channels.md#what-a-channel-should-serve)) |
-| A follower beside each server | loads what the run says from the blob store into its vLLM server, as an adapter named by the checkpoint's id, and beats with what it serves (`python -m rollout_train.pods.inference`, told the run, the channel, the model and the server's address) |
+| A follower beside each server | loads what the run says from the blob store into its vLLM server, as an adapter named by the checkpoint's id, and beats with what it serves (`python -m rollout_train.pods.inference`, its environment naming the run, the channel, the model, the server's address and the stores: `ROLLOUT_RUN`, `ROLLOUT_CHANNEL`, `ROLLOUT_MODEL`, `ROLLOUT_VLLM`, `ROLLOUT_LEDGER`, `ROLLOUT_BLOBS`, `ROLLOUT_POD_NAME`) |
 | The run's gateway | asks the servers (or the router in front of them) for the checkpoint the run says, by name, and records what they sample, so tokens and logprobs are recorded exactly as sampled |
 
 ### The servers
@@ -218,14 +229,14 @@ on. What makes either safe:
 
 ### Pods on RunPod
 
-Pods rented on RunPod run an image of their own: `deploy/images/inference` (a stock vLLM server, the follower beside
-it, Envoy in front), `deploy/images/trainer` (the training service a run reaches with
-`rollout_train.pods.RemoteTrainer`), or `deploy/images/host` (both on one GPU). A run leases the pods its RunPod
-providers give it when it starts and releases them when it ends; a released pod stays warm for the next run, and
+Pods rented on RunPod run an image of their own: `deploy/images/inference` (a stock vLLM server, the follower beside it,
+Envoy in front), `deploy/images/trainer` (the training service a run reaches with `rollout_train.pods.RemoteTrainer`),
+or `deploy/images/host` (both on one GPU, and the sandboxes of the kinds its provider lists). A run leases the pods its
+RunPod providers give it when it starts and releases them when it ends; a released pod stays warm for the next run, and
 `rollout pods reap` deletes what no run holds. Each pod is reached at a public TCP port over mutual TLS, with
 certificates from the cluster's step-ca, and reaches the cluster through the ledger service with a token of its own.
-What a deployment provides is in [GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod); how the pieces fit
-and the security model in [RunPod pods as inference and training providers](../research/runpod-providers.md).
+What a deployment provides is in [GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod); how the pieces fit and
+the security model in [RunPod pods as inference and training providers](../research/runpod-providers.md).
 
 ## The gateway
 
@@ -235,10 +246,10 @@ gateway](../libraries/rollout-train/gateway.md#a-runner-served-by-the-gateway)).
 
 `rollout gateway --cluster` serves a replica of the cluster's [gateway](../libraries/rollout-train/gateway.md): it
 samples every channel a run's start names on the cluster's providers whose servers answer vLLM's API at their endpoints
-(`vllm-servers`, and a `vllm` provider's `listen`) or are the pods the run leases (`runpod-inference`, `runpod-host`),
-for programs and harnesses that hold a signed
-key, and records every turn in the cluster's ledger and blob store before it replies. Replicas keep no session, so as
-many as wanted stand behind one proxy, and any of them may stop at any moment.
+(`vllm-servers`, and a `vllm` provider's `listen`), are the pods the run leases (`runpod-inference`, `runpod-host`) or
+are hosted APIs (`api`), for programs and harnesses that hold a signed key, and records every turn in the cluster's
+ledger and blob store before it replies. Replicas keep no session, so as many as wanted stand behind one proxy, and any
+of them may stop at any moment.
 
 - **Keys.** The secrets are read from `[gateway] keys_file` or `keys_env`, else from the environment
   (`ROLLOUT_GATEWAY_KEYS`, or a file named by `ROLLOUT_GATEWAY_KEYS_FILE`), and never from the ledger. Whoever mints
@@ -254,26 +265,30 @@ many as wanted stand behind one proxy, and any of them may stop at any moment.
 Every run is a Ray job. On one machine, the job goes to the job server `[ray] jobs` names, on the head `ray start`
 started: Ray places its driver on a node with a CPU free and supervises it. The driver joins the Ray cluster at
 `[ray] address` (`auto`: the one the job runs on; name its GCS address where a machine runs more than one Ray cluster),
-and asks it for its actors: the trainer with its GPUs on the driver's node, an engine host with its share of a GPU per
-replica; a bridge runs as a Ray task asking for the CPUs and memory it declares, or what `[bridges."NAME"]` says
-([bridges](../libraries/rollout-train/checkpoints.md#bridges)). The actors are the job's: Ray ends them when the job
-ends, so a stopped or failed run leaves no engine behind. `ray job list --address http://127.0.0.1:8265` lists the runs'
-jobs.
+and reserves its parts as one placement group before it starts any of them: the trainer with its GPUs on the driver's
+node, an engine host with its share of a GPU per replica, and a bundle for its bridges, as large as the largest bridge
+it may run declares, or what `[bridges."NAME"]` says
+([what a run needs](../libraries/rollout-train/launching.md#what-a-run-needs)). Each bridge runs as a Ray task in that
+bundle ([bridges](../libraries/rollout-train/checkpoints.md#bridges)). The actors are the job's: Ray ends them when
+the job ends, so a stopped or failed run leaves no engine behind. `ray job list --address http://127.0.0.1:8265` lists
+the runs' jobs.
 
 ## On Kubernetes
 
-The chart `deploy/chart/rollout` runs the platform in one namespace, by role: the stores (Postgres and an S3 gateway),
-a long-lived Ray cluster (KubeRay: a head, and a GPU group and a CPU group the autoscaler starts from zero), where the
-monitors check environments imported from git; the gateway and the monitors (Deployments, each behind a Service and an
-Ingress); and the cluster config, the RayJob template and the presets in a ConfigMap every pod mounts at
+The chart `deploy/chart/rollout` runs the platform in one namespace, by role ([Helm](../deploy/helm.md)): the stores
+(Postgres and an S3 gateway), a long-lived Ray cluster (KubeRay: a head, and a GPU group and a CPU group the autoscaler
+starts from zero), where the monitors check environments imported from git; the gateway, the ledger service and the
+monitors (Deployments, each behind a Service, with an Ingress where asked); a Deployment for each sandbox pool it
+serves; and the cluster config, the RayJob template and the presets in a ConfigMap every pod mounts at
 `/etc/rollout`.
 
 - **Each run is a RayJob** with a Ray cluster of its own: the cluster config's `[kubernetes]` names the namespace and
   `files/rayjob.yaml`, the template (a head pod of the platform's image, sized from what the run needs within the
-  template's limits, `backoffLimit` retries, removed `ttlSeconds` after it ends). With `kueue.enabled`, Kueue admits
-  it whole once its queue's quota has room ([Kueue](../deploy/helm.md#kueue)). A monitor makes it when a run is asked
-  for from its page, with its account (`templates/rbac.yaml`: create, get, list, watch and delete on `rayjobs`), reads
-  its status, and deletes it to stop the run.
+  template's limits, with worker pods for its engine hosts where one pod cannot hold the run, `backoffLimit` retries,
+  removed `ttlSeconds` after it ends). With `kueue.enabled`, Kueue admits it whole once its queue's quota has room
+  ([Kueue](../deploy/helm.md#kueue)). A monitor makes it when a run is asked for from its page, with its account
+  (`templates/rbac.yaml`: create, get, list, watch and delete on `rayjobs`), reads its status, and deletes it to stop
+  the run.
 - **The presets** in `files/presets` are saved beside the ledger by a hook Job at every install and upgrade (`rollout
   preset load /etc/rollout/presets --cluster`): a new version only where a preset's newest says otherwise.
 - **The gateway** runs `rollout gateway --cluster`.
@@ -287,7 +302,8 @@ before uninstalling K3s).
 
 A run can be paused instead: its driver stays, with its engines and GPU, and starts nothing new until it is resumed
 (`rollout pause`, `rollout resume`, or the monitor's buttons). A run stopped, failed or lost is resumed by submitting
-it again with its recorded settings ([pausing and resuming](../libraries/rollout-train/training.md#pausing-and-resuming)).
+it again with its recorded settings
+([pausing and resuming](../libraries/rollout-train/training.md#pausing-and-resuming)).
 
 A run asked to stop (the monitor's **Stop**, an interrupt to `rollout train`, a termination) stops what it started: its
 episodes, its tool sets, a step in progress, and its actors with its job.

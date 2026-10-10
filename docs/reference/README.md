@@ -33,8 +33,12 @@ Every command that asks for a run (`train`, `eval`, `imitate`, `env check`, `res
 | `rollout monitor` | [the monitor](../libraries/rollout-train/monitor.md) |
 | `rollout gateway` | [the gateway](../libraries/rollout-train/gateway.md#running-it) |
 | `rollout pool`, `rollout tools` | [sandboxes over HTTP](../libraries/rollout/sandboxes.md#over-http), [serving a tool set over HTTP](../guide/tools.md#serving-a-tool-set-over-http) |
-| `rollout cluster check`, `rollout preset` | [the cluster config](../guide/cluster.md) |
+| `rollout cluster check` | [the cluster config](../guide/cluster.md) |
+| `rollout preset` | [presets](../guide/cluster.md#presets) |
+| `rollout report` | [the command line](../guide/deploying.md#asking-for-a-run) |
 | `rollout ledger copy` | [Postgres and S3](../deploy/stores.md#move-an-existing-ledger-and-blob-store) |
+| `rollout ledger serve` | [the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http) |
+| `rollout pods`, `rollout pki` | [GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod), [what a deployment provides](../deploy/providers.md#what-a-deployment-provides) |
 | `rollout train`, `rollout eval`, `rollout imitate`, `rollout resume` | [the command line](../guide/deploying.md#asking-for-a-run), [Start runs and evals](../deploy/runs.md) |
 
 ## Objective presets

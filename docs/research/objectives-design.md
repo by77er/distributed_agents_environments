@@ -4,8 +4,9 @@
 (steps 1, 2 and 4 of the [order of work](#order-of-work)): the declaration is `rollout_train.objectives`, the torch
 implementation `rollout_objectives` ([objectives in torch](../implementations/rollout-objectives.md),
 [objectives](../libraries/rollout-train/training.md#objectives)). Distillation is library code: the loop does not yet
-ask teachers to score its episodes. Judges are proposed. Each section says which of its parts are built. A design
-note: see [Design notes](README.md) for the others.
+ask teachers to score its episodes. Judges are built in part: a judge as a model slot that is never trained, scoring
+against an environment's rubric for the reward ([judging](../products/judging.md)); comparisons are proposed. Each
+section says which of its parts are built. A design note: see [Design notes](README.md) for the others.
 
 ## Goals
 
@@ -15,8 +16,8 @@ note: see [Design notes](README.md) for the others.
 - The objectives of the literature ship as **presets**: each one a family plus component values, cited, and tested
   against a direct transcription of the paper's formula. A run names a preset and overrides any component. *Built.*
 - Two more sources of supervision: **distillation** from a teacher's logprobs, on-policy and off-policy (not black-box
-  distillation from text alone), *built* as library code; and **LLM judges** as a source of rewards and preferences,
-  *proposed*.
+  distillation from text alone), *built* as library code; and **LLM judges** as a source of rewards (*built*, as a
+  model slot an environment declares) and preferences (*proposed*).
 - One definition serves every training provider. Local LoRA (low-rank adaptation) and full-weight trainers compute it in
   torch. Tinker runs it through its custom-loss path, or through its built-in loss when the composition is one Tinker
   has built in. *Built.*
@@ -263,7 +264,12 @@ channels of the run (`channels.NAME`), each bound for scoring like a judge.
 
 ## LLM judges
 
-*Proposed.*
+*Built in part*: a judge is a model slot an environment declares (`ModelSlot(trained=False, judge=True)`), bound by a
+run to a channel by name, giving a score against the environment's versioned rubric as the reward, asked once or
+several times with the scores averaged; validation refuses a judge bound to a channel serving the run's own
+checkpoints unless the run sets `self_judging`; judged environments are ordinary suite entries
+([judging](../products/judging.md)). Comparisons (and what they feed), asking both ways round, the cache, and the check
+of the judge's sampling settings are proposed.
 
 A judge is a channel serving a fixed model, or one following a checkpoint, with no training of its own. It is
 reached through the gateway, so every judge call is recorded, counted in spend, and visible in the monitor.
@@ -293,7 +299,7 @@ reached through the gateway, so every judge call is recorded, counted in spend, 
 2. **The preference family**: `dpo`, `ipo`, `simpo`, `kto`, `orpo`, with pairs from a group's best and worst
    episodes and from datasets. Use the adapter-off reference for LoRA. *Built.*
 3. **Judges**: judge channels, rubric scores and comparisons, and comparisons feeding preferences and group
-   rankings.
+   rankings. Rubric scores as rewards are *built* (a judge slot); comparisons are not.
 4. **Distillation**: prompt logprobs in `VllmEngine` (scoring through the engines and the gateway), on-policy
    distillation, MOPD with routing by teacher, and off-policy distillation with teacher datasets. *Built* as library
    code; asking teachers after each episode is wired where runs are built.

@@ -12,9 +12,8 @@ drives a **task** (the environment the agent acts in) with an **agent** (the pol
 it.
 
 Writing tasks, tools and agents is covered by [Write an environment](../../guide/README.md). This page covers the rest:
-the loop, programs, run specifications and runners. Agent products and long-lived conversational runs are built in the
-separate rollout-agents repository. The fields and signatures of every type named here are in the [API
-reference](../../guide/reference.md#rolloutharness).
+the loop, programs, run specifications and runners. The fields and signatures of every type named here are in the
+[API reference](../../guide/reference.md#rolloutharness).
 
 | Page | Covers |
 |---|---|
@@ -68,7 +67,7 @@ A run names its program with a [`ProgramReference`](../../guide/reference.md#pro
 | `resolve(name)` | get the class a name refers to: registered, or imported |
 | `instantiate(reference)` | create the program. A task, an agent or a program is constructed with its parameters, or with no arguments when they are `None`. |
 | `with_row(reference, row)` | get the same program for another row of parameters. For the loop, the row replaces the task's parameters. |
-| `bind(reference, channel)` | get a `RunBinding` that serves every model slot from one recorded [channel](../rollout-train/channels.md), each import from the tool set registered under the import's name unless `tools` says otherwise, and each kind of sandbox from the pool registered under the kind's name unless `pools` says otherwise |
+| `bind(reference, channel)` | get a `RunBinding` that serves each model slot from a recorded [channel](../rollout-train/channels.md) (`channel`, unless `slots` names another for the slot; recorded as trained or not, as the slot declares), each import from the tool set registered under the import's name unless `tools` says otherwise, and each kind of sandbox from the pool registered under the kind's name unless `pools` says otherwise |
 
 ## Run specifications
 
@@ -80,7 +79,7 @@ what task and agent code must not: which model serves a slot, how it samples, wh
 | [`RunBinding`](../../guide/reference.md#runbinding) | how each model slot and each import is served, and which pool serves each kind of sandbox |
 | [`ModelBinding`](../../guide/reference.md#modelbinding) | exactly one of `direct` and `recorded` |
 | [`DirectModel`](../../guide/reference.md#directmodel) | a provider's API. `provider` is the key of an endpoint factory registered with the runner. Nothing is recorded. |
-| [`RecordedModel`](../../guide/reference.md#recordedmodel) | a channel served through the [gateway](../rollout-train/gateway.md), which records every sample |
+| [`RecordedModel`](../../guide/reference.md#recordedmodel) | a channel served through the [gateway](../rollout-train/gateway.md), which records every sample; `trained` says whether its turns may be trained on (the slot's `ModelSlot.trained`) |
 | [`SamplingParameters`](../../guide/reference.md#samplingparameters) | how a bound model samples. It belongs to bindings; task and agent code cannot set it. |
 | [`ToolBinding`](../../guide/reference.md#toolbinding) | exactly one of `local` (a tool set registered with the runner) and `url` (a tool set served over HTTP, [tools](../../guide/tools.md#serving-a-tool-set-over-http)) |
 | [`PoolBinding`](../../guide/reference.md#poolbinding) | exactly one of `local` (a pool registered with the runner) and `url` (a pool served over HTTP, [sandboxes](sandboxes.md#over-http)) |
@@ -95,8 +94,8 @@ Code written against them holds any implementation:
 | `LocalRunner(...)` | `rollout.local` | Runs each program as a task on the current asyncio loop. Nothing persists: a process crash loses its runs. |
 
 It takes `providers` (endpoint factories for direct bindings, by provider name), `tool_sets` (for local tool
-bindings, by name), `pools` (for local pool bindings, by name), `blobs`, `recorder`
-(serves recorded bindings) and `hooks`.
+bindings, by name), `pools` (for local pool bindings, by name), `blobs`, `gateway` (serves recorded bindings: a
+`RecordedEndpoints`, such as the [gateway](../rollout-train/gateway.md)'s endpoints) and `hooks`.
 
 What the protocols guarantee:
 
@@ -120,9 +119,10 @@ A `LocalRunHandle` also has `context`, the run's `LocalRunContext`.
 |---|---|
 | A hook returns an observation that breaks the validation rules | `run.failed` with class `invalid_observation`; `RunOutcome.failure_class` is `RunFailureClass.INVALID_OBSERVATION` |
 | Any other exception leaves the program: a hook raised (`setup` included), the agent returned a message that is not from the assistant, an endpoint error went unhandled | `run.failed` with class `task_error` and detail `ExceptionType: message`; `RunFailureClass.TASK_ERROR` |
+| A sandbox cannot be acquired: its pool stays full for `ACQUIRE_SECONDS`, refuses the key (`LeaseRefused`), or has lost its sandbox (`SandboxLost`) | `run.failed` with class `task_error`, before the program starts ([sandboxes](sandboxes.md#the-runner)) |
 | A `@tool` body raises or times out, its arguments do not validate, or the model calls a tool that does not exist | no failure: the model receives an error result ([tools](../../guide/tools.md#tool-errors-are-observations)) |
 | An imported tool set raises | no failure: the effect completes as `failed` and the model receives an error result |
-| A binding leaves a model slot or an import unserved | `LocalRunner.start` raises `ValueError` |
+| A binding leaves a model slot, an import or a kind of sandbox unserved | `LocalRunner.start` raises `ValueError` |
 | The process crashes | its runs are lost; an episode runner's episodes are open again in the [ledger](../rollout-train/checkpoints.md#the-ledger), and are played again |
 
 `teardown` has run by the time a run fails or is cancelled.

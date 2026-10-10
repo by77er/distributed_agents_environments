@@ -6,12 +6,13 @@
 //   {"id": 2, "op": "observe", "bot": "ada"}         what ada sees, her messages, her last action's result; asked
 //                                                     again before the next thaw, it answers the same
 //   {"id": 3, "op": "act", "bot": "ada", "action": {"name": "mine", "x": 1, "y": -58, "z": 4}}
-//   {"id": 4, "op": "busy"}                           which bots are still acting, and which were hurt since the thaw
-//   {"id": 4, "op": "unloaded"}                       which bots do not yet hold the chunks around them
-//   {"id": 5, "op": "freeze"}                         stop every action (results are kept) and pause physics
-//   {"id": 6, "op": "thaw"}                           resume physics, before actions start; the messages and deaths
+//   {"id": 4, "op": "busy"}                           which bots are still acting, which were hurt since the thaw,
+//                                                     and which are threatened
+//   {"id": 5, "op": "unloaded"}                       which bots do not yet hold the chunks around them
+//   {"id": 6, "op": "freeze"}                         stop every action (results are kept) and pause physics
+//   {"id": 7, "op": "thaw"}                           resume physics, before actions start; the messages and deaths
 //                                                     that observations have told are dropped
-//   {"id": 7, "op": "quit"}
+//   {"id": 8, "op": "quit"}
 //
 // Messages reach an agent only from its teammates: system messages (someone joining, deaths, server notices) and
 // players outside the team never do, whatever they say. This is by construction, not by asking the model to ignore

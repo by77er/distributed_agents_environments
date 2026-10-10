@@ -1,7 +1,7 @@
 # Where sandboxes run
 
-**Status: built.** A pool served from a pod of its own on Kubernetes, reached through the claiming interface. A design
-note: see [Design notes](README.md) for the others.
+**Status: built.** A pool served from a pod of its own on Kubernetes, reached through the claiming interface, and a
+kind served from a run's RunPod host pods (`on_pods`). A design note: see [Design notes](README.md) for the others.
 
 A run and its sandboxes are separate systems. A run reaches a sandbox only through the claiming interface
 ([sandboxes](../libraries/rollout/sandboxes.md)): it acquires a lease under its episode's claim
@@ -53,7 +53,7 @@ episode, and acquires, operates and releases over HTTP exactly as it does in pro
 - A kind may also be served from the RunPod host pods a run leases (`on_pods`), on the CPUs and memory their engine and
   trainer leave, with the pool at `url` taking what they have no room for
   ([sandbox pools on a host pod](run-placement.md#sandbox-pools-on-a-host-pod-built)).
-- On one machine, without `[kubernetes]`, the pool is made in each run's driver as before; `[guards] runs_gib` keeps a
+- On one machine, without `[kubernetes]`, the pool is made in each run's driver; `[guards] runs_gib` keeps a
   runner from claiming episodes while the machine is short of memory.
 
 A pool served elsewhere runs the provider code its pod has (the platform's image), not that of a published version a

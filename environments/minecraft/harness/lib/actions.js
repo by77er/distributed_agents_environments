@@ -384,8 +384,8 @@ const ACTIONS = {
 
 // Walk to a goal. The pathfinder searches for a path for two seconds at most; a far goal, or one behind rock, takes
 // longer than that to find. It then gives the best start it has: the bot walks that, and the search begins again
-// from where it ends, for as long as each leg gets the bot somewhere.
-// Walk to `goal`, through what is in the way only if `dig` (the agent's choice: else around it, or not at all).
+// from where it ends, for as long as each leg gets the bot somewhere. It walks through what is in the way only if
+// `dig` (the agent's choice): else around it, breaking nothing but leaves, or not at all.
 async function travel (bot, goal, context, dig = false) {
   bot.pathfinder.setMovements(dig ? bot.movements.digging : bot.movements.walking)
   const unless = dig ? '' : ' without digging (say dig to dig through what is in the way)'

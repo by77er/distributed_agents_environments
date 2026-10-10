@@ -2,7 +2,7 @@
 on.
 
 - `environment`: the tasks as rows, and how a start is drawn
-  (`rollout train PROFILE minecraft_team.environment:environment`).
+  (`rollout train minecraft_team.environment:environment --preset minecraft-one-gpu`).
 - `episode`: the episode program: a model slot for each agent, lockstep turns, one shared reward, one world.
 - `prompts`: what agents read and call: the system prompt, observations as text, the actions as tools.
 - `limits`: the limits the prompts state and the harness keeps (`limits.json`, which both read).

@@ -5,7 +5,8 @@ engine hosts, published environments, runs submitted as Ray jobs, the New run fo
 placement (a placement group, and Kueue's admission on Kubernetes), the ledger service, and RunPod's pods leased by
 runs ([RunPod pods as providers](runpod-providers.md)) are built ([the cluster config](../guide/cluster.md),
 [the monitor](../libraries/rollout-train/monitor.md#launching-a-run),
-[launching runs](../libraries/rollout-train/launching.md)); the environment worker is not. A design note: see [Design notes](README.md) for the others.
+[launching runs](../libraries/rollout-train/launching.md)); the environment worker is not. A design note: see
+[Design notes](README.md) for the others.
 
 A design, to be carried out in the sequence of commits at its end. It removes profiles and every path that runs
 without Ray, and describes what replaces them: one config per cluster, a run's own settings (with presets), inference
@@ -1480,8 +1481,8 @@ The user settled the design's open questions on 2026-10-04:
   at once by a Ray placement group inside the run's Ray cluster, and admitted whole by Kueue on Kubernetes, which
   queues a RayJob until its total request fits. So two runs never deadlock holding half of what each needs.
   *Built*: each provider's and trainer's `allocation` (its kind's unless said) and a metered one's `concurrency`,
-  reported in the offers; capacity counts the scheduled parts, and the spend estimate the metered ones. The gang is
-  not built.
+  reported in the offers; capacity counts the scheduled parts, and the spend estimate the metered ones; and the gang
+  ([as built](#as-built-a-runs-gang)).
 - **A run's engines are its own.** Engines serve one run: its trained channel's window of `max_lag + 1` adapters, its
   channels that follow its own snapshots, and evals of its own checkpoints. Runs never share an inference server's
   throughput, so one run's speed, staleness and failures never depend on another's, and a run is the unit of

@@ -145,9 +145,15 @@ runs, which a test calls on a `Run` built directly:
 3. **What it claims** (`Run.start`): first the run's placement group, reserved whole ([what a run
    needs](#what-a-run-needs)); then the pods its RunPod providers give it (`rollout_train.pods.leasing.Pods`: warm ones
    taken, others started, each waited for until its beat says it is ready for the run, or deleted and the run failed
-   past its provider's `start_timeout`), renewed every 30 seconds and released warm on the way out
-   ([GPU pods on RunPod](../../deploy/providers.md#gpu-pods-on-runpod)); its blobs then go to the store those providers
-   name. Then in the group, as actors the job owns, so they go with it:
+   past its provider's `start_timeout`), renewed every 30 seconds, what they cost counted toward its `limits.spend`, and
+   released warm on the way out ([GPU pods on RunPod](../../deploy/providers.md#gpu-pods-on-runpod)). A renewal that
+   fails (the ledger or RunPod not answering) is logged and tried again at the next, since a lease goes stale only after
+   5 minutes; a lease taken from the run (a reaper found it stale) ends the run failed (`LeaseLost`). A host pod whose
+   provider lists kinds of sandboxes the environment declares is given, in its lease, what it needs to serve them (their
+   sources: the providers' settings, their projects' code packed into the pods' store, and pins of everything else,
+   `rollout_train.pods.sources`). A `runpod-trainer` with a pod of its own is not claimed now: its pod is leased once
+   the first group to train on has played (`LeasedTrainer`). Its blobs then go to the store those providers name. Then
+   in the group, as actors the job owns, so they go with it:
    - each channel on a `vllm` provider: an engine host per replica (`run/RUN/engine/CHANNEL/N`,
      [engine hosts](channels.md#engine-hosts)), bound to the run's channel, asking for one CPU and the provider's GPUs
      per replica (half of them where the trainer is colocated with them) in its bundle, started from the model's
@@ -160,8 +166,8 @@ runs, which a test calls on a `Run` built directly:
      full weights, or an adapter over them, those weights fetched here), the trainer settings it takes, the objective
      the settings resolve to, and Tinker's project where the config names one. `TrainerClient` is the `Trainer` the
      loop steps over the actor. A `runpod-trainer`'s steps go to the training service of the pod the run holds for
-     them (`RemoteTrainer`, reached at the address its lease says, checked by its identity), and it asks Ray for
-     nothing.
+     them (its own, or the host pod its `colocate_with` names: `RemoteTrainer`, reached at the address its lease says,
+     checked by its identity), and it asks Ray for nothing.
 
    While the group or any of these waits for Ray, the driver beats as `run/RUN` (kind `run`, with what it waits for:
    each part, what it asked for, and an actor's state where Ray says) and notes it on its launch (`waits for
@@ -178,10 +184,13 @@ runs, which a test calls on a `Run` built directly:
    (`trainer.segment_tokens`, else the trainer's in the config).
 5. **The runner.** An episode runner in the driver's process (`run/RUN`), with `episodes_at_once` places, over a
    runner whose harnesses reach the gateway on this node (a free port on `127.0.0.1`); a pool of each kind of sandbox
-   the environment's programs declare, from the cluster's `[sandboxes.KIND]`: one with a `url` is reached there, and
-   any other is made here (its provider made with the run's directory, `size` and its settings; named `KIND@RUN`; its
-   leases beside the ledger, with a keeper); the tool sets of the cluster's `[tools]`; the memory guards of `[guards]`;
-   the monitor's feed in the run's directory.
+   the environment's programs declare, from the cluster's `[sandboxes.KIND]`: one with `on_pods` is the pools the run's
+   pods serve, as one (`PodPools`, named `KIND@RUN`, with a keeper; the pool at its `url`, if any, takes what they have
+   no room for), one with only a `url` is reached there, and any other is made here (its provider made with the run's
+   directory, `size` and its settings; named `KIND@RUN`; its leases beside the ledger, with a keeper); the tool sets of
+   the cluster's `[tools]`; the memory guards of `[guards]`; the monitor's feed in the run's directory. Where no pod of
+   the run's serves a kind and no `url` does, the run says so in its beat and on its launch, and once none has for 30
+   minutes it ends failed (`SandboxesUnserved`).
 6. **The loop of its kind**: `train`, `evaluate`, `imitate` or `check` ([training](training.md), [evals](evals.md),
    [datasets](datasets.md#a-step-on-a-dataset), [checking an environment](rollouts.md#checking-an-environment)), given
    what was built. The trained channel's files are made by the bridges from the trainer's format to what the channel's
@@ -191,9 +200,13 @@ runs, which a test calls on a `Run` built directly:
 7. **The way out**: what it started is stopped in reverse, the actors ended, and the launch noted `ended`, `failed`
    (with why) or `stopped`.
 
-An eval with `limits.spend` is bounded by it: once what the eval and its parts spent on hosted APIs reaches the limit
-(each turn's `spend`, over what the eval's earlier starts recorded), the gateway samples no more on them for it, and
-the driver ends it (`SpendReached`): the eval and its parts end `failed`, saying what was spent and the limit.
+A run with `limits.spend` (a training run, an eval or an imitate run) is bounded by it: once what it spent reaches the
+limit (its turns on hosted APIs, an eval's with its parts', each turn's `spend` over what its earlier starts recorded,
+and its pods' hours at their price, counted at each renewal), the gateway samples no more on hosted APIs for it, and
+the driver ends it (`SpendReached`). A run with `limits.hours` ends once this start of it has run that long
+(`HoursReached`); on Kubernetes its RayJob's `activeDeadlineSeconds` stops it half an hour after that in any case.
+Either ends the run stopped, saying why, and the parts it played (an eval's) failed with the same reason; its pods are
+released.
 
 The run's directory is `[scratch]/runs/RUN` on the driver's node: the monitor's feed, the checkpoints in use, fetched
 bases. Its start records, beside what the loop records: the environment (and the published version), the blob store,
@@ -221,8 +234,10 @@ Tinker ask the run's Ray cluster for nothing, nor does a trainer on RunPod's pod
 Kueue's quota.
 
 A run's sandboxes are not among its parts. It reaches them only through the claiming interface: what a pool's
-sandboxes run and hold is the pool's, scheduled and accounted by whatever runs it (on Kubernetes, the pool's own pod:
-[Where sandboxes run](../../research/sandbox-placement.md)).
+sandboxes run and hold is the pool's, scheduled and accounted by whatever runs it (on Kubernetes, the pool's own pod;
+on the host pods a run leases, the CPUs and memory their engine and trainer leave:
+[Where sandboxes run](../../research/sandbox-placement.md),
+[sandboxes on a host pod](../../deploy/providers.md#sandboxes-on-a-host-pod)).
 
 Each part's figure is measured, with room above it, on gridworld runs of Qwen3-0.6B on one card (a LoRA trainer
 sharing it with one engine host), with 8 episodes at once (18 minutes, sampled every 2 seconds) and with 32 (13
@@ -293,15 +308,19 @@ A started run's page says the same, with the store its newest start recorded (`w
 | Field | Holds |
 |---|---|
 | `cluster`, `kinds`, `submits` | The cluster's name, the kinds of run, and where jobs go (`ray` or `kubernetes`) |
-| `environments` | The cluster config's (`environment`, `python`: `platform` or `project`), then every published version beside the ledger (`environment` as `NAME@VERSION`, `name`, `source`, `commit`, `imported`, `sandboxes`); each with the renderer `families` runs and presets on it named for their trained channel |
-| `trainers` | Each trainer: `name`, `kind`, `produces`, `format`, `models`, `gpus`, `colocate_with`, `segment_tokens`, `cost`, `families` (the objective families it takes), `allocation` (`metered` or `scheduled`), `concurrency`, `weights` (`lora` or `full`: what it trains), `separate` (whether it trains apart from what samples its checkpoints: not a `runpod-trainer` on a host's pods), and its `settings` (each `key`, `types`, `default`, `changeable`) |
-| `inference` | Each provider: `name`, `kind`, `gpus`, `replicas`, `allocation`, `concurrency`, `capabilities`, `weights` (those it serves a run's checkpoints as: `lora` with adapters, `full` with full-weight reload), and its `models` (each `model`, `context`, `base`, `max_lora_rank`, `cost`, the `renderers` that say they render it, or the model it was quantized from, and their `families`; none for a provider that renders messages itself) |
+| `environments` | The cluster config's (`environment`, `python`: `platform` or `project`), then every published version beside the ledger (`environment` as `NAME@VERSION`, `name`, `source`, `commit`, `imported`, `sandboxes`); each saying whether it is `published`, and with the renderer `families` runs and presets on it named for their trained channel |
+| `trainers` | Each trainer: `name`, `kind`, `produces`, `format`, `models`, `gpus`, `colocate_with`, `segment_tokens`, `cost`, `families` (the objective families it takes), `allocation` (`metered` or `scheduled`), `concurrency`, `weights` (`lora` or `full`: what it trains), `separate` (whether it trains apart from what samples its checkpoints: not a `runpod-trainer` on a host's pods), `pods` (below), and its `settings` (each `key`, `types`, `default`, `changeable`) |
+| `inference` | Each provider: `name`, `kind`, `gpus`, `replicas`, `allocation`, `concurrency`, `capabilities`, `weights` (those it serves a run's checkpoints as: `lora` with adapters, `full` with full-weight reload), its `models` (each `model`, `context`, `base`, `max_lora_rank`, `cost`, the `renderers` that say they render it, or the model it was quantized from, and their `families`; none for a provider that renders messages itself), and `pods` (below) |
 | `pairs` | Each trainer and provider: the `bridge` chain's names, or none and why it is `refused` (no bridge, or a provider that cannot serve the trainer's weights), and whether the two share one machine (`together`: the trainer's `colocate_with` names the provider) |
 | `sandboxes` | Each pool's `size` and `provider` |
 | `presets` | Each preset's newest version: `name`, `version`, `id`, `settings`, `note`, `saved` |
 | `capacity` | The GPUs the machines that beat now have, and those idle (under a twentieth of their memory used), by machine; none where no beat says |
 | `objectives` | The objective's `families`, its `presets` (each `name`, `family`, `source`, `says` and its family's `components` with their values) and the `components` (each `key`, `types`, `families` that accept it, `changeable`, `says`, `choices`, `least`, `above`) |
 | `schema` | The keys a training run takes, each `key`, `types`, `default`, `changeable`, `says`, `choices`, `least` |
+
+A RunPod provider's `pods` say what its pods are, as the form shows them: `gpu` (the first of its `gpu_types`),
+`gpu_types`, `gpu_count`, the hourly `price` a pod is reckoned at, `cloud`, `regions`, `max_pods` and `idle_stop`; a
+trainer on a host's pods says the host's. Any other provider's `pods` are none.
 
 `examined(settings, cluster, ledger)` is `checked` with what it found beside the findings: the environment's facts, one
 step's estimated spend on the run's metered parts (`spend_of`), what the run trains (`weights_of`) and where its

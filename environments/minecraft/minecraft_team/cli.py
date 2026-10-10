@@ -1,5 +1,6 @@
-"""`minecraft-team server [--seed N]`: a temporary server to look at (join with any client; Ctrl-C stops and
-deletes it). Training is `rollout train PROFILE minecraft_team.environment:environment`."""
+"""`minecraft-team server [--seed N] [--keep]`: a temporary server to look at (join with any client; Ctrl-C stops it
+and deletes its directory, unless `--keep`). Training is `rollout train minecraft_team.environment:environment
+--preset minecraft-one-gpu`."""
 
 import argparse
 import asyncio

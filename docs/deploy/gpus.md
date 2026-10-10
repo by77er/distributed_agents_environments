@@ -1,6 +1,6 @@
 # Share GPUs
 
-How the platform's pods get GPUs: whole cards for Ray workers, and time-slicing when several pods share one card.
+How the platform's pods get GPUs: whole cards for runs' pods, and time-slicing when several pods share one card.
 This page is for whoever sets up GPU nodes and sizes the chart's GPU workers.
 
 **Read first:** [Prepare a Kubernetes cluster](kubernetes.md). **Next:** [Postgres and S3](stores.md).
@@ -22,8 +22,8 @@ GPU](../libraries/rollout-train/channels.md#share-a-gpu-between-engines-and-the-
 
 ## Time-slicing a card between pods
 
-When two pods must use one card at once (for example, a run's trainer and a shared inference pool's engine, on a node
-with one GPU), the device plugin can advertise each card as several `nvidia.com/gpu` with time-slicing. Write the
+When two pods must use one card at once (for example, a run's head pod and the long-lived Ray cluster's GPU worker, on
+a node with one GPU), the device plugin can advertise each card as several `nvidia.com/gpu` with time-slicing. Write the
 plugin's configuration:
 
 ```yaml title="time-slicing.yaml"

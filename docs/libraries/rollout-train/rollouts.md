@@ -41,7 +41,7 @@ nothing more.
 |---|---|---|
 | `runs/RUN/claims` | `GROUP/EPISODE/ATTEMPT` | the runner that plays that attempt, the number of its fence, when, and the run that plays it (`run_id`) |
 | `runs/RUN/episodes` | `GROUP/EPISODE` | the episode's [`Record`](../../guide/reference.md#record), once it has ended, appended under [the episode's fence](#each-episodes-fence) |
-| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt cut short, and why: its runner closed, the claim lapsed while its runner was stopped, a sandbox of its was lost (its pool ended it or was started again), another took the episode's fence before it was recorded, or its pool released its sandboxes |
+| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt cut short, and why: its runner closed, the claim lapsed while its runner was stopped, a sandbox of its was lost (its pool ended it or was started again, or the pod that served it is no longer the run's), another took the episode's fence before it was recorded, or its pool released its sandboxes |
 | `runs/RUN/adopted` | `GROUP/EPISODE/ATTEMPT/FENCE` | an attempt whose run its runner, started again, took up under its new fence, appended under the episode's fence |
 
 - **First append wins.** A claim is an append to a key no one has written, so two runners never play one attempt:
@@ -139,8 +139,10 @@ claims it held lapse, and their episodes are open again for any runner with room
   going. The attempt is noted in `interrupted` and the run cancelled; a pool beside the ledger refuses it its
   sandboxes and releases them.
 - **Played again:** a run that fails because a sandbox of its is gone (`SandboxLost`: its pool ended its lease, was
-  started again, or did not outlive the runner), adopted or not, is noted in `interrupted`, and the episode is played
-  as a new attempt; its third such attempt is recorded failed, saying its sandbox was lost three times running.
+  started again, or did not outlive the runner, or the pod that served it is no longer the run's: [sandboxes on a host
+  pod](../../deploy/providers.md#sandboxes-on-a-host-pod)), adopted or not, is noted in `interrupted`, and the episode
+  is played as a new attempt; its third such attempt is recorded failed, saying its sandbox was lost three times
+  running.
 
 `serve()` runs until cancelled; `async with playing(runner):` serves while a block runs.
 [`episodes_of(ledger, blobs, run, group, count)`](../../guide/reference.md#episodes_of) waits until all `count`
@@ -182,8 +184,11 @@ plays, while Ray has not given the run what it asked for, its driver beats under
 it waits for, and its `demand` and `asked` (`reserved` none until its placement group is reserved). An engine host (kind `engines`) beats with the run it follows, its machine, and
 what each channel's engines serve ([what a channel should serve](channels.md#what-a-channel-should-serve)); a gateway
 replica (kind `gateway`) with where it listens, its machine and its channels ([the gateway](gateway.md#running-it)); a
-pool on a machine of its own (kind `pool`) with how full it is. The
-monitor's [Machines page](monitor.md#the-machines) shows each by its kind.
+pool on a machine of its own (kind `pool`) with how full it is. A pod on RunPod says besides what it is (`pod`: its
+name, identity, role, whether it is ready, and the run it is ready for): an inference or host pod beats as an engine
+host, a training pod with kind `trainer` ([GPU pods on RunPod](../../deploy/providers.md#gpu-pods-on-runpod)). The
+monitor's [Machines page](monitor.md#the-machines) shows runners, waiting runs, pools, engine hosts and gateways, each
+by its kind.
 
 ## The record
 

@@ -20,10 +20,11 @@ pages are the reference; a design note never overrides them.
   servers and episodes, the Java and Node settings chosen from it, and why several worlds do not share one server.
 - [Where sandboxes run](sandbox-placement.md), **built**: sandboxes as a system of their own, reached only through
   the claiming interface; the options for where a pool's worlds run, and the choice: a pool served from a pod of its
-  own on Kubernetes, which a run's demand does not count.
-- [Where a run runs](run-placement.md), **proposed**: a run's driver, gateway, runners, environment and sandbox pools
-  on the GPU pod it leases, in a Ray cluster of its own there, with the cluster admitting, watching and storing; the
-  internet path measured on a live run, the options, phases and what each costs.
+  own on Kubernetes, which a run's demand does not count, and kinds served from a run's RunPod host pods.
+- [Where a run runs](run-placement.md), **sandbox pools on host pods built, the rest proposed**: a run's driver,
+  gateway, runners, environment and sandbox pools on the GPU pod it leases, in a Ray cluster of its own there, with
+  the cluster admitting, watching and storing; the internet path measured on a live run, the options, phases and what
+  each costs.
 - [Cleanup inventory](cleanup-inventory.md), **in progress**: what to remove and what to factor out, ranked, and the
   order of the removal commits.
 - [Scaling models and topologies](scaling-models-and-topologies.md), **trainer on several GPUs built, the rest
@@ -35,7 +36,8 @@ pages are the reference; a design note never overrides them.
 
 - [Objectives design](objectives-design.md), **in progress**: objectives as families and components, the
   literature's losses as presets, distillation from a teacher's logprobs, and LLM judges. The composable objective,
-  the preference family and the distillation family are built; judges are proposed.
+  the preference family and the distillation family are built; judges are built in part (a judge slot scoring
+  against an environment's rubric), and comparisons are proposed.
 - [The checkpoint graph](policy-dag.md), **proposed**: the graph of checkpoints with what trains and serves them,
   distillation, shared trainers and their queues. The monitor's view of the graph that exists is built.
 - [Curricula](curricula.md), **proposed**: building training curricula and frozen evaluation suites from a run's data.

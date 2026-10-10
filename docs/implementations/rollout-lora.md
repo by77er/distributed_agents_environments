@@ -122,11 +122,11 @@ whose parent is the checkpoint the step began from.
 
 ### Keeping the state after the step
 
-Told a blob store (`keep_in`, as a training pod tells a trainer whose processes are kept: `rollout_train.trainer.Keeps`),
-the processes write `weights/`, `held.txt` and `minibatches.jsonl` before they answer, and keep the full state in the
-blob store after: the pod keeps the weights and answers, and the run serves them while the state is being kept
-([checkpoints](../libraries/rollout-train/checkpoints.md#a-training-pods-checkpoints)). Every process copies the state
-off the GPU at the end of the step, in the same order:
+Told a blob store (`keep_in`, as a training pod tells a trainer whose processes are kept:
+`rollout_train.trainer.Keeps`), the processes write `weights/`, `held.txt` and `minibatches.jsonl` before they answer,
+and keep the full state in the blob store after: the pod keeps the weights and answers, and the run serves them while
+the state is being kept ([checkpoints](../libraries/rollout-train/checkpoints.md#a-training-pods-checkpoints)). Every
+process copies the state off the GPU at the end of the step, in the same order:
 
 | Weights | The snapshot |
 |---|---|
@@ -189,9 +189,9 @@ On more than one GPU of a machine, each process holds its shard of the policy an
 | Files | Rank 0 writes the step's files from tensors every process gathers in the same order: the adapter in PEFT's layout in bfloat16 or the full weights' serving copy; `state/master.safetensors` and `state/optimizer.pt` for an adapter and `state/shards/` (every process writes its shards) for full weights, every `state_every` steps since the processes loaded; `state/minibatches.jsonl`, and `state/held.txt` where the processes are kept, every step. The full state is the same files on one GPU as on several, kept after the step as one process keeps it ([keeping the state](#keeping-the-state-after-the-step)) |
 | Failures | A step shared among processes does not leave out a minibatch that runs out of memory: the step fails |
 
-What each GPU needs is estimated by `rollout_train.memory` (the check's `memory` rule, [validation](../guide/cluster.md#validation)),
-in GiB a GPU for a 9B and a 4B model of Qwen3.5's shapes, segments (and packs) of 8,192 tokens (the same on 80 and 96 GB cards;
-"no" where it is more than the card):
+What each GPU needs is estimated by `rollout_train.memory` (the check's `memory` rule,
+[validation](../guide/cluster.md#validation)), in GiB a GPU for a 9B and a 4B model of Qwen3.5's shapes, segments (and
+packs) of 8,192 tokens (the same on 80 and 96 GB cards; "no" where it is more than the card):
 
 | Model | Weights | 1 GPU | 2 | 4 | 8 |
 |---|---|---|---|---|---|
@@ -203,19 +203,19 @@ in GiB a GPU for a 9B and a 4B model of Qwen3.5's shapes, segments (and packs) o
 ## The memory bound
 
 Each process may use the GPU memory that is free when it starts, less `MEMORY_MARGIN`, and no more
-(`torch.cuda.set_per_process_memory_fraction`). Some drivers let a process spill past the card into system memory,
-where a step crawls instead of failing; the bound turns that into an out-of-memory error. On one process, a minibatch
-that runs out of memory is dropped whole, its gradient cleared, and counted in `minibatches_out_of_memory`; the pass
-goes on with the next. Full weights are sharded with FSDP2 on one GPU too, and a backward pass that ends part way leaves
+(`torch.cuda.set_per_process_memory_fraction`). Some drivers let a process spill past the card into system memory, where
+a step crawls instead of failing; the bound turns that into an out-of-memory error. On one process, a minibatch that
+runs out of memory is dropped whole, its gradient cleared, and counted in `minibatches_out_of_memory`; the pass goes on
+with the next. Full weights are sharded with FSDP2 on one GPU too, and a backward pass that ends part way leaves
 gradients on the weights it gathered that it never reduced to their shards (the output layer's, the last norm's, a
-layer's half done): the policy's `recover` drops them and resets FSDP's state of the pass (`reset_iter_state`), else
-the next minibatch would add them to its own. A pack of the step's start that runs out of memory runs again a segment at a time, and an item with a
-segment that runs out alone is left out and counted in `start_out_of_memory`. Segments longer than `segment_tokens`
-are left out before the pass and counted in `segments_too_long`. A pack holds at most `pack_tokens` (by default
-`segment_tokens`) row tokens, and its activations are those of a segment as long as its row whatever prefixes it shares
-(nothing is copied for a branch), so a pass needs about the memory of the longest segment alone; the memory estimate
-(`rollout_train.memory`, [several GPUs](#several-gpus)) counts activations for the larger of the two, and for a model
-with linear attention a state for each run of a pack beside each chunk's.
+layer's half done): the policy's `recover` drops them and resets FSDP's state of the pass (`reset_iter_state`), else the
+next minibatch would add them to its own. A pack of the step's start that runs out of memory runs again a segment at a
+time, and an item with a segment that runs out alone is left out and counted in `start_out_of_memory`. Segments longer
+than `segment_tokens` are left out before the pass and counted in `segments_too_long`. A pack holds at most
+`pack_tokens` (by default `segment_tokens`) row tokens, and its activations are those of a segment as long as its row
+whatever prefixes it shares (nothing is copied for a branch), so a pass needs about the memory of the longest segment
+alone; the memory estimate (`rollout_train.memory`, [several GPUs](#several-gpus)) counts activations for the larger of
+the two, and for a model with linear attention a state for each run of a pack beside each chunk's.
 
 ## The policy
 
@@ -227,7 +227,7 @@ with linear attention a state for each run of a pack beside each chunk's.
 | Entropy | `Policy.logprobs_and_entropy`: each sampled position's entropy beside its logprob, from the same chunk of logits |
 | Left off the GPU | A vision tower is dropped. The token embedding table is memory-mapped from the checkpoint file and only a segment's rows are read |
 | Output layer | Run only at the sampled positions, `LOGIT_ROWS` at a time, each chunk recomputed in the backward pass. Peak memory is one chunk's logits, whatever the share of sampled tokens |
-| Elementwise operations | `rollout_lora.fused.fuse`: on a GPU, Qwen3.5's zero-centred norms (each layer's two, attention's query and key norms, the last norm), its gated norms and its MLPs' `silu(gate) * up` each run as one Triton kernel, forward and backward, instead of half a dozen eager kernels each reading and writing the whole activation. They round where the eager operations round: a norm's output differs from eager in about one element in a hundred thousand, by one bf16 unit in the last place, and `silu(gate) * up`'s not at all. A norm whose weight trains keeps its eager forward. On an RTX 5080 a 9B gradient pass takes about a sixth less time |
+| Elementwise operations | `rollout_lora.fused.fuse`: on a GPU, Qwen3.5's zero-centred norms (each layer's two, attention's query and key norms, the last norm), its gated norms and its MLPs' `silu(gate) * up` each run as one Triton kernel, forward and backward, instead of half a dozen eager kernels each reading and writing the whole activation. They round where the eager operations round: a norm's output differs from eager in about one element in a hundred thousand, by one bf16 unit in the last place, and `silu(gate) * up`'s not at all. On an RTX 5080 a 9B gradient pass takes about a sixth less time, and its peak memory about 0.7 GiB less. `FullPolicy` keeps the eager operations: its norms' weights train, and these kernels give no weight a gradient |
 | Activations | Gradient checkpointing over the transformer |
 | Packs | `Policy.packed`: every segment of a pack in one pass, the logprobs each has alone ([packs](#packs)) |
 
@@ -316,27 +316,29 @@ alike. A step in a fresh process took 9 s, the kept process's first 7.3 s, its n
 
 `tests/rollout_lora/` needs torch and is collected only when it is installed. It covers the adapter's file format and
 the adapter switched off (the model it was added to), and the settings a trainer takes between steps (its objective's
-numbers among them), and how far a step has got as the processes say it, on one process and on two; the step itself
-is [`rollout_objectives`'](rollout-objectives.md#tests). `test_merge.py` covers
-merging on the CPU. `test_small_on_gpu.py` runs only when asked
-(`-m live`), with nothing else on the card: on Qwen3-0.6B (`ROLLOUT_SMALL_MODEL` names another) it trains an
-adapter, takes steps of every weight (its serving copy and full state written, its next step from memory, a step from
-its weights alone), and checks that a merged adapter gives what the adapter gave (an adapter
-that moved logprobs by 2.6 on average, merged, is 0.06 from it: bfloat16 rounds part of a small update away). Its
-steps write gigabytes, so give it `--basetemp` on disk, not `/tmp`.
+numbers among them), and how far a step has got as the processes say it, on one process and on two; the step itself is
+[`rollout_objectives`'](rollout-objectives.md#tests). On a GPU, `test_layers.py` also checks a 4-bit weight dequantized
+by the kernel against torch's operations, an adapter's product in bfloat16 activations, and matmuls accumulating in fp16
+against bf16's distance from the exact product; `test_fused.py` checks the fused norms, gated norms and
+`silu(gate) * up` against the eager operations, forward and backward. `test_merge.py` covers merging on the CPU.
+`test_small_on_gpu.py` runs only when asked (`-m live`), with nothing else on the card: on Qwen3-0.6B
+(`ROLLOUT_SMALL_MODEL` names another) it trains an adapter, takes steps of every weight (its serving copy and full state
+written, its next step from memory, a step from its weights alone), and checks that a merged adapter gives what the
+adapter gave (an adapter that moved logprobs by 2.6 on average, merged, is 0.06 from it: bfloat16 rounds part of a small
+update away). Its steps write gigabytes, so give it `--basetemp` on disk, not `/tmp`.
 
-`test_packing.py` takes tiny random Qwen3, Llama and Qwen3.5 models on the CPU: a pack gives each segment the
-logprobs, entropies, reference logprobs and logprobs of given tokens it has alone, its prefix shared or not; changing
-one segment of a pack changes no other's (no attention, convolution or recurrent state crosses a boundary); the
-branches' block mask holds the blocks of the whole mask that FlexAttention's own would; a model with `dynamic` or
-`longrope` rotary scaling is not packed; on weights a step leaves alone, every minibatch's ratios are exactly 1 in
-bfloat16; a step in packs takes the losses, minibatches and gradients of a step one segment at a time for each objective family (a policy
-gradient with and without a KL to the reference and an entropy bonus, a segment ratio, a likelihood, pairs, labelled
-examples, both forms of distillation); the first minibatch's start folded into it is the start computed apart; and two
-processes (FSDP2 over gloo) step in packs, with shared prefixes, as one does. `test_packing_on_gpu.py` (`-m live`)
-takes Qwen3.5's packs on the GPU, where flash-linear-attention's kernels and FlexAttention run: logprobs and gradients
-against each segment alone, a step against one segment at a time, and every minibatch's ratios exactly 1 in bfloat16
-on weights a step leaves alone.
+`test_packing.py` takes tiny random Qwen3, Llama and Qwen3.5 models on the CPU: a pack gives each segment the logprobs,
+entropies, reference logprobs and logprobs of given tokens it has alone, its prefix shared or not; changing one segment
+of a pack changes no other's (no attention, convolution or recurrent state crosses a boundary); the branches' block mask
+holds the blocks of the whole mask that FlexAttention's own would; a model with `dynamic` or `longrope` rotary scaling
+is not packed; on weights a step leaves alone, every minibatch's ratios are exactly 1 in bfloat16; a step in packs takes
+the losses, minibatches and gradients of a step one segment at a time for each objective family (a policy gradient with
+and without a KL to the reference and an entropy bonus, a segment ratio, a likelihood, pairs, labelled examples, both
+forms of distillation); the first minibatch's start folded into it is the start computed apart; and two processes (FSDP2
+over gloo) step in packs, with shared prefixes, as one does. `test_packing_on_gpu.py` (`-m live`) takes Qwen3.5's packs
+on the GPU, where flash-linear-attention's kernels and FlexAttention run: logprobs and gradients against each segment
+alone, a step against one segment at a time, and every minibatch's ratios exactly 1 in bfloat16 on weights a step leaves
+alone.
 
 `test_sharded.py` takes the trainers' steps on one, two and three processes on the CPU (gloo) with a tiny random Qwen3,
 against the step on one: an adapter with its model sharded and whole, a step from files one process wrote, a

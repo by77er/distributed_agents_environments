@@ -18,8 +18,10 @@ gets a model) and the **episode** (the labelled trajectory that comes out).
 ## Building an environment
 
 An environment says how a situation is set up, what a player perceives, what it can do, how the world moves, and how
-it went. It is a package that depends on `rollout` and on nothing above it (`tests/test_layers.py` checks that), as
-[`environments/minecraft`](../products/minecraft-team.md) does. It chooses how much of the platform's loop to use:
+it went. It is a package that depends on `rollout` and on nothing of `rollout-train` or an implementation
+(`tests/test_layers.py` checks that), as [`environments/minecraft`](../products/minecraft-team.md) does; it may build on
+another environment it declares, as [`environments/minecraft-horizons`](../products/minecraft-horizons.md) builds on the
+Minecraft team. It chooses how much of the platform's loop to use:
 
 | Depth | You write | The platform provides |
 |---|---|---|
@@ -37,9 +39,11 @@ await run.emit("result", {"solved": True, "saturated": False, "duration": 3.5})
 `solved` and `saturated` (nothing was left to earn) are booleans; `duration` is in whatever the world counts. A
 curriculum and a tie-break read them; nothing else about the world is known to training.
 
-The environment's own infrastructure (game servers, sandboxes) is a **tool set**, imported by name. It runs in the
-process that runs episodes, or on machines of its own (`rollout tools module:factory`), and the program calls
-`run.tools` the same way.
+What a run needs for itself alone (a game server, a container) is a **sandbox**: the program declares it, the runner
+leases it from a pool before the program starts and releases it after, and the program reaches it as
+`run.sandbox(name)` ([sandboxes](../libraries/rollout/sandboxes.md)). What runs share (notes, a search service) is a
+**tool set**, imported by name. Either runs in the process that runs episodes or on machines of its own
+(`rollout pool`, `rollout tools`), and the program reaches it the same way.
 
 What a run trains on and an eval measures is an **environment**:
 
@@ -84,12 +88,12 @@ await publish("policy", makes, fetched, 3)  # served under its id, at depth 3; `
   training needs: every sampled token carries the weights version it was sampled at.
 - An **episode** has its labels, its outcome, its result, and for each model slot its trajectory: the segments of
   tokens the policy saw and continued, with the logprobs it sampled them at.
-- `rollout_train.train` is the loop most runs use: a curriculum over an environment picks rows, each start is played as a
-  group of episodes, and a step is taken over several groups at a time, while play goes on
+- `rollout_train.train` is the loop most runs use: a curriculum over an environment picks rows, each start is played as
+  a group of episodes, and a step is taken over several groups at a time, while play goes on
   ([training](../libraries/rollout-train/training.md)).
 - Watching: the ledger (each group, its claims and its episodes, the checkpoints), the runners' heartbeats (their
   machines, and what each channel serves and how fast), and each run's feed of the episodes playing now, on one page
-  (`rollout monitor RUN`).
+  (`rollout monitor`, over a ledger and every run in it).
 
 The same code serves when the runners are in this process and when they are on other machines: they share only the
 ledger and the blob store ([rollouts](../libraries/rollout-train/rollouts.md)).
@@ -97,9 +101,9 @@ ledger and the blob store ([rollouts](../libraries/rollout-train/rollouts.md)).
 ## Deploying
 
 A cluster config is a TOML file, written once per cluster, that names what it offers: inference providers (what samples
-a channel, and its models), trainers, sandbox pools, tool sets served elsewhere and environments
-([the cluster config](cluster.md)). A run's settings pick from it: the environment, the trainer, each channel's provider,
-model and token format, and the numbers each takes; a preset holds a set of them under a name.
+a channel, and its models), trainers, sandbox pools, tool sets served elsewhere and environments ([the cluster
+config](cluster.md)). A run's settings pick from it: the environment, the trainer, each channel's provider, model and
+token format, and the numbers each takes; a preset holds a set of them under a name.
 
 ```bash
 uv run rollout train minecraft_team.environment:environment --preset minecraft-one-gpu

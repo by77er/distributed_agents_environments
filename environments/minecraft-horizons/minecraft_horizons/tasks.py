@@ -69,7 +69,7 @@ PORTAL_ROOM = Setting(
 )
 """Inside a stronghold beside the end portal's frame, with eyes of ender to fill it."""
 END = Setting("end", "on the end's platform, armed", Start.END, Kit.END_READY, Hazards.EASY)
-"""Diamond armor and sword, a bow, arrows, blocks, food and a water bucket, the dragon alive."""
+"""Diamond armor, sword and pickaxe, a bow, arrows, blocks, a water bucket, bread and torches; the dragon alive."""
 
 SETTINGS: dict[str, Sequence[Setting]] = {
     "wood": (FRESH,),

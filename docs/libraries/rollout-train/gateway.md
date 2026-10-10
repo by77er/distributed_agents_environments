@@ -299,9 +299,10 @@ its gateway. Each samples the channel's model through the endpoint the provider 
   a minute, and at least the API's `retry-after`), up to six times. Credentials refused, a request rejected, or a
   context too long fail at once: the error reaches the program, and its episode ends failed with the reason.
 - **Spend.** The gateway keeps each run's total (`Spending`): what its earlier starts recorded, read once from the
-  ledger, and each turn it records. A cap (`Spending.cap`) bounds what some runs spend together: an eval and its parts
-  under the eval's `limits.spend`. Once reached, the gateway samples no more on hosted APIs for them, and the eval's
-  driver ends it, failed with the reason ([launching runs](launching.md#the-driver)).
+  ledger, each turn it records, and what the run's driver counts of its pods' hours. A cap (`Spending.cap`) bounds
+  what some runs spend together: a run under its `limits.spend`, an eval with its parts. Once reached, the gateway
+  samples no more on hosted APIs for them, and the run's driver ends the run, stopped with the reason
+  ([launching runs](launching.md#the-driver)).
 
 A turn's weights are chosen once, when it begins: both phases of its thinking ask for the same checkpoint. The turn
 records the checkpoint that served it (by id; the base model's name before the first checkpoint) and that
@@ -312,8 +313,8 @@ attempt is recorded.
 ## Running it
 
 A run's driver runs a gateway in its own process, over the run's channels ([launching runs](launching.md#the-driver)):
-its routed channels (engine hosts, servers at addresses), its channels with engines in the process (Tinker), and its
-channels on hosted APIs. Its
+its routed channels (engine hosts, servers at addresses, the pods it leases), its channels with engines in the process
+(Tinker), and its channels on hosted APIs. Its
 runner records through it with no HTTP in between, and serves it to harnesses on its node, at a free port on
 `127.0.0.1`; it signs keys with a secret of its own ([deploying](../../guide/deploying.md#the-gateway)). Replicas of the
 cluster's gateway serve the same code:
@@ -325,9 +326,9 @@ uv run rollout gateway --cluster --listen 0.0.0.0:8900     # a replica: start as
 `rollout gateway --cluster` serves a replica over the cluster config's ledger and blob store, with the keys
 `[gateway] keys_file` or `keys_env` names (else the environment's), and a `ChannelDirectory` of its providers
 (`ChannelDirectory.of`): every channel a run's start names on a provider whose servers answer vLLM's API at its
-endpoints or on a hosted API, a judge's channel or one that follows the trained channel among them. Replicas share
-nothing but the ledger and the blob store. A replica reads a hosted API's key from its environment (on Kubernetes,
-the Secret `providers`: [provider keys](../../deploy/helm.md#provider-keys)).
+endpoints, on RunPod's pods or on a hosted API, a judge's channel or one that follows the trained channel among them.
+Replicas share nothing but the ledger and the blob store. A replica reads a hosted API's key from its environment (on
+Kubernetes, the Secret `providers`: [provider keys](../../deploy/helm.md#provider-keys)).
 
 - **Behind a proxy.** A proxy in front of the replicas terminates TLS, checks its own credentials, and may serve them
   under a path of its own (`https://models.example/gw/v1`). The gateway builds no URL from a request. It trusts

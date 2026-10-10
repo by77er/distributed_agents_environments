@@ -1,8 +1,8 @@
 # Images
 
-`platform/` is the image the K3s cluster runs (Ray's pods, each run's RayJob, the gateway, the monitors), built in the
-cluster ([deploy/k3s](../k3s/README.md#images)). The other three are for GPU pods rented elsewhere (RunPod), each reached
-at a public TCP port over mutual TLS:
+`platform/` is the image the K3s cluster runs (Ray's pods, each run's RayJob, the sandbox pools, the gateway, the
+monitors, the ledger service), built in the cluster ([deploy/k3s](../k3s/README.md#images)). The other three are for
+GPU pods rented elsewhere (RunPod), each reached at a public TCP port over mutual TLS:
 
 | Image | Directory | What runs in it |
 |---|---|---|

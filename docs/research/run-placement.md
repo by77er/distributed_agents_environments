@@ -1,7 +1,8 @@
 # Where a run runs: in the cluster, or on its pod
 
 **Status: option 1 built; the rest proposed.** Sandbox pools on a run's host pods, played from the cluster, are built
-([Sandbox pools on a host pod](#sandbox-pools-on-a-host-pod-built)); hosting the run on its pod is proposed. The note
+([Sandbox pools on a host pod](#sandbox-pools-on-a-host-pod-built)), and so is phase 0's connection pool as large as
+the turns in flight; the rest of phase 0 and hosting the run on its pod are proposed. The note
 is read against main `e8e06d8`, and its figures are measured from the run `run_01M4745DD5B1NHNDGEA9RGT030`
 (`gridworld-9b-pro6000`). A design note: see [Design notes](README.md) for the others.
 
@@ -22,7 +23,7 @@ Code read for this note: `rollout_train.jobs`, `.loop`, `.ledger`, `.gateway` (`
 | Question | Recommendation |
 |---|---|
 | What costs most on the internet path now | Not latency. 41% of the run's episodes failed on it (27 of 66), every one because a turn was not served in three attempts, and 16% of turns were sampled more than once. A turn took 19.7 s at the median, of which about 1 s was spent outside the GPU's work on network round trips and recording |
-| What to do first | Make the remote path sound where it is (phase 0): a server that misses one look stays a server (main already lets a turn wait out a missed look instead of failing), the gateway's connection pool is as large as the turns it has in flight, the driver stops downloading a step's files, and the gateway stops reading a session's whole turn table for every turn. It is needed under any placement, since several pods will always sample each other's engines |
+| What to do first | Make the remote path sound where it is (phase 0): a server that misses one look stays a server (main already lets a turn wait out a missed look instead of failing), the gateway's connection pool is as large as the turns it has in flight (built), the driver stops downloading a step's files, and the gateway stops reading a session's whole turn table for every turn. It is needed under any placement, since several pods will always sample each other's engines |
 | What to move | The whole run: its driver (the loop), its gateway, its runners, the environment's code and its sandbox pools, in a Ray cluster of the run's own on its pod, as KubeRay gives it one at home today. Moving one role alone moves the hairpin elsewhere: a gateway on the pod with the ledger at home crosses the tunnel twice a turn instead of the internet twice a turn |
 | What stays in the cluster | Kueue's admission, the launch and a thin job that leases the pod and follows the run, the monitor, the ledger of record (Postgres), step-ca, the reaper, the cluster's gateway for clients elsewhere, and runs that rent no pod |
 | Ray | A Ray head inside the pod, one node, for the run's driver and its actors; the cluster's RayJob shrinks to the run's keeper. Not a Ray worker on the pod joined to a head at home: Ray wants every node to reach every other on many ports, which a pod behind NAT with one mapped port per declared port cannot give |
@@ -45,7 +46,7 @@ The driver leases the pod (`rollout_train.pods.leasing`) and renews the lease ev
 | Training loop | The run's RayJob in the cluster | Steps' batches up to the bucket; each step's weights and state back down from it |
 | Gateway | The driver's process | Each turn's generations to the pod (`https://PUBLIC_IP:PORT`, mutual TLS); each turn's blob to the bucket |
 | Runners, the environment's code | The driver's process | Nothing directly: they reach the gateway on `127.0.0.1` |
-| Sandbox pools | A pod of their own in the cluster (`sandboxes-KIND`, [where sandboxes run](sandbox-placement.md)) | Nothing |
+| Sandbox pools | A pod of their own in the cluster (`sandboxes-KIND`, [where sandboxes run](sandbox-placement.md)), or the run's host pods ([option 1](#sandbox-pools-on-a-host-pod-built)) | Nothing from the cluster's pool; every sandbox operation to a host pod's |
 | Engine (vLLM) and its follower | The pod | The ledger, through the Cloudflare Tunnel; checkpoints from its disk (`ROLLOUT_BLOB_CACHE`) |
 | Training service | The pod | The batch from the bucket; the step's weights and state to the bucket |
 | Ledger | Postgres in the cluster | Pods reach it through the ledger service behind the tunnel |
@@ -85,16 +86,17 @@ did, read against the failures (a reading, not yet a test):
   one pod, one slow answer left the channel no server, and every turn that began a generation in those two seconds
   failed with `Unserved` and was sampled again from the start; three in a row failed the turn, and the turn its
   episode.
-- The look and the generations share one `httpx.AsyncClient` per server, with httpx's default pool: 100 connections,
-  20 kept alive. The run had about 104 requests in flight, so a look can wait for a connection behind generations
-  that take 15 seconds, and the pool's wait counts toward the look's 2 seconds. Connections beyond 20 are closed when
-  idle, and opened again (TCP, then TLS with client certificates) across the internet at the next burst.
+- In the run, the look and the generations shared one `httpx.AsyncClient` per server, with httpx's default pool: 100
+  connections, 20 kept alive. The run had about 104 requests in flight, so a look could wait for a connection behind
+  generations that take 15 seconds, and the pool's wait counted toward the look's 2 seconds. Connections beyond 20 were
+  closed when idle, and opened again (TCP, then TLS with client certificates) across the internet at the next burst.
 - Agents of an episode move in rounds, so turns start in bursts, which matches the bursts of failures.
 
 Main now lets a turn with no server wait for one while the channel looks again (`RemoteChannel._asked`, for as long
 as a turn waits for a replica), and waits before each attempt after the first (`Gateway._sampled`): a missed look no
-longer fails the turns in flight. A missed look still takes the only server from every turn for a look or more, and
-the pool is still smaller than the turns in flight; phase 0 is what remains of that. Placement does not cure it: a run
+longer fails the turns in flight, and a client keeps as many connections to a server as its turns need
+(`CONNECTIONS`, 1,024, in `rollout_train.inference.remote`). A missed look still takes the only server from every turn
+for a look or more; phase 0 is what remains of that. Placement does not cure it: a run
 with several pods samples engines on other pods.
 
 ### What crosses the boundary
@@ -487,7 +489,7 @@ Most value first. Each later phase waits for its trigger.
 
 | Phase | Build | Trigger |
 |---|---|---|
-| 0. The remote path made sound | As above | Now: 41% of episodes failed on it before main's wait for a server, the pool is still smaller than the turns in flight, and every multi-pod shape keeps a remote path |
+| 0. The remote path made sound | As above | Now: 41% of episodes failed on it before main's wait for a server and its larger pool, and every multi-pod shape keeps a remote path |
 | 1. The run hosted on its pod, trusted environments, no sandboxes | `placement = "pod"` for runs whose trainer and trained channel are one `runpod-host` provider and whose environment needs no sandbox | Phase 0 done and the round trip to the pod measured: start when a run is bounded by the cluster's CPU or memory (more episodes at once than its RayJob holds), or when a short-reply workload spends a fifth of a turn on the path |
 | 2. Group commit, temporary bucket keys | As above | With or right after phase 1, once the ledger's round trip from the pod is measured: if recording a turn from the pod takes more than about 0.3 s |
 | 3. Minecraft on the pod | As above; built for runs in the cluster ([option 1](#sandbox-pools-on-a-host-pod-built)) | The first Minecraft run on a pod, or when the cluster's 4 worlds bound a run |

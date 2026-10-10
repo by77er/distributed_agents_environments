@@ -9,14 +9,14 @@ cluster.
 
 ## Tinker
 
-**Built.** Tinker trains LoRA (low-rank adaptation) adapters and samples from them on Thinking Machines' GPUs. A run
-can train on Tinker and sample there, or train on Tinker and be served on your own vLLM engines through the bridge
-from Tinker's format to PEFT ([bridges](../guide/cluster.md#bridges)).
+Tinker trains LoRA (low-rank adaptation) adapters and samples from them on Thinking Machines' GPUs. A run can train on
+Tinker and sample there, or train on Tinker and be served on your own vLLM engines through the bridge from Tinker's
+format to PEFT ([bridges](../guide/cluster.md#bridges)).
 
 - **Install:** the `tinker` extra (`uv sync --extra tinker`); the platform image has it.
 - **Key:** Tinker's SDK reads `TINKER_API_KEY`, or the `credentials.json` that `tinker auth login` writes under
   `~/.tinker`. On Kubernetes, put either in the Secret `tinker` ([make the Secrets](helm.md#make-the-secrets)); the
-  chart passes the key to every pod and mounts the file at `/root/.tinker`.
+  chart passes the key to each run's job and mounts the file there at `/root/.tinker`.
 - **Cluster config:** an inference provider and a trainer of kind `tinker`, with the models each offers and their
   costs:
 
@@ -39,9 +39,9 @@ from Tinker's format to PEFT ([bridges](../guide/cluster.md#bridges)).
 
 ## GPU pods on RunPod
 
-**Built.** GPU pods rented by the hour on RunPod serve a run's [channel](../libraries/rollout-train/channels.md), take
-its training steps, or both on one GPU. A run leases the pods it needs when it starts and releases them when it ends; a
-released pod stays warm for a few minutes for the next run, and a reaper deletes what no run holds. No runs, no pods.
+GPU pods rented by the hour on RunPod serve a run's [channel](../libraries/rollout-train/channels.md), take its training
+steps, or both on one GPU. A run leases the pods it needs when it starts and releases them when it ends; a released pod
+stays warm for a few minutes for the next run, and a reaper deletes what no run holds. No runs, no pods.
 
 | Kind | Table | Its pods run | What a run leases |
 |---|---|---|---|
@@ -351,17 +351,17 @@ with a few cents of a cheap GPU.
   ([the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http)). An inference pod gets the
   bucket's read-only key; a trainer or host pod the key that writes.
 
-A checkpoint made in the cluster's own store and served on RunPod (a run that starts from a local checkpoint, an eval
-of one on pods) is not copied to the bucket the pods read yet: run such a run where its checkpoints are, or train it on
-RunPod from the start ([RunPod pods as providers](../research/runpod-providers.md#later)).
+Pods read only the bucket their provider's `store` names. A checkpoint made in the cluster's own store (a run that
+starts from a local checkpoint, an eval of one on pods) is not in it: run such a run where its checkpoints are, or
+train it on RunPod from the start.
 
 ## Hosted model APIs
 
-**Built.** OpenAI's models (the Responses API, `rollout-openai`) and Anthropic's (the Messages API,
+OpenAI's models (the Responses API, `rollout-openai`) and Anthropic's (the Messages API,
 [`rollout-anthropic`](../implementations/rollout-anthropic.md)) are inference providers of the kind `api`: the gateway
 samples a channel on one through its endpoint, for an eval of a hosted model or a slot that is not trained (a judge, a
-fixed opponent). Such turns are not token-exact, so they are never trained on; each records what it cost, and an
-eval's `limits.spend` ends it once it spends that ([hosted APIs](../guide/cluster.md#hosted-apis)).
+fixed opponent). Such turns are not token-exact, so they are never trained on; each records what it cost, and an eval's
+`limits.spend` ends it once it spends that ([hosted APIs](../guide/cluster.md#hosted-apis)).
 
 - **Install:** both packages are in the platform image (`rollout-openai`, `rollout-anthropic`).
 - **Keys:** `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`, named by each provider's `api_key_env`. On Kubernetes, put them

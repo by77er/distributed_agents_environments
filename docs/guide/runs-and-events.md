@@ -42,7 +42,7 @@ An **effect** is an operation that leaves task or agent code:
 | Kind | Requested through |
 |---|---|
 | `model.sample` | `run.models[slot].sample(...)` |
-| `tool.call` | a call to an imported tool (`run.tools.call`, which the default `respond` uses) |
+| `tool.call` | a call to an imported tool (`run.tools.call`, which the default `respond` uses), or an operation on a sandbox (`run.sandbox(name).call`) |
 | `output.emit` | `run.emit(...)` |
 
 Each effect gets an identity, which receivers use to perform it once: the
@@ -107,7 +107,8 @@ asyncio.run(main())
 ```
 
 A run started by a runner also has lifecycle events: `run.created` at `seq = 0`, `tools.resolved` when it has
-tools, `sandboxes.acquired` when its program declares sandboxes, and one terminal event. A bare `LocalRunContext`, as above, has none of them.
+tools, `sandboxes.acquired` when its program declares sandboxes, and one terminal event. A bare `LocalRunContext`, as
+above, has none of them.
 
 ## The local runner
 

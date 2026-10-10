@@ -116,7 +116,8 @@ ends, however it ends, it deletes what it fetched under its directory (`bases/`,
 renderer and no checkpoint ([hosted APIs](../../guide/cluster.md#hosted-apis)). Its driver starts no engines; the
 gateway in it samples each turn through the provider's endpoint and records what it cost. Its estimated spend (the
 whole eval's: `spend_of`, from the suite's starts, each entry's episodes and the budgets, at the model's catalog
-prices) is said when it is checked, and `limits.spend` ends it, failed, once it spends that.
+prices) is said when it is checked, and `limits.spend` ends it once it spends that: the eval stopped and its parts
+failed, saying what was spent and the limit ([launching runs](launching.md#the-driver)).
 
 ```bash
 uv run rollout eval math --provider anthropic --model claude-sonnet-5-5 --set limits.spend=5 \
