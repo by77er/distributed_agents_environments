@@ -50,6 +50,7 @@ train on).
 | `implementations/rollout-runpod` | `rollout_runpod` | GPU pods on RunPod (the pods API), and certificates for them from step-ca | |
 | `implementations/rollout-verifiers` | `rollout_verifiers` | Prime Intellect's verifiers environments, played through the gateway | `Environment` |
 | `environments/minecraft` | `minecraft_team` | One to four agents in a Minecraft world; depends on `rollout` only | `Environment` |
+| `environments/minecraft-horizons` | `minecraft_horizons` | Minecraft objectives with no ceiling against budgets of game time the agents see; depends on `rollout` and `minecraft-team` | `Environment` |
 | `environments/gridworld` | `gridworld` | Two to four agents on a grid level, with plates, doors, a gate and a lever; depends on `rollout` only | `Environment` |
 | `environments/judging` | `judging` | Open-ended requests answered by the policy and scored by a judge against a rubric; depends on `rollout` only | `Environment` |
 

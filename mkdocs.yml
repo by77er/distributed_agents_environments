@@ -106,6 +106,7 @@ nav:
       - Example environments:
           - products/README.md
           - "Minecraft team": products/minecraft-team.md
+          - "Minecraft horizons": products/minecraft-horizons.md
           - "Gridworld": products/gridworld.md
           - "Judging": products/judging.md
   - Train a model:

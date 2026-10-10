@@ -21,17 +21,23 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
+import org.bukkit.block.Container;
+import org.bukkit.block.DoubleChest;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -93,6 +99,10 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
     private final Gson gson = new GsonBuilder().disableHtmlEscaping().create();
     private final Set<String> team = ConcurrentHashMap.newKeySet();
     private final Map<String, Integer> lastKnownDiamonds = new ConcurrentHashMap<>();
+    /** What each team member held when they left, item by item (`/holdings`). */
+    private final Map<String, Map<String, Integer>> lastKnownHeld = new ConcurrentHashMap<>();
+    /** Where team members placed containers since the baseline: what is stored in them is the team's. */
+    private final Set<Location> placedContainers = ConcurrentHashMap.newKeySet();
     private final Map<String, Set<String>> baselines = new ConcurrentHashMap<>();
     private final Set<String> teamEarned = ConcurrentHashMap.newKeySet();
     private final Map<String, Integer> teamObtained = new ConcurrentHashMap<>();
@@ -125,6 +135,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         http.setExecutor(Executors.newFixedThreadPool(8));
         route("/health", this::health);
         route("/state", this::state);
+        route("/holdings", this::holdings);
         route("/tick", this::tick);
         route("/episode", this::episode);
         route("/ores", this::ores);
@@ -212,6 +223,58 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             JsonArray members = new JsonArray();
             team.forEach(members::add);
             result.add("team", members);
+            return result;
+        });
+    }
+
+    /**
+     * Every item the team holds, by its id: what members carry (`held`: inventory with armor and offhand, cursor and
+     * crafting grid; members who left, what they held then) and what is stored in the containers members placed since
+     * the baseline (`stored`; a double chest counted once), with how many of those containers still stand.
+     */
+    private JsonElement holdings(String method, Map<String, String> query, JsonObject body) throws Exception {
+        return onMainThread(() -> {
+            Map<String, Integer> carried = new TreeMap<>();
+            Set<String> counted = new java.util.HashSet<>();
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                String name = player.getName().toLowerCase(Locale.ROOT);
+                if (team.contains(name)) {
+                    counted.add(name);
+                    held(player).forEach((item, count) -> carried.merge(item, count, Integer::sum));
+                }
+            }
+            for (String member : team) {
+                if (!counted.contains(member)) {
+                    lastKnownHeld.getOrDefault(member, Map.of()).forEach((item, count) -> carried.merge(item, count, Integer::sum));
+                }
+            }
+            Map<String, Integer> stored = new TreeMap<>();
+            Set<String> seen = new java.util.HashSet<>();
+            int containers = 0;
+            for (Location at : placedContainers) {
+                BlockState state = at.getBlock().getState();
+                if (!(state instanceof Container container)) {
+                    continue;  // broken, or replaced by something else
+                }
+                Inventory inventory = container.getInventory();
+                InventoryHolder holder = inventory.getHolder();
+                Location where = holder instanceof DoubleChest both ? both.getLocation() : at;
+                if (!seen.add(where.getWorld().getName() + ":" + where.getX() + ":" + where.getY() + ":" + where.getZ())) {
+                    continue;  // the other half of a double chest
+                }
+                containers++;
+                for (ItemStack stack : inventory.getContents()) {
+                    count(stored, stack);
+                }
+            }
+            JsonObject result = new JsonObject();
+            JsonObject heldJson = new JsonObject();
+            carried.forEach(heldJson::addProperty);
+            result.add("held", heldJson);
+            JsonObject storedJson = new JsonObject();
+            stored.forEach(storedJson::addProperty);
+            result.add("stored", storedJson);
+            result.addProperty("containers", containers);
             return result;
         });
     }
@@ -412,6 +475,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             held.clear();  // what is held while the game is frozen is the team as set up here
             team.clear();
             lastKnownDiamonds.clear();
+            lastKnownHeld.clear();
             for (JsonElement name : body.getAsJsonArray("team")) {
                 team.add(name.getAsString().toLowerCase(Locale.ROOT));
             }
@@ -881,6 +945,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             baselines.clear();
             teamEarned.clear();
             teamObtained.clear();
+            placedContainers.clear();
             dragonKilled = false;
             dragonDamage = 0.0;
             JsonObject result = new JsonObject();
@@ -1085,11 +1150,20 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         record("joined", event.getPlayer(), new JsonObject());
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlace(BlockPlaceEvent event) {
+        String name = event.getPlayer().getName().toLowerCase(Locale.ROOT);
+        if (team.contains(name) && event.getBlockPlaced().getState() instanceof Container) {
+            placedContainers.add(event.getBlockPlaced().getLocation());
+        }
+    }
+
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         String name = event.getPlayer().getName().toLowerCase(Locale.ROOT);
         if (team.contains(name)) {
             lastKnownDiamonds.put(name, diamonds(event.getPlayer()));
+            lastKnownHeld.put(name, held(event.getPlayer()));
         }
         record("left", event.getPlayer(), new JsonObject());
     }
@@ -1114,6 +1188,32 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             default -> { }
         }
         return total;
+    }
+
+    /** Every item a player holds, by its id: inventory (with armor and offhand), cursor and crafting grid. */
+    static Map<String, Integer> held(Player player) {
+        Map<String, Integer> found = new TreeMap<>();
+        for (ItemStack stack : player.getInventory().getContents()) {
+            count(found, stack);
+        }
+        count(found, player.getItemOnCursor());
+        InventoryView view = player.getOpenInventory();
+        switch (view.getType()) {
+            case CRAFTING, WORKBENCH -> {
+                ItemStack[] grid = view.getTopInventory().getContents();
+                for (int slot = 1; slot < grid.length; slot++) {  // slot 0 is the result, not yet held
+                    count(found, grid[slot]);
+                }
+            }
+            default -> { }
+        }
+        return found;
+    }
+
+    private static void count(Map<String, Integer> found, ItemStack stack) {
+        if (stack != null && !stack.getType().isAir() && stack.getAmount() > 0) {
+            found.merge(stack.getType().getKey().getKey(), stack.getAmount(), Integer::sum);
+        }
     }
 
     private static int diamondValue(ItemStack stack) {

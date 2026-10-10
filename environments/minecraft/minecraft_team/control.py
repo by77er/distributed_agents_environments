@@ -25,6 +25,11 @@ class Control:
         dragon is dead and how much it was hurt."""
         return await self._request("GET", "/state")
 
+    async def holdings(self) -> dict[str, Any]:
+        """Every item the team holds, by its id: what members carry (`held`) and what is stored in the containers they
+        placed since the baseline (`stored`), and how many of those containers still stand (`containers`)."""
+        return await self._request("GET", "/holdings")
+
     async def freeze(self) -> dict[str, Any]:
         return await self._request("POST", "/tick", {"action": "freeze"})
 
