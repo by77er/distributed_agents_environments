@@ -163,7 +163,7 @@ sandboxes:
     provider: minecraft_team.worlds:worlds
     size: 4
     port: 8710
-    onPods: ""                # e.g. '{ settings = { cache = "/workspace/minecraft" } }'
+    onPods: ""                # e.g. 'true', or '{ size = 8 }'
     resources: {requests: {cpu: "4", memory: 7680Mi}, limits: {memory: 10Gi}}
 
 gateway:

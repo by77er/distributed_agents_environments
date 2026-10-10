@@ -195,8 +195,9 @@ class GuardsSection:
 @dataclass(frozen=True)
 class OnPods:
     """Sandboxes of a kind served from the pods a run leases (`[sandboxes.KIND] on_pods`): each pod whose provider
-    lists the kind (`sandboxes`) serves a pool of them beside its engine and trainer, as many as its spare CPUs and
-    memory hold (`rollout_train.pods.sandboxes`)."""
+    lists the kind (`sandboxes`) serves a pool of them beside its engine and trainer, in a process of its own, in a
+    Python environment made on the pod from the provider's source (`rollout_train.pods.sources`), as many as its spare
+    CPUs and memory hold (`rollout_train.pods.sandboxes`)."""
 
     size: int | None = None
     """The most sandboxes a pod holds (none: as many as its spare CPUs and memory hold)."""
@@ -204,8 +205,12 @@ class OnPods:
     """The vCPUs one sandbox takes (a Minecraft world: about one while it plays)."""
     memory_gib: float = 2.4
     """The memory one sandbox takes, in GiB (a Minecraft world: up to 2.4 when its bots roam far)."""
+    share: float | None = None
+    """The part of a pod's spare CPUs and memory its sandboxes may take, where a pod serves several kinds."""
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
-    """The provider's settings on a pod, over the section's own (a Minecraft cache on the pod's volume, say)."""
+    """The provider's settings on a pod, over the section's own."""
+    version: str | None = None
+    """A published version (`NAME@VERSION`) whose code the pods run the provider from (none: the platform's own)."""
 
 
 @dataclass(frozen=True)
@@ -845,24 +850,35 @@ def _sandboxes(kind: str, described: dict[str, Any]) -> SandboxesSection:
 
 
 def _on_pods(where: str, given: Any) -> OnPods | None:
-    """`on_pods`: false or absent (none), true (the defaults), or a table of `size`, `cpus`, `memory_gib` and the
-    provider's `settings` on a pod."""
+    """`on_pods`: false or absent (none), true (the defaults), or a table of `size`, `cpus`, `memory_gib`, `share`,
+    the provider's `settings` on a pod and the published `version` its code is from."""
     if given is None or given is False:
         return None
     if given is True:
         return OnPods()
     if not isinstance(given, dict):
-        raise ClusterError(f"{where} on_pods is true, or a table of size, cpus, memory_gib and settings")
+        raise ClusterError(
+            f"{where} on_pods is true, or a table of size, cpus, memory_gib, share, settings and version"
+        )
     said = _Table(dict(cast(dict[str, Any], given)), f"{where} on_pods")
     size = said.whole("size", None, least=1)
-    cpus, memory = said.number("cpus", 1.0), said.number("memory_gib", 2.4)
+    cpus, memory, share = said.number("cpus", 1.0), said.number("memory_gib", 2.4), said.number("share", None)
     settings = said.take("settings", {})
+    version = said.text("version", None)
     said.done()
     if cpus <= 0 or memory <= 0:
         raise ClusterError(f"{where} on_pods cpus and memory_gib are more than 0")
+    if share is not None and not 0 < share <= 1:
+        raise ClusterError(f"{where} on_pods share is a part of a pod's spare CPUs and memory, more than 0, 1 at most")
     if not isinstance(settings, dict):
         raise ClusterError(f"{where} on_pods settings is a table of the provider's settings")
-    return OnPods(size, cpus, memory, dict(cast(dict[str, JsonValue], settings)))
+    if version is not None and "@" not in version:
+        raise ClusterError(f"{where} on_pods version names a published version, NAME@VERSION")
+    return OnPods(size, cpus, memory, share, dict(cast(dict[str, JsonValue], settings)), version)
+
+
+SANDBOX_KIND = re.compile(r"[a-z0-9-]+")
+"""What a kind served from pods may be named: what a pod's proxy routes (`/v1/sandboxes/KIND/...`)."""
 
 
 def _served_on_pods(sandboxes: Mapping[str, SandboxesSection], inference: Mapping[str, InferenceProvider]) -> None:
@@ -871,13 +887,26 @@ def _served_on_pods(sandboxes: Mapping[str, SandboxesSection], inference: Mappin
     for name, provider in inference.items():
         if provider.kind != "runpod-host":
             continue
-        for kind in pod_table(provider.kind, provider.settings).sandboxes:
+        kinds = pod_table(provider.kind, provider.settings).sandboxes
+        for kind in kinds:
             section = sandboxes.get(kind)
             if section is None or section.on_pods is None:
                 raise ClusterError(f"[inference.{name}] sandboxes names {kind}, which is no [sandboxes.{kind}] with "
                                    "on_pods")  # fmt: skip
             serving.setdefault(kind, []).append(name)
+        if len(kinds) > 1:  # (several kinds share a pod: each says how much of it it takes)
+            ons = {kind: sandboxes[kind].on_pods for kind in kinds}
+            vague = sorted(kind for kind, on in ons.items() if on is not None and on.size is None and on.share is None)
+            if vague:
+                raise ClusterError(f"[inference.{name}] serves {', '.join(kinds)}: each says its size or its share in "
+                                   f"on_pods, and {', '.join(vague)} says neither")  # fmt: skip
+            if sum(on.share or 0.0 for on in ons.values() if on is not None) > 1 + 1e-9:
+                raise ClusterError(f"[inference.{name}] serves {', '.join(kinds)}: their on_pods shares add up to more "
+                                   "than 1")  # fmt: skip
     for kind, section in sandboxes.items():
+        if section.on_pods is not None and not SANDBOX_KIND.fullmatch(kind):
+            raise ClusterError(f"[sandboxes.{kind}] on_pods: a kind served from pods is named with lowercase letters, "
+                               "digits and hyphens (what a pod's proxy routes)")  # fmt: skip
         if section.on_pods is not None and kind not in serving:
             raise ClusterError(f"[sandboxes.{kind}] on_pods: no runpod-host provider's pods serve {kind} (its "
                                "sandboxes)")  # fmt: skip

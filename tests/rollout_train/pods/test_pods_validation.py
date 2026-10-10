@@ -4,12 +4,18 @@ its trained channel, charged once; a step's spend on pods is their hourly price 
 whose pods cannot reach the ledger service; and pods are not the cluster's GPUs."""
 
 import dataclasses
+import io
 import tomllib
+import zipfile
+from pathlib import Path
 
 import pytest
 
+from rollout.contracts import BlobReference
+from rollout.harness.blobs import FileBlobStore
 from rollout_train.cluster import Cluster, KubernetesSection, parsed
-from rollout_train.pods.leasing import PodNeed, needs_of, sandboxes_of, serving
+from rollout_train.pods.leasing import PodNeed, needs_of, serving, with_sandboxes
+from rollout_train.pods.sources import SandboxSource, local_projects, sources_of
 from rollout_train.providers import pod_table
 from rollout_train.run_settings import RunSettings
 from rollout_train.validation import EnvironmentFacts, LedgerFacts, check, spend_of
@@ -121,13 +127,43 @@ def test_on_kubernetes_sandboxes_the_runs_pods_serve_need_no_pool_of_their_own()
     assert refused(cluster_of(host=with_url)) == []  # (the cluster's own pool serves them)
 
 
-def test_a_host_pod_is_told_the_pools_it_serves() -> None:
-    cluster = cluster_of(host=SERVED)
+async def test_a_host_pod_is_given_the_sources_of_the_kinds_it_serves_for_its_run(tmp_path: Path) -> None:
+    cluster = cluster_of(host=SERVED.replace("on_pods = {", 'heap = "1G"\non_pods = {'))
     host = cluster.inference["h100"]
-    table = pod_table(host.kind, host.settings)
-    assert serving(cluster, "minecraft") == ["h100"] and table.sandboxes == ("minecraft",)
-    assert sandboxes_of(cluster, table) == {"minecraft": {
-        "provider": "minecraft_team.worlds:worlds", "settings": {"cache": "/workspace/minecraft"}, "size": None,
-        "cpus": 1.0, "memory_gib": 2.4,
-    }}  # fmt: skip
-    assert sandboxes_of(cluster_of(), pod_table(host.kind, cluster_of().inference["h100"].settings)) == {}
+    assert serving(cluster, "minecraft") == ["h100"] and pod_table(host.kind, host.settings).sandboxes == ("minecraft",)
+    blobs = FileBlobStore(tmp_path / "blobs")
+    sources = await sources_of(cluster, {"minecraft", "elsewhere"}, blobs)
+    (source,) = sources.values()
+    assert (source.kind, source.provider, source.python) == ("minecraft", "minecraft_team.worlds:worlds", "3.13")
+    assert source.settings == {"heap": "1G", "cache": "/workspace/minecraft"}  # (the section's, under on_pods')
+    assert [(each.name, each.extras) for each in source.projects] == [("minecraft-team", ()), ("rollout", ("http",))]
+    for project in source.projects:  # (each a zip in the pods' store, packed as an imported environment is)
+        names = zipfile.ZipFile(
+            io.BytesIO(await blobs.read(BlobReference.model_validate(dict(project.blob))))
+        ).namelist()
+        assert "pyproject.toml" in names and not [name for name in names if "node_modules" in name]
+    assert any(each.startswith("pyyaml==") for each in source.constraints)  # (minecraft-team's, at the platform's)
+    assert any(each.startswith("uvicorn==") for each in source.constraints)  # (what serves the pool)
+    assert (await sources_of(cluster, {"minecraft"}, blobs))["minecraft"].digest == source.digest
+    needs = needs_of(RunSettings(SETTINGS), cluster)
+    (given,) = with_sandboxes(needs, cluster, {"minecraft": source.to_json()})
+    assert given.settings["sandboxes"] == {"minecraft": source.to_json()} and given.settings["model"]
+    assert SandboxSource.from_json(source.to_json()) == source
+
+
+def test_a_provider_in_no_project_of_its_own_is_not_packed() -> None:
+    with pytest.raises(ValueError, match="in no project the platform holds"):  # (the workspace's root is no project)
+        local_projects("tests.rollout_train.pods.sandbox_kinds:boxes")
+    projects, _ = local_projects("minecraft_horizons.worlds:worlds")
+    assert [each.name for each in projects] == ["minecraft-horizons", "minecraft-team", "rollout"]
+
+
+def test_sandboxes_whose_specs_name_model_slots_are_not_served_from_pods() -> None:
+    harnessed = dataclasses.replace(ENVIRONMENT, sandboxes=frozenset({"minecraft"}), slotted=frozenset({"minecraft"}))
+    refused = [each.reason for each in check(RunSettings(SETTINGS), cluster_of(host=SERVED), harnessed)
+               if each.refuses and "model slots" in each.reason]  # fmt: skip
+    assert refused == [
+        "gridworld.environment:environment's sandboxes of kind minecraft name model slots: a harness inside reaches "
+        "its model at the run's gateway, which a pod cannot reach, so they are not served from pods "
+        "([sandboxes.minecraft] on_pods)"
+    ]

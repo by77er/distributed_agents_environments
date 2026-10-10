@@ -143,6 +143,8 @@ class EnvironmentFacts:
     """Why it does not load, where it does not."""
     sandboxes: frozenset[str] = frozenset()
     """The sandbox kinds its programs need."""
+    slotted: frozenset[str] = frozenset()
+    """Those of its sandbox kinds whose specs name model slots (a harness inside reaches its model's address)."""
     tool_sets: frozenset[str] = frozenset()
     """The tool sets its programs import by name that are served elsewhere (`[tools.NAME]`)."""
     slots: frozenset[str] | None = None
@@ -1025,6 +1027,11 @@ def _environment(run: _Run) -> None:
     for kind in sorted(facts.sandboxes - set(run.cluster.sandboxes)):
         run.refuse("environment", "environment", f"{environment} needs sandboxes of kind {kind}, and this cluster has "
                    "no pool of them")  # fmt: skip
+    for kind in sorted(facts.slotted & set(run.cluster.sandboxes)):
+        if run.cluster.sandboxes[kind].on_pods is not None:
+            run.refuse("environment", "environment", f"{environment}'s sandboxes of kind {kind} name model slots: a "
+                       "harness inside reaches its model at the run's gateway, which a pod cannot reach, so they are "
+                       f"not served from pods ([sandboxes.{kind}] on_pods)")  # fmt: skip
     if run.cluster.kubernetes is not None:
         from rollout_train.pods.leasing import serving
 

@@ -152,7 +152,7 @@ class Connection:
             return Path(self.token_file).expanduser().read_text().strip() or None
         return None
 
-    def client(self, timeout: float = 600.0) -> httpx.AsyncClient:
+    def client(self, timeout: float | httpx.Timeout = 600.0) -> httpx.AsyncClient:
         """A client that reaches servers so."""
         token = self.token()
         headers = {"Authorization": f"Bearer {token}"} if token else {}

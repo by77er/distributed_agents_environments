@@ -2,8 +2,10 @@
 and acquires at once spread over the pods; releases and operations go to the pod that holds the lease, and only there;
 capacity is the live pods' summed; a pod the run no longer holds loses its leases (`SandboxLost`), and one that only
 misses beats keeps them; the cluster's pool takes what no pod has room for; a lapsed claim's lease is refused and
-released on its pod, by the pool and by its keeper; and where each lease is outlives the driver. Over HTTP, the run's
-pods are found by their leases and reached over mutual TLS by their identities."""
+released on its pod, by the pool and by its keeper; where each lease is outlives the driver; acquires at once against
+slow pods all get leases; an acquire whose answer is lost leaves no sandbox behind, a release that fails is tried again,
+and a pod that does not answer holds no acquire up. Over HTTP, the run's pods are found by their leases and reached over
+mutual TLS by their identities."""
 
 import asyncio
 import json
@@ -20,6 +22,7 @@ from rollout.harness.sandboxes import (
     Capacity,
     LeaseRefused,
     NoCapacity,
+    Reach,
     SandboxLost,
     SandboxPool,
     SandboxSpec,
@@ -30,13 +33,13 @@ from rollout_train.ledger import FileLedger
 from rollout_train.pods import GATEWAY_IDENTITY, pod_identity
 from rollout_train.pods.identity import POD
 from rollout_train.pods.leases import HELD, IDLE, PodLease, pod_leases_of
-from rollout_train.pods.pools import FALLBACK, PodPools, Reached
+from rollout_train.pods.pools import ACQUIRING, FALLBACK, RELEASING, FilePlacements, PodPools, Reached
 from rollout_train.pods.routing import LeasedPools
 from rollout_train.presence import FilePresence
 from rollout_train.providers import LEASED, Auth, Tls
 from rollout_train.record import table
 from rollout_train.rollouts.scheduler import CLAIMS
-from rollout_train.sandboxes import FileLeases, sweep
+from rollout_train.sandboxes import sweep
 from tests.rollout_train.pods.authority import Authority, served_tls, server_context
 from tests.rollout_train.support import ask_boxed
 
@@ -62,7 +65,99 @@ class Pods:
 
 
 def pod_pools(pods: Pods, tmp_path: Path, **options: Any) -> PodPools:
-    return PodPools("fake", pods.discover, name="fake@run", leases=FileLeases(tmp_path / "pods"), look=0.0, **options)
+    placements = FilePlacements(tmp_path / "pods" / "fake.json")
+    return PodPools("fake", pods.discover, name="fake@run", placements=placements, look=0.0, **options)
+
+
+class Slow(FakeSandboxes):
+    """Sandboxes that take a while to make."""
+
+    async def create(self, handle: str, spec: SandboxSpec, environment: Mapping[str, str]) -> Reach:
+        await asyncio.sleep(0.2)
+        return await super().create(handle, spec, environment)
+
+
+async def test_acquires_at_once_against_slow_pods_all_get_leases(tmp_path: Path) -> None:
+    pods = Pods(a=4)
+    pods.sandboxes["a"] = Slow(size=4)
+    pods.pools["a"] = SandboxPool(pods.sandboxes["a"], name="fake@a")
+    pool = pod_pools(pods, tmp_path)
+    leases = await asyncio.gather(*(pool.acquire(BOX, f"r/1/{n}/1/box") for n in range(4)), return_exceptions=True)
+    assert [type(each).__name__ for each in leases] == ["Lease"] * 4  # (those on their way are not counted twice)
+
+
+class Losing:
+    """A pod's pool whose answers to acquires are lost (after it made the sandbox), and whose releases fail while
+    `failing`."""
+
+    def __init__(self, pool: SandboxPool) -> None:
+        self.pool = pool
+        self.failing = False
+
+    def operations(self) -> Any:
+        return self.pool.operations()
+
+    async def capacity(self) -> Capacity:
+        return await self.pool.capacity()
+
+    async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Any:
+        await self.pool.acquire(spec, key, environment)
+        raise httpx.ReadTimeout("the answer was lost")
+
+    async def release(self, key: str) -> None:
+        if self.failing:
+            raise httpx.ConnectError("the pod does not answer")
+        await self.pool.release(key)
+
+    async def call(self, *arguments: Any, **options: Any) -> Any:
+        return await self.pool.call(*arguments, **options)
+
+
+async def test_an_acquire_whose_answer_is_lost_leaves_no_sandbox_behind(tmp_path: Path) -> None:
+    pods = Pods(a=2)
+    losing = Losing(pods.pools["a"])
+    pods.pools["a"] = cast(Any, losing)
+    pool = pod_pools(pods, tmp_path)
+    with pytest.raises(httpx.ReadTimeout):
+        await pool.acquire(BOX, "r/1/1/1/box")
+    assert pods.sandboxes["a"].sandboxes == {} and await pool.held() == []  # (released on its pod at once)
+    losing.failing = True  # (and where that release fails too, the next sweep releases it)
+    with pytest.raises(httpx.ReadTimeout):
+        await pool.acquire(BOX, "r/1/2/1/box")
+    (kept,) = await FilePlacements(tmp_path / "pods" / "fake.json").all()
+    assert (kept.key, kept.state) == ("r/1/2/1/box", ACQUIRING) and len(pods.sandboxes["a"].sandboxes) == 1
+    losing.failing = False
+    assert await pool.sweep() == ["r/1/2/1/box"]
+    assert pods.sandboxes["a"].sandboxes == {} and await pool.held() == []
+
+
+async def test_a_release_that_fails_is_kept_and_tried_again(tmp_path: Path) -> None:
+    pods = Pods(a=2)
+    pool = pod_pools(pods, tmp_path)
+    lease = await pool.acquire(BOX, "r/1/1/1/box")
+    losing = Losing(pods.pools["a"])
+    losing.failing = True
+    pods.pools["a"] = cast(Any, losing)
+    await pool.release(lease.key)
+    (kept,) = await FilePlacements(tmp_path / "pods" / "fake.json").all()
+    assert kept.state == RELEASING and len(pods.sandboxes["a"].sandboxes) == 1
+    with pytest.raises(SandboxLost):  # (its key cannot have it back meanwhile)
+        await pool.call(lease.key, "describe", {}, effect_id="e", arguments_digest="d")
+    losing.failing = False
+    assert await pool.sweep() == [lease.key] and pods.sandboxes["a"].sandboxes == {}
+
+
+async def test_a_pod_that_does_not_answer_holds_no_acquire_up(tmp_path: Path) -> None:
+    pods = Pods(a=4, b=1)
+
+    class Silent:
+        async def capacity(self) -> Capacity:
+            raise httpx.ConnectTimeout("no answer")
+
+    pods.pools["a"] = cast(Any, Silent())
+    pool = pod_pools(pods, tmp_path)
+    await pool.acquire(BOX, "r/1/1/1/box")
+    assert len(pods.sandboxes["b"].sandboxes) == 1 and await pool.capacity() == Capacity(size=1, leased=1)
 
 
 async def test_a_new_lease_goes_to_the_pod_with_the_most_room(tmp_path: Path) -> None:

@@ -138,7 +138,7 @@ Beside what every provider has (`models`, `replicas`), a RunPod table says what 
 | `sleep` | false | On a host: vLLM sleeps while a step is taken, for a GPU too small for both |
 | `max_logprobs` | 20 | The top-k logprobs its vLLM is started with |
 | `min_vcpus_per_gpu`, `min_memory_gb_per_gpu` | RunPod's (2, 8) | The fewest vCPUs and the least memory in GB a pod may be given for each GPU (RunPod's `minVCPUPerGPU`, `minRAMPerGPU`): what its sandbox pools are sized from |
-| `sandboxes` | none | On a host: the kinds of sandboxes its pods serve beside the engine and trainer (`["minecraft"]`), each a `[sandboxes.KIND]` with `on_pods` ([below](#sandboxes-on-a-host-pod)) |
+| `sandboxes` | none | On a host: the kinds of sandbox its pods serve beside the engine and trainer (`["minecraft"]`), each a `[sandboxes.KIND]` with `on_pods` ([below](#sandboxes-on-a-host-pod)) |
 
 A `runpod-trainer` also says `trainer` (`lora` or `full`) and its `models`, and may say `gpu_memory_gib` (each GPU's
 memory, for the check's `memory` rule, where its GPU types do not say it); one that takes its steps on a host's pods
@@ -226,8 +226,9 @@ A pod's lease records the vCPUs and memory RunPod says it gave the pod (`vcpus`,
 ### Sandboxes on a host pod
 
 A host pod has more CPUs and memory than its engine and trainer use (an RTX PRO 6000 pod: 16 vCPUs and 188 GB). Its
-provider's `sandboxes` names kinds of sandboxes it serves there, and the run that holds the pod plays its episodes'
-sandboxes of those kinds on it: its Minecraft worlds on the pod, its runner and the rest of the run in the cluster.
+provider's `sandboxes` names kinds of sandbox it serves there, and the run that holds the pod plays its episodes'
+sandboxes of those kinds on it, its runner and the rest of the run staying in the cluster. Any kind can be served: the
+image holds no environment's code and none of an environment's system dependencies.
 
 ```toml
 [inference.pro6000]
@@ -239,24 +240,33 @@ min_vcpus_per_gpu = 16                         # room for 12 worlds beside vLLM 
 [sandboxes.minecraft]
 provider = "minecraft_team.worlds:worlds"
 url = "http://sandboxes-minecraft.rollout:8710"   # the cluster's own pool, for when the pods are full
-on_pods = { settings = { cache = "/workspace/minecraft" } }
+on_pods = true
 ```
 
-- **On the pod**, the image's pools' process serves a pool of each kind behind the pod's Envoy
-  (`/v1/sandboxes/KIND/...`), one sandbox per spare vCPU and no more than the spare memory holds
-  (`deploy/images/host/README.md` has the routes, the sizing and the variables).
-  It admits only the keys of the run that holds the pod, releases every lease when another run takes it or it is
-  released, and is started again alone when it ends.
+- **What a pod is given.** When the run's driver takes a pod, it writes into the pod's lease (its settings,
+  `sandboxes`) a source for each kind the run's environment needs that the pod's provider lists: the provider and its
+  settings, its projects' zips in the pods' blob store (packed as an imported environment is, stored once per
+  content), pins of what they need at the platform's versions, and the Python version. For a cluster's own kind, the
+  projects are the provider's (`environments/minecraft`; for `minecraft_horizons.worlds:worlds`, also
+  `environments/minecraft-horizons`) and `rollout`; with `on_pods.version = "NAME@VERSION"`, a published version's
+  zip. A source holds no secret.
+- **On the pod**, the sandbox host makes each kind's Python environment with uv, once per digest of its source, on the
+  volume; runs each kind's pool in a process of its own, given a home on the volume and nothing of the pod's secrets;
+  and serves them behind the pod's Envoy (`/v1/sandboxes/KIND/...`). `deploy/images/host/README.md` has the routes,
+  the sizing, the supervision and the variables.
 - **In the run's driver**, the pods the run leases whose provider serves the kind are one pool
   ([on a run's pods](../libraries/rollout/sandboxes.md#on-a-runs-pods)), reached over mutual TLS with the gateway's
-  certificate and each pod's identity checked, as the gateway reaches their engines. A new sandbox goes to the pod
-  with the most room, then to the pool at `url` when every pod is full.
+  certificate and each pod's identity checked, as the gateway reaches their engines. A new sandbox goes to a pod with
+  room, the most first, then to the pool at `url` when every pod is full. The run's keeper releases the leases of
+  lapsed claims on their pods.
 - **`on_pods`** is `true`, or a table: `size` (the most a pod holds; by default as many as fit), `cpus` and
-  `memory_gib` (what one sandbox takes: 1 and 2.4 by default, a Minecraft world's), and `settings` (the provider's
-  settings on a pod, over the section's: Minecraft's `cache` on the pod's volume, so a container started again finds
-  the Paper jar, the plugin and the world templates).
-- **Validation.** On Kubernetes, a run whose environment needs a kind served from pods is refused unless it leases a
-  pod whose provider serves the kind, or the section has a `url`.
+  `memory_gib` (what one sandbox takes: 1 and 2.4 by default, a Minecraft world's), `share` (the part of a pod's spare
+  CPUs and memory its sandboxes may take), `settings` (the provider's settings on a pod, over the section's) and
+  `version`. A provider that lists several kinds needs each to say its `size` or its `share`, and their shares add up
+  to 1 at most. A kind served from pods is named with lowercase letters, digits and hyphens.
+- **Validation.** A kind whose specs name model slots is refused on pods (a harness inside could not reach the run's
+  gateway). On Kubernetes, a run whose environment needs a kind served from pods is refused unless it leases a pod
+  whose provider serves the kind, or the section has a `url`.
 
 ### What a deployment provides
 

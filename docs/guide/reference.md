@@ -9,7 +9,7 @@ do not edit by hand.
 
 ## Contents
 
-- **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`Capacity`](#capacity), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`InvalidObservation`](#invalidobservation), [`Lease`](#lease), [`LeaseRefused`](#leaserefused), [`Leases`](#leases), [`Memory`](#memory), [`MemoryLeases`](#memoryleases), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Mount`](#mount), [`Network`](#network), [`NoCapacity`](#nocapacity), [`Observation`](#observation), [`Pool`](#pool), [`PoolBinding`](#poolbinding), [`Process`](#process), [`Program`](#program), [`ProgramReference`](#programreference), [`Provider`](#provider), [`Reach`](#reach), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Sandbox`](#sandbox), [`SandboxLimits`](#sandboxlimits), [`SandboxLost`](#sandboxlost), [`SandboxPool`](#sandboxpool), [`SandboxSpec`](#sandboxspec), [`Scratch`](#scratch), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`with_row`](#with_row)
+- **[`rollout.harness`](#rolloutharness)** — Writing tasks, agents and programs; runners; memory; tool sets. [`Agent`](#agent), [`agent_program`](#agent_program), [`AgentProgram`](#agentprogram), [`bind`](#bind), [`Blobs`](#blobs), [`Capacity`](#capacity), [`CompactingAgent`](#compactingagent), [`ContextHints`](#contexthints), [`DeduplicatingToolSet`](#deduplicatingtoolset), [`DirectModel`](#directmodel), [`Effects`](#effects), [`End`](#end), [`Ending`](#ending), [`EndpointModel`](#endpointmodel), [`FileBlobStore`](#fileblobstore), [`History`](#history), [`HistoryShape`](#historyshape), [`instantiate`](#instantiate), [`InvalidObservation`](#invalidobservation), [`Lease`](#lease), [`LeaseRefused`](#leaserefused), [`Leases`](#leases), [`Memory`](#memory), [`MemoryLeases`](#memoryleases), [`Model`](#model), [`ModelBinding`](#modelbinding), [`ModelSample`](#modelsample), [`ModelSlot`](#modelslot), [`Mount`](#mount), [`Network`](#network), [`NoCapacity`](#nocapacity), [`Observation`](#observation), [`Pool`](#pool), [`PoolBinding`](#poolbinding), [`PoolUnavailable`](#poolunavailable), [`Process`](#process), [`Program`](#program), [`ProgramReference`](#programreference), [`Provider`](#provider), [`Reach`](#reach), [`RecordedEndpoints`](#recordedendpoints), [`RecordedModel`](#recordedmodel), [`register`](#register), [`resolve`](#resolve), [`rollout`](#rollout), [`RunBinding`](#runbinding), [`RunContext`](#runcontext), [`RunHandle`](#runhandle), [`RunHooks`](#runhooks), [`Runner`](#runner), [`RunOutcome`](#runoutcome), [`RunSpecification`](#runspecification), [`RunStatus`](#runstatus), [`SamplingParameters`](#samplingparameters), [`Sandbox`](#sandbox), [`SandboxLimits`](#sandboxlimits), [`SandboxLost`](#sandboxlost), [`SandboxPool`](#sandboxpool), [`SandboxSpec`](#sandboxspec), [`Scratch`](#scratch), [`Task`](#task), [`tool`](#tool), [`ToolBinding`](#toolbinding), [`Tools`](#tools), [`ToolSet`](#toolset), [`Turn`](#turn), [`with_row`](#with_row)
 - **[`rollout.contracts`](#rolloutcontracts)** — Types that cross layers: canonical content, identifiers, digests, effects, events. [`address_of`](#address_of), [`AddressableEndpoint`](#addressableendpoint), [`arguments_digest`](#arguments_digest), [`BlobReference`](#blobreference), [`Block`](#block), [`canonical_json`](#canonical_json), [`CapabilityContract`](#capabilitycontract), [`Conflict`](#rolloutcontractsconflict), [`context_digests`](#context_digests), [`ContextDelta`](#contextdelta), [`ContextOverflow`](#contextoverflow), [`ContractModel`](#contractmodel), [`ContractViolation`](#contractviolation), [`digest`](#digest), [`effect_id`](#effect_id), [`EffectIdentity`](#effectidentity), [`EffectKind`](#effectkind), [`EffectStatus`](#effectstatus), [`EMPTY_DIGEST`](#empty_digest), [`FinishReason`](#finishreason), [`FrozenSequence`](#frozensequence), [`InternalError`](#internalerror), [`Media`](#media), [`Message`](#message), [`message_digest`](#message_digest), [`ModelAddress`](#modeladdress), [`ModelEndpoint`](#modelendpoint), [`ModelEndpointError`](#modelendpointerror), [`NamedToolChoice`](#namedtoolchoice), [`new_run_id`](#new_run_id), [`new_ulid`](#new_ulid), [`Overloaded`](#overloaded), [`Reasoning`](#reasoning), [`ReasoningScope`](#reasoningscope), [`ResultBlock`](#resultblock), [`RetryClass`](#retryclass), [`Role`](#role), [`RUN_EVENT_SCHEMA_VERSION`](#run_event_schema_version), [`RunEvent`](#runevent), [`RunEventType`](#runeventtype), [`RunFailureClass`](#runfailureclass), [`SampleLink`](#samplelink), [`SampleRequest`](#samplerequest), [`SampleResult`](#sampleresult), [`session_id`](#session_id), [`SessionIdentity`](#sessionidentity), [`spec_hash`](#spec_hash), [`TERMINAL_EVENT_TYPES`](#terminal_event_types), [`Text`](#text), [`ToolCall`](#toolcall), [`ToolChoice`](#toolchoice), [`ToolChoiceMode`](#toolchoicemode), [`ToolResult`](#toolresult), [`ToolResultBlock`](#toolresultblock), [`ToolSpecification`](#toolspecification), [`Usage`](#usage)
 - **[`rollout.environment`](#rolloutenvironment)** — What a run trains on and an eval measures: rows, starts, eval data, what results say. [`binding_for`](#binding_for), [`Description`](#description), [`drawn`](#drawn), [`Environment`](#environment), [`first_program`](#first_program), [`held_out`](#held_out), [`Row`](#row), [`Start`](#start), [`start_key`](#start_key), [`train_start`](#train_start)
 - **[`rollout.curriculum`](#rolloutcurriculum)** — Which row to train on next, and gates on evals. [`Curriculum`](#curriculum), [`curriculum_of`](#curriculum_of), [`GroupResult`](#groupresult), [`solved_share`](#solved_share)
@@ -637,6 +637,17 @@ How a kind of sandbox is served. Exactly one kind is set.
 | `local` | `str \| None` | `None` | The name of a pool registered with the runner, in process. |
 | `url` | `str \| None` | `None` | A pool served over HTTP (`rollout.harness.remote.serve_pool`), wherever its sandboxes live. |
 
+### `PoolUnavailable`
+
+*class* · `libraries/rollout/src/rollout/harness/sandboxes.py`
+
+```python
+class PoolUnavailable(NoCapacity)
+```
+
+The pool does not answer now (its process is starting, or was started again): an acquire may succeed once it
+does. A runner waits for it as for room.
+
 ### `Process`
 
 *class* · `libraries/rollout/src/rollout/harness/sandboxes.py`
@@ -1006,7 +1017,10 @@ A `Pool` over a `Provider`: at most `provider.size` leases at once, kept in `lea
   it has), `SandboxLost` for a key whose sandbox is gone, and `NoCapacity` when the pool is full.
 - `async def release(self, key: str) -> None`
 - `async def capacity(self) -> Capacity`
-- `async def call(self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str) -> ToolResult`
+- `async def call(self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str) -> ToolResult` — Perform an operation on the sandbox of `key`. Raises `SandboxLost` for a key with no live lease here (its
+  lease was lost, or ended by the pool): its run cannot go on in another sandbox.
+- `async def lose(self, key: str) -> None` — Delete the sandbox of `key` and keep its lease, marked lost: the key gets `SandboxLost` from then on, until
+  its lease is released. Nothing when there is no such lease.
 - `async def held(self) -> list[Lease]` — This pool's leases, those whose sandboxes are lost included.
 - `async def sweep(self, ended: Callable[[Lease], bool] = lambda lease: False) -> list[str]` — Release the leases `ended` says have ended, and those past their time limit; mark lost those whose sandbox
   is gone (the pool's process was started again, say), which their keys cannot have back; and delete the
@@ -3987,7 +4001,7 @@ How servers are reached: a bearer token read from an environment variable (`toke
 **Methods**
 
 - `def token(self) -> str | None`
-- `def client(self, timeout: float = 600.0) -> httpx.AsyncClient` — A client that reaches servers so.
+- `def client(self, timeout: float | httpx.Timeout = 600.0) -> httpx.AsyncClient` — A client that reaches servers so.
 
 ### `Engine`
 
@@ -7077,15 +7091,18 @@ class OnPods
 ```
 
 Sandboxes of a kind served from the pods a run leases (`[sandboxes.KIND] on_pods`): each pod whose provider
-lists the kind (`sandboxes`) serves a pool of them beside its engine and trainer, as many as its spare CPUs and
-memory hold (`rollout_train.pods.sandboxes`).
+lists the kind (`sandboxes`) serves a pool of them beside its engine and trainer, in a process of its own, in a
+Python environment made on the pod from the provider's source (`rollout_train.pods.sources`), as many as its spare
+CPUs and memory hold (`rollout_train.pods.sandboxes`).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `size` | `int \| None` | `None` | The most sandboxes a pod holds (none: as many as its spare CPUs and memory hold). |
 | `cpus` | `float` | `1.0` | The vCPUs one sandbox takes (a Minecraft world: about one while it plays). |
 | `memory_gib` | `float` | `2.4` | The memory one sandbox takes, in GiB (a Minecraft world: up to 2.4 when its bots roam far). |
-| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The provider's settings on a pod, over the section's own (a Minecraft cache on the pod's volume, say). |
+| `share` | `float \| None` | `None` | The part of a pod's spare CPUs and memory its sandboxes may take, where a pod serves several kinds. |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The provider's settings on a pod, over the section's own. |
+| `version` | `str \| None` | `None` | A published version (`NAME@VERSION`) whose code the pods run the provider from (none: the platform's own). |
 
 ### `parsed` {#rollout_trainclusterparsed}
 
@@ -8982,7 +8999,7 @@ point's in `GROUP`, else the project's. Raises `Refused` where there is none, or
 *constant* · `libraries/rollout-train/src/rollout_train/publishing.py`
 
 ```python
-EXCLUDED = frozenset({'.git', '.venv', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.ipynb_checkpoints'})
+EXCLUDED = frozenset({'.git', '.venv', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.ipynb_checkpoints', 'node_modules'})
 ```
 
 Directories never packed.
@@ -9249,6 +9266,7 @@ What the environment's worker says of it, asked beforehand.
 | `loads` | `bool` | `True` |  |
 | `why` | `str` | `''` | Why it does not load, where it does not. |
 | `sandboxes` | `frozenset[str]` | `frozenset()` | The sandbox kinds its programs need. |
+| `slotted` | `frozenset[str]` | `frozenset()` | Those of its sandbox kinds whose specs name model slots (a harness inside reaches its model's address). |
 | `tool_sets` | `frozenset[str]` | `frozenset()` | The tool sets its programs import by name that are served elsewhere (`[tools.NAME]`). |
 | `slots` | `frozenset[str] \| None` | `None` | Its programs' slots (none: not known). |
 | `untrained` | `frozenset[str]` | `frozenset()` | Those of its slots that are not trained (a judge, a fixed opponent): each must be bound by name. |

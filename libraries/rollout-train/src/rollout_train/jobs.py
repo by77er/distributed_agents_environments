@@ -470,6 +470,7 @@ class Run:
         needs = needs_of(self.settings, self.cluster)
         if not needs:
             return
+        needs = await self._with_sandboxes(needs)
         pods = Pods(self.run.id, self.cluster, self.ledger, told=self._told)
         self.pods = pods
         stack.push_async_callback(pods.release)
@@ -854,14 +855,26 @@ class Run:
             self.pool_bindings[kind] = PoolBinding(local=kind)
         return pools
 
+    async def _with_sandboxes(self, needs: Sequence[Any]) -> list[Any]:
+        """`needs`, those of providers whose pods serve kinds of sandboxes the environment declares given those kinds'
+        sources (`rollout_train.pods.sources`): their code packed and stored in the pods' store, once per content."""
+        from rollout_train.pods.leasing import with_sandboxes
+        from rollout_train.pods.sources import sources_of
+        from rollout_train.published import environment_versions_of
+
+        kinds = {kind for kind in self.sandboxes if kind in self.cluster.sandboxes}
+        if not any(serving(self.cluster, kind) for kind in kinds):
+            return list(needs)
+        sources = await sources_of(self.cluster, kinds, self.stores.blobs, environment_versions_of(self.ledger))
+        return with_sandboxes(needs, self.cluster, {kind: each.to_json() for kind, each in sources.items()})
+
     def _on_pods(self, stack: contextlib.AsyncExitStack, kind: str, url: str | None) -> Pool | None:
         """The pools of `kind` the run's pods serve, as one (`rollout_train.pods.pools`), the pool at `url` behind them
         for when they are full; swept here by a keeper as a pool of the run's own. None where the run leases no pod
         that serves the kind (validation refused such a run unless the pool at `url` serves it)."""
         from rollout.harness.remote import RemotePool
-        from rollout_train.pods.pools import PodPools
+        from rollout_train.pods.pools import FilePlacements, PodPools
         from rollout_train.pods.routing import LeasedPools
-        from rollout_train.sandboxes import FileLeases
 
         providers = serving(self.cluster, kind)
         if self.pods is None or not any(each.provider in providers for each in self.pods.leases.values()):
@@ -873,9 +886,10 @@ class Run:
         if fallback is not None:
             stack.push_async_callback(fallback.aclose)
         beats = presence_of(self.ledger)
+        placements = FilePlacements(self.directory / "pods" / f"{kind}.json")
         pool = PodPools(
-            kind, discover, name=f"{kind}@{self.run.id}", leases=FileLeases(self.directory / "pods" / kind),
-            admits=admits(self.ledger, beats), fallback=fallback,
+            kind, discover, name=f"{kind}@{self.run.id}", placements=placements, admits=admits(self.ledger, beats),
+            fallback=fallback,
         )  # fmt: skip
         stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
         _background(stack, keep(pool, self.ledger, beats))

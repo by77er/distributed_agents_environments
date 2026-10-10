@@ -17,9 +17,9 @@ public port 8443/tcp is mapped to), written into its lease (`PodLease.address`) 
 it, or when RunPod is next asked about the pod while the run waits for it; so are the vCPUs and memory RunPod says it
 gave the pod (`PodLease.vcpus`, `memory_gb`). The pod is ready for the run once its lease has that address and it beats
 that it is ready (its beat names the run). A pod not ready within its provider's `start_timeout` is deleted, and the
-run fails saying which and why (`PodsDidNotStart`). A host pod whose provider lists kinds of sandboxes is told the
-pools it serves (`ROLLOUT_SANDBOXES`, `sandboxes_of`), and is asked of RunPod with the provider's least vCPUs and
-memory per GPU, where it says them.
+run fails saying which and why (`PodsDidNotStart`). A pod is asked of RunPod with its provider's least vCPUs and
+memory per GPU, where it says them. A host pod whose provider lists kinds of sandboxes is given, in its lease's
+settings, the sources of those its run needs (`with_sandboxes`), which its sandbox host serves.
 
 **Renewing** (`Pods.renewing`). Every `RENEW` seconds the run stamps each lease (`renewed`, writing where RunPod says
 its pod is reached into a lease that does not say it, or says another place: a pod started again, or given another
@@ -84,9 +84,9 @@ __all__ = [
     "pod_name",
     "pods_store",
     "reap",
-    "sandboxes_of",
     "serving",
     "tag_of",
+    "with_sandboxes",
 ]
 
 log = logging.getLogger(__name__)
@@ -223,20 +223,16 @@ def serving(cluster: "Cluster", kind: str) -> list[str]:
     ]  # fmt: skip
 
 
-def sandboxes_of(cluster: "Cluster", table: PodTable) -> dict[str, JsonValue]:
-    """The pools a pod of `table` serves (`ROLLOUT_SANDBOXES`, read by `rollout_train.pods.sandboxes`): for each kind
-    its table lists, the provider that makes them, its settings on a pod, and what a pool of them is sized by."""
-    served: dict[str, JsonValue] = {}
-    for kind in table.sandboxes:
-        section = cluster.sandboxes.get(kind)
-        if section is None or section.on_pods is None or section.provider is None:
-            continue  # (the cluster config refuses it)
-        on = section.on_pods
-        served[kind] = {
-            "provider": section.provider, "settings": {**section.settings, **on.settings}, "size": on.size,
-            "cpus": on.cpus, "memory_gib": on.memory_gib,
-        }  # fmt: skip
-    return served
+def with_sandboxes(needs: Sequence[PodNeed], cluster: "Cluster", sources: Mapping[str, JsonValue]) -> list[PodNeed]:
+    """`needs`, each of a provider whose pods serve kinds of sandboxes given the sources of those kinds among
+    `sources` (`rollout_train.pods.sources`, as JSON by kind) in its settings (`sandboxes`): what its pod's sandbox
+    host serves for the run."""
+    found: list[PodNeed] = []
+    for need in needs:
+        table = _table(cluster, need.provider)
+        served = {kind: sources[kind] for kind in (table.sandboxes if table is not None else ()) if kind in sources}
+        found.append(replace(need, settings={**need.settings, "sandboxes": served}) if served else need)
+    return found
 
 
 def _gave(lease: PodLease, pod: "Pod | None") -> PodLease:
@@ -461,8 +457,6 @@ class Pods:
             env["ROLLOUT_TRAINER"] = str(need.settings.get("implementation") or "rollout_lora:LoraTrainer")
             env["ROLLOUT_TRAINER_MODEL"] = str(need.settings.get("model") or lease.model)
             env["ROLLOUT_TRAINER_GPUS"] = str(table.gpu_count)  # (more than one: a process per GPU, sharded)
-        if served := sandboxes_of(self.cluster, table):
-            env["ROLLOUT_SANDBOXES"] = json.dumps(served)
         sensitive = {"ROLLOUT_LEDGER_TOKEN": lease.token or "", **keys}
         ca = self._ca(table)
         if ca is not None:

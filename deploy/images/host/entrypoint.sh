@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # A host pod (deploy/images/host/README.md): its certificate first, then the renewal daemon, Envoy, the vLLM server
 # (with its share of the GPU's memory), the follower and the training service. When any of them ends, the others are
-# ended and the container exits. Where the pod's settings name sandbox pools (`ROLLOUT_SANDBOXES`), their process runs
-# too, started again alone whenever it ends: vLLM and the trainer never go down with it.
+# ended and the container exits. The sandbox host (whatever kinds of sandbox the run that holds the pod asks for) runs
+# too, started again alone when it ends, with a growing wait: vLLM and the trainer never go down with it.
 set -euo pipefail
 source /opt/rollout/bin/supervise.sh
 
@@ -48,8 +48,6 @@ start trainer /opt/rollout/venv/bin/python -m rollout_train.pods.training
 # (the follower says the pod is ready once vLLM serves what the run says and the training service holds its trainer)
 export ROLLOUT_TRAINER_URL=${ROLLOUT_TRAINER_URL:-http://127.0.0.1:8001}
 start follower /opt/rollout/venv/bin/python -m rollout_train.pods.inference
-if [ -n "${ROLLOUT_SANDBOXES:-}" ]; then
-    start sandboxes restarting /opt/rollout/venv/bin/python -m rollout_train.pods.sandboxes
-fi
+start sandboxes restarting /opt/rollout/venv/bin/python -m rollout_train.pods.sandboxes
 
 supervise

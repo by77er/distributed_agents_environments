@@ -128,14 +128,20 @@ def test_a_host_pod_s_sandbox_pools_are_reached_under_their_kind_with_time_for_a
     assert endpoint["endpoint"]["address"]["socket_address"] == {"address": "127.0.0.1", "port_value": 8710}
 
 
-def test_a_host_pod_s_sandbox_pools_are_started_again_alone_when_they_end() -> None:
+def test_a_host_pod_s_sandbox_host_is_started_again_alone_when_it_ends_with_a_growing_wait() -> None:
     entrypoint = (IMAGES / "host" / "entrypoint.sh").read_text()
     assert "start sandboxes restarting /opt/rollout/venv/bin/python -m rollout_train.pods.sandboxes" in entrypoint
-    assert 'if [ -n "${ROLLOUT_SANDBOXES:-}" ]; then' in entrypoint
     supervise = (IMAGES / "common" / "supervise.sh").read_text()
-    assert "restarting() {" in supervise
+    assert "restarting() {" in supervise and "RESTART_LIMIT" in supervise and "wait * 2 > 300" in supervise
     for role in ROLES:  # (no other process is started again: the container ends with any of them)
         assert role == "host" or "restarting" not in (IMAGES / role / "entrypoint.sh").read_text()
+
+
+def test_the_host_image_holds_no_environment_and_none_of_an_environments_system_dependencies() -> None:
+    dockerfile = (IMAGES / "host" / "Dockerfile").read_text()
+    for absent in ("java", "temurin", "node", "npm", "minecraft", "environments/"):
+        assert absent not in dockerfile.lower(), absent
+    assert "COPY --from=uv /uv /uvx /usr/local/bin/" in dockerfile  # (what makes each kind's Python on the pod)
 
 
 @pytest.mark.parametrize("role", ROLES)

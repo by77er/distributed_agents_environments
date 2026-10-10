@@ -15,7 +15,9 @@ it listen on the pod's loopback interface.
 - `training`: the training service on a training pod: one step at a time, each idempotent by the checkpoint it makes
   (`TrainerService`).
 - `trainer`: `RemoteTrainer`, a `Trainer` over that service.
-- `sandboxes`: sandbox pools on a host pod's spare CPUs and memory, following its lease (`PodSandboxes`).
+- `sources`: what a pod needs to serve a kind of sandbox, as data its lease gives it (`SandboxSource`).
+- `sandboxes`: a host pod's sandbox host: each kind its lease asks for, in a Python environment made on the pod and a
+  process of its own, following the lease (`SandboxHost`).
 - `pools`: the pools of a kind a run's pods serve, as one pool in the run's driver (`PodPools`), found and reached by
   `routing` (`LeasedPools`), as the run's engines are (`LeasedServers`).
 

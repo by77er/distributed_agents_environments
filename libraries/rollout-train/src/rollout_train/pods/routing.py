@@ -20,6 +20,8 @@ ready.
 from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING
 
+import httpx
+
 from rollout.harness.remote import RemotePool
 from rollout_train.inference.remote import CheckpointServer, RemoteEngine
 from rollout_train.ledger import Ledger
@@ -35,8 +37,10 @@ __all__ = ["SANDBOXES", "LeasedPools", "LeasedServers"]
 
 SANDBOXES = "/v1/sandboxes"
 """Where a pod's proxy serves its sandbox pools, each under its kind (`/v1/sandboxes/KIND/acquire`)."""
-POOL_TIMEOUT = 600.0
-"""Seconds a request to a pod's pool may take: an acquire starts a world (a Paper server, its bots, its task)."""
+POOL_TIMEOUT = httpx.Timeout(600.0, connect=5.0)
+"""How long a request to a pod's pool may take: an acquire starts a sandbox (a world: a Paper server, its bots, its
+task), but a pod that does not answer is given up on in 5 seconds. Asking a pool how full it is takes 10 at most
+(`rollout.harness.remote.QUICK`)."""
 
 
 class LeasedServers:
@@ -118,6 +122,9 @@ class LeasedPools:
             and each.address.startswith("https://")
         }  # fmt: skip
         alive = {pod.name for pod in live(await presence.beats())}
+        wanted = {(address, pod_identity(pod)) for pod, address in addresses.items()}
+        for key in [each for each in self._pools if each not in wanted]:  # (a pod no longer the run's: closed)
+            await self._pools.pop(key).aclose()
         found: dict[str, Reached] = {}
         for pod, address in sorted(addresses.items()):
             identity = pod_identity(pod)

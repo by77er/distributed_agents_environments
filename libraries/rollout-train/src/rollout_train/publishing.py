@@ -17,8 +17,8 @@ the Python environment it runs in, and recorded as a version beside the ledger (
    else the project's. Its module is imported from the project's root, or from `src/` for a project that keeps its
    packages there.
 3. **Pack** (`packed`): the project's files in one zip, stored uncompressed, sorted, with fixed times and modes, so the
-   same files are the same bytes wherever they are packed; without `.git`, `.venv` and caches (`EXCLUDED`) or
-   symbolic links. The version's id is the zip's SHA-256.
+   same files are the same bytes wherever they are packed; without `.git`, `.venv`, `node_modules` and caches
+   (`EXCLUDED`) or symbolic links. The version's id is the zip's SHA-256.
 4. **Store** (`stored`): the zip as a blob, and where Ray fetches it as a runtime environment's `working_dir`. Ray
    tells an archive by its name, so a store in S3 hands Ray a copy of the blob's object named `KEY.zip`
    (`s3://BUCKET/KEY.zip`, which each node of a run's Ray cluster reads with the run's credentials), and a store of
@@ -94,7 +94,16 @@ __all__ = [
 GROUP = "rollout.environments"
 """The entry-point group a project declares its environments in."""
 EXCLUDED = frozenset(
-    {".git", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".ipynb_checkpoints"}
+    {
+        ".git",
+        ".venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".ipynb_checkpoints",
+        "node_modules",
+    }
 )
 """Directories never packed."""
 LARGEST = 256 * 2**20

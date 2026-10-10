@@ -16,18 +16,37 @@ start() { # start NAME COMMAND...: run COMMAND in the background, its output pre
     children+=("$!")
 }
 
-restarting() { # restarting COMMAND...: run COMMAND, and again 5 seconds after each time it ends, until this is ended
-    local child=
+# restarting COMMAND...: run COMMAND, and again after each time it ends, until this is ended: 5 seconds after, doubling
+# up to 5 minutes while it keeps ending within a minute of its start. After 10 such quick ends running it is no longer
+# started, and this waits (it never ends by itself, so the pod's other processes go on).
+restarting() {
+    local child= status wait=5 quick=0 began
     trap '[ -n "$child" ] && kill -TERM "$child" 2>/dev/null && wait "$child"; exit 0' TERM
     while true; do
+        began=$SECONDS
         "$@" &
         child=$!
-        local status=0
+        status=0
         wait "$child" || status=$?
         child=
-        echo "it ended (status $status): starting it again in 5 s" >&2
-        sleep 5 &
-        wait $! || true
+        if ((SECONDS - began < ${RESTART_QUICK:-60})); then
+            quick=$((quick + 1))
+        else
+            quick=1 wait=5
+        fi
+        if ((quick >= ${RESTART_LIMIT:-10})); then
+            echo "it ended (status $status) $quick times running within a minute of its start: not started again" >&2
+            sleep infinity &
+            child=$!
+            wait "$child"
+            exit 0
+        fi
+        echo "it ended (status $status): starting it again in $wait s" >&2
+        sleep "$wait" &
+        child=$!
+        wait "$child" || true
+        child=
+        wait=$((wait * 2 > 300 ? 300 : wait * 2))
     done
 }
 

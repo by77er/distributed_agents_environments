@@ -5,29 +5,35 @@ through `PodPools`, which the runner holds as it holds any pool (docs/research/r
 - **Which pods.** At each look (`discover`, `rollout_train.pods.routing.LeasedPools`), the pods whose leases the run
   holds, at the addresses their leases say: those that beat fresh are live and take new leases; the rest still answer
   for the leases they hold.
-- **Acquiring.** A key with no lease goes to the live pod with the most room (its pool's `capacity`, less the acquires
-  on their way to it), then the next while each answers full; when every pod is full, to the cluster's own pool of the
-  kind (`fallback`, the section's `url`), where there is one; else `NoCapacity`. A key with a lease goes to where its
-  lease is, and only there: its sandbox is never made again elsewhere.
-- **Releasing and operations** go to where the key's lease is.
+- **Acquiring.** A key with no lease goes to a live pod with room, the one with the most first (its pool's `capacity`,
+  asked of every pod at once and never while another acquire chooses, less the acquires on their way to it, which
+  only orders the pods); a pod that answers full (or does not answer) passes it to the next; when every pod is full, to
+  the cluster's own pool of the kind (`fallback`, the section's `url`), where there is one; else `NoCapacity`. A key
+  with a lease goes to where its lease is, and only there: its sandbox is never made again elsewhere.
+- **Where each lease is** is kept (`placements`, in the run's directory) before the pod is asked, as `acquiring`, and
+  as `held` once it answers, so a driver started again routes the leases of the runs it adopts. An acquire whose
+  answer was lost (a timeout) is released on its pod at once, or, failing that, at the next sweep: no world is left
+  behind unnamed.
+- **Releasing and operations** go to where the key's lease is. A release that fails is kept (`releasing`) and tried
+  again at each sweep; the key gets `SandboxLost` meanwhile.
 - **Capacity** is the sum of the live pods' pools' and the fallback's, so a runner asks one pool for room as before.
 - **A lost pod.** A lease whose pod the run no longer holds (released, deleted, taken by another run) is lost: its key
-  gets `SandboxLost`, and its episode is played again. A pod that only misses beats keeps its leases.
-- **Where each lease is** is kept in `leases` (by key: the pod's lease, under this pool's name, its `handle` saying the
-  pod and the pod's own handle), so a driver started again routes the leases of runs it adopts to where they are.
+  gets `SandboxLost`, and its episode is played again. A pod that only misses beats keeps its leases. A pod's pool
+  says `SandboxLost` itself for a lease it ended (its run's driver was gone, or it was started again).
 - **Claims.** As a pool beside the ledger: `admits` refuses a key whose claim has lapsed (releasing its lease), and a
-  keeper (`rollout_train.sandboxes.keep`) sweeps this pool, releasing on its pod each lease whose claim lapsed. A pod's
-  own pool also ends leases unused for long, and every lease when another run takes the pod.
+  keeper (`rollout_train.sandboxes.keep`) sweeps this pool, releasing on its pod each lease whose claim lapsed.
 """
 
 import asyncio
 import contextlib
+import json
 import logging
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
+from typing import Any, Protocol
 
 from pydantic import JsonValue
 
@@ -37,23 +43,35 @@ from rollout.harness.sandboxes import (
     Capacity,
     Lease,
     LeaseRefused,
-    Leases,
-    MemoryLeases,
     NoCapacity,
     Pool,
     SandboxLost,
     SandboxSpec,
 )
+from rollout_train.ledger import locked
 
-__all__ = ["FALLBACK", "PodPools", "Reached"]
+__all__ = [
+    "ACQUIRING",
+    "FALLBACK",
+    "HELD",
+    "LOST",
+    "RELEASING",
+    "FilePlacements",
+    "MemoryPlacements",
+    "Placement",
+    "Placements",
+    "PodPools",
+    "Reached",
+]
 
 log = logging.getLogger(__name__)
 
 FALLBACK = "_cluster"
-"""Where a lease of the fallback pool is, in its handle (no pod's name: those are lowercase letters, digits and
-hyphens)."""
+"""Where a lease of the fallback pool is (no pod's name: those are lowercase letters, digits and hyphens)."""
 LOOK = 2.0
 """Seconds a look at the run's pods is kept for."""
+ACQUIRING, HELD, RELEASING, LOST = "acquiring", "held", "releasing", "lost"
+"""A placement's states: asked of its pod (no answer yet), held, being released (a release failed), lost."""
 
 
 @dataclass(frozen=True)
@@ -64,10 +82,80 @@ class Reached:
     live: bool = True
 
 
+@dataclass(frozen=True)
+class Placement:
+    """Where a key's lease is: the pod (or `FALLBACK`), the pod's handle for its sandbox, and its state."""
+
+    key: str
+    where: str
+    handle: str = ""
+    state: str = ACQUIRING
+    at: float = 0.0
+
+
+class Placements(Protocol):
+    async def get(self, key: str) -> Placement | None: ...
+    async def put(self, placement: Placement) -> None: ...
+    async def delete(self, key: str) -> None: ...
+    async def all(self) -> list[Placement]: ...
+
+
+class MemoryPlacements:
+    def __init__(self) -> None:
+        self.placements: dict[str, Placement] = {}
+
+    async def get(self, key: str) -> Placement | None:
+        return self.placements.get(key)
+
+    async def put(self, placement: Placement) -> None:
+        self.placements[placement.key] = placement
+
+    async def delete(self, key: str) -> None:
+        self.placements.pop(key, None)
+
+    async def all(self) -> list[Placement]:
+        return list(self.placements.values())
+
+
+class FilePlacements:
+    """`Placements` in a JSON file (in the run's directory), written whole under the directory's lock."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    async def get(self, key: str) -> Placement | None:
+        return (await asyncio.to_thread(self._read_locked)).get(key)
+
+    async def put(self, placement: Placement) -> None:
+        await asyncio.to_thread(self._change, lambda found: {**found, placement.key: placement})
+
+    async def delete(self, key: str) -> None:
+        await asyncio.to_thread(self._change, lambda found: {k: v for k, v in found.items() if k != key})
+
+    async def all(self) -> list[Placement]:
+        return list((await asyncio.to_thread(self._read_locked)).values())
+
+    def _read_locked(self) -> dict[str, Placement]:
+        with locked(self.path.parent):
+            return self._read()
+
+    def _change(self, change: Callable[[dict[str, Placement]], dict[str, Placement]]) -> None:
+        with locked(self.path.parent):
+            found = change(self._read())
+            staged = self.path.with_suffix(".staged")
+            staged.write_text(json.dumps([asdict(each) for each in found.values()]))
+            staged.replace(self.path)
+
+    def _read(self) -> dict[str, Placement]:
+        if not self.path.exists():
+            return {}
+        return {each["key"]: Placement(**each) for each in json.loads(self.path.read_text())}
+
+
 class PodPools:
     """A `Pool` of `kind` over the pools of the pods `discover` finds (by pod name), with `fallback` for when every pod
-    is full; where each lease is, kept in `leases` under `name`. `admits` says whether a key may hold a lease now
-    (beside the ledger: whether its claim holds)."""
+    is full; where each lease is, kept in `placements`. `admits` says whether a key may hold a lease now (beside the
+    ledger: whether its claim holds)."""
 
     def __init__(
         self,
@@ -75,7 +163,7 @@ class PodPools:
         discover: Callable[[], Awaitable[Mapping[str, Reached]]],
         *,
         name: str | None = None,
-        leases: Leases | None = None,
+        placements: Placements | None = None,
         admits: Callable[[str], Awaitable[bool]] | None = None,
         fallback: Pool | None = None,
         look: float = LOOK,
@@ -83,15 +171,15 @@ class PodPools:
         self._kind = kind
         self.discover = discover
         self.name = name or f"{kind}@pods"
-        self.leases: Leases = leases or MemoryLeases()
+        self.placements: Placements = placements or MemoryPlacements()
         self.admits = admits
         self.fallback = fallback
         self.look = look
-        self._held: dict[str, Lease] = {}
+        self._held: dict[str, Placement] = {}
         self._loaded = False
         self._making: set[str] = set()
         self._pending: Counter[str] = Counter()
-        """Acquires on their way to each pod: counted against its room, so acquires at once spread."""
+        """Acquires on their way to each pod: they order the pods, so acquires at once spread, and exclude none."""
         self._choosing = asyncio.Lock()
         self._locks: dict[str, asyncio.Lock] = {}
         self._found: tuple[float, Mapping[str, Reached]] | None = None
@@ -115,30 +203,27 @@ class PodPools:
             raise ValueError(f"the pool {self.name} holds {self.kind} sandboxes, not {spec.kind}")
         await self._load()
         async with self._lock(key):
-            record = self._held.get(key)
+            placement = self._held.get(key)
             if self.admits is not None and not await self.admits(key):
-                if record is not None:
-                    await self._end(record)
+                if placement is not None:
+                    await self._end(placement)
                 raise LeaseRefused(f"{key} may hold no sandbox: the claim it names no longer holds")
-            if record is not None:
-                return await self._again(record, spec, environment)
             self._making.add(key)
             try:
-                where, pool, lease = await self._placed(spec, key, environment)
+                if placement is not None:
+                    return await self._again(placement, spec, environment)
+                _, pool, lease = await self._placed(spec, key, environment)
             finally:
                 self._making.discard(key)
             await self._describe(pool)
-            kept = lease.model_copy(update={"pool": self.name, "handle": f"{where}/{lease.handle}"})
-            await self.leases.put(kept)
-            self._held[key] = kept
             return lease
 
     async def release(self, key: str) -> None:
         await self._load()
         async with self._lock(key):
-            record = self._held.get(key)
-            if record is not None:
-                await self._end(record)
+            placement = self._held.get(key)
+            if placement is not None:
+                await self._end(placement)
 
     async def capacity(self) -> Capacity:
         """The sum of the live pods' pools' room and the fallback's (a pool that does not answer: none)."""
@@ -155,102 +240,139 @@ class PodPools:
         self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
     ) -> ToolResult:
         await self._load()
-        record = self._held.get(key)
-        if record is None or record.lost:
-            raise SandboxLost(f"the pool {self.name} holds no sandbox of {key}")
-        pool = self._pool_at(_where(record), await self._reached())
+        placement = self._held.get(key)
+        if placement is None or placement.state != HELD:
+            raise SandboxLost(f"the pool {self.name} holds no live sandbox of {key}")
+        pool = self._pool_at(placement.where, await self._reached())
         if pool is None:
-            raise SandboxLost(f"the sandbox of {key} is gone with pod {_where(record)}")
+            raise SandboxLost(f"the sandbox of {key} is gone with pod {placement.where}")
         return await pool.call(key, name, arguments, effect_id=effect_id, arguments_digest=arguments_digest)
 
     async def held(self) -> list[Lease]:
-        """Its leases, those whose pods are gone included, as it keeps them (`handle`: `POD/HANDLE`)."""
+        """Its leases, as leases (`handle`: `POD/HANDLE`; `lost` for those not held), for its keeper."""
         await self._load()
-        return list(self._held.values())
+        return [
+            Lease(key=each.key, kind=self.kind, pool=self.name, handle=f"{each.where}/{each.handle}", at=each.at,
+                  lost=each.state != HELD)
+            for each in self._held.values()
+        ]  # fmt: skip
 
     async def sweep(self, ended: Callable[[Lease], bool] = lambda lease: False) -> list[str]:
-        """Release the leases `ended` says have ended, on their pods; mark lost those whose pod the run no longer
-        holds. Returns the keys released or marked lost."""
+        """Release, on their pods, the leases `ended` says have ended and those whose release or acquire did not finish;
+        mark lost those whose pod the run no longer holds. Returns the keys released or marked lost."""
         await self._load()
         reached = await self._reached(fresh=True)
         gone: list[str] = []
-        for record in list(self._held.values()):
-            if record.key in self._making:
+        for lease in await self.held():
+            placement = self._held.get(lease.key)
+            if placement is None or lease.key in self._making:
                 continue
-            if ended(record):
-                await self.release(record.key)
-                gone.append(record.key)
-            elif not record.lost and self._pool_at(_where(record), reached) is None:
-                async with self._lock(record.key):
-                    lost = record.model_copy(update={"lost": True})
-                    await self.leases.put(lost)
-                    self._held[record.key] = lost
-                gone.append(record.key)
+            if ended(lease) or placement.state in (ACQUIRING, RELEASING):
+                await self.release(lease.key)
+                if lease.key not in self._held:
+                    gone.append(lease.key)
+            elif placement.state == HELD and self._pool_at(placement.where, reached) is None:
+                async with self._lock(lease.key):
+                    await self._put(replace(placement, state=LOST))
+                gone.append(lease.key)
         return gone
 
     async def close(self) -> None:
         """Release every lease it holds, on its pod (a pod's own pool ends what is left)."""
-        for record in await self.held():
+        for lease in await self.held():
             with contextlib.suppress(Exception):
-                await self.release(record.key)
+                await self.release(lease.key)
 
     async def _placed(
         self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None
     ) -> tuple[str, Pool, Lease]:
-        """A new lease of `key`: on the live pod with the most room, the next while each is full, then the fallback.
-        A pod is chosen by one acquire at a time, its room asked then less the acquires on their way to it, so acquires
-        at once spread over the pods."""
-        tried: set[str] = set()
-        while True:
-            async with self._choosing:
-                reached = await self._reached()
-                live = {where: each.pool for where, each in reached.items() if each.live and where not in tried}
-                asked = await asyncio.gather(*(pool.capacity() for pool in live.values()), return_exceptions=True)
-                room = {
-                    where: found.free - self._pending[where] for where, found in zip(live, asked, strict=True)
-                    if isinstance(found, Capacity) and found.free > self._pending[where]
-                }  # fmt: skip
-                where = min(room, key=lambda each: (-room[each], each), default=None)
-                if where is None:
-                    break
+        """A new lease of `key` (hold its lock): on a live pod with room, the most first, the next while each answers
+        full or does not answer, then the fallback."""
+        live = {where: each.pool for where, each in (await self._reached()).items() if each.live}
+        asked = await asyncio.gather(*(pool.capacity() for pool in live.values()), return_exceptions=True)
+        free = {where: found.free for where, found in zip(live, asked, strict=True) if isinstance(found, Capacity)}
+        async with self._choosing:  # (no network here: only the order, from what was asked)
+            order = sorted((where for where in free if free[where] > 0),
+                           key=lambda each: (-(free[each] - self._pending[each]), each))  # fmt: skip
+            if order:
+                self._pending[order[0]] += 1
+        for number, where in enumerate(order):
+            if number:
                 self._pending[where] += 1
             try:
-                return where, live[where], await live[where].acquire(spec, key, environment)
+                lease = await self._asked(where, live[where], spec, key, environment)
             except NoCapacity:
-                tried.add(where)
+                continue
             finally:
                 self._pending[where] -= 1
+            return where, live[where], lease
         if self.fallback is not None:
-            return FALLBACK, self.fallback, await self.fallback.acquire(spec, key, environment)
+            return FALLBACK, self.fallback, await self._asked(FALLBACK, self.fallback, spec, key, environment)
         raise NoCapacity(f"the pool {self.name}: every pod's pool is full")
 
-    async def _again(self, record: Lease, spec: SandboxSpec, environment: Mapping[str, str] | None) -> Lease:
-        """The lease of a key that has one, from where it is; `SandboxLost` where that is gone. Hold its lock."""
-        pool = None if record.lost else self._pool_at(_where(record), await self._reached())
-        if pool is None:
-            await self._forget(record)
-            raise SandboxLost(f"the sandbox of {record.key} is gone with pod {_where(record)}")
+    async def _asked(
+        self, where: str, pool: Pool, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None
+    ) -> Lease:
+        """Acquire `key` from the pool at `where`, its placement kept before it is asked: forgotten where the pool says
+        no; released where its answer was lost (a timeout, a dropped connection), at once or at the next sweep."""
+        await self._put(Placement(key, where, state=ACQUIRING, at=round(time.time(), 1)))
         try:
-            lease = await pool.acquire(spec, record.key, environment)
+            lease = await pool.acquire(spec, key, environment)
+        except (NoCapacity, LeaseRefused, SandboxLost):
+            await self._forget(key)
+            raise
+        except Exception:
+            try:
+                await pool.release(key)
+            except Exception as error:  # (its placement stays `acquiring`: the next sweep releases it)
+                log.warning("releasing %s on %s after a lost acquire failed: %s", key, where, error)
+            else:
+                await self._forget(key)
+            raise
+        await self._put(Placement(key, where, lease.handle, HELD, round(time.time(), 1)))
+        return lease
+
+    async def _again(self, placement: Placement, spec: SandboxSpec, environment: Mapping[str, str] | None) -> Lease:
+        """The lease of a key that has one, from where it is; `SandboxLost` where that is gone. Hold its lock."""
+        if placement.state in (LOST, RELEASING):
+            if placement.state == LOST:
+                await self._forget(placement.key)
+            raise SandboxLost(f"the sandbox of {placement.key} is gone")
+        pool = self._pool_at(placement.where, await self._reached())
+        if pool is None:
+            await self._forget(placement.key)
+            raise SandboxLost(f"the sandbox of {placement.key} is gone with pod {placement.where}")
+        if placement.state == ACQUIRING:  # (an acquire whose answer was lost: asked again, where it was asked)
+            return await self._asked(placement.where, pool, spec, placement.key, environment)
+        try:
+            lease = await pool.acquire(spec, placement.key, environment)
         except SandboxLost:
-            await self._forget(record)
+            await self._forget(placement.key)
             raise
         await self._describe(pool)
         return lease
 
-    async def _end(self, record: Lease) -> None:
-        """Release a lease where it is, and forget it. Hold its key's lock."""
-        pool = None if record.lost else self._pool_at(_where(record), await self._reached())
+    async def _end(self, placement: Placement) -> None:
+        """Release a lease where it is and forget it; one whose release fails is kept as `releasing`, for the next
+        sweep. Hold its key's lock."""
+        pool = None if placement.state == LOST else self._pool_at(placement.where, await self._reached())
         if pool is not None:
             try:
-                await pool.release(record.key)
-            except Exception as error:  # (its pod ends it: unused for long, or another run takes the pod)
-                log.warning("releasing %s on %s failed: %s", record.key, _where(record), error)
-        await self._forget(record)
+                await pool.release(placement.key)
+            except Exception as error:
+                log.warning("releasing %s on %s failed: %s; tried again at the next sweep", placement.key,
+                            placement.where, error)  # fmt: skip
+                await self._put(replace(placement, state=RELEASING))
+                return
+        await self._forget(placement.key)
 
-    async def _forget(self, record: Lease) -> None:
-        self._held.pop(record.key, None)
-        await self.leases.delete(record.key)
+    async def _put(self, placement: Placement) -> None:
+        await self.placements.put(placement)
+        self._held[placement.key] = placement
+
+    async def _forget(self, key: str) -> None:
+        self._held.pop(key, None)
+        await self.placements.delete(key)
 
     def _pool_at(self, where: str, reached: Mapping[str, Reached]) -> Pool | None:
         if where == FALLBACK:
@@ -278,13 +400,8 @@ class PodPools:
 
     async def _load(self) -> None:
         if not self._loaded:
-            self._held = {lease.key: lease for lease in await self.leases.all() if lease.pool == self.name}
+            self._held = {each.key: each for each in await self.placements.all()}
             self._loaded = True
 
     def _lock(self, key: str) -> asyncio.Lock:
         return self._locks.setdefault(key, asyncio.Lock())
-
-
-def _where(record: Lease) -> str:
-    """The pod (or `FALLBACK`) a kept lease is on."""
-    return record.handle.partition("/")[0]

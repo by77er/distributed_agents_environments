@@ -419,15 +419,28 @@ def test_a_kind_of_sandbox_may_be_served_from_the_pods_whose_provider_lists_it()
     section = cluster.sandboxes["minecraft"]
     assert section.on_pods == OnPods() and section.settings == {"heap": "1G"} and section.url is None
     assert pod_table("runpod-host", cluster.inference["h100"].settings).sandboxes == ("minecraft",)
-    told = cluster_of(SMALL + TLS + serving + WORLDS + 'on_pods = { size = 8, cpus = 1.5, memory_gib = 3, settings = '
-                      '{ cache = "/workspace/minecraft" } }\nurl = "http://sandboxes-minecraft:8710"\n')  # fmt: skip
-    assert told.sandboxes["minecraft"].on_pods == OnPods(8, 1.5, 3.0, {"cache": "/workspace/minecraft"})
+    told = cluster_of(SMALL + TLS + serving + WORLDS + 'on_pods = { size = 8, cpus = 1.5, memory_gib = 3, share = 0.5, '
+                      'settings = { heap = "2G" }, version = "minecraft-team@abc" }\n'
+                      'url = "http://sandboxes-minecraft:8710"\n')  # fmt: skip
+    said = OnPods(size=8, cpus=1.5, memory_gib=3.0, share=0.5, settings={"heap": "2G"}, version="minecraft-team@abc")
+    assert told.sandboxes["minecraft"].on_pods == said
+    two = HOST.replace("idle_stop = 300", 'idle_stop = 300\nsandboxes = ["minecraft", "boxes"]')
+    boxes = '\n[sandboxes.boxes]\nprovider = "tests.rollout_train.pods.sandbox_kinds:boxes"\non_pods = { size = 4 }\n'
+    cluster_of(SMALL + TLS + two + WORLDS + "on_pods = { share = 0.5 }\n" + boxes)  # (each says how much it takes)
     for text, says in (
         (SMALL + TLS + HOST + WORLDS + "on_pods = true\n", "no runpod-host provider's pods serve minecraft"),
         (SMALL + TLS + serving + WORLDS, "which is no .sandboxes.minecraft. with on_pods"),
         (SMALL + TLS + serving + WORLDS + "on_pods = { cpus = 0 }\n", "cpus and memory_gib are more than 0"),
         (SMALL + TLS + serving + WORLDS + "on_pods = { gpus = 1 }\n", "on_pods has no gpus"),
         (SMALL + TLS + serving + WORLDS + 'on_pods = "yes"\n', "on_pods is true, or a table"),
+        (SMALL + TLS + serving + WORLDS + "on_pods = { share = 1.5 }\n", "share is a part of a pod's spare"),
+        (SMALL + TLS + serving + WORLDS + 'on_pods = { version = "abc" }\n', "version names a published version"),
+        (SMALL + TLS + two + WORLDS + "on_pods = true\n" + boxes, "each says its size or its share in on_pods, and "
+         "minecraft says neither"),
+        (SMALL + TLS + two + WORLDS + "on_pods = { share = 0.8 }\n" + boxes.replace("size = 4", "share = 0.5"),
+         "shares add up to more than 1"),
+        (SMALL + TLS + HOST.replace("idle_stop = 300", 'sandboxes = ["Mine_craft"]') + WORLDS.replace(
+         "minecraft]", "Mine_craft]") + "on_pods = true\n", "named with lowercase letters, digits and hyphens"),
         (SMALL + TLS + serving + '\n[sandboxes.minecraft]\nurl = "http://x:1"\non_pods = true\n', "names its provider"),
         (SMALL + TLS + HOST.replace("idle_stop = 300", 'sandboxes = ["minecraft"]').replace('kind = "runpod-host"',
          'kind = "runpod-inference"') + WORLDS + "on_pods = true\n", "has no sandboxes|a runpod-host's pods alone"),
