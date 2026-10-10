@@ -206,6 +206,25 @@ def test_the_minecraft_worlds_are_served_from_a_pod_of_their_own_that_runs_reach
     off = render("--set", "sandboxes.minecraft.enabled=false")
     assert "minecraft" not in parsed(tomllib.loads(config_of(off)["cluster.toml"])).sandboxes
     assert not [each for each in off if each["metadata"]["name"] == "sandboxes-minecraft"]
+    assert pool.on_pods is None
+
+
+def test_the_minecraft_worlds_may_be_served_from_the_runs_host_pods_too(tmp_path: Path) -> None:
+    from rollout_train.cluster import OnPods
+
+    host = tmp_path / "host.toml"
+    host.write_text(
+        '[tls]\nca = "/etc/rollout-secrets/tls/ca.crt"\ncertificate = "/etc/rollout-secrets/tls/tls.crt"\n'
+        'key = "/etc/rollout-secrets/tls/tls.key"\n[inference.h100]\nkind = "runpod-host"\n'
+        'image = "ghcr.io/by77er/rollout-host@sha256:0"\ngpu_types = ["NVIDIA H100 80GB HBM3"]\n'
+        'sandboxes = ["minecraft"]\n[inference.h100.models."Qwen/Qwen3.5-9B"]\ncontext = 8192\n'
+    )
+    values = tmp_path / "values.yaml"
+    values.write_text("sandboxes:\n  minecraft:\n    onPods: '{ settings = { cache = \"/workspace/minecraft\" } }'\n")
+    served = render("--set-file", f"clusterExtra={host}", "-f", str(values))
+    pool = parsed(tomllib.loads(config_of(served)["cluster.toml"])).sandboxes["minecraft"]
+    assert pool.on_pods == OnPods(settings={"cache": "/workspace/minecraft"})
+    assert pool.url == "http://sandboxes-minecraft.rollout:8710"  # (the cluster's pool, for when the pods are full)
 
 
 def test_the_gateway_serves_the_cluster_configs_channels(rendered: list[dict[str, Any]]) -> None:
