@@ -5,18 +5,24 @@ pod's sandbox host, `rollout_train.pods.sandboxes`) runs for each kind, in the k
 
 `CONFIG` is a JSON file: the kind, the provider (`module:name`, called as `provider(directory, size=SIZE,
 **settings)`), its settings and size, the directory its state goes in, the pool's name, where to serve
-(`host`, `port`), and the run it serves (`run`; none: no run). The process serves the pool over HTTP
-(`rollout.harness.remote.serve_pool`) and one route more, for whoever started it:
+(`fd`, a listening socket it was handed; or `host` and `port`), and the run it serves (`run`; none: no run). The
+process serves the pool over HTTP (`rollout.harness.remote.serve_pool`) and two routes more, for whoever started it:
 
-    POST /_follow             {"run": RUN or null}: the run it serves now
+    POST /_follow             {"run": RUN or null, "admitting": true or false}: the run it serves now, and whether it
+                              takes new keys of it
+    POST /_resize             {"size": N}: hold at most N sandboxes from now on (409 where the provider's size is fixed)
+
+Where it serves on a socket it was handed (a Unix socket only whoever started it may reach), these routes, like the
+pool's, are reachable by that one alone.
 
 - **Whose keys.** A key is admitted only while it is of the run it serves (`of_run`): its first part is the run's id,
-  or the id of one of the run's evals (`RUN-...`). Any other gets `LeaseRefused`. A sandbox made for a key whose run
-  stopped being served while it was made is deleted, and the key refused.
+  or the id of one of the run's evals (`RUN-...`). Any other gets `LeaseRefused`.
 - **Another run, or none.** Told another run, it marks every live lease not of that run lost (deleting its sandbox)
   and forgets the leases of other runs; told none (the run's driver is gone, or the machine released), it marks every
-  live lease lost and forgets nothing. A lost lease's key gets `SandboxLost` from then on, so its episode is played
-  again, never in a fresh sandbox under the same key; a lease ends only when its run releases it.
+  live lease lost and forgets nothing. Told not to admit, it takes no new key (`PoolUnavailable`: a runner waits) and
+  serves those it holds. A sandbox made for a key while its run stopped being served is not kept: `SandboxLost` where
+  no run is served now, `LeaseRefused` where another is. A lost lease's key gets `SandboxLost` from then on, so its
+  episode is played again, never in a fresh sandbox under the same key; a lease ends only when its run releases it.
 - **What a restart keeps.** Its leases are in `sandboxes.json` in its directory. Started again, it finds them and marks
   lost those whose sandboxes are gone. Stopped, it deletes its sandboxes and keeps its leases.
 - It sweeps every 15 seconds: leases past their time limit end, leases whose sandboxes are gone are marked lost, and
@@ -35,7 +41,15 @@ from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from typing import Any
 
-from rollout.harness.sandboxes import Lease, LeaseRefused, Provider, SandboxPool, SandboxSpec
+from rollout.harness.sandboxes import (
+    Lease,
+    LeaseRefused,
+    PoolUnavailable,
+    Provider,
+    SandboxLost,
+    SandboxPool,
+    SandboxSpec,
+)
 from rollout.names import named
 
 __all__ = ["FollowingPool", "JsonLeases", "of_run", "serve"]
@@ -101,26 +115,35 @@ class JsonLeases:
 
 class FollowingPool(SandboxPool):
     """A `SandboxPool` that serves one run at a time (`run`): it admits only that run's keys, and `follow` moves it to
-    another run, or none."""
+    another run, or none. While not `admitting` it takes no new key (`PoolUnavailable`), and goes on serving those it
+    holds."""
 
     def __init__(self, provider: Provider, *, name: str, leases: JsonLeases, run: str | None) -> None:
         super().__init__(provider, name=name, leases=leases, admits=self._admitted)
         self.run = run
+        self.admitting = True
 
     async def _admitted(self, key: str) -> bool:
         return of_run(key, self.run)
 
     async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease:
+        await self._load()
+        if not self.admitting and of_run(key, self.run) and key not in self._held:
+            raise PoolUnavailable(f"the pool {self.name} takes no new sandbox now: its run's driver does not answer")
         lease = await super().acquire(spec, key, environment)
-        if not of_run(key, self.run):  # (another run, or none, since it was made: it is not that run's to keep)
+        if self.run is None:  # (no run since it was made: its driver is gone, so it is lost as the others are)
+            await self.lose(key)
+            raise SandboxLost(f"the sandbox of {key} was lost: the run it was made for is not served here now")
+        if not of_run(key, self.run):  # (another run since it was made: it is not that run's to keep)
             await self.release(key)
             raise LeaseRefused(f"{key} may hold no sandbox: its run is no longer the one served here")
         return lease
 
-    async def follow(self, run: str | None) -> list[str]:
-        """Serve `run` (none: no run). Every live lease not of it is marked lost; with a run, the leases of other runs
-        are forgotten (their keys are refused from now on). Returns the keys marked lost or forgotten."""
-        self.run = run
+    async def follow(self, run: str | None, *, admitting: bool = True) -> list[str]:
+        """Serve `run` (none: no run), taking new keys or not (`admitting`). Every live lease not of it is marked lost;
+        with a run, the leases of other runs are forgotten (their keys are refused from now on). Returns the keys marked
+        lost or forgotten."""
+        self.run, self.admitting = run, admitting
         gone: list[str] = []
         for lease in await self.held():
             if of_run(lease.key, run):
@@ -134,9 +157,19 @@ class FollowingPool(SandboxPool):
             gone.append(lease.key)
         return gone
 
+    def resize(self, size: int) -> bool:
+        """Hold at most `size` sandboxes from now on, where the provider lets its `size` be set; whether it did."""
+        try:
+            setattr(self.provider, "size", size)  # noqa: B010 (a provider's `size` is a property of the protocol)
+        except (AttributeError, TypeError):
+            return False
+        return self.provider.size == size
+
 
 async def serve(config: Mapping[str, Any]) -> None:
-    """Serve the pool `config` describes until cancelled; its sandboxes are deleted on the way out, its leases kept."""
+    """Serve the pool `config` describes until cancelled; its sandboxes are deleted on the way out, its leases kept.
+    With `fd`, it serves on that listening socket, which whoever started it made and handed it (a Unix socket only that
+    one can reach); else at `host` and `port`."""
     import uvicorn
     from starlette.requests import Request
     from starlette.responses import JSONResponse, Response
@@ -156,10 +189,16 @@ async def serve(config: Mapping[str, Any]) -> None:
     async def follow(request: Request) -> Response:
         said = await request.json()
         run = said.get("run")
-        gone = await pool.follow(str(run) if run else None)
+        gone = await pool.follow(str(run) if run else None, admitting=said.get("admitting", True) is not False)
         if gone:
             log.info("serving %s now: %d leases lost or ended", run or "no run", len(gone))
-        return JSONResponse({"run": pool.run, "gone": gone})
+        return JSONResponse({"run": pool.run, "admitting": pool.admitting, "gone": gone})
+
+    async def resize(request: Request) -> Response:
+        size = int((await request.json())["size"])
+        if not pool.resize(size):
+            return JSONResponse({"error": f"the provider of {pool.name} does not let its size be set"}, status_code=409)
+        return JSONResponse({"size": size})
 
     async def sweeping() -> None:
         while True:
@@ -169,9 +208,12 @@ async def serve(config: Mapping[str, Any]) -> None:
             except Exception:  # (looked at again next time)
                 log.exception("sweeping the pool %s failed", pool.name)
 
-    app = serve_pool(pool, [Route("/_follow", follow, methods=["POST"])])
-    server = uvicorn.Server(uvicorn.Config(app, host=str(config.get("host", "127.0.0.1")), port=int(config["port"]),
-                                           log_level="warning", lifespan="off"))  # fmt: skip
+    app = serve_pool(pool, [Route("/_follow", follow, methods=["POST"]), Route("/_resize", resize, methods=["POST"])])
+    where: dict[str, Any] = (
+        {"fd": int(config["fd"])} if config.get("fd") is not None
+        else {"host": str(config.get("host", "127.0.0.1")), "port": int(config["port"])}
+    )  # fmt: skip
+    server = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="off", **where))
     task = asyncio.ensure_future(sweeping())
     try:
         await server.serve()

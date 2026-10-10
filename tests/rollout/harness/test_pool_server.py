@@ -104,6 +104,56 @@ async def test_a_sandbox_made_while_its_run_stopped_being_served_is_not_kept(tmp
     assert sandboxes.sandboxes == {} and await pool.held() == []
 
 
+async def test_not_admitting_it_takes_no_new_key_and_serves_those_it_holds(tmp_path: Path) -> None:
+    pool = pool_of(tmp_path)
+    lease = await pool.acquire(BOX, "run_a/1/1/1/box")
+    await pool.follow("run_a", admitting=False)  # (its run's driver has not renewed the machine lately)
+    with pytest.raises(PoolUnavailable):
+        await pool.acquire(BOX, "run_a/1/2/1/box")
+    assert await pool.acquire(BOX, lease.key) == lease
+    await pool.call(lease.key, "describe", {}, effect_id="e", arguments_digest="d")
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=serve_pool(pool)))
+    with pytest.raises(PoolUnavailable):  # (over HTTP too: a 503 that is not "full")
+        await RemotePool("http://pool", client=client).acquire(BOX, "run_a/1/3/1/box")
+
+
+async def test_a_sandbox_made_while_its_run_lost_its_driver_is_lost(tmp_path: Path) -> None:
+    started, finish = asyncio.Event(), asyncio.Event()
+
+    class Slow(FakeSandboxes):
+        async def create(self, handle: str, spec: SandboxSpec, environment: Mapping[str, str]) -> Reach:
+            started.set()
+            await finish.wait()
+            return await super().create(handle, spec, environment)
+
+    sandboxes = Slow()
+    pool = pool_of(tmp_path, sandboxes)
+    acquiring = asyncio.ensure_future(pool.acquire(BOX, "run_a/1/1/1/box"))
+    await started.wait()
+    await pool.follow(None)  # (no run while it is made: its driver is gone)
+    finish.set()
+    with pytest.raises(SandboxLost):
+        await acquiring
+    assert sandboxes.sandboxes == {} and [each.lost for each in await pool.held()] == [True]
+
+
+async def test_a_pool_is_resized_where_its_provider_lets_it(tmp_path: Path) -> None:
+    sandboxes = FakeSandboxes(size=2)
+    pool = pool_of(tmp_path, sandboxes)
+    assert pool.resize(5) and (await pool.capacity()).size == 5
+
+    class Fixed(FakeSandboxes):
+        @property
+        def size(self) -> int:  # pyright: ignore[reportIncompatibleVariableOverride]
+            return 2
+
+        @size.setter
+        def size(self, value: int) -> None:  # pyright: ignore[reportIncompatibleVariableOverride]
+            pass
+
+    assert not pool_of(tmp_path / "fixed", Fixed()).resize(5)
+
+
 async def test_over_http_a_lost_keys_operation_is_sandbox_lost_and_an_unanswered_503_is_unavailable(
     tmp_path: Path,
 ) -> None:

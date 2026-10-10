@@ -204,6 +204,8 @@ def serve_pool(pool: Pool, extra: Sequence[Any] = ()) -> Any:
         body = await request.json()
         try:
             lease = await pool.acquire(SandboxSpec.model_validate(body["spec"]), body["key"], body.get("environment"))
+        except PoolUnavailable as error:
+            return JSONResponse({"error": str(error)}, status_code=503)
         except NoCapacity as error:
             return JSONResponse({"error": str(error), "full": True}, status_code=503)
         except LeaseRefused as error:
