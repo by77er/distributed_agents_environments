@@ -54,6 +54,10 @@ stores:
     resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {memory: 2Gi}}
   bucket: rollout-blobs
   prefix: blobs/
+  # The cluster config's [blobs] table, as TOML, to keep blobs in a bucket outside the cluster (such as R2's, with the
+  # keys of the Secret `r2`) in place of the bucket above. Blobs written before stay where they were, and whoever
+  # reads one finds it in the store its run's start names.
+  blobs: ""
 
 # One long-lived Ray cluster, where the monitors check environments imported from git: a head that runs no tasks, a
 # GPU group and a CPU group the autoscaler starts from zero when work waits for one and removes after idleSeconds idle.

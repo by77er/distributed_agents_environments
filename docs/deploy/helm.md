@@ -88,6 +88,7 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `clusterExtra` | none | TOML appended to the cluster config: this deployment's own tables, such as `[stores.r2]`, `[tls]` and RunPod providers (`files/cluster.toml` has a commented example of each) |
 | `stores.postgres.storage`, `stores.s3.storage` | `20Gi`, `200Gi` | The stores' volumes; cannot change once made |
 | `stores.bucket`, `stores.prefix` | `rollout-blobs`, `blobs/` | Where blobs are kept in the S3 store |
+| `stores.blobs` | none | The cluster config's `[blobs]` table as TOML, to keep blobs in a bucket outside the cluster (such as R2's, with the keys of the Secret `r2`) instead; blobs written before stay where they were, and readers find each in the store its run's start names |
 | `ray.version` | `2.59.0` | Ray's version, which must be the image's |
 | `ray.idleSeconds` | `300` | How long a Ray worker stays without work before the autoscaler removes it |
 | `ray.gpu.maxReplicas`, `ray.cpu.maxReplicas` | `1`, `1` | The most GPU and CPU worker pods at once |
@@ -323,9 +324,13 @@ job server and the gateway at the addresses of the release it is installed with:
 url = "{{ include "rollout.ledgerUrl" . }}"  # the password is PGPASSWORD's
 
 [blobs]
+{{- if .Values.stores.blobs }}
+{{ .Values.stores.blobs | trim }}
+{{- else }}
 kind = "rollout_s3:S3BlobStore"               # the endpoint and the credentials come from the environment
 bucket = "{{ .Values.stores.bucket }}"
 prefix = "{{ .Values.stores.prefix }}"
+{{- end }}
 ```
 
 Its other sections describe what this cluster offers: the inference providers and their models, the trainers, the

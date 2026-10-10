@@ -398,6 +398,22 @@ def test_each_role_is_given_only_the_secrets_its_code_reads() -> None:
                 assert any(str(secret.file).startswith(path) for path in paths), (workload, where)
 
 
+def test_blobs_may_be_kept_in_a_bucket_outside_the_cluster_whose_keys_the_gateway_is_given(tmp_path: Path) -> None:
+    table = tmp_path / "blobs.toml"
+    table.write_text(
+        'kind = "rollout_s3:S3BlobStore"\nbucket = "rollout"\nprefix = "blobs/"\n'
+        'endpoint_url = "https://ACCOUNT_ID.r2.cloudflarestorage.com"\nregion = "auto"\n'
+        'access_key_id_env = "R2_WRITER_ACCESS_KEY_ID"\nsecret_access_key_env = "R2_WRITER_SECRET_ACCESS_KEY"\n'
+    )
+    every = render("--set-file", f"stores.blobs={table}")
+    cluster = parsed(tomllib.loads(config_of(every)["cluster.toml"]))
+    assert cluster.blobs.kind == BLOBS["kind"] and dict(cluster.blobs.settings)["bucket"] == "rollout"
+    gateway = secrets_of(workloads(every)["gateway"])
+    assert gateway == GIVEN["gateway"] | R2_WRITER
+    names = {each["name"] for each in workloads(every)["gateway"]["spec"]["containers"][0]["env"]}
+    assert {secret.env for secret in cluster.secrets_of("gateway").values() if secret.env} <= names
+
+
 def test_nothing_reaches_a_pod_but_the_roles_that_use_it() -> None:
     every = render("--set", "stepCa.enabled=true", "--set", "tunnel.enabled=true")
     policies = {each["metadata"]["name"]: each["spec"] for each in every if each["kind"] == "NetworkPolicy"}

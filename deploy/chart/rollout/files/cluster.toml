@@ -33,9 +33,13 @@ public = "{{ .Values.ledger.public }}"        # where pods outside the cluster r
 {{- end }}
 
 [blobs]
+{{- if .Values.stores.blobs }}
+{{ .Values.stores.blobs | trim }}
+{{- else }}
 kind = "rollout_s3:S3BlobStore"               # the endpoint and the credentials come from the environment
 bucket = "{{ .Values.stores.bucket }}"
 prefix = "{{ .Values.stores.prefix }}"
+{{- end }}
 
 # A second blob store, which RunPod's pods reach (an R2 bucket): a run whose trainer or servers are RunPod's writes its
 # blobs there, and every reader finds each blob in the store its reference names. Its keys come from the Secret `r2`:

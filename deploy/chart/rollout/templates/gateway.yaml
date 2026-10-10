@@ -28,6 +28,9 @@ spec:
             {{- include "rollout.configEnv" . | nindent 12 }}
             {{- include "rollout.ledgerEnv" . | nindent 12 }}
             {{- include "rollout.blobsEnv" . | nindent 12 }}
+            {{- if .Values.stores.blobs }}  # (a bucket outside the cluster, such as R2's, with the keys of `r2`)
+            {{- include "rollout.r2Env" (dict "root" . "keys" (list "WRITER_ACCESS_KEY_ID" "WRITER_SECRET_ACCESS_KEY")) | nindent 12 }}
+            {{- end }}
             {{- include "rollout.providerEnv" . | nindent 12 }}
             {{- include "rollout.cacheEnv" . | nindent 12 }}
           ports: [{containerPort: {{ .Values.gateway.port }}, name: http}]
