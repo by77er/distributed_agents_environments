@@ -149,7 +149,7 @@ class Installation:
             return self._node()
 
     def _node(self) -> Path:
-        arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64", "arm64": "arm64"}[platform.machine().lower()]
+        arch = _architecture({"x86_64": "x64", "amd64": "x64", "aarch64": "arm64", "arm64": "arm64"}, "Node")
         name = f"node-{NODE_VERSION}-linux-{arch}"
         target = self.root.parent / "node"
         if not (target / name / "bin" / "node").is_file():
@@ -203,7 +203,7 @@ class Installation:
         this machine's architecture, checked, and unpacked whole before it is used."""
         if system := shutil.which("javac"):
             return Path(system).parent
-        arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "aarch64", "arm64": "aarch64"}[platform.machine().lower()]
+        arch = _architecture({"x86_64": "x64", "amd64": "x64", "aarch64": "aarch64", "arm64": "aarch64"}, "A JDK")
         target = self.root.parent / "jdk"
         if not (target / JDK_RELEASE / "bin" / "javac").is_file():
             with self._lock("jdk"):
@@ -620,6 +620,15 @@ def _json(url: str) -> Any:
 def _fetch(url: str) -> bytes:
     with urllib.request.urlopen(url, timeout=120) as response:
         return response.read()
+
+
+def _architecture(names: dict[str, str], what: str) -> str:
+    """This machine's architecture as a download names it; `RuntimeError` saying so where none is pinned for it."""
+    machine = platform.machine().lower()
+    if machine not in names:
+        raise RuntimeError(f"{what} is pinned here for {', '.join(sorted(set(names.values())))} machines, not this one "
+                           f"({machine}): put it on the path")  # fmt: skip
+    return names[machine]
 
 
 def _unpacked(url: str, sha256: str, target: Path, name: str) -> None:

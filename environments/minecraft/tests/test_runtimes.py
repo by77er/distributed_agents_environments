@@ -109,3 +109,16 @@ def test_a_download_that_does_not_match_its_pinned_checksum_is_refused(
     with pytest.raises(RuntimeError, match="does not match its checksum"):
         Installation(root=tmp_path / "minecraft").node()
     assert not list((tmp_path / "node").glob("node-*"))
+
+
+async def test_a_machine_none_is_pinned_for_is_said_plainly_when_the_bots_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from minecraft_team.harness import Harness, HarnessError
+
+    monkeypatch.setattr(paper.shutil, "which", nowhere)
+    monkeypatch.setattr(paper.platform, "machine", lambda: "riscv64")
+    with pytest.raises(RuntimeError, match=r"pinned here for aarch64, x64 machines, not this one \(riscv64\)"):
+        Installation(root=tmp_path / "minecraft").jdk()
+    with pytest.raises(HarnessError, match=r"Node is pinned here for arm64, x64 machines, not this one \(riscv64\)"):
+        await Harness.start(installation=Installation(root=tmp_path / "minecraft"))
