@@ -4,7 +4,8 @@ start, stop, delete), pods kept in memory, nothing rented and nothing spent.
 Like RunPod's front, it refuses a request whose User-Agent it does not accept (403: Python's default one, or none) and
 one without the key (401). A pod is created `RUNNING` with a public address and its price (or, with `addressed` false,
 with none until a test says it with `address`, as RunPod says a pod's address only once it runs); `gpu` is the GPU type
-it is given (the first asked for). `created` is called with each pod made (and its body), so a test can start a process
+it is given (the first asked for); `vcpus` and `memory_gb` what it is given of each, or the least the request asks
+for where that is more. `created` is called with each pod made (and its body), so a test can start a process
 that stands in for what runs on it; `deleted` with each pod's id as it is deleted.
 """
 
@@ -32,8 +33,12 @@ class FakeRunPod:
         created: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
         deleted: Callable[[str], None] | None = None,
         addressed: bool = True,
+        vcpus: int = 16,
+        memory_gb: int = 188,
     ) -> None:
         self.key = key
+        self.vcpus = vcpus
+        self.memory_gb = memory_gb
         self.addressed = addressed
         self.cost = cost
         self.pods: dict[str, dict[str, Any]] = {}
@@ -77,6 +82,8 @@ class FakeRunPod:
             "portMappings": {"8443": next(self._ports)} if self.addressed else {}, "costPerHr": self.cost,
             "env": body["env"], "gpu": {"id": gpus[0], "count": body.get("gpuCount", 1)},
             "cloudType": body.get("cloudType"), "dataCenterIds": body.get("dataCenterIds"),
+            "vcpuCount": max(self.vcpus, body.get("minVCPUPerGPU", 2) * body.get("gpuCount", 1)),
+            "memoryInGb": max(self.memory_gb, body.get("minRAMPerGPU", 8) * body.get("gpuCount", 1)),
         }  # fmt: skip
         if self.created is not None:
             self.created(self.pods[id], body)
