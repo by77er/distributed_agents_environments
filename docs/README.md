@@ -48,7 +48,7 @@ train on).
 | `implementations/rollout-openai` | `rollout_openai` | The OpenAI Responses API as a model endpoint | `ModelEndpoint` |
 | `implementations/rollout-anthropic` | `rollout_anthropic` | Anthropic's Messages API as a model endpoint | `ModelEndpoint` |
 | `implementations/rollout-s3` | `rollout_s3` | Blobs in S3 or an S3-compatible store | `Blobs` |
-| `implementations/rollout-runpod` | `rollout_runpod` | GPU pods on RunPod (the pods API), and certificates for them from step-ca | |
+| `implementations/rollout-runpod` | `rollout_runpod` | GPU pods on RunPod: the client of its pods API that pod leases use by default | |
 | `implementations/rollout-verifiers` | `rollout_verifiers` | Prime Intellect's verifiers environments, played through the gateway | `Environment` |
 | `environments/minecraft` | `minecraft_team` | One to four agents in a Minecraft world; depends on `rollout` only | `Environment` |
 | `environments/minecraft-horizons` | `minecraft_horizons` | Minecraft objectives with no ceiling against budgets of game time the agents see; depends on `rollout` and `minecraft-team` | `Environment` |

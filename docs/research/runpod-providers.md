@@ -10,7 +10,8 @@ gateway reaches a pod by its identity, and the security model. What a deployment
 [GPU pods on RunPod](../deploy/providers.md#gpu-pods-on-runpod).
 
 Code: `deploy/images`, `.github/workflows/images.yml`, `rollout_train.pods` (`leases`, `leasing`, `routing`,
-`inference`, `training`, `trainer`, `identity`), `rollout_train.ledger_service`, `rollout_train.pki`, `rollout_runpod`.
+`inference`, `training`, `trainer`, `identity`, `client`, `certificates`), `rollout_train.ledger_service`,
+`rollout_train.pki`, `rollout_runpod`.
 
 ## Decisions
 
@@ -43,8 +44,8 @@ Code: `deploy/images`, `.github/workflows/images.yml`, `rollout_train.pods` (`le
 | The ledger over HTTP | `rollout_train.ledger_service` | The ledger and the stores beside it for whoever holds a token: the platform's does everything; a pod's reads its run's serving records, starts and checkpoints, writes its beat and reads its lease, while its lease names that run |
 | Blob stores | `[stores.NAME]`, `rollout_train.stores.for_pods` | A bucket RunPod reaches beside the cluster's own; a pod gets its location and a key: read-only for inference, the writer's for a trainer or host |
 | The platform's certificates | `rollout_train.pki`, `rollout pki publish` | From the chart's step-ca: its root and the provisioner's key (Secret `step-ca`), and a new gateway certificate every six hours (Secret `gateway-tls`) |
-| RunPod's pods API | `rollout_runpod.RunPod` | Create, start, stop, delete, list; a pod's public address, GPU type and price. Its key is read at each request and never kept, logged or put in an error; each request says its User-Agent |
-| step-ca | `rollout_runpod.StepCa` | One-time tokens for pods' first certificates, revocation by serial, certificates for the platform's own clients, a provisioner's key from step-ca's configuration |
+| RunPod's pods API | `rollout_runpod.RunPod`, a `rollout_train.pods.client.PodClient` named by the provider's `client` | Create, start, stop, delete, list; a pod's public address, GPU type and price. Its key is read at each request and never kept, logged or put in an error; each request says its User-Agent |
+| step-ca | `rollout_train.pods.certificates.StepCa` | One-time tokens for pods' first certificates, revocation by serial, certificates for the platform's own clients, a provisioner's key from step-ca's configuration |
 
 How it is tested, with no network, Docker, RunPod or step-ca (`tests/rollout_train/pods`, `tests/rollout_runpod`,
 `tests/rollout_train/test_ledger_service.py`, `tests/rollout_train/test_limits.py`, `tests/deploy`):

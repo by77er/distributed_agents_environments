@@ -4960,14 +4960,14 @@ name = "rollout-runpod"
 version = "0.0.0"
 source = { editable = "implementations/rollout-runpod" }
 dependencies = [
-    { name = "cryptography" },
     { name = "httpx" },
+    { name = "rollout-train" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "cryptography", specifier = ">=46" },
     { name = "httpx", specifier = ">=0.28" },
+    { name = "rollout-train", editable = "libraries/rollout-train" },
 ]
 
 [[package]]
@@ -5015,6 +5015,7 @@ name = "rollout-train"
 version = "0.0.0"
 source = { editable = "libraries/rollout-train" }
 dependencies = [
+    { name = "cryptography" },
     { name = "httpx" },
     { name = "packaging" },
     { name = "psycopg", extra = ["binary"] },
@@ -5032,25 +5033,22 @@ http = [
 report = [
     { name = "matplotlib" },
 ]
-runpod = [
-    { name = "rollout-runpod" },
-]
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=46" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "matplotlib", marker = "extra == 'report'", specifier = ">=3.9" },
     { name = "packaging", specifier = ">=24" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "ray", extras = ["default"], specifier = ">=2.59" },
     { name = "rollout", editable = "libraries/rollout" },
-    { name = "rollout-runpod", marker = "extra == 'runpod'", editable = "implementations/rollout-runpod" },
     { name = "sqlalchemy", specifier = ">=2" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=0.48" },
     { name = "uv", specifier = ">=0.11" },
     { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.37" },
 ]
-provides-extras = ["http", "report", "runpod"]
+provides-extras = ["http", "report"]
 
 [[package]]
 name = "rollout-vllm"

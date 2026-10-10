@@ -41,6 +41,10 @@ meanwhile is left, with its pod. A lease the reaper could not delete (it changed
 failed) is logged as an error and said in what it did. A pod RunPod did not delete once its lease was deleted is
 deleted by the next reap, as a pod no lease names.
 
+RunPod is asked through the client a provider's table names (`client`, by default `rollout_runpod:RunPod`; what
+leasing asks of it is `rollout_train.pods.client`), and pods' certificates come from the cluster's step-ca
+(`rollout_train.pods.certificates`).
+
 Pod time is charged at the pod's hourly price: RunPod's `costPerHr` for it, else the provider's `price`.
 """
 
@@ -61,14 +65,15 @@ from pydantic import JsonValue
 from rollout_train.ledger import Ledger
 from rollout_train.ledger_service.scopes import pod_token
 from rollout_train.ledger_service.wire import Conflict
+from rollout_train.pods.certificates import StepCa, fingerprint
+from rollout_train.pods.client import Pod, PodClient, PodSpec, client_of
 from rollout_train.pods.environment import PORT
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.pods.leases import HELD, IDLE, STARTING, PodLease, PodLeases, PodTime, pod_leases_of, time_key
 from rollout_train.presence import Beat, alive, presence_of
-from rollout_train.providers import RUNPOD, InferenceProvider, PodTable, TrainerProvider, pod_table
+from rollout_train.providers import POD_CLIENT, RUNPOD, InferenceProvider, PodTable, TrainerProvider, pod_table
 
 if TYPE_CHECKING:
-    from rollout_runpod import Pod, PodSpec, RunPod, StepCa
     from rollout_train.cluster import Cluster
     from rollout_train.run_settings import RunSettings
 
@@ -197,19 +202,18 @@ def _table(cluster: "Cluster", name: str) -> PodTable | None:
     return pod_table(provider.kind, provider.settings)
 
 
-def _runpod(cluster: "Cluster", name: str) -> "RunPod":
-    from rollout_runpod import RunPod
-
+def _client(cluster: "Cluster", name: str) -> PodClient:
+    """The client of a provider's pods API its table names (`client`), with the provider's API key."""
     provider = _provider(cluster, name)
     key = provider.secrets.get("api_key") if provider is not None else None
-    return RunPod(key_env=key.env if key is not None and key.env else "RUNPOD_API_KEY")
+    table = _table(cluster, name)
+    return client_of(table.client if table is not None else POD_CLIENT,
+                     key.env if key is not None and key.env else "RUNPOD_API_KEY")  # fmt: skip
 
 
-def _step_ca(table: PodTable) -> "StepCa | None":
+def _step_ca(table: PodTable) -> StepCa | None:
     if not table.step_ca:
         return None
-    from rollout_runpod import StepCa
-
     said = table.step_ca
     return StepCa.from_files(said["url"], provisioner=said["provisioner"], key=Path(said["key_file"]).expanduser(),
                              root=Path(said["root"]).expanduser(), system=said.get("trust") == "system")  # fmt: skip
@@ -235,7 +239,7 @@ def with_sandboxes(needs: Sequence[PodNeed], cluster: "Cluster", sources: Mappin
     return found
 
 
-def _gave(lease: PodLease, pod: "Pod | None") -> PodLease:
+def _gave(lease: PodLease, pod: Pod | None) -> PodLease:
     """The lease with the vCPUs and memory RunPod says it gave the pod, where it says them."""
     if pod is None:
         return lease
@@ -253,8 +257,9 @@ def _beat_of(beats: Sequence[Beat], pod: str) -> Mapping[str, Any] | None:
 
 class Pods:
     """A run's pods on RunPod: claimed when it starts (`claim`), renewed while it runs (`renewing`), released when it
-    ends (`release`). `api` gives the RunPod client of a provider (by default one with the provider's key), `ca` its
-    step-ca (by default the one its table says, if any). `told` hears what the run waits for."""
+    ends (`release`). `api` gives the client of a provider's pods API (by default the one its table names, with the
+    provider's key), `ca` its step-ca (by default the one its table says, if any). `told` hears what the run waits
+    for."""
 
     def __init__(
         self,
@@ -262,8 +267,8 @@ class Pods:
         cluster: "Cluster",
         ledger: Ledger,
         *,
-        api: Callable[[str], "RunPod"] | None = None,
-        ca: Callable[[PodTable], "StepCa | None"] | None = None,
+        api: Callable[[str], PodClient] | None = None,
+        ca: Callable[[PodTable], StepCa | None] | None = None,
         environ: Mapping[str, str] | None = None,
         told: Callable[[Sequence[str]], Awaitable[None]] | None = None,
         renew: float = RENEW,
@@ -276,8 +281,8 @@ class Pods:
         self.cluster = cluster
         self.ledger = ledger
         self.store: PodLeases = store
-        self._api: Callable[[str], RunPod] = api or (lambda provider: _runpod(cluster, provider))
-        self._clients: dict[str, RunPod] = {}
+        self._api: Callable[[str], PodClient] = api or (lambda provider: _client(cluster, provider))
+        self._clients: dict[str, PodClient] = {}
         self._ca = ca or _step_ca
         self.environ = environ
         self._told = told
@@ -293,7 +298,7 @@ class Pods:
         """Whether `renewing` renews its leases (a claim made meanwhile, a trainer's pod leased later, leaves it to)."""
         """Dollars its pods cost it so far, as its renewals counted."""
 
-    def api(self, provider: str) -> "RunPod":
+    def api(self, provider: str) -> PodClient:
         if provider not in self._clients:
             self._clients[provider] = self._api(provider)
         return self._clients[provider]
@@ -419,9 +424,8 @@ class Pods:
                              "[ledger] token_env, and set it here")  # fmt: skip
         return pod_token(secret, pod, self.run)
 
-    def _spec(self, lease: PodLease, table: PodTable, need: PodNeed) -> "PodSpec":
+    def _spec(self, lease: PodLease, table: PodTable, need: PodNeed) -> PodSpec:
         """The pod as RunPod is asked for it."""
-        from rollout_runpod import PodSpec, fingerprint
         from rollout_train.stores import SERVICES, for_pods
 
         public = self.cluster.ledger.public or (
@@ -534,7 +538,7 @@ class Pods:
 
         return await self._put_own(lease, described, "address") or lease
 
-    async def _described(self, lease: PodLease) -> "tuple[str | None, Pod | None]":
+    async def _described(self, lease: PodLease) -> tuple[str | None, Pod | None]:
         """Where RunPod's API says a lease's pod is reached now (`https://IP:PORT`), and the pod as it says; none
         while it says none, where it cannot be asked (asked again next time), or the pod has no id."""
         if lease.id is None:
@@ -583,7 +587,7 @@ class Pods:
                 raise LeaseLost(f"pod {pod} is no longer held by run {self.run} (its lease went stale and was reaped)")
             address, given = await self._described(there)  # (none yet, or another public port since)
 
-            def stamped(each: PodLease, address: str | None = address, given: "Pod | None" = given) -> PodLease:
+            def stamped(each: PodLease, address: str | None = address, given: Pod | None = given) -> PodLease:
                 return _gave(replace(each, renewed=now, address=address or each.address), given)
 
             renewed = await self._put_own(there, stamped, "renew")
@@ -674,8 +678,8 @@ async def delete(
     lease: PodLease,
     why: str,
     *,
-    api: "RunPod | None" = None,
-    ca: Callable[[PodTable], "StepCa | None"] = _step_ca,
+    api: PodClient | None = None,
+    ca: Callable[[PodTable], StepCa | None] = _step_ca,
     still: Callable[[PodLease], bool] | None = None,
 ) -> bool:
     """Delete a lease, then its pod at RunPod; revoke its certificate (the serial its beats said) and close the time
@@ -712,7 +716,7 @@ async def delete(
     else:
         raise Conflict(f"the lease of {lease.pod} changed each of the {TRIES} times it was read: slot {lease.slot} of "
                        f"{lease.provider} stays taken")  # fmt: skip
-    client = api or _runpod(cluster, lease.provider)
+    client = api or _client(cluster, lease.provider)
     if lease.id is not None:
         try:
             await client.terminate(lease.id)
@@ -740,8 +744,8 @@ async def reap(
     cluster: "Cluster",
     ledger: Ledger,
     *,
-    api: Callable[[str], "RunPod"] | None = None,
-    ca: Callable[[PodTable], "StepCa | None"] = _step_ca,
+    api: Callable[[str], PodClient] | None = None,
+    ca: Callable[[PodTable], StepCa | None] = _step_ca,
     stale: float = STALE,
 ) -> list[str]:
     """Delete the pods no run holds: those of leases not renewed for `stale` seconds, of idle leases past their
@@ -749,11 +753,11 @@ async def reap(
     store = pod_leases_of(ledger)
     if store is None:
         return []
-    clients: dict[str, RunPod] = {}
+    clients: dict[str, PodClient] = {}
 
-    def client(provider: str) -> "RunPod":
+    def client(provider: str) -> PodClient:
         if provider not in clients:
-            clients[provider] = api(provider) if api is not None else _runpod(cluster, provider)
+            clients[provider] = api(provider) if api is not None else _client(cluster, provider)
         return clients[provider]
 
     def reaped(lease: PodLease, now: float) -> str | None:

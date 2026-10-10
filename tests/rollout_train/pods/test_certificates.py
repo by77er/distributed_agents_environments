@@ -21,10 +21,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from rollout_runpod import StepCa, fingerprint
 from rollout_train.inference import Connection, RemoteEngine
 from rollout_train.inference.remote import Unreachable
 from rollout_train.pods import GATEWAY_IDENTITY, pod_identity
+from rollout_train.pods.certificates import StepCa, fingerprint
 from tests.rollout_train.machines import MODEL, Saying, fake_vllm
 from tests.rollout_train.pods.authority import Authority, Issued, served_tls, server_context
 
@@ -223,7 +223,7 @@ def encrypted(key: dict[str, Any], password: str) -> str:
 
 
 def test_a_provisioner_s_key_is_read_from_step_ca_s_configuration_with_its_password() -> None:
-    from rollout_runpod import decrypted_key
+    from rollout_train.pods.certificates import decrypted_key
 
     jwk, _ = provisioner_key()
     said = encrypted(jwk, "the CA's password")

@@ -131,6 +131,7 @@ Beside what every provider has (`models`, `replicas`), a RunPod table says what 
 | `start_timeout` | 1200 | Seconds a pod may take to be ready for its run |
 | `volume_gb`, `container_disk_gb` | 50, 50 | The pod's volume (models, checkpoints, certificates) and container disk |
 | `store` | `[blobs]` | The blob store its pods read and write (`[stores.NAME]`) |
+| `client` | `rollout_runpod:RunPod` | The pods API client its leases use (`module:name`, a `rollout_train.pods.client.PodClient`), given the API key's variable |
 | `step_ca` | | `{ url, provisioner, key_file, root, trust }`: step-ca for the pods' certificates (`trust = "system"` behind a Cloudflare Tunnel) |
 | `secrets` | | Variables whose values are RunPod console secrets, by the secret's name (`HF_TOKEN = "hf_token"`) |
 | `api_key_env` | `RUNPOD_API_KEY` | The variable RunPod's API key is read from |

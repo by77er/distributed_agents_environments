@@ -177,7 +177,7 @@ async def test_a_pod_is_asked_for_its_providers_least_cpus_and_memory_and_its_le
     plain = cluster_of(tmp_path)
     table = pod_table("runpod-inference", plain.inference["pods"].settings)
     spec = pods_of("run_2", plain, ledger, fake)._spec(lease, table, NEED)  # pyright: ignore[reportPrivateUsage]
-    assert "minVCPUPerGPU" not in spec.body()  # (unsaid: RunPod's defaults)
+    assert (spec.min_vcpus_per_gpu, spec.min_memory_gb_per_gpu) == (None, None)  # (unsaid: RunPod's defaults)
 
 
 async def test_a_pod_whose_provider_says_its_thinking_starts_vllm_bounding_it(
@@ -335,7 +335,7 @@ async def test_the_reaper_deletes_idle_pods_past_their_idle_stop_and_stale_lease
     with pytest.raises(LeaseLost):
         await crashed.renewed()
     client = fake.client()
-    from rollout_runpod import PodSpec
+    from rollout_train.pods.client import PodSpec
 
     orphan = await client.create(PodSpec(tag_of(cluster) + "pods-5-abcdef", "image", ["NVIDIA GeForce RTX 4090"]))
     stranger = await client.create(PodSpec("someone-elses-pod", "image", ["NVIDIA GeForce RTX 4090"]))
@@ -624,3 +624,26 @@ async def test_a_trainer_pod_of_several_gpus_is_rented_with_them_and_its_trainer
             "trainer", "rollout_lora:FullTrainer", "4")  # fmt: skip
     finally:
         await pods.release()
+
+
+class NamedClient:
+    """A client of a pods API that a provider's table names (`client`)."""
+
+    def __init__(self, *, key_env: str) -> None:
+        self.key_env = key_env
+
+
+async def test_a_providers_pods_are_asked_of_the_client_its_table_names(tmp_path: Path) -> None:
+    from rollout_runpod import RunPod
+    from rollout_train.pods.client import PodClient
+    from rollout_train.pods.leasing import _client  # pyright: ignore[reportPrivateUsage]
+
+    typed: PodClient = RunPod()  # (RunPod is a PodClient, as pyright checks)
+    await typed.aclose()
+    default = _client(cluster_of(tmp_path), "pods")
+    assert isinstance(default, RunPod) and default.key_env == "RUNPOD_API_KEY"
+    await default.aclose()
+    named: Any = _client(cluster_of(tmp_path, client="tests.rollout_train.pods.test_leasing:NamedClient"), "pods")
+    assert (type(named).__name__, named.key_env) == ("NamedClient", "RUNPOD_API_KEY")
+    with pytest.raises(ClusterError, match="module:name"):
+        cluster_of(tmp_path, client="rollout_runpod")

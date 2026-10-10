@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
+from rollout_train.pods.certificates import StepCa, decrypted_key
 from rollout_train.pods.identity import GATEWAY_IDENTITY
 
 __all__ = ["provisioner_key", "publish"]
@@ -29,8 +30,6 @@ def provisioner_key(
     """The name and private key (a JWK) of step-ca's JWK provisioner `name` (by default its first), from its
     configuration (`ca.json`) and the provisioner's password. Raises `ValueError` where there is none, or the password
     does not open its key."""
-    from rollout_runpod import decrypted_key
-
     listed: Any = cast(dict[str, Any], configuration.get("authority") or {}).get("provisioners") or []
     for each in cast(list[dict[str, Any]], listed):
         if each.get("type") == "JWK" and (name is None or each.get("name") == name) and each.get("encryptedKey"):
@@ -51,7 +50,6 @@ async def publish(
 ) -> str:
     """Write the root and the provisioner's key (`secret`), and a new gateway certificate (`tls_secret`), from the
     step-ca whose state is in `directory` and which answers at `url`; what it did, in words."""
-    from rollout_runpod import StepCa
     from rollout_train.submitting import KubernetesApi
 
     configuration = json.loads((directory / "config" / "ca.json").read_text())

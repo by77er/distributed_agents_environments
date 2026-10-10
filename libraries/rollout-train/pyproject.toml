@@ -8,7 +8,8 @@ dependencies = [
     "ray[default]>=2.59",  # every role runs on Ray: runs as jobs, engine hosts as actors, bridges as tasks
     "sqlalchemy>=2",  # the ledger in a database: SQLite on one machine, Postgres for several
     "psycopg[binary]>=3.2",
-    "httpx>=0.28",  # clients: the gateway, remote engines, the pods, the monitor
+    "httpx>=0.28",  # clients: the gateway, remote engines, the pods, step-ca, the monitor
+    "cryptography>=46",  # step-ca's one-time tokens and certificates (`rollout_train.pods.certificates`)
     "packaging>=24",  # reading an imported environment's dependencies (`rollout_train.publishing`)
     "uv>=0.11",  # what Ray installs them with
 ]
@@ -19,11 +20,9 @@ rollout = "rollout_train.cli:main"
 [project.optional-dependencies]
 http = ["starlette>=0.48", "uvicorn>=0.37"]  # the endpoint for harnesses, the monitor
 report = ["matplotlib>=3.9"]
-runpod = ["rollout-runpod"]  # leasing RunPod's pods for runs, and the certificates the platform holds
 
 [tool.uv.sources]
 rollout = { workspace = true }
-rollout-runpod = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

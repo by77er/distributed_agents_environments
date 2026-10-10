@@ -7,6 +7,11 @@ pod's own servers (Envoy) checks the client and lets through only the requests t
 it listen on the pod's loopback interface.
 
 - `identity`: the names certificates carry, and the pods whose heartbeats say they are alive (`live`).
+- `certificates`: the cluster's step-ca (`StepCa`): one-time tokens for pods' first certificates, revoking a pod's
+  certificate, and certificates for the platform's own clients; `decrypted_key`, a provisioner's key from step-ca's
+  configuration.
+- `client`: what leasing asks of a provider's pods API: a pod as it is asked for (`PodSpec`) and as the provider says
+  it is (`Pod`), and the client (`PodClient`) a provider's table names as `module:name` (`rollout_runpod:RunPod`).
 - `leases`: each pod's lease (which run holds it, and where the pod is reached), and the time each run held a pod,
   charged at its price.
 - `leasing`: a run's pods, claimed (started, or taken warm), renewed and released (`Pods`); the reaper (`reap`).

@@ -1,12 +1,15 @@
 [project]
 name = "rollout-runpod"
 version = "0.0.0"
-description = "GPU pods on RunPod for inference and training: the pods API, and certificates for pods from step-ca"
+description = "GPU pods on RunPod for inference and training: a client of the pods API that runs lease pods through"
 requires-python = ">=3.13"
 dependencies = [
+    "rollout-train",  # the pods leasing asks for and is told of (`rollout_train.pods.client`)
     "httpx>=0.28",
-    "cryptography>=46",
 ]
+
+[tool.uv.sources]
+rollout-train = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

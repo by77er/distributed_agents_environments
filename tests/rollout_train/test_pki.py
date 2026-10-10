@@ -11,9 +11,9 @@ from cryptography import x509
 
 from rollout_train.pki import provisioner_key, publish
 from rollout_train.pods import GATEWAY_IDENTITY
-from tests.rollout_runpod.test_certificates import PROVISIONER, FakeStepCa, encrypted
-from tests.rollout_runpod.test_certificates import provisioner_key as made_key
 from tests.rollout_train.pods.authority import Authority, served_tls, server_context
+from tests.rollout_train.pods.test_certificates import PROVISIONER, FakeStepCa, encrypted
+from tests.rollout_train.pods.test_certificates import provisioner_key as made_key
 
 
 class Secrets:

@@ -70,7 +70,7 @@ PUBLIC_MODULES = [
     ("rollout_openai", "A model endpoint for the OpenAI Responses API, on an API key or a Codex login."),
     ("rollout_anthropic", "A model endpoint for Anthropic's Messages API."),
     ("rollout_s3", "Blobs in S3 or any S3-compatible object store."),
-    ("rollout_runpod", "GPU pods on RunPod, and certificates for them from step-ca."),
+    ("rollout_runpod", "GPU pods on RunPod: the client of its pods API that runs lease pods through."),
     ("rollout_tinker", "A trainer and an engine at Thinking Machines (Tinker)."),
 ]
 

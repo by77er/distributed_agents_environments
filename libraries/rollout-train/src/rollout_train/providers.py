@@ -37,7 +37,8 @@ takes (`options`). It is metered, and not token-exact: what it samples is never 
 GPU pods on RunPod are leased by the runs that use them (`rollout_train.pods.leasing`): a `runpod-inference` pod serves
 a run's channel, a `runpod-trainer` pod takes its steps, and a `runpod-host` pod does both on one GPU (a
 `runpod-trainer` whose `colocate_with` names it takes its steps there). What each kind's table says of its pods (the
-image, the GPU types, the most pods at once, how long a released pod stays warm, the price) is a `PodTable`
+image, the GPU types, the most pods at once, how long a released pod stays warm, the price, the client of the pods API
+they are asked of: `client = "module:name"`, `rollout_runpod:RunPod` unless it names another) is a `PodTable`
 (`pod_table`).
 
 A channel may be served by several providers at once (`Routing`): `spill` fills the first and sends the rest to the
@@ -64,6 +65,7 @@ __all__ = [
     "ALLOCATIONS",
     "AUTHS",
     "INFERENCE_KINDS",
+    "POD_CLIENT",
     "POD_FIELDS",
     "ROUTING",
     "RUNPOD",
@@ -101,14 +103,16 @@ RUNPOD = ("runpod-inference", "runpod-host", "runpod-trainer")
 POD_FIELDS = (
     "image", "gpu_types", "gpu_count", "max_pods", "idle_stop", "start_timeout", "cloud", "regions",
     "cuda_versions", "price", "volume_gb", "container_disk_gb", "secrets", "step_ca", "store", "min_vcpus_per_gpu",
-    "min_memory_gb_per_gpu",
+    "min_memory_gb_per_gpu", "client",
 )  # fmt: skip
 """The settings of a RunPod kind's table that say what its pods are (`PodTable`)."""
+POD_CLIENT = "rollout_runpod:RunPod"
+"""The client of the pods API a RunPod kind's table names unless it names another (`PodTable.client`)."""
 ROUTING = ("spill", "weighted")
-CUDA_VERSIONS = ("13.0", "12.9", "12.8", "12.7", "12.6", "12.5", "12.4", "12.3", "12.2", "12.1", "12.0", "11.8")
-"""The CUDA versions RunPod lets a pod ask its machine for (`allowedCudaVersions`)."""
 """How turns are shared among a channel's providers: fill the first and spill the rest over to the next, or by
 weight."""
+CUDA_VERSIONS = ("13.0", "12.9", "12.8", "12.7", "12.6", "12.5", "12.4", "12.3", "12.2", "12.1", "12.0", "11.8")
+"""The CUDA versions RunPod lets a pod ask its machine for (`allowedCudaVersions`)."""
 
 
 @dataclass(frozen=True)
@@ -733,6 +737,9 @@ class PodTable:
     sandboxes: tuple[str, ...] = ()
     """On a `runpod-host` pod: the kinds of sandboxes it serves beside its engine and trainer, each a
     `[sandboxes.KIND]` with `on_pods` (`rollout_train.pods.sandboxes`)."""
+    client: str = POD_CLIENT
+    """`module:name` of the client of the pods API its pods are asked of, called with `key_env`, the variable its API
+    key is in (`rollout_train.pods.client`)."""
 
 
 CLOUDS = ("SECURE", "COMMUNITY")
@@ -801,6 +808,9 @@ def pod_table(kind: str, settings: Mapping[str, JsonValue]) -> PodTable:
     sandboxes = texts("sandboxes")
     if sandboxes and kind != "runpod-host":
         raise ValueError("sandboxes are served beside a host's engine and trainer: a runpod-host's pods alone")
+    client = settings.get("client", POD_CLIENT)
+    if not isinstance(client, str) or not client.partition(":")[2]:
+        raise ValueError(f"client names the client of the pods API as module:name (not {client!r})")
     cuda_versions = texts("cuda_versions") or ("13.0",)
     if unknown := sorted(set(cuda_versions) - set(CUDA_VERSIONS)):
         raise ValueError(f"cuda_versions are RunPod's ({', '.join(CUDA_VERSIONS)}), not {', '.join(unknown)}")
@@ -811,5 +821,5 @@ def pod_table(kind: str, settings: Mapping[str, JsonValue]) -> PodTable:
         container_disk_gb=whole("container_disk_gb", 50), secrets=table("secrets"), step_ca=step_ca, store=store,
         memory_fraction=fraction, sleep=sleep, cuda_versions=cuda_versions,
         min_vcpus_per_gpu=least["min_vcpus_per_gpu"], min_memory_gb_per_gpu=least["min_memory_gb_per_gpu"],
-        sandboxes=sandboxes,
+        sandboxes=sandboxes, client=client,
     )  # fmt: skip

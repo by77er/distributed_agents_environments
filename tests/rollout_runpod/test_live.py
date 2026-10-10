@@ -58,9 +58,10 @@ def bucket() -> dict[str, Any]:
 
 
 async def test_a_pod_is_leased_waited_for_and_deleted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from rollout_runpod import PodSpec, RunPod
+    from rollout_runpod import RunPod
     from rollout_train.cluster import parsed
     from rollout_train.database import DatabaseLedger
+    from rollout_train.pods.client import PodSpec
     from rollout_train.pods.leasing import PodNeed, Pods, PodsDidNotStart, reap, tag_of
     from rollout_train.stores import Stores
 

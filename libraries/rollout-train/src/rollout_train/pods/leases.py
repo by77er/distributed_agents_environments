@@ -81,12 +81,12 @@ class PodLease:
     """RunPod's id for it, once asked for."""
     address: str | None = None
     """Where the pod is reached, `https://IP:PORT`: its public IP and the public port its 8443/tcp is mapped to, as
-    RunPod's API says (`rollout_runpod.Pod.address`), read by whoever leased it; none until RunPod has said. The only
-    address the pod is reached at: nothing the pod says of itself is."""
+    RunPod's API says (`rollout_train.pods.client.Pod.address`), read by whoever leased it; none until RunPod has
+    said. The only address the pod is reached at: nothing the pod says of itself is."""
     vcpus: int | None = None
-    """The vCPUs RunPod gave the pod (`rollout_runpod.Pod.vcpus`); none until RunPod has said."""
+    """The vCPUs RunPod gave the pod (`rollout_train.pods.client.Pod.vcpus`); none until RunPod has said."""
     memory_gb: float | None = None
-    """The memory RunPod gave the pod, in GB (`rollout_runpod.Pod.memory_gb`); none until RunPod has said."""
+    """The memory RunPod gave the pod, in GB (`rollout_train.pods.client.Pod.memory_gb`); none until RunPod has said."""
     run: str | None = None
     """The run that holds it (none: idle)."""
     channel: str | None = None

@@ -28,10 +28,7 @@ DEPENDENCIES = {
 }
 """Edges between two implementations or two environments, each declared in its project file, and why."""
 
-EXCEPTIONS = {
-    ("rollout-train", "rollout-runpod"): "pod leases and `rollout pki` call RunPod's API and step-ca directly (the "
-    "`runpod` extra), with no protocol for a pod provider between them",
-}
+EXCEPTIONS: dict[tuple[str, str], str] = {}
 """Edges that break a rule today, and why they stay until they are designed away."""
 
 

@@ -62,14 +62,14 @@ What they share is in `common/`:
 Every pod has a certificate from the cluster's step-ca, good for 24 hours, whose one URI SAN is
 `spiffe://rollout/pod/NAME` (NAME: `ROLLOUT_POD_NAME`, the pod's name):
 
-1. The pod is given a one-time token for that identity as `STEP_TOKEN` (`rollout_runpod.StepCa.pod_token` mints one,
-   good for 15 minutes).
+1. The pod is given a one-time token for that identity as `STEP_TOKEN` (`rollout_train.pods.certificates.StepCa.pod_token`
+   mints one, good for 15 minutes).
 2. The pod fetches the root, checking it against `STEP_FINGERPRINT`, makes its key itself, and asks for its
    certificate with the token (`step ca certificate`). step-ca takes a token once.
 3. The pod renews its certificate at about two thirds of its life, over mutual TLS with the one it has
    (`step ca renew --daemon`), and publishes each new one; Envoy reads it without a restart.
-4. A revoked certificate (`rollout_runpod.StepCa.revoke`, for a pod stopped or deleted) is not renewed, and lapses
-   within a day.
+4. A revoked certificate (`rollout_train.pods.certificates.StepCa.revoke`, for a pod stopped or deleted) is not renewed,
+   and lapses within a day.
 
 The certificates are kept on the pod's volume (`ROLLOUT_CERTS`, default `/workspace/certs`): a pod started again renews
 the one it has while it is valid, and needs a new token only when it has lapsed.
@@ -89,7 +89,7 @@ and a `step ca renew --daemon` beside the gateway.
 | `ROLLOUT_LEDGER_TOKEN` | The pod's token for the ledger service: it reads its run's serving records, starts and checkpoints, and writes the pod's beats and reads its lease, nothing else. A run that takes the pod later gives a token for itself in the lease |
 | `ROLLOUT_BLOBS` | Where the blob store is, as JSON: `{"kind": "rollout_s3:S3BlobStore", "bucket": "…", "endpoint_url": "…", "access_key_id_env": "…", "secret_access_key_env": "…"}`, the store's key in the two variables it names: a read-only key for an inference pod, a key that writes for a trainer or host pod |
 | `STEP_CA_URL` | The cluster's step-ca (`https://ca.example.com`) |
-| `STEP_FINGERPRINT` | The SHA-256 fingerprint of step-ca's root certificate (`rollout_runpod.fingerprint`, or `step certificate fingerprint root_ca.crt`) |
+| `STEP_FINGERPRINT` | The SHA-256 fingerprint of step-ca's root certificate (`rollout_train.pods.certificates.fingerprint`, or `step certificate fingerprint root_ca.crt`) |
 | `STEP_ROOT` | The cluster's root certificate itself (PEM), pinned when the pod is leased and checked against `STEP_FINGERPRINT`; without it the pod fetches it from step-ca |
 | `STEP_CA_TRUST` | `root` (default): step-ca is reached directly, its TLS checked by the cluster's root; `system`: behind a proxy that ends TLS with a public certificate (a Cloudflare Tunnel), checked by the system's roots, and renewals use a token signed by the certificate's key (`--mtls=false`) |
 | `STEP_TOKEN` | The one-time token for the pod's first certificate; unset before any other process starts |

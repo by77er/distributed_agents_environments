@@ -8,8 +8,9 @@ from typing import Any
 import pytest
 from starlette.applications import Starlette
 
-from rollout_runpod import Pod, PodSpec, RunPod, RunPodError
+from rollout_runpod import RunPod, RunPodError, body, pod_of
 from rollout_runpod.api import USER_AGENT
+from rollout_train.pods.client import PodSpec
 from tests.rollout_runpod.fake import FakeRunPod
 from tests.rollout_train.pods.authority import served_tls
 
@@ -45,13 +46,13 @@ async def test_a_pod_is_created_listed_stopped_started_and_deleted(
         pod = await runpod.create(SPEC)
         assert (pod.name, pod.status, pod.address()) == ("inference-r1-0", "RUNNING", "https://203.0.113.7:40123")
         assert pod.cost_per_hour == 0.69 and pod.address(22) is None
-        _, _, body = asked[0]
-        assert body["env"] == {
+        _, _, sent = asked[0]
+        assert sent["env"] == {
             "ROLLOUT_POD_NAME": "inference-r1-0", "ROLLOUT_RUN": "r1",
             "AWS_SECRET_ACCESS_KEY": "{{ RUNPOD_SECRET_r2_secret }}", "STEP_TOKEN": TOKEN,
         }  # fmt: skip
-        assert body["ports"] == ["8443/tcp"] and body["gpuTypeIds"] == ["NVIDIA GeForce RTX 4090"]
-        assert (body["volumeMountPath"], body["cloudType"], body["supportPublicIp"]) == ("/workspace", "SECURE", True)
+        assert sent["ports"] == ["8443/tcp"] and sent["gpuTypeIds"] == ["NVIDIA GeForce RTX 4090"]
+        assert (sent["volumeMountPath"], sent["cloudType"], sent["supportPublicIp"]) == ("/workspace", "SECURE", True)
         assert [each.id for each in await runpod.pods(name="inference-r1-0")] == [pod.id]
         assert await runpod.pods(name="another") == []
         await runpod.stop(pod.id)
@@ -93,7 +94,7 @@ async def test_a_refused_or_missing_key_is_said_without_the_key(monkeypatch: pyt
 def test_a_pod_is_read_from_what_runpod_says() -> None:
     said = {"id": "x1", "name": "trainer-0", "desiredStatus": "RUNNING", "imageName": "img", "publicIp": "",
             "portMappings": {"22": 10341}, "adjustedCostPerHr": 0.5, "costPerHr": 0.7}  # fmt: skip
-    pod = Pod.of(said)
+    pod = pod_of(said)
     assert (pod.image, pod.public_ip, pod.ports, pod.cost_per_hour, pod.address()) == (
         "img",
         None,
@@ -104,16 +105,16 @@ def test_a_pod_is_read_from_what_runpod_says() -> None:
 
 
 def test_a_pods_cpus_and_memory_are_read_where_runpod_says_them() -> None:
-    placed = Pod.of({"id": "x1", "name": "host-0", "desiredStatus": "RUNNING", "vcpuCount": 16, "memoryInGb": 188})
+    placed = pod_of({"id": "x1", "name": "host-0", "desiredStatus": "RUNNING", "vcpuCount": 16, "memoryInGb": 188})
     assert (placed.vcpus, placed.memory_gb) == (16, 188.0)
-    waiting = Pod.of({"id": "x2", "name": "host-1", "desiredStatus": "RUNNING", "vcpuCount": 0, "memoryInGb": None})
+    waiting = pod_of({"id": "x2", "name": "host-1", "desiredStatus": "RUNNING", "vcpuCount": 0, "memoryInGb": None})
     assert (waiting.vcpus, waiting.memory_gb) == (None, None)  # (not placed yet: it has said nothing)
 
 
 def test_a_pod_may_ask_for_the_fewest_cpus_and_least_memory_per_gpu() -> None:
-    assert not {"minVCPUPerGPU", "minRAMPerGPU"} & set(SPEC.body())  # (unsaid: RunPod's own defaults)
-    body = PodSpec(name="host-0", image="img", gpu_types=["g"], min_vcpus_per_gpu=12, min_memory_gb_per_gpu=96).body()
-    assert (body["minVCPUPerGPU"], body["minRAMPerGPU"]) == (12, 96)
+    assert not {"minVCPUPerGPU", "minRAMPerGPU"} & set(body(SPEC))  # (unsaid: RunPod's own defaults)
+    said = body(PodSpec(name="host-0", image="img", gpu_types=["g"], min_vcpus_per_gpu=12, min_memory_gb_per_gpu=96))
+    assert (said["minVCPUPerGPU"], said["minRAMPerGPU"]) == (12, 96)
 
 
 async def test_every_request_says_who_sends_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,7 +127,7 @@ async def test_every_request_says_who_sends_it(monkeypatch: pytest.MonkeyPatch) 
     await runpod.pods()
     await runpod.terminate(pod.id)
     assert USER_AGENT.startswith("rollout/") and fake.agents == [USER_AGENT] * 3
-    assert pod.gpu == "NVIDIA GeForce RTX 4090" and Pod.of({"id": "p", "machine": {"gpuTypeId": "H100"}}).gpu == "H100"
+    assert pod.gpu == "NVIDIA GeForce RTX 4090" and pod_of({"id": "p", "machine": {"gpuTypeId": "H100"}}).gpu == "H100"
     bare = httpx.AsyncClient(transport=httpx.ASGITransport(app=fake.app))  # (what a client without one sends)
     refused = await bare.get("http://runpod.test/v1/pods", headers={"Authorization": f"Bearer {KEY}"})
     assert refused.status_code == 403
