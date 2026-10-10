@@ -26,10 +26,10 @@ import torch
 from torch import nn
 
 from rollout_lora.full import FullPolicy
-from rollout_lora.layers import LoraLinear, adapter_tensors
+from rollout_lora.layers import adapter_tensors, lora_parameters
 from rollout_lora.policy import Policy, layers_of
 from rollout_lora.settings import LoraSettings
-from rollout_lora.sharded import joined, shard_adapter, shard_full, summed, whole
+from rollout_lora.sharded import joined, shard_adapter, shard_full, whole
 from rollout_lora.workers import SEED
 from rollout_objectives.step import PolicyStep
 from rollout_train import Weighted
@@ -66,19 +66,12 @@ def stepped(policy: Policy, given: list[Item], ranks: Any = None) -> dict[str, t
     return adapter_tensors(policy.model, whole)
 
 
-def bfloat16_adapters(policy: Policy, mesh: Any) -> None:
-    """The adapter's units gathered in bfloat16, as the frozen model's are."""
-    from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy, fully_shard
-
-    bf16 = MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
-    for layer in layers_of(policy.model):
-        units: list[nn.Module] = [part for each in layer.modules() if isinstance(each, LoraLinear)
-                                  for part in (each.lora_A, each.lora_B)]  # fmt: skip
-        fully_shard(units, mesh=mesh, mp_policy=bf16)
-        fully_shard(layer, mesh=mesh, mp_policy=bf16, reshard_after_forward=False)
-    fully_shard(policy.scorer, mesh=mesh, mp_policy=bf16)
-    cast(FSDPModule, policy.scorer).set_reshard_after_backward(False, recurse=False)
-    summed(policy.scorer)
+def bfloat16_adapters(policy: Policy, mesh: Any, device: torch.device) -> None:
+    """The adapter held in bfloat16, as the frozen model is (so its steps' updates are rounded to bfloat16), then
+    sharded as an adapter is."""
+    for parameter in lora_parameters(policy.model):
+        parameter.data = parameter.data.to(torch.bfloat16)
+    shard_adapter(policy, mesh, device, whole_base=True)
 
 
 def apart(one: dict[str, torch.Tensor], two: dict[str, torch.Tensor]) -> float:
@@ -98,7 +91,7 @@ def precision(model: str) -> dict[str, Any]:
         shard_adapter(policy, mesh, device, whole_base=False)
 
     def bfloat16(policy: Policy) -> None:
-        bfloat16_adapters(policy, mesh)
+        bfloat16_adapters(policy, mesh, device)
 
     found: dict[str, Any] = {}
     shards: dict[str, Callable[[Policy], None]] = {"whole": whole_base, "shared": shared, "bfloat16": bfloat16}

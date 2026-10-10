@@ -10,6 +10,12 @@ for backward, so at most one layer's bf16 weight exists at a time, whether or no
 On a GPU, a Triton kernel (`rollout_lora.kernels`) dequantizes a weight in one pass, reading the packed words and
 writing the weight; torch's own operations, which the CPU runs, write and read whole int32, int8 and bf16 copies of
 it between. Both round each weight once, from its value times its scale in float32, and agree bit for bit.
+
+Where it is faster on the GPU at hand (`accumulates_in_fp16`: a consumer GPU, whose fp32 accumulation runs at half
+the rate of fp16's), bf16 activations are multiplied on fp16 tensor cores accumulating in fp16 a tile at a time
+(`rollout_lora.kernels.half_matmul`), by the weight dequantized to fp16 (times `WEIGHT_FACTOR`, divided back out
+after). fp16 keeps three more bits than bf16 of the activations and of the weights, so the products are closer to
+exact than bf16's with fp32 accumulation; on an RTX 5080 the matmuls take about 70% of the time.
 """
 
 import functools
@@ -19,11 +25,53 @@ from typing import Any, cast
 import torch
 from torch import nn
 
+WEIGHT_FACTOR = 64.0
+"""What a weight dequantized to fp16 is multiplied by (exactly: a power of two), so that its smallest weights (an int4
+value of 1 times a scale of about 4e-5) are normal fp16 numbers; its largest (8 times a scale of at most about
+0.26, times this) are far below fp16's largest, as are the tile sums of products with rows of magnitude 1."""
+
 
 @functools.cache
 def _kernels() -> bool:
     """Whether Triton is here to compile `rollout_lora.kernels`."""
     return importlib.util.find_spec("triton") is not None
+
+
+@functools.cache
+def accumulates_in_fp16(device: torch.device) -> bool:
+    """Whether `rollout_lora.kernels.half_matmul` multiplies a 9B model's projection faster than torch's bf16 matmul
+    on this GPU (by a tenth or more), timed once: a consumer GPU's fp32 accumulation runs at half the rate of fp16's,
+    a datacenter GPU's at the same."""
+    from rollout_lora.kernels import half_matmul
+
+    generator = torch.Generator(device=device).manual_seed(0)
+    inputs = torch.randn(2048, 4096, device=device, generator=generator).to(torch.bfloat16)
+    weight = torch.randn(4096, 4096, device=device, generator=generator)
+
+    def timed(multiply: Any) -> float:
+        for _ in range(3):
+            multiply()
+        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+        start.record()
+        for _ in range(10):
+            multiply()
+        end.record()
+        end.synchronize()
+        return start.elapsed_time(end)
+
+    with torch.cuda.device(device):
+        half, bf16 = weight.half(), weight.to(torch.bfloat16)
+        return timed(lambda: half_matmul(inputs, half.t())) < 0.9 * timed(lambda: inputs @ bf16.t())
+
+
+def _half(tensor: torch.Tensor) -> bool:
+    """Whether a matmul of these activations runs on fp16 tensor cores (`accumulates_in_fp16`)."""
+    return (
+        tensor.is_cuda
+        and tensor.dtype in (torch.bfloat16, torch.float16)
+        and _kernels()
+        and accumulates_in_fp16(tensor.device)
+    )
 
 
 def unpack_int4(packed: torch.Tensor, columns: int) -> torch.Tensor:
@@ -54,6 +102,12 @@ class _Int4MatMul(torch.autograd.Function):
     ) -> torch.Tensor:
         ctx.save_for_backward(packed, scale)
         ctx.columns = columns
+        if _half(inputs):
+            from rollout_lora.kernels import dequantized, half_matmul
+
+            weight = dequantized(packed, scale, columns, torch.float16, WEIGHT_FACTOR)
+            found = half_matmul(inputs.reshape(-1, columns), weight.t(), 1 / WEIGHT_FACTOR)
+            return found.reshape(*inputs.shape[:-1], packed.shape[0])
         weight = dequantize(packed, scale, columns, inputs.dtype)
         return inputs @ weight.t()
 
@@ -63,6 +117,12 @@ class _Int4MatMul(torch.autograd.Function):
         packed, scale = cast(tuple[torch.Tensor, torch.Tensor], ctx.saved_tensors)
         if not ctx.needs_input_grad[0]:
             return None, None, None, None
+        if _half(gradient):
+            from rollout_lora.kernels import dequantized, half_matmul
+
+            weight = dequantized(packed, scale, ctx.columns, torch.float16, WEIGHT_FACTOR)
+            found = half_matmul(gradient.reshape(-1, gradient.shape[-1]), weight, 1 / WEIGHT_FACTOR)
+            return found.reshape(*gradient.shape[:-1], ctx.columns), None, None, None
         weight = dequantize(packed, scale, ctx.columns, gradient.dtype)
         return gradient @ weight, None, None, None
 

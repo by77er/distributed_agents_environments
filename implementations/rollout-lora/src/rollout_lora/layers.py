@@ -13,16 +13,42 @@ from typing import Any, cast
 import torch
 from safetensors.torch import load_file, save_file  # pyright: ignore[reportUnknownVariableType]
 from torch import nn
+from torch.nn import functional
+
+
+class Down(nn.Linear):
+    """An adapter's A: kept in its own dtype (float32, as it trains), multiplied in its inputs' (the model's
+    activations', on their tensor cores; its gradient comes back to float32)."""
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return functional.linear(input, self.weight.to(input.dtype))
+
+
+class Up(nn.Linear):
+    """An adapter's B, multiplied as `Down` is, its product added to the frozen layer's output by the same matmul
+    (`addmm`: one rounding of the sum, and no copy of either)."""
+
+    def forward(self, low: torch.Tensor, base: torch.Tensor, scaling: float) -> torch.Tensor:  # pyright: ignore[reportIncompatibleMethodOverride]
+        found = torch.addmm(
+            base.reshape(-1, base.shape[-1]), low.reshape(-1, low.shape[-1]), self.weight.to(low.dtype).t(),
+            alpha=scaling,
+        )  # fmt: skip
+        return found.reshape(base.shape)
 
 
 class LoraLinear(nn.Module):
-    """`base(x) + scaling · B(A(x))`; only A and B train. B starts at zero, so a new adapter changes nothing."""
+    """`base(x) + scaling · B(A(x))`; only A and B train. B starts at zero, so a new adapter changes nothing.
+
+    A and B are float32 and are multiplied in the activations' dtype (bf16, for a bf16 or 4-bit model): an adapter's
+    product is a small correction to the frozen layer's, which is bf16 already, and float32 matmuls of whole
+    activations (and the copies of them in float32 and back) took about an eighth of a 9B model's training pass on
+    an RTX 5080."""
 
     def __init__(self, base: nn.Module, in_features: int, out_features: int, rank: int, alpha: float) -> None:
         super().__init__()
         self.base = base
-        self.lora_A = nn.Linear(in_features, rank, bias=False)
-        self.lora_B = nn.Linear(rank, out_features, bias=False)
+        self.lora_A = Down(in_features, rank, bias=False)
+        self.lora_B = Up(rank, out_features, bias=False)
         nn.init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B.weight)
         self.scaling = alpha / rank
@@ -30,12 +56,10 @@ class LoraLinear(nn.Module):
         """Switched off (`adapter_off`), the layer is its base."""
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        base = cast(torch.Tensor, self.base(inputs))
         if not self.enabled:
-            return cast(torch.Tensor, self.base(inputs))
-        return (
-            cast(torch.Tensor, self.base(inputs))
-            + self.lora_B(self.lora_A(inputs.to(self.lora_A.weight.dtype))).to(inputs.dtype) * self.scaling
-        )
+            return base
+        return cast(torch.Tensor, self.lora_B(self.lora_A(inputs), base, self.scaling))
 
 
 def add_lora(

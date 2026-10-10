@@ -379,7 +379,7 @@ def alone(mode: str, model: str, processes: int, out: Path) -> dict[str, Any]:
 def test_an_adapters_units_sharded_on_one_process_step_bitwise_as_the_policy_does(tiny: str, tmp_path: Path) -> None:
     found = alone("precision", tiny, 1, tmp_path / "precision.json")
     assert found["whole"] == 0.0 and found["shared"] == 0.0  # (float32 units: what one process computes, exactly)
-    assert found["bfloat16"] > 1e-4  # (units gathered in bfloat16 would not be: the comparison sees them)
+    assert found["bfloat16"] > 1e-4  # (an adapter held in bfloat16 would not be: the comparison sees it)
 
 
 def test_an_adapters_gradients_reduced_once_a_minibatch_are_those_reduced_after_each_pass(

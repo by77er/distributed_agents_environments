@@ -108,3 +108,65 @@ def test_a_4bit_weight_is_dequantized_on_the_gpu_as_on_the_cpu(
     assert inputs.grad is not None
     torch.testing.assert_close(found.cpu(), expected.detach(), rtol=2e-2, atol=2e-2)  # (the matmuls' own sums)
     torch.testing.assert_close(inputs.grad.cpu(), wanted, rtol=2e-2, atol=2e-2)
+
+
+def test_an_adapter_in_bf16_activations_is_its_product_added_and_trains_its_float32_weights() -> None:
+    torch.manual_seed(0)
+    base = nn.Linear(16, 24, bias=False).to(torch.bfloat16).requires_grad_(False)
+    lora = LoraLinear(base, 16, 24, rank=4, alpha=8.0)
+    nn.init.normal_(lora.lora_B.weight)
+    inputs = torch.randn(2, 5, 16).to(torch.bfloat16)
+    found = lora(inputs)
+    low = inputs.float() @ lora.lora_A.weight.t()
+    wanted = base(inputs).float() + 2.0 * low @ lora.lora_B.weight.t()
+    assert found.dtype == torch.bfloat16 and found.shape == (2, 5, 24)
+    assert (found.float() - wanted).norm() / wanted.norm() < 1e-2  # (bf16 products)
+    found.sum().backward()
+    for weight in (lora.lora_A.weight, lora.lora_B.weight):
+        assert weight.grad is not None and weight.grad.dtype == torch.float32 and weight.grad.abs().sum() > 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize(("count", "inner", "columns"), [(700, 4096, 1024), (3, 72, 5), (130, 1000, 300)])
+def test_a_matmul_accumulating_in_fp16_a_tile_at_a_time_is_as_close_to_exact_as_bf16s(
+    count: int, inner: int, columns: int
+) -> None:
+    from rollout_lora.kernels import half_matmul
+
+    generator = torch.Generator(device="cuda").manual_seed(count)
+    inputs = (torch.randn(count, inner, device="cuda", generator=generator) * 40).to(torch.bfloat16)
+    inputs[0] = 0  # (a row of zeros stays zeros)
+    weight = torch.randn(inner, columns, device="cuda", generator=generator) * 0.05
+    exact = inputs.double() @ weight.double()
+    found = half_matmul(inputs, (weight * 64).half(), 1 / 64)
+    bf16 = inputs @ weight.to(torch.bfloat16)
+    assert found.dtype == torch.bfloat16 and torch.all(found[0] == 0)
+    error = (found.double() - exact).norm() / exact.norm()
+    assert error <= (bf16.double() - exact).norm() / exact.norm()  # (fp16 keeps three more bits of each operand)
+    through = half_matmul(inputs, (weight.t().contiguous() * 64).half().t(), 1 / 64)  # (a transposed operand)
+    torch.testing.assert_close(through, found, rtol=0, atol=0)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_4bit_layer_on_a_consumer_gpu_multiplies_in_fp16_as_close_to_exact_as_bf16() -> None:
+    from rollout_lora.quantized import Int4Linear, accumulates_in_fp16, dequantize
+
+    if not accumulates_in_fp16(torch.device("cuda")):
+        pytest.skip("this GPU's fp32 accumulation is as fast")
+    generator = torch.Generator().manual_seed(0)
+    packed = torch.randint(-(2**31), 2**31 - 1, (512, 4096 // 8), dtype=torch.int32, generator=generator)
+    scale = (torch.rand(512, 4096 // 128, generator=generator) * 0.02 + 4e-5).to(torch.bfloat16)
+    layer = Int4Linear(packed, scale, in_features=4096, out_features=512).cuda()
+    weight = dequantize(packed, scale, 4096, torch.float64).cuda()
+    inputs = (torch.randn(300, 4096, generator=generator) * 3).to(torch.bfloat16).cuda().requires_grad_(True)
+    found = layer(inputs)
+    upstream = torch.randn(300, 512, device="cuda", dtype=torch.float64).to(torch.bfloat16) * 1e-3
+    found.backward(upstream)
+    assert inputs.grad is not None
+    bf16 = weight.to(torch.bfloat16)
+    for got, exact, plain in [
+        (found, inputs.double() @ weight.t(), inputs.detach() @ bf16.t()),
+        (inputs.grad, upstream.double() @ weight, upstream @ bf16),
+    ]:
+        error = (got.double() - exact).norm() / exact.norm()
+        assert error <= (plain.double() - exact).norm() / exact.norm()
