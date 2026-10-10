@@ -12,7 +12,9 @@ A source is:
   installed editable, so a project finds the files beside its package (a plugin's sources, a harness);
 - **the requirements**: pins (`NAME==VERSION`) of every other distribution those projects need, at the versions the
   platform's Python holds, installed as they are with nothing resolved (`--no-deps`): the pod's environment runs what
-  the platform tested, and nothing is fetched by a name alone;
+  the platform tested, and nothing is fetched by a name alone. A project's build backend (its `[build-system]`, for
+  its editable install: hatchling) is not pinned: uv fetches it from PyPI at what the project's `requires` allows,
+  since the platform holds no build backend to pin it from;
 - **the Python**: the version the pod's environment is made with (`PYTHON`), a uv-managed one, whatever the pod's own.
 
 Where the code comes from (`shipped`): every project a provider needs that the platform holds as a directory of its own
@@ -179,8 +181,11 @@ def _directory_of(name: str) -> Path | None:
         return None
     if not said:
         return None
-    url = str(json.loads(said).get("url") or "")
-    return Path(url.removeprefix("file://")) if url.startswith("file://") else None
+    described = json.loads(said)
+    url = str(described.get("url") or "")
+    if not url.startswith("file://") or "dir_info" not in described:  # (a wheel or an archive is no directory)
+        return None
+    return Path(url.removeprefix("file://"))
 
 
 def _project_of_module(module: str) -> LocalProject:

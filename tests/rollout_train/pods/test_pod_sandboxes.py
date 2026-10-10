@@ -10,8 +10,10 @@ host before it left; and, when another run takes the pod or the host is started 
 
 import asyncio
 import io
+import json
 import os
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -23,6 +25,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import pytest
 from pydantic import JsonValue
 
@@ -381,6 +384,58 @@ async def test_each_kind_runs_as_a_user_of_its_own_and_none_is_left_for_a_kind_t
         assert stat.S_IMODE((root / "kinds" / "one").stat().st_mode) == 0o700  # (its directory: its user's alone)
         assert stat.S_IMODE((root / "accounts.json").stat().st_mode) == 0o600
     finally:
+        await host.stop()
+
+
+async def test_a_kind_no_longer_asked_for_gives_its_user_back(
+    pod: tuple[PodLeases, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    leases, root, sockets = pod
+    monkeypatch.setattr(sandboxes, "FIRST_WAIT", 0.05)
+    one = SandboxSource("one", f"{KINDS}:boxes", size=1)
+    two = SandboxSource("two", f"{KINDS}:boxes", size=1)
+    await held_by(leases, "run_a", settings={"sandboxes": {"one": one.to_json()}})
+    host = host_of(leases, root, sockets, accounts=[Account(os.getuid(), os.getgid())])  # (one user, for two kinds)
+    try:
+        await host.followed()
+        await until(states_are(host, one="running"), 60, every=0.1)
+        await held_by(leases, "run_a", settings={"sandboxes": {"two": two.to_json()}})  # (the next run's kind)
+        await host.followed()
+        await until(states_are(host, two="running"), 60, every=0.1)  # (its user given back, and taken by two)
+        assert json.loads((root / "accounts.json").read_text()) == {"two": os.getuid()}
+    finally:
+        await host.stop()
+
+
+async def test_the_host_serves_on_a_socket_its_own_and_a_dead_kinds_socket_refuses(
+    pod: tuple[PodLeases, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    leases, root, sockets = pod
+    monkeypatch.setattr(sandboxes, "FIRST_WAIT", 30.0)  # (not started again while it is looked at)
+    assert sandboxes.PRCTL is not None  # (looked up once, at import: never in a child before it runs Python)
+    fake = SandboxSource("fake", f"{KINDS}:boxes", size=1)
+    await held_by(leases, "run_a", settings={"sandboxes": {"fake": fake.to_json()}})
+    host = host_of(leases, root, sockets)
+    listener = sandboxes._listening(sockets / "host.sock")  # pyright: ignore[reportPrivateUsage]
+    serving = asyncio.ensure_future(sandboxes.served_on(host.app(), listener))
+    try:
+        await host.followed()
+        await until(states_are(host, fake="running"), 60, every=0.1)
+        assert stat.S_IMODE((sockets / "host.sock").stat().st_mode) == 0o600  # (root's alone, on a pod)
+        transport = httpx.AsyncHTTPTransport(uds=str(sockets / "host.sock"))
+        async with httpx.AsyncClient(transport=transport, base_url="http://host") as client:
+            assert (await client.get("/fake/capacity")).json() == {"size": 1, "leased": 0}
+        worker = host.workers["fake"]
+        assert worker._listener is None  # pyright: ignore[reportPrivateUsage]  (the host's copy closed)
+        assert worker.process is not None
+        worker.process.kill()
+        await worker.process.wait()
+        with socket.socket(socket.AF_UNIX) as probe, pytest.raises(ConnectionRefusedError):
+            probe.connect(str(sockets / "fake.sock"))  # (refused at once, not left waiting)
+    finally:
+        serving.cancel()
+        await asyncio.gather(serving, return_exceptions=True)
+        listener.close()
         await host.stop()
 
 

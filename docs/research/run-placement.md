@@ -187,7 +187,7 @@ data, resolved on the pod into cached Python environments, each kind run in a pr
 | Part | Where | What it does |
 |---|---|---|
 | The source | Made by the run's driver; given in the pod's lease's settings (`sandboxes`, by kind) | The provider (`module:name`) and its settings; projects' zips in the pods' blob store, packed as an imported environment is (`rollout_train.publishing.packed`, stored once per content); pins of everything else at the platform's versions; the Python (3.13); what a pool is sized by. For a cluster's own kind, the provider's project, the platform's projects it depends on (`minecraft_horizons` → `environments/minecraft-horizons` and `environments/minecraft`) and `rollout`; for `on_pods.version`, a published version's zip (read from the store versions are published to), the platform's projects its dependencies name and `rollout`. A distribution the platform holds neither as a project nor installed is refused, so no name is ever resolved on the pod |
-| The sandbox host | The pod, `127.0.0.1:8710`, as root, under `supervise.sh`'s `restarting` | Follows the lease every 15 seconds; makes each kind's Python environment with uv (a uv-managed Python 3.13, the projects installed editable with `--no-sources`, the pins with `--no-deps`), once per digest of the zips, the pins and the Python, under a file lock, kept on the volume and deleted after 14 days unused; runs each kind's process, watched and started again with a growing wait; passes `/KIND/...` on to it |
+| The sandbox host | The pod, on a Unix socket root's alone that Envoy reaches, as root, under `supervise.sh`'s `restarting` | Follows the lease every 15 seconds; makes each kind's Python environment with uv (a uv-managed Python 3.13, the projects installed editable with `--no-sources`, the pins with `--no-deps`), once per digest of the zips, the pins and the Python, under a file lock, kept on the volume and deleted after 14 days unused; runs each kind's process, watched and started again with a growing wait; passes `/KIND/...` on to it |
 | A kind's process | The pod, as its own user, on a Unix socket only the host reaches, its own Python, a made environment (a home of its own on the volume, nothing of the pod's secrets) | `python -P -m rollout.harness.pool_server`: a `SandboxPool` over the provider for one run at a time, its leases kept on the volume |
 | Envoy | The pod's one public port | Passes `GET /v1/sandboxes/KIND/operations` and `.../capacity`, `POST .../acquire`, `.../release` and `.../call` to the host as `/KIND/...`, from the gateway's certificate alone; acquire may take 600 s (a world starts in a minute or more), an operation 120 s (a window is 20 s) |
 | `PodPools` | The run's driver, in the cluster | The run's pods' pools as one: a new lease on a live pod with room, the most first, then the cluster's pool (`url`); releases and operations where the lease is; capacity summed; where each lease is kept before a pod is asked, so no sandbox is left unnamed when an answer is lost |
@@ -203,9 +203,11 @@ again, never given up on.
 **Isolation.** Each kind's process runs as a user of its own (the image makes `sandbox1` to `sandbox8`), so it cannot
 read the environments of the processes that hold the pod's secrets (the host, the follower, the training service and
 the container's first process run as root), the certificates (root's alone), the environments and zips it runs from
-(root's, read-only to it), or another kind's directory, and it reaches no other kind's process (their sockets are
-root's). It can still reach vLLM and the training service on the loopback interface, which take requests without a
-key: the code a run gives a pod must be code the cluster trusts beside its trainer.
+(root's, read-only to it), or another kind's directory. It reaches no other kind's process, the sandbox host, or
+Envoy's admin interface: each serves on a Unix socket root's alone (the host and the admin interface in
+`/run/rollout`, 0700). A user is given back when no kind the lease asks for has it, its kind's directory made root's
+until the kind is served again. It can still reach vLLM and the training service on the loopback interface, which
+take requests without a key: the code a run gives a pod must be code the cluster trusts beside its trainer.
 
 **How many sandboxes a pod holds.** One per spare vCPU, bounded by memory: the pod's vCPUs less 4 (vLLM, the trainer,
 the follower, Envoy), at the kind's `cpus` (1 for a world), and no more than its memory less 64 GiB at its

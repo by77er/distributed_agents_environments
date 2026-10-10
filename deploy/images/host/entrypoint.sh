@@ -38,6 +38,8 @@ if [ -n "${VLLM_REASONING_PARSER:-}" ]; then
     reasoning_options=(--reasoning-parser "$VLLM_REASONING_PARSER" --reasoning-config "$VLLM_REASONING_CONFIG")
 fi
 
+# (the sandbox host's socket and Envoy's admin socket: root's alone, out of reach of the kinds' processes)
+mkdir -p -m 700 /run/rollout
 start certificates /opt/rollout/bin/pki.sh renew
 start envoy envoy --config-path "${ENVOY_CONFIG:-/etc/envoy/envoy.yaml}" --log-level "${ENVOY_LOG_LEVEL:-warn}" \
     --concurrency "${ENVOY_CONCURRENCY:-4}" # (by default Envoy runs a worker per hardware thread the machine has, not the pod)

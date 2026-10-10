@@ -17,26 +17,30 @@ download a Python (from python-build-standalone's GitHub releases) and wheels (f
 there is waited out and tried again, never given up on.
 
 **Each kind's pool** runs in a process of its own (`python -P -m rollout.harness.pool_server`, nothing of its working
-directory on its path), in that Python, as a user of its own (`ROLLOUT_SANDBOX_USERS`: one per kind, assigned once and
-kept), on a Unix socket the host makes, owned by root and readable by no one else, and hands it: no other process of the
-pod reaches it, another kind's included. The process dies with the host (`PR_SET_PDEATHSIG`), is ended with its process
-group, and one a host before this one left is ended when it starts (its pid kept under `pids/`). One that ends is
-started again after 5 seconds, then 10, 20, up to 5 minutes; one that ends within a minute five times running is given
-up on until its source changes, the run changes, or 15 minutes pass. One kind failing (its code does not import, its
-settings are wrong) leaves the others served. The host says each kind's state in a log line whenever one changes.
+directory on its path), in that Python, as a user of its own (`ROLLOUT_SANDBOX_USERS`: one per kind served, given back
+once the lease asks for the kind no more, its directory then root's), on a Unix socket the host makes, owned by root and
+readable by no one else, and hands it: no other process of the pod reaches it, another kind's included. The process dies
+with the host (`PR_SET_PDEATHSIG`), is ended with its process group, and one a host before this one left is ended when
+it starts (its pid kept under `pids/`). One that ends is started again after 5 seconds, then 10, 20, up to 5 minutes;
+one that ends within a minute five times running is given up on until its source changes, the run changes, or 15 minutes
+pass. One kind failing (its code does not import, its settings are wrong) leaves the others served. The host says each
+kind's state in a log line whenever one changes.
 
 **What a kind's process may touch.** Its environment is made, not inherited: `PATH`, `HOME` and `TMPDIR` in its own
 directory (`ROLLOUT_SANDBOX_DIRECTORY/kinds/KIND`, its own and no other user's: its leases, logs and caches, kept across
 restarts), a locale. It cannot read the pod's secrets: the host, the follower, the training service and the container's
 first process run as root, so their environments (`/proc/PID/environ`: the ledger token, the store's keys, the
 certificate's token) are not its to read, and the certificates' directory is root's alone. The environments and zips it
-runs from are root's, and read-only to it. What it can still reach is what any process of the pod can: vLLM
-(`127.0.0.1:8000`) and the training service (`127.0.0.1:8001`) on the loopback interface, which take requests without
-a key; the code a run gives a pod must be code the cluster trusts to run beside its trainer.
+runs from are root's, and read-only to it. It cannot reach the host (which serves on a Unix socket root's alone,
+`ROLLOUT_SANDBOX_SOCKET`, for Envoy) nor through it another kind's pool, nor Envoy's admin interface (a Unix socket
+root's alone too). What it can still reach is what any process of the pod can: vLLM (`127.0.0.1:8000`) and the
+training service (`127.0.0.1:8001`) on the loopback interface, which take requests without a key, and Envoy's public
+port, which takes only the gateway's certificate; the code a run gives a pod must be code the cluster trusts to run
+beside its trainer.
 
-**Routing.** The pod's proxy sends `/v1/sandboxes/KIND/...` here as `/KIND/...`; the host passes `GET operations` and
-`capacity` and `POST acquire`, `release` and `call` on to the kind's process, and answers 503 (`PoolUnavailable`, never
-"full") while that process is not up.
+**Routing.** The pod's proxy sends `/v1/sandboxes/KIND/...` here, over the host's socket, as `/KIND/...`; the host
+passes `GET operations` and `capacity` and `POST acquire`, `release` and `call` on to the kind's process, and answers
+503 (`PoolUnavailable`, never "full") while that process is not up.
 
 **Whose leases.** An acquire for a key of another run than the host serves makes it read its lease again first; the
 kinds' processes admit only the served run's keys. When the lease names another run, each process forgets the other
@@ -55,7 +59,8 @@ again once it holds nothing), and one that is down starts at the new size.
 
     python -m rollout_train.pods.sandboxes
 
-- `ROLLOUT_SANDBOX_ADDRESS`: where the host serves (default `127.0.0.1:8710`);
+- `ROLLOUT_SANDBOX_SOCKET`: where the host serves, a Unix socket only root may reach (default
+  `/run/rollout/sandboxes.sock`, where the pod's Envoy sends the sandboxes' routes);
 - `ROLLOUT_SANDBOX_DIRECTORY`: its state (default `/workspace/sandboxes`);
 - `ROLLOUT_SANDBOX_RESERVED_CPUS`, `ROLLOUT_SANDBOX_RESERVED_GIB`: what is kept for the pod's other processes;
 - `ROLLOUT_SANDBOX_USERS`: the users kinds' processes run as, one per kind (default `sandbox1` to `sandbox8`, which the
@@ -89,7 +94,7 @@ from rollout.contracts import BlobReference
 from rollout.harness.blobs import Blobs
 from rollout.harness.pool_server import of_run
 from rollout_train.ledger import opened
-from rollout_train.pods.environment import listening, location, required, served, stores
+from rollout_train.pods.environment import location, required, stores
 from rollout_train.pods.leases import IDLE, PodLease, PodLeases, pod_leases_of
 from rollout_train.pods.sources import SandboxSource, sources_in
 
@@ -100,7 +105,8 @@ __all__ = ["Account", "Machine", "SandboxHost", "Venvs", "Worker", "machine_of",
 
 log = logging.getLogger(__name__)
 
-ADDRESS = "127.0.0.1:8710"
+SOCKET = "/run/rollout/sandboxes.sock"
+"""Where the host serves, for Envoy alone: a Unix socket root's alone, in a directory root's alone."""
 DIRECTORY = "/workspace/sandboxes"
 USERS = tuple(f"sandbox{number}" for number in range(1, 9))
 """The users kinds' processes run as, one per kind, which the host image makes."""
@@ -378,12 +384,24 @@ def accounts_of(names: Sequence[str]) -> list[Account]:
     return found
 
 
-def _dying_with_parent() -> None:
-    """In a child before it runs its program: end it when its parent ends (`PR_SET_PDEATHSIG`)."""
+def _prctl() -> Callable[..., int] | None:
+    """The C library's `prctl`, looked up once here (never in a child between fork and exec), where there is one."""
     import ctypes
 
-    with contextlib.suppress(Exception):
-        ctypes.CDLL(None).prctl(1, signal.SIGTERM)
+    try:
+        return cast(Callable[..., int], ctypes.CDLL(None).prctl)
+    except (OSError, AttributeError):
+        return None
+
+
+PRCTL = _prctl()
+PR_SET_PDEATHSIG, PR_SET_DUMPABLE = 1, 4
+
+
+def _dying_with_parent() -> None:
+    """In a child before it runs its program: end it when its parent ends (`PR_SET_PDEATHSIG`)."""
+    if PRCTL is not None:
+        PRCTL(PR_SET_PDEATHSIG, signal.SIGTERM)
 
 
 def _listening(path: Path) -> socket.socket:
@@ -462,7 +480,7 @@ class Worker:
             if time.monotonic() - began < QUICK_END:
                 self.quick_ends += 1
             else:
-                self.quick_ends, running = 1, FIRST_WAIT
+                self.quick_ends, running = 0, FIRST_WAIT
             if self.quick_ends >= GIVE_UP:
                 self.state, self.failed_at = "failed", time.monotonic()
                 changed()
@@ -485,12 +503,12 @@ class Worker:
 
     async def _started(self, python: Path) -> None:
         home, temporary = self._own()
-        self._listener = _listening(self.socket_path)
+        listener = self._listener = _listening(self.socket_path)
         config = self.directory / "worker.json"
         written = self.run
         config.write_text(json.dumps({
             "kind": self.kind, "provider": self.source.provider, "settings": dict(self.source.settings),
-            "size": self.size, "directory": str(self.directory), "name": self.name, "fd": self._listener.fileno(),
+            "size": self.size, "directory": str(self.directory), "name": self.name, "fd": listener.fileno(),
             "run": written,
         }))  # fmt: skip
         config.chmod(0o600)
@@ -503,7 +521,7 @@ class Worker:
         self.process = await asyncio.create_subprocess_exec(
             str(python), "-P", "-m", "rollout.harness.pool_server", str(config),
             env=worker_environment(home, temporary, self.passed), cwd=str(home), start_new_session=True,
-            pass_fds=(self._listener.fileno(),), preexec_fn=_dying_with_parent, **options,
+            pass_fds=(listener.fileno(),), preexec_fn=_dying_with_parent, **options,
         )  # fmt: skip
         self.pid_path.parent.mkdir(parents=True, exist_ok=True)
         self.pid_path.write_text(str(self.process.pid))
@@ -519,6 +537,8 @@ class Worker:
             if time.monotonic() > deadline:
                 raise RuntimeError("its process did not answer within 120 seconds")
             await asyncio.sleep(0.2)
+        listener.close()  # (the process holds it now: once it ends, a connection is refused, not left waiting)
+        self._listener = None
         if (self.run, self.admitting) != (written, True):  # (the run changed while it started)
             await self._told()
 
@@ -642,6 +662,7 @@ class SandboxHost:
             changed = (run, admitting) != (self.run, self.admitting)
             for kind in [each for each in self.workers if each not in wanted or sizes.get(each, 0) < 1]:
                 await self.workers.pop(kind).stop()
+            self._given_back(set(self.workers) | set(wanted))
             for kind, source in sorted(wanted.items()):
                 size = sizes.get(kind, 0)
                 worker = self.workers.get(kind)
@@ -684,7 +705,7 @@ class SandboxHost:
         return lease.run, age <= HOLD_AFTER
 
     def _account(self, kind: str) -> Account | None:
-        """The user `kind`'s process runs as: assigned once (kept in `accounts.json`), one per kind."""
+        """The user `kind`'s process runs as: one per kind served (kept in `accounts.json` until given back)."""
         if self.accounts is None:
             return None
         path = self.root / "accounts.json"
@@ -694,7 +715,8 @@ class SandboxHost:
             return by_uid[assigned[kind]]
         free = [each for each in self.accounts if each.uid not in assigned.values()]
         if not free:
-            raise RuntimeError(f"no user is left for the kind {kind}: each kind runs as one of its own")
+            raise RuntimeError(f"no user is left for the kind {kind}: each kind runs as one of its own, and "
+                               f"{len(self.accounts)} kinds are served now")  # fmt: skip
         assigned[kind] = free[0].uid
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(assigned))
@@ -705,6 +727,24 @@ class SandboxHost:
                 with contextlib.suppress(OSError):
                     os.lchown(each, free[0].uid, free[0].gid)
         return free[0]
+
+    def _given_back(self, kept: set[str]) -> list[str]:
+        """Give back the users of the kinds not in `kept` (none of their processes runs): each kind's directory is
+        made root's alone, until its kind is served again and given to the user it then gets. Returns those kinds."""
+        path = self.root / "accounts.json"
+        if self.accounts is None or not path.exists():
+            return []
+        assigned: dict[str, int] = json.loads(path.read_text())
+        gone = sorted(kind for kind in assigned if kind not in kept)
+        for kind in gone:
+            directory = self.root / "kinds" / kind
+            for each in [directory, *directory.rglob("*")] if directory.exists() else []:
+                with contextlib.suppress(OSError):
+                    os.lchown(each, 0, 0)
+            del assigned[kind]
+        if gone:
+            path.write_text(json.dumps(assigned))
+        return gone
 
     def _start(self, kind: str, source: SandboxSource, size: int, run: str | None, admitting: bool) -> None:
         worker = Worker(kind, source, size, self.root / "kinds" / kind, self.sockets / f"{kind}.sock",
@@ -781,10 +821,8 @@ class SandboxHost:
 
 def _undumpable() -> None:
     """This process's memory and environment are root's alone, even to its own user's processes (`PR_SET_DUMPABLE`)."""
-    import ctypes
-
-    with contextlib.suppress(Exception):
-        ctypes.CDLL(None).prctl(4, 0)
+    if PRCTL is not None:
+        PRCTL(PR_SET_DUMPABLE, 0)
 
 
 async def main(environ: Mapping[str, str]) -> None:
@@ -808,11 +846,24 @@ async def main(environ: Mapping[str, str]) -> None:
     )  # fmt: skip
     if ended := host.reap():
         log.info("ended the processes a host before this one left: %s", ", ".join(map(str, ended)))
-    address, port = listening(environ, "ROLLOUT_SANDBOX_ADDRESS", ADDRESS)
+    listener = _listening(Path(environ.get("ROLLOUT_SANDBOX_SOCKET") or SOCKET))
     try:
-        await asyncio.gather(host.serve(), served(host.app(), address, port))
+        await asyncio.gather(host.serve(), served_on(host.app(), listener))
     finally:
+        listener.close()
         await host.stop()
+
+
+async def served_on(app: Any, listener: socket.socket) -> None:
+    """Serve `app` on `listener` (a socket made for it) until cancelled."""
+    import uvicorn
+
+    server = uvicorn.Server(uvicorn.Config(app, fd=listener.fileno(), log_level="warning", lifespan="off"))
+    try:
+        await server.serve()
+    except asyncio.CancelledError:
+        server.should_exit = True
+        raise
 
 
 async def _until_stopped(environ: Mapping[str, str], run: Callable[[Mapping[str, str]], Awaitable[None]]) -> None:

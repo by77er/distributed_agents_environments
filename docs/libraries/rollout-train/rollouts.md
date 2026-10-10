@@ -140,7 +140,7 @@ claims it held lapse, and their episodes are open again for any runner with room
   sandboxes and releases them.
 - **Played again:** a run that fails because a sandbox of its is gone (`SandboxLost`: its pool ended its lease, was
   started again, or did not outlive the runner), adopted or not, is noted in `interrupted`, and the episode is played
-  as a new attempt.
+  as a new attempt; its third such attempt is recorded failed, saying its sandbox was lost three times running.
 
 `serve()` runs until cancelled; `async with playing(runner):` serves while a block runs.
 [`episodes_of(ledger, blobs, run, group, count)`](../../guide/reference.md#episodes_of) waits until all `count`

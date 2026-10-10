@@ -160,6 +160,18 @@ async def test_a_pod_that_does_not_answer_holds_no_acquire_up(tmp_path: Path) ->
     assert len(pods.sandboxes["b"].sandboxes) == 1 and await pool.capacity() == Capacity(size=1, leased=1)
 
 
+async def test_a_pod_another_run_took_since_the_look_passes_the_key_to_the_next(tmp_path: Path) -> None:
+    pods = Pods(a=4, b=1)
+
+    class Taken(Losing):
+        async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Any:
+            raise LeaseRefused(f"{key} is not of the run this pod serves")
+
+    pods.pools["a"] = cast(Any, Taken(pods.pools["a"]))
+    pool = pod_pools(pods, tmp_path)
+    assert (await pool.acquire(BOX, "r/1/1/1/box")).pool == "fake@b"
+
+
 async def test_a_pod_that_does_not_answer_an_acquire_passes_it_to_the_next(tmp_path: Path) -> None:
     pods = Pods(a=4, b=1)
 
@@ -193,13 +205,36 @@ async def test_a_run_whose_pods_serve_no_kind_it_needs_and_no_pool_behind_says_s
 
     run.noted = said
     pods = Pods()  # (the run's pods: none serves the kind now)
-    run.unserved = asyncio.get_running_loop().create_future()
-    watching = asyncio.ensure_future(run._served_by_pods("fake", pod_pools(pods, tmp_path), run.unserved,  # pyright: ignore[reportPrivateUsage]
-                                                         every=0.01, within=0.05))  # fmt: skip
+    watching = asyncio.ensure_future(run._served_by_pods("fake", pod_pools(pods, tmp_path), every=0.01,  # pyright: ignore[reportPrivateUsage]
+                                                         within=0.05))  # fmt: skip
     with pytest.raises(SandboxesUnserved, match="no pod of the run's served fake sandboxes"):
         await _within_limits(run, asyncio.sleep(30))
     await watching
     assert told and "a pod that serves fake sandboxes" in told[0]
+
+
+async def test_a_run_whose_pods_leases_are_lost_to_it_ends_failed_saying_so(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from rollout_train.jobs import Run, _within_limits  # pyright: ignore[reportPrivateUsage]
+    from rollout_train.pods.leasing import LeaseLost
+    from rollout_train.run_settings import RunSettings
+    from rollout_train.stores import Stores
+    from tests.rollout_train.clusters import POLICY, WORDS, a_cluster
+
+    cluster = a_cluster(tmp_path)
+    stores = Stores.open(cluster)
+    settings = RunSettings({**POLICY, "kind": "train", "environment": WORDS, "name": "lost"})
+    run = Run(cluster, stores, settings, await stores.registry.create("lost"), directory=tmp_path / "run")
+
+    async def renewing(spent: object) -> None:
+        await asyncio.sleep(0.05)
+        raise LeaseLost("pod x is no longer held by run lost (its lease went stale and was reaped)")
+
+    renewal = asyncio.ensure_future(run._renewing(SimpleNamespace(renewing=renewing)))  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(LeaseLost, match="no longer held"):
+        await _within_limits(run, asyncio.sleep(30))
+    await renewal
 
 
 async def test_a_new_lease_goes_to_the_pod_with_the_most_room(tmp_path: Path) -> None:

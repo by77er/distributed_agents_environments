@@ -119,6 +119,28 @@ def pods_of(run: str, cluster: Cluster, ledger: DatabaseLedger, fake: FakeRunPod
 NEED = PodNeed("pods", "inference", 1, "m", "policy")
 
 
+async def test_renewing_tries_again_after_a_failure_and_ends_on_a_lost_lease(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, fake, _ = world
+    pods = pods_of("run_1", cluster_of(tmp_path), ledger, fake, renew=0.01)
+    answers: list[BaseException | None] = [RuntimeError("the ledger service did not answer"), None,
+                                           LeaseLost("pod x is no longer held by run run_1")]  # fmt: skip
+    calls: list[int] = []
+
+    async def renewed() -> float:
+        calls.append(1)
+        answer = answers.pop(0)
+        if answer is not None:
+            raise answer
+        return 0.0
+
+    monkeypatch.setattr(pods, "renewed", renewed)
+    with pytest.raises(LeaseLost):  # (the first failure tried again; the lost lease ends it)
+        await asyncio.wait_for(pods.renewing(), 10)
+    assert len(calls) == 3
+
+
 async def test_a_renewal_follows_a_pod_runpod_maps_to_another_port(
     tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
 ) -> None:

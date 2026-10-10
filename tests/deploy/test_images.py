@@ -125,7 +125,10 @@ def test_a_host_pod_s_sandbox_pools_are_reached_under_their_kind_with_time_for_a
     (cluster,) = [each for each in envoy("host")["static_resources"]["clusters"] if each["name"] == "sandboxes"]
     (endpoints,) = cluster["load_assignment"]["endpoints"]
     (endpoint,) = endpoints["lb_endpoints"]
-    assert endpoint["endpoint"]["address"]["socket_address"] == {"address": "127.0.0.1", "port_value": 8710}
+    from rollout_train.pods.sandboxes import SOCKET
+
+    assert endpoint["endpoint"]["address"] == {"pipe": {"path": SOCKET}}  # (the sandbox host's, root's alone)
+    assert "mkdir -p -m 700 /run/rollout" in (IMAGES / "host" / "entrypoint.sh").read_text()
 
 
 def test_a_host_pod_s_sandbox_host_is_started_again_alone_when_it_ends_with_a_growing_wait() -> None:
@@ -167,11 +170,19 @@ def test_only_the_gateway_s_certificate_is_taken(role: str) -> None:
         path = Path(secret["sds_config"]["path_config_source"]["path"])
         (resource,) = yaml.safe_load((IMAGES / "common" / "sds" / path.name).read_text())["resources"]
         assert resource["name"] == secret["name"]
-    assert config["admin"]["address"]["socket_address"]["address"] == "127.0.0.1"
+    admin = config["admin"]["address"]
+    if role == "host":  # (a pod that runs sandboxes' code: its admin interface on a socket root's alone)
+        assert admin == {"pipe": {"path": "/run/rollout/envoy-admin.sock", "mode": 0o600}}
+    else:
+        assert admin["socket_address"]["address"] == "127.0.0.1"
     for cluster in config["static_resources"]["clusters"]:  # (the pod's servers listen on its loopback interface)
         for endpoints in cluster["load_assignment"]["endpoints"]:
             for endpoint in endpoints["lb_endpoints"]:
-                assert endpoint["endpoint"]["address"]["socket_address"]["address"] == "127.0.0.1"
+                address = endpoint["endpoint"]["address"]
+                if "pipe" in address:  # (or on a Unix socket in a directory root's alone)
+                    assert Path(address["pipe"]["path"]).parent == Path("/run/rollout")
+                else:
+                    assert address["socket_address"]["address"] == "127.0.0.1"
 
 
 @pytest.mark.parametrize("role", ROLES)

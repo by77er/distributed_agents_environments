@@ -267,7 +267,9 @@ releasing on its pod each lease whose claim it found lapsed at two looks running
   sandbox under the same key;
 - its leases are kept on the pod's volume, so a process started again answers `SandboxLost` for the sandboxes it lost;
 - an episode that fails because its sandbox is lost is played again as a new attempt, whether or not its runner adopted
-  it ([rollouts](../rollout-train/rollouts.md#a-runner)).
+  it, and recorded failed at its third ([rollouts](../rollout-train/rollouts.md#a-runner));
+- the run's driver renews the pods' leases every 30 seconds, trying again after a renewal that fails; a lease lost to
+  the run (another took it, or the reaper did) ends the run failed (`LeaseLost`).
 
 A kind whose specs name model slots is not served from pods: a harness inside reaches its model at the run's gateway,
 on the driver's loopback interface, which a pod cannot reach.

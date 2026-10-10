@@ -7,10 +7,12 @@ through `PodPools`, which the runner holds as it holds any pool (docs/research/r
   for the leases they hold.
 - **Acquiring.** A key with no lease goes to a live pod with room, the one with the most first (its pool's `capacity`,
   asked of every pod at once and never while another acquire chooses, less the acquires on their way to it or sent
-  since, which only orders the pods); a pod that answers full (or does not answer) passes it to the next; when every
-  pod is full, to the cluster's own pool of the kind (`fallback`, the section's `url`), where there is one; else
+  since, which only orders the pods); a pod that answers full (or does not answer) passes it to the next; when every pod
+  is full, to the cluster's own pool of the kind (`fallback`, the section's `url`), where there is one; else
   `NoCapacity`. A pod that does not answer an acquire passes it on too, once it is asked to release what it may have
-  made. A key with a lease goes to where its lease is, and only there: its sandbox is never made again elsewhere.
+  made, and so does one that refuses the key (another run took it since the look). The driver's own refusal of a key
+  whose claim lapsed (`admits`) is the acquire's. A key with a lease goes to where its lease is, and only there: its
+  sandbox is never made again elsewhere.
 - **Where each lease is** is kept (`placements`, in the run's directory) before the pod is asked, as `acquiring`, and
   as `held` once it answers, so a driver started again routes the leases of the runs it adopts. An acquire whose
   answer was lost (a timeout) is released on its pod at once, or, failing that, at the next sweep: no world is left
@@ -313,6 +315,9 @@ class PodPools:
             try:
                 lease = await self._asked(where, live[where], spec, key, environment)
             except NoCapacity:
+                continue
+            except LeaseRefused as error:  # (a pod another run took since the look: the key is not its run's)
+                log.info("%s refused %s: %s; trying the next pod", where, key, error)
                 continue
             except httpx.TransportError as error:  # (the pod did not answer: released there, as far as it can be)
                 log.warning("acquiring %s on %s failed: %s; trying the next pod", key, where, error)

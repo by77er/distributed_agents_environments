@@ -116,6 +116,23 @@ async def test_a_live_episode_whose_sandbox_is_lost_is_played_again_not_failed(t
     assert {key: record["why"] for key, record in interrupted.items()} == {"1/1/1": LOST}  # type: ignore[index]
 
 
+async def test_an_episode_whose_sandbox_is_always_lost_is_recorded_failed_after_three_attempts(tmp_path: Path) -> None:
+    class Losing(SandboxPool):
+        async def call(self, key: str, name: str, arguments: Any, *, effect_id: str, arguments_digest: str) -> Any:
+            await self.lose(key)  # (its pool ends it each time: started again, say)
+            return await super().call(key, name, arguments, effect_id=effect_id, arguments_digest=arguments_digest)
+
+    pool = Losing(FakeSandboxes(), leases=FileLeases(tmp_path / "ledger"))
+    played = episode_runner(tmp_path, pool)
+    await ask_boxed(played.ledger, {1: ({}, 1)})
+    async with playing(played):
+        (episode,) = await episodes_of(played.ledger, played.blobs, "train", 1, 1, every=0.01)
+    assert episode.outcome.value == "failed" and "lost 3 times running" in str(episode.detail)
+    interrupted = await played.ledger.read(table("train", INTERRUPTED))
+    assert {key: record["why"] for key, record in interrupted.items()} == {"1/1/1": LOST, "1/1/2": LOST}  # type: ignore[index]
+    assert sorted(await played.ledger.read(table("train", CLAIMS))) == ["1/1/1", "1/1/2", "1/1/3"]
+
+
 async def _gone(sandboxes: FakeSandboxes, handle: str) -> bool:
     return handle not in sandboxes.sandboxes
 

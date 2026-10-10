@@ -5,6 +5,7 @@ whose pods cannot reach the ledger service; and pods are not the cluster's GPUs.
 
 import dataclasses
 import io
+import json
 import tomllib
 import zipfile
 from pathlib import Path
@@ -191,6 +192,28 @@ async def test_a_published_versions_source_ships_its_zip_and_every_project_it_ne
     with pytest.raises(ValueError, match="no-such-distribution-here is needed, and the platform holds it neither"):
         await sources_of(cluster_of(host=text.replace("on_pods = { ", 'on_pods = { version = "boxes-world@def", ')),
                          {"minecraft"}, pods, cast(Any, Versions(unknown)), published=published)  # fmt: skip
+
+
+def test_only_a_distribution_installed_from_a_directory_is_a_project_of_the_platforms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rollout_train.pods import sources
+
+    said: dict[str, dict[str, object]] = {
+        "from-a-directory": {"url": f"file://{tmp_path}", "dir_info": {"editable": True}},
+        "from-a-wheel": {"url": f"file://{tmp_path}/a-0-py3-none-any.whl", "archive_info": {}},
+    }
+
+    class Installed:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def read_text(self, file: str) -> str:
+            return json.dumps(said[self.name])
+
+    monkeypatch.setattr(sources.metadata, "distribution", Installed)
+    assert sources._directory_of("from-a-directory") == tmp_path  # pyright: ignore[reportPrivateUsage]
+    assert sources._directory_of("from-a-wheel") is None  # pyright: ignore[reportPrivateUsage]
 
 
 def test_a_provider_in_no_project_of_its_own_is_not_packed() -> None:

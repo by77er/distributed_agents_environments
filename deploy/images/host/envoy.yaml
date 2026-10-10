@@ -4,12 +4,13 @@
 # chains to the cluster's root and carries the gateway's identity. It passes on what sampling needs (POST
 # /v1/completions and GET /v1/models, to vLLM), the training API (POST /v1/steps, GET /v1/steps/CHECKPOINT and GET
 # /v1/trainer, to the training service) and the sandbox pools' API (GET /v1/sandboxes/KIND/operations and .../capacity,
-# POST .../acquire, .../release and .../call, to the pools' process, as /KIND/...), and nothing else: every other
-# request is answered 404 here. Every server listens on 127.0.0.1 only.
+# POST .../acquire, .../release and .../call, to the sandbox host, as /KIND/...), and nothing else: every other
+# request is answered 404 here. vLLM and the training service listen on 127.0.0.1 only; the sandbox host and this
+# admin interface on Unix sockets root's alone (in /run/rollout, 0700), which no kind's process of the pod reaches.
 node: {id: rollout-host, cluster: rollout}   # (certificates over SDS need a node's id and cluster)
 admin:
   address:
-    socket_address: { address: 127.0.0.1, port_value: 9901 }
+    pipe: { path: /run/rollout/envoy-admin.sock, mode: 384 }   # (0600: root's alone)
 
 static_resources:
   listeners:
@@ -236,7 +237,7 @@ static_resources:
     - name: sandboxes
       type: STATIC
       connect_timeout: 2s
-      # Uvicorn behind it (the pools' process) closes a connection idle for 5 s: Envoy closes its own first.
+      # Uvicorn behind it (the sandbox host) closes a connection idle for 5 s: Envoy closes its own first.
       typed_extension_protocol_options:
         envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
           "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
@@ -250,4 +251,4 @@ static_resources:
           - lb_endpoints:
               - endpoint:
                   address:
-                    socket_address: { address: 127.0.0.1, port_value: 8710 }
+                    pipe: { path: /run/rollout/sandboxes.sock }   # (the sandbox host's: root's alone)

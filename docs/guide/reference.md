@@ -5283,7 +5283,7 @@ A run being built from its settings, and what it started: everything the loop of
 | `asked_at` | `float \| None` | `None` | When it asked Ray for its placement group. |
 | `reserved_at` | `float \| None` | `None` | When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own). |
 | `pods` | `Any` | `None` |  |
-| `unserved` | `'asyncio.Future[str] \| None'` | `None` | Done, saying why, once no pod of the run's has served a kind of sandbox it needs for `UNSERVED` seconds. |
+| `failing` | `'asyncio.Future[BaseException] \| None'` | `None` | Done, with the error, once something the run runs beside its loop fails it: its pods' leases lost to it (`LeaseLost`), or no pod of its serving a kind of sandbox it needs for `UNSERVED` seconds (`SandboxesUnserved`). |
 | `trainer_need` | `Any` | `None` | The pod its trainer's steps need of its own (`rollout_train.pods.leasing.PodNeed`), leased once a step is coming (`rollout_train.pods.LeasedTrainer`), not with the rest. |
 | `began` | `float` | `field(default_factory=time.time)` | When this start of it began: what `limits.hours` counts from. |
 
@@ -5298,6 +5298,7 @@ A run being built from its settings, and what it started: everything the loop of
   pools and the runner; then wait for what Ray has yet to give.
 - `def hosted(self, channel: str, provider: str, model: str) -> list[Any]` — The servers of a channel on a `vllm` provider: engine hosts of the run's own, one per replica, each bound to
   the run's channel, asking Ray for its share of a GPU and its CPU in its bundle of the run's placement group.
+- `def fail(self, error: BaseException) -> None` — End the run failed with `error` (`failing`), from something it runs beside its loop.
 - `def binding(self, environment: Environment) -> Any` — How an environment's episodes are played: each slot from the channel the settings bind it to (the run's
   channel unless said), each import and pool where the cluster serves it.
 - `async def publish(self, channel: str, adapter: str, files: Fetched, version: int | None = None, *, full: bool = False) -> int` — Serve a checkpoint on a channel: on engines in this process (Tinker's), its files read here and loaded now;
@@ -6663,7 +6664,9 @@ step-ca (by default the one its table says, if any). `told` hears what the run w
 - `async def renewed(self) -> float` — Stamp each lease it holds, and its time on each pod; the dollars that time cost since the last renewal.
   Raises `LeaseLost` where a lease is no longer the run's.
 - `async def renewing(self, spent: Callable[[float], Awaitable[None]] | None = None) -> None` — Renew every `renew` seconds until cancelled, telling `spent` the dollars its pods cost that it has not told
-  yet: first what they cost while the run waited for them to be ready (renewed then too), then each renewal's.
+  yet: first what they cost while the run waited for them to be ready (renewed then too), then each renewal's. A
+  renewal that fails (the store or RunPod not answering) is said and tried again at the next; a lease no longer
+  the run's (`LeaseLost`) ends it, raised.
 - `async def release(self) -> None` — Release every lease it holds: each pod stays warm for its provider's `idle_stop` (deleted at once where that
   is 0), its warm time charged to the run.
 - `async def deleted(self, lease: PodLease, why: str, *, still: Callable[[PodLease], bool] | None = None) -> bool` — Delete a lease and its pod (`delete`), and hold it no more; whether it was deleted (false where it is no

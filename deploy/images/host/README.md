@@ -9,11 +9,11 @@ environment's code for that, and nothing an environment needs of its system (no 
 | Process | Listens on | Does |
 |---|---|---|
 | `pki.sh renew` | | Renews the pod's certificate at about two thirds of its life, and publishes each new one for Envoy |
-| Envoy | `0.0.0.0:8443` (the pod's exposed TCP port), admin on `127.0.0.1:9901` | Ends mutual TLS; takes only the gateway's certificate; passes on `POST /v1/completions` and `GET /v1/models` to vLLM, `POST /v1/steps`, `GET /v1/steps/CHECKPOINT` and `GET /v1/trainer` to the training service, the sandboxes' routes (below) to the sandbox host, and answers everything else 404 |
+| Envoy | `0.0.0.0:8443` (the pod's exposed TCP port), admin on the Unix socket `/run/rollout/envoy-admin.sock` (root's alone) | Ends mutual TLS; takes only the gateway's certificate; passes on `POST /v1/completions` and `GET /v1/models` to vLLM, `POST /v1/steps`, `GET /v1/steps/CHECKPOINT` and `GET /v1/trainer` to the training service, the sandboxes' routes (below) to the sandbox host, and answers everything else 404 |
 | vLLM (`vllm serve`, the workspace's version) | `127.0.0.1:8000` | Samples, as on an inference pod |
 | The training service (`python -m rollout_train.pods.training`) | `127.0.0.1:8001` | Takes the run's steps, as on a training pod, its trainer made for the run that holds the pod |
 | The follower (`python -m rollout_train.pods.inference`) | `127.0.0.1:8081` (`/healthz`, `/readyz`) | Loads what the run's channel should serve into vLLM, and beats for the pod: ready once vLLM serves it and the training service holds the run's trainer |
-| The sandbox host (`python -m rollout_train.pods.sandboxes`) | `127.0.0.1:8710` | Serves the kinds of sandbox the pod's lease gives sources for, each kind's pool in a process of its own (below) |
+| The sandbox host (`python -m rollout_train.pods.sandboxes`) | The Unix socket `/run/rollout/sandboxes.sock` (root's alone: Envoy reaches it) | Serves the kinds of sandbox the pod's lease gives sources for, each kind's pool in a process of its own (below) |
 
 A checkpoint the training service makes is kept in the bucket (so evals, the monitor and a run started again find it)
 and on the pod's disk (`ROLLOUT_BLOB_CACHE`, default `/workspace/blobs`), where the follower loads it from, with no
@@ -40,13 +40,16 @@ names it, a zip not named by its SHA-256) is left out.
   the pins as they are (`--no-deps`: nothing is resolved, so nothing is fetched by a name alone). The digest is of the
   zips' contents, the pins and the Python: an environment is made once, under a file lock, and found again by later
   runs and after restarts; one no kind has used for 14 days is deleted, with the zips no kept environment uses.
-- **First use downloads** a Python (python-build-standalone's releases on GitHub) and the pinned wheels (PyPI); an
+- **First use downloads** a Python (python-build-standalone's releases on GitHub), the pinned wheels (PyPI), and the
+  build backend each project's `[build-system]` names for its editable install (hatchling, from PyPI, at whatever
+  version that `requires` allows: the platform holds no build backend to pin it from); an
   environment's own caches download what it needs at first use (Minecraft: Paper, a JDK, Node, the harness's npm
   packages). A failure to make a Python is waited out (5 seconds, doubling to 5 minutes) and tried again, never given
   up on.
 - **Each kind's process.** `python -P -m rollout.harness.pool_server`, in that Python (nothing of its working directory
   on its path), as a user of its own (`ROLLOUT_SANDBOX_USERS`, `sandbox1` to `sandbox8`, which the image makes; one per
-  kind, assigned once in `ROLLOUT_SANDBOX_DIRECTORY/accounts.json`). It serves on a Unix socket the host makes and
+  kind served, kept in `ROLLOUT_SANDBOX_DIRECTORY/accounts.json` and given back once the lease asks for the kind no
+  more, its directory then made root's until the kind is served again). It serves on a Unix socket the host makes and
   hands it, root's and readable by no one else, so no other process of the pod (another kind's included) reaches it or
   its control routes. It dies with the host, is ended with its process group, and one a host before left (its pid in
   `ROLLOUT_SANDBOX_DIRECTORY/pids`) is ended when the host starts. One that ends is started again after 5 seconds, then
@@ -57,9 +60,12 @@ names it, a zip not named by its SHA-256) is left out.
   (`ROLLOUT_SANDBOX_DIRECTORY/kinds/KIND`, its user's alone: its leases, logs and caches, kept across restarts), a
   locale. The host, the follower, the training service, Envoy and the container's first process run as root, so their
   environments (the ledger token, the store's keys, the certificate's token) are not its to read, and the
-  certificates' directory is root's alone. The environments and zips it runs from are root's, read-only to it. It can
-  still reach what every process of the pod can: vLLM (`127.0.0.1:8000`) and the training service (`127.0.0.1:8001`),
-  which take requests without a key. A run's sandbox code must be code the cluster trusts beside its trainer.
+  certificates' directory is root's alone. The environments and zips it runs from are root's, read-only to it. It
+  cannot reach the sandbox host, nor through it another kind's pool, nor Envoy's admin interface: both serve on Unix
+  sockets root's alone, in `/run/rollout` (0700). It can still reach what every process of the pod can: vLLM
+  (`127.0.0.1:8000`) and the training service (`127.0.0.1:8001`), which take requests without a key, and Envoy's
+  public port, which takes the gateway's certificate alone. A run's sandbox code must be code the cluster trusts
+  beside its trainer.
 - **Whose.** A kind's process admits only keys of the run that holds the pod (and its evals'). When another run takes
   the pod, it forgets the other runs' leases. When the lease's `renewed` is older than 5 minutes (the run's driver
   renews it every 30 seconds, but may stall), it takes no new keys (`PoolUnavailable`) and goes on serving those it
@@ -96,7 +102,7 @@ Those of the [inference image](../inference/README.md#variables) and the [traine
 | `ROLLOUT_BLOB_CACHE` | Where the pod keeps a copy of every blob its processes put or read (default `/workspace/blobs`) |
 | `ROLLOUT_TRAINER_URL` | Where the follower asks the training service which run's trainer it holds (default `http://127.0.0.1:8001`) |
 | `ROLLOUT_SLEEP_VLLM` | `1`: vLLM sleeps while a step is taken |
-| `ROLLOUT_SANDBOX_ADDRESS` | Where the sandbox host serves (default `127.0.0.1:8710`, where Envoy sends the sandboxes' routes) |
+| `ROLLOUT_SANDBOX_SOCKET` | The Unix socket the sandbox host serves on, root's alone (default `/run/rollout/sandboxes.sock`, where Envoy sends the sandboxes' routes) |
 | `ROLLOUT_SANDBOX_DIRECTORY` | The sandbox host's state: projects, Python environments, uv's cache and Pythons, each kind's leases, the home its processes are given (default `/workspace/sandboxes`) |
 | `ROLLOUT_SANDBOX_RESERVED_CPUS` | vCPUs kept for vLLM, the trainer, the follower and Envoy (default 4) |
 | `ROLLOUT_SANDBOX_RESERVED_GIB` | GiB of memory kept for them (default 64) |

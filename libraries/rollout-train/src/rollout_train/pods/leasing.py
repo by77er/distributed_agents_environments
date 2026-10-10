@@ -600,15 +600,23 @@ class Pods:
 
     async def renewing(self, spent: Callable[[float], Awaitable[None]] | None = None) -> None:
         """Renew every `renew` seconds until cancelled, telling `spent` the dollars its pods cost that it has not told
-        yet: first what they cost while the run waited for them to be ready (renewed then too), then each renewal's."""
+        yet: first what they cost while the run waited for them to be ready (renewed then too), then each renewal's. A
+        renewal that fails (the store or RunPod not answering) is said and tried again at the next; a lease no longer
+        the run's (`LeaseLost`) ends it, raised."""
         told = 0.0
         self._renewing = True
         while True:
             await asyncio.sleep(self.renew)
-            await self.renewed()
-            if spent is not None and self.spent > told:
-                added, told = self.spent - told, self.spent
-                await spent(added)
+            try:
+                await self.renewed()
+                if spent is not None and self.spent > told:
+                    added, told = self.spent - told, self.spent
+                    await spent(added)
+            except LeaseLost:
+                raise
+            except Exception as error:  # (tried again at the next renewal: a lease goes stale only after STALE)
+                log.warning("run %s did not renew its pods' leases: %s: %s; trying again in %.0f s", self.run,
+                            type(error).__name__, error, self.renew)  # fmt: skip
 
     async def release(self) -> None:
         """Release every lease it holds: each pod stays warm for its provider's `idle_stop` (deleted at once where that
