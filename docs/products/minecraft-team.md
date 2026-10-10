@@ -417,8 +417,8 @@ under a file lock so that episodes starting together make it once:
 |---|---|---|
 | The harness's packages | `minecraft/harness/DIGEST/node_modules` | `npm ci` once per `package-lock.json` (DIGEST covers it and `package.json`): 470 MB, in seconds where npm's own cache holds them. Where the harness's own `node_modules` is installed beside its sources (a checkout after `npm ci`, the platform image's built-in copy), that is used |
 | Paper | `minecraft/paper/` | Downloaded once per version and build, checked against its SHA-256 |
-| A JDK, for `javac` and `java` | `jdk/` | Downloaded once (Eclipse Temurin 21, checked against its SHA-256) where no `javac` is on the path (the platform image has a Java runtime only); its `java` runs Paper where no `java` is on the path |
-| Node 22, for the bots | `node/` | Downloaded once (nodejs.org's newest 22.x for the machine, checked against the release's `SHASUMS256.txt`) where no `node` and `npm` are on the path; its `npm` installs the harness's packages |
+| A JDK, for `javac` and `java` | `jdk/` | Downloaded once (Eclipse Temurin 21, the release `JDK_RELEASE` pins, for the machine's architecture, checked against the SHA-256 pinned beside it) where no `javac` is on the path (the platform image has a Java runtime only); its `java` runs Paper where no `java` is on the path |
+| Node 22, for the bots | `node/` | Downloaded once (the release `NODE_VERSION` pins, for the machine's architecture, checked against the SHA-256 pinned beside it) where no `node` and `npm` are on the path; its `npm` installs the harness's packages |
 | The plugin | `minecraft/plugin/` | Compiled from the version's `plugin/` once per digest of its sources and the Paper version |
 | A template per world seed | `minecraft/templates/` | Generated once per seed and digest of `config/`: half a minute on 20 cores |
 

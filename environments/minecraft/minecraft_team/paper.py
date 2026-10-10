@@ -17,11 +17,12 @@ Everything is cached under `~/.cache/rollout/minecraft` (not `/tmp`, which may b
   started it, and what such a process left behind is removed by the next one (`sweep`).
 
 The runtimes are the machine's where it has them on the path (`java`, `javac`, `node` and `npm`). Where it does not,
-they are downloaded once beside the cache and used from there: a JDK (Eclipse Temurin 21, checked against its published
-SHA-256) to `~/.cache/rollout/jdk`, whose `java` runs Paper where there is no `java` and whose `javac` compiles the
-plugin where there is no `javac`; and Node 22 (nodejs.org's newest 22.x for this machine, checked against the release's
-`SHASUMS256.txt`) to `~/.cache/rollout/node`, whose `node` runs the bots and whose `npm` installs their packages. A
-machine that only runs processes (a rented GPU pod) needs nothing installed for Minecraft.
+they are downloaded once beside the cache, for the machine's architecture, and used from there: a JDK (Eclipse Temurin,
+`JDK_RELEASE`) to `~/.cache/rollout/jdk`, whose `java` runs Paper where there is no `java` and whose `javac` compiles
+the plugin where there is no `javac`; and Node (`NODE_VERSION`) to `~/.cache/rollout/node`, whose `node` runs the bots
+and whose `npm` installs their packages. Each is refused unless it matches the SHA-256 pinned here, and is unpacked
+beside its place and renamed into it, under a lock. A machine that only runs processes (a rented GPU pod) needs
+nothing installed for Minecraft.
 
 Starting a server means accepting the Minecraft EULA (https://aka.ms/MinecraftEULA) for a local, offline server.
 """
@@ -71,8 +72,22 @@ GENERATED_CHUNKS = 19
 within 240 blocks of it and reach 40 further."""
 SHARED = ("libraries", "versions", "cache")
 """Directories every server shares with the bootstrap server, so none downloads or patches anything."""
-NODE = "https://nodejs.org/dist/latest-v22.x"
-"""Where Node 22's newest release is published, with its `SHASUMS256.txt`."""
+NODE_VERSION = "v22.23.3"
+"""The Node a machine without one downloads, by its release."""
+NODE = f"https://nodejs.org/dist/{NODE_VERSION}"
+NODE_SHA256 = {
+    "x64": "df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de",
+    "arm64": "a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f",
+}
+"""Each linux tarball's SHA-256, as the release's `SHASUMS256.txt` says it."""
+JDK_RELEASE = "jdk-21.0.12.1+1"
+"""The JDK (Eclipse Temurin 21) a machine without `javac` downloads, by its release."""
+JDK = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1"
+JDK_SHA256 = {
+    "x64": "ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94",
+    "aarch64": "23e37e026f12f3e706f18938ff611db3032d075b09d0879a25d06718c773e223",
+}
+"""Each linux JDK's SHA-256, as Adoptium publishes it beside the archive."""
 HEAP = "1536M"
 """A server's largest heap. Four bots roaming apart through terrain the template does not hold keep up to 1 GiB live
 (docs/research/minecraft-memory.md); in 15 turns of a task the live set grows from 214 MiB to 420 to 560 MiB."""
@@ -135,27 +150,11 @@ class Installation:
 
     def _node(self) -> Path:
         arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64", "arm64": "arm64"}[platform.machine().lower()]
+        name = f"node-{NODE_VERSION}-linux-{arch}"
         target = self.root.parent / "node"
-        found = sorted(target.glob(f"node-v22.*-linux-{arch}/bin/node"))
-        if found:
-            return found[-1].parent
-        sums = _fetch(f"{NODE}/SHASUMS256.txt").decode()
-        digest, name = next(
-            line.split() for line in sums.splitlines() if line.strip().endswith(f"-linux-{arch}.tar.xz")
-        )
-        data = _fetch(f"{NODE}/{name}")
-        if hashlib.sha256(data).hexdigest() != digest:
-            raise RuntimeError(f"the Node download {name} does not match its checksum in SHASUMS256.txt")
-        target.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(dir=target, prefix=".partial-"))
-        try:
-            with tarfile.open(fileobj=io.BytesIO(data), mode="r:xz") as tar:
-                tar.extractall(staging, filter="data")
-            (unpacked,) = [each for each in staging.iterdir() if each.is_dir()]
-            unpacked.replace(target / unpacked.name)
-        finally:
-            shutil.rmtree(staging, ignore_errors=True)
-        return target / unpacked.name / "bin"
+        if not (target / name / "bin" / "node").is_file():
+            _unpacked(f"{NODE}/{name}.tar.xz", NODE_SHA256[arch], target, name)
+        return target / name / "bin"
 
     def node_environment(self) -> dict[str, str]:
         """This process's environment with the `node` and `npm` it uses first on the path (npm runs `node` by name)."""
@@ -200,26 +199,19 @@ class Installation:
         return directory
 
     def jdk(self) -> Path:
-        """A JDK's bin directory, downloaded if no `javac` is on the path."""
+        """A JDK's bin directory: the machine's, where `javac` is on the path; else `JDK_RELEASE`, downloaded once for
+        this machine's architecture, checked, and unpacked whole before it is used."""
         if system := shutil.which("javac"):
             return Path(system).parent
-        found = sorted((self.root.parent / "jdk").glob("jdk-21*/bin/javac"))
-        if found:
-            return found[-1].parent
+        arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "aarch64", "arm64": "aarch64"}[platform.machine().lower()]
         target = self.root.parent / "jdk"
-        target.mkdir(parents=True, exist_ok=True)
-        asset = _json(
-            "https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse"
-        )[0]["binary"]["package"]
-        data = _fetch(asset["link"])
-        if hashlib.sha256(data).hexdigest() != asset["checksum"]:
-            raise RuntimeError("the JDK download does not match its checksum")
-        archive = target / asset["name"]
-        archive.write_bytes(data)
-        with tarfile.open(archive) as tar:
-            tar.extractall(target, filter="data")
-        archive.unlink()
-        return sorted(target.glob("jdk-21*/bin/javac"))[-1].parent
+        if not (target / JDK_RELEASE / "bin" / "javac").is_file():
+            with self._lock("jdk"):
+                if not (target / JDK_RELEASE / "bin" / "javac").is_file():
+                    version = JDK_RELEASE.removeprefix("jdk-").replace("+", "_")
+                    archive = f"{JDK}/OpenJDK21U-jdk_{arch}_linux_hotspot_{version}.tar.gz"
+                    _unpacked(archive, JDK_SHA256[arch], target, JDK_RELEASE)
+        return target / JDK_RELEASE / "bin"
 
     def plugin_jar(self) -> Path:
         """The ground-truth plugin, compiled against this Paper's API; rebuilt when its sources change."""
@@ -628,6 +620,24 @@ def _json(url: str) -> Any:
 def _fetch(url: str) -> bytes:
     with urllib.request.urlopen(url, timeout=120) as response:
         return response.read()
+
+
+def _unpacked(url: str, sha256: str, target: Path, name: str) -> None:
+    """Download the tarball at `url`, refuse it unless its SHA-256 is `sha256`, and unpack its one top directory as
+    `target/name`: into a directory beside it first, then renamed, so a half unpacked one is never found."""
+    data = _fetch(url)
+    if hashlib.sha256(data).hexdigest() != sha256:
+        raise RuntimeError(f"the download {url} does not match its checksum")
+    target.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(dir=target, prefix=".partial-"))
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
+            tar.extractall(staging, filter="data")
+        (unpacked,) = [each for each in staging.iterdir() if each.is_dir()]
+        shutil.rmtree(target / name, ignore_errors=True)
+        unpacked.replace(target / name)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def _write_atomically(path: Path, data: bytes) -> None:
