@@ -9,5 +9,6 @@ This section is for whoever writes an environment and wants a worked one to read
 | Environment | What it shows |
 |---|---|
 | [Minecraft team](minecraft-team.md) | One to four agents in a Minecraft world, each world a sandbox from a pool; a curriculum of 100 rows; the presets `minecraft-one-gpu` and `minecraft-tinker` |
+| [Minecraft horizons](minecraft-horizons.md) | Objectives with no ceiling (iron, food, advancements…), each raced against a budget of game time the agents see, from 5 to 160 minutes; the team package's server, bots and builders; a sandbox kind of its own |
 | [Gridworld](gridworld.md) | Two to four agents share out the plates of a grid level over chat; no sandbox; the preset `gridworld-qwen3-0.6b` |
 | [Judging](judging.md) | Open-ended answers scored by a judge against a versioned rubric: a reward from a slot that is not trained, bound to a channel of its own by the run's settings |

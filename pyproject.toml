@@ -15,6 +15,7 @@ dependencies = [
     "rollout-s3",
     "rollout-runpod",
     "minecraft-team",
+    "minecraft-horizons",
     "gridworld",
     "judging",
 ]
@@ -25,7 +26,10 @@ gemma = ["rollout-gemma"]
 tinker = ["rollout-tinker", "rollout-qwen"]  # a trainer and an engine at Thinking Machines
 
 [tool.uv.workspace]
-members = ["libraries/*", "implementations/*", "environments/minecraft", "environments/gridworld", "environments/judging"]
+members = [
+    "libraries/*", "implementations/*", "environments/minecraft", "environments/minecraft-horizons",
+    "environments/gridworld", "environments/judging",
+]
 exclude = ["implementations/rollout-verifiers"]  # a project of its own, locked apart
 
 [tool.uv.sources]
@@ -42,6 +46,7 @@ rollout-s3 = { workspace = true }
 rollout-runpod = { workspace = true }
 rollout-tinker = { workspace = true }
 minecraft-team = { workspace = true }
+minecraft-horizons = { workspace = true }
 gridworld = { workspace = true }
 judging = { workspace = true }
 
@@ -70,8 +75,8 @@ target-version = "py313"
 # Code in docs/ is illustrative and hand-aligned for reading; .claude/ holds agents' working copies.
 extend-exclude = ["docs", ".claude"]
 src = [
-    "libraries/*/src", "implementations/*/src", "environments/minecraft", "environments/gridworld", "environments/judging",
-    ".",
+    "libraries/*/src", "implementations/*/src", "environments/minecraft", "environments/minecraft-horizons",
+    "environments/gridworld", "environments/judging", ".",
 ]
 
 [tool.ruff.per-file-target-version]  # (what the pods run, which they run on the vLLM image's Python: deploy/images)
@@ -104,6 +109,7 @@ extraPaths = [
     "implementations/rollout-tinker/src",
     "implementations/rollout-verifiers/src",
     "environments/minecraft",
+    "environments/minecraft-horizons",
     "environments/gridworld",
     "environments/judging",
 ]
