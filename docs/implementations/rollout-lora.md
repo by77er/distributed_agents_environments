@@ -227,6 +227,7 @@ with linear attention a state for each run of a pack beside each chunk's.
 | Entropy | `Policy.logprobs_and_entropy`: each sampled position's entropy beside its logprob, from the same chunk of logits |
 | Left off the GPU | A vision tower is dropped. The token embedding table is memory-mapped from the checkpoint file and only a segment's rows are read |
 | Output layer | Run only at the sampled positions, `LOGIT_ROWS` at a time, each chunk recomputed in the backward pass. Peak memory is one chunk's logits, whatever the share of sampled tokens |
+| Elementwise operations | `rollout_lora.fused.fuse`: on a GPU, Qwen3.5's zero-centred norms (each layer's two, attention's query and key norms, the last norm), its gated norms and its MLPs' `silu(gate) * up` each run as one Triton kernel, forward and backward, instead of half a dozen eager kernels each reading and writing the whole activation. They round where the eager operations round: a norm's output differs from eager in about one element in a hundred thousand, by one bf16 unit in the last place, and `silu(gate) * up`'s not at all. A norm whose weight trains keeps its eager forward. On an RTX 5080 a 9B gradient pass takes about a sixth less time |
 | Activations | Gradient checkpointing over the transformer |
 | Packs | `Policy.packed`: every segment of a pack in one pass, the logprobs each has alone ([packs](#packs)) |
 

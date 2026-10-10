@@ -36,6 +36,7 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
+from rollout_lora.fused import fuse
 from rollout_lora.layers import adapter_off, add_lora, lora_parameters, save_adapter
 from rollout_lora.models import body, config, local, multimodal, quantized
 from rollout_lora.packing import hidden, prepare
@@ -329,7 +330,7 @@ class Policy:
     @classmethod
     def load(cls, checkpoint: str, *, rank: int, alpha: float, device: str = "cuda") -> "Policy":
         """The checkpoint on `device` (the GPU; the CPU, for a policy to shard) with a new adapter, its layers
-        checkpointed for the backward pass."""
+        checkpointed for the backward pass, its elementwise operations fused (`rollout_lora.fused`)."""
         from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, CompressedTensorsConfig
 
         where = str(local(checkpoint))
@@ -360,7 +361,9 @@ class Policy:
         cast(Any, model).gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         if embedding is None:  # (embeddings read from the file are marked as needing gradients where used)
             cast(Any, model).enable_input_require_grads()
-        return cls(model, checkpoint, rank, alpha, embedding, prepare(model))
+        packing = prepare(model)
+        fuse(model)
+        return cls(model, checkpoint, rank, alpha, embedding, packing)
 
     def parameters(self) -> list[nn.Parameter]:
         return lora_parameters(self.model)
