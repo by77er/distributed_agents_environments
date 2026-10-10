@@ -2,8 +2,8 @@
 
 rollout is a reinforcement learning platform for language-model agents. It trains them on long, multi-turn,
 multi-agent episodes, such as four bots sharing a Minecraft world, a gridworld or a math problem. Episodes keep playing
-while the policy trains, and each new checkpoint is served to the agents during the run. The same code runs on a
-single 16 GB GPU and on a Kubernetes cluster.
+while the policy trains, and each new checkpoint is served to the agents during the run. It runs on one machine or
+on a Kubernetes cluster.
 
 ## An example turn
 
@@ -46,9 +46,9 @@ how the amount grows with time. These tasks are described in [Minecraft horizons
 - **Evals.** Versioned suites of environments run on a schedule or against any checkpoint, with a score for each
   environment.
 
-On one machine, the `minecraft-one-gpu` preset puts the 4-bit Qwen3.5-9B on vLLM and a rank-32 LoRA trainer on the
-same 16 GB card. The engines sleep while the trainer steps. On a cluster, the included Helm chart runs the same
-processes under [KubeRay](https://github.com/ray-project/kuberay).
+On one machine, the `minecraft-one-gpu` preset puts the 4-bit Qwen3.5-9B on vLLM and a rank-32 LoRA trainer on one
+16 GB GPU; the engines sleep while the trainer steps. On Kubernetes, the included Helm chart deploys the platform
+with [KubeRay](https://github.com/ray-project/kuberay).
 
 ## Writing an environment
 
