@@ -23,34 +23,36 @@ class ActionError extends Error {}
 
 // Each action: (bot, args, context) → result object. context: { signal, memory }.
 const ACTIONS = {
-  async move_to (bot, { x, y, z }, context) {
+  async move_to (bot, { x, y, z, dig }, context) {
     const target = new Vec3(int(x, 'x'), int(y, 'y'), int(z, 'z'))
     if (!known(context.memory, target) && target.distanceTo(bot.entity.position) > 6) {
       throw new ActionError(`(${x}, ${y}, ${z}) is not near anything you have seen; move toward what you can see first`)
     }
-    await travel(bot, new goals.GoalNear(target.x, target.y, target.z, 1), context)
+    await travel(bot, new goals.GoalNear(target.x, target.y, target.z, 1), context, dig === true)
     return { arrived_at: position(bot) }
   },
 
-  async move (bot, { direction, blocks }, context) {
+  async move (bot, { direction, blocks, dig }, context) {
     const vector = direction_(direction)
     const count = Math.max(1, Math.min(int(blocks ?? 8, 'blocks'), LIMITS.move_blocks))
     const start = bot.entity.position.floored()
     const target = start.plus(vector.scaled(count))
     const goal = vector.y === 0 ? new goals.GoalXZ(target.x, target.z) : new goals.GoalY(target.y)
     try {
-      await travel(bot, goal, context)
+      await travel(bot, goal, context, dig === true)
     } catch (error) {
       // No way to the far end (a wall the bot's tools do not break): go as far that way as feet would, to the wall.
       if (!(error instanceof ActionError) || vector.y !== 0) throw error
       const { steps, obstacle } = straight(bot, start, vector, count)
       if (steps === 0) {
-        throw new ActionError(obstacle
-          ? `you cannot go ${direction} from here: ${obstacle} is in the way, and your tools do not break it within ${spelled(LIMITS.walk_dig_seconds)} seconds`
-          : `you cannot go ${direction} from here: there is no ground to walk on`)
+        throw new ActionError(!obstacle
+          ? `you cannot go ${direction} from here: there is no ground to walk on`
+          : dig === true
+            ? `you cannot go ${direction} from here: ${obstacle} is in the way, and your tools do not break it within ${spelled(LIMITS.walk_dig_seconds)} seconds`
+            : `you cannot go ${direction} from here: ${obstacle} is in the way (walking digs through nothing unless you say dig)`)
       }
       const end = start.plus(vector.scaled(steps))
-      await travel(bot, new goals.GoalBlock(end.x, end.y, end.z), context)
+      await travel(bot, new goals.GoalBlock(end.x, end.y, end.z), context, dig === true)
       return { arrived_at: position(bot), moved: round(bot.entity.position.distanceTo(start)), stopped_by: obstacle ?? 'no ground beyond' }
     }
     return { arrived_at: position(bot), moved: round(bot.entity.position.distanceTo(start)) }
@@ -383,12 +385,20 @@ const ACTIONS = {
 // Walk to a goal. The pathfinder searches for a path for two seconds at most; a far goal, or one behind rock, takes
 // longer than that to find. It then gives the best start it has: the bot walks that, and the search begins again
 // from where it ends, for as long as each leg gets the bot somewhere.
-async function travel (bot, goal, context) {
+// Walk to `goal`, through what is in the way only if `dig` (the agent's choice: else around it, or not at all).
+async function travel (bot, goal, context, dig = false) {
+  bot.pathfinder.setMovements(dig ? bot.movements.digging : bot.movements.walking)
+  const unless = dig ? '' : ' without digging (say dig to dig through what is in the way)'
   for (;;) {
     if (context.signal.aborted) throw new Interrupted()
     const from = bot.entity.position.clone()
-    if (await leg(bot, goal, context)) return
-    if (bot.entity.position.distanceTo(from) < 0.9) throw new ActionError('could not get there: no way found')
+    try {
+      if (await leg(bot, goal, context)) return
+    } catch (error) {
+      if (error instanceof ActionError) throw new ActionError(error.message + unless)
+      throw error
+    }
+    if (bot.entity.position.distanceTo(from) < 0.9) throw new ActionError('could not get there: no way found' + unless)
   }
 }
 
@@ -451,7 +461,7 @@ async function collectNearby (bot, context, radius) {
       setTimeout(() => { clearInterval(check); resolve() }, 2500)
     })
     try {
-      await Promise.race([travel(bot, goal, context), gone])
+      await Promise.race([travel(bot, goal, context, true), gone]) // (to what was just mined: as walking did before)
     } catch (error) {
       if (error instanceof Interrupted) throw error
     } finally {

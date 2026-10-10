@@ -166,13 +166,15 @@ async def test_the_map_shows_the_room_and_nothing_behind_its_walls(world: World)
 
 @pytest.mark.live
 @pytest.mark.asyncio(loop_scope="module")
-async def test_walking_digs_through_rock_and_items_are_tossed_eaten_and_found_in_chests(world: World) -> None:
+async def test_walking_told_to_dig_goes_through_rock_and_items_are_tossed_eaten_and_found_in_chests(
+    world: World,
+) -> None:
     _, observation = await begin(world, Start.ORE_NEARBY, Kit.IRON, seed=13)
     here = observation["self"]["position"]
     # The pocket's wall is two blocks away; the rest is rock: six blocks of tunnel, two high. The window stays open
     # until the walk is done (well over five seconds), and no longer than a whole window.
     await world.harness.thaw()
-    await world.harness.act("ada", {"name": "move", "direction": "west", "blocks": 8})
+    await world.harness.act("ada", {"name": "move", "direction": "west", "blocks": 8, "dig": True})
     ran = await run_window(world)
     result = (await world.harness.observe("ada"))["last_action"]
     assert result["ok"] and result["arrived_at"]["x"] == here["x"] - 8, result
@@ -366,6 +368,7 @@ async def test_a_crafting_table_is_made_from_a_tree_and_every_step_is_scored(wor
     assert (await world.harness.observe("ada"))["self"]["inventory"] == {}  # nothing given
     kind = ""
     trail: list[Any] = []  # what was tried, for the failure message
+    dig = False  # (as an agent does: walk breaking nothing, and dig once told there is no other way)
     for _ in range(10):  # walk to the nearest log in sight and break it by hand
         observation = await world.harness.observe("ada")
         logs = [entry for entry in observation["notable"] if entry["block"].endswith("_log")]
@@ -373,8 +376,9 @@ async def test_a_crafting_table_is_made_from_a_tree_and_every_step_is_scored(wor
         feet = observation["self"]["position"]["y"]
         log = min(logs, key=lambda entry: (abs(entry["y"] - feet) > 2, entry["distance"]))  # a trunk, not a crown
         if log["distance"] > 3.5:
-            moved = await do(world, {"name": "move_to", "x": log["x"], "y": log["y"], "z": log["z"]})
+            moved = await do(world, {"name": "move_to", "x": log["x"], "y": log["y"], "z": log["z"], "dig": dig})
             trail.append(("move_to", log["block"], log["distance"], moved.get("error") or moved.get("arrived_at")))
+            dig = dig or "without digging" in str(moved.get("error"))
             continue
         mined = await do(world, {"name": "mine", "x": log["x"], "y": log["y"], "z": log["z"]})
         trail.append(("mine", log["block"], log["distance"], mined.get("error") or mined.get("gained")))
@@ -482,3 +486,24 @@ async def test_a_frozen_game_holds_players_as_they_were_and_nobody_starts_on_the
 
 def test_the_harness_lives_in_the_environment() -> None:
     assert (Path(__file__).resolve().parents[1] / "harness" / "harness.js").exists()
+
+
+@pytest.mark.live
+@pytest.mark.asyncio(loop_scope="module")
+async def test_walking_breaks_nothing_unless_the_agent_says_dig(world: World) -> None:
+    _, observation = await begin(world, Start.ORE_IN_SIGHT, Kit.IRON)
+    here = observation["self"]["position"]
+    x, y, z = int(here["x"] // 1), int(here["y"] // 1), int(here["z"] // 1)
+    await world.control.carve(x + 1, y, z, width=8, height=2, depth=1, light=True, floor="stone")  # a corridor east
+    wall = [(x + 4, y, z), (x + 4, y + 1, z)]
+    for wx, wy, wz in wall:
+        await world.control.set_block(wx, wy, wz, "oak_planks")  # what a team might have built across it
+    await settle(world)
+    around = await do(
+        world, {"name": "move_to", "x": x + 6, "y": y, "z": z}, windows=2
+    )  # (within six: no need to see it)
+    assert not around["ok"] and "could not get there" in around["error"] and "say dig" in around["error"], around
+    assert await world.control.blocks(wall) == ["oak_planks", "oak_planks"]  # (nothing broken)
+    through = await do(world, {"name": "move_to", "x": x + 6, "y": y, "z": z, "dig": True})
+    assert through["ok"], through
+    assert await world.control.blocks(wall) == ["air", "air"]
