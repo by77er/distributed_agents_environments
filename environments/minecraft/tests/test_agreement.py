@@ -64,8 +64,10 @@ def test_the_prompts_state_the_limits_in_these_words() -> None:
     assert (LIMITS.reach_blocks, LIMITS.move_blocks, LIMITS.walk_dig_seconds) == (4.5, 32, 5)
     assert described["mine"] == "Mine a block you can see within reach (4.5 blocks) and pick up what drops."
     assert described["move"].startswith(
-        "Walk up to 32 blocks in a direction. Walking digs through what is in the way if your tools break it within "
-        "five seconds a block, and bridges or pillars with dirt, cobblestone, cobbled_deepslate or netherrack you carry"
+        "Walk up to 32 blocks in a direction. Walking goes around what is in the way and breaks nothing but leaves, "
+        "unless you say dig: then it digs through what is in the way if your tools break it within five seconds a "
+        "block (what you or your team built too). Either way it bridges or pillars with dirt, cobblestone, "
+        "cobbled_deepslate or netherrack"
     )
     assert described["move_to"].endswith(described["move"].removeprefix("Walk up to 32 blocks in a direction. "))
     assert (LIMITS.wait_seconds, LIMITS.smelt_seconds, LIMITS.window_seconds) == (5, 10, 20)

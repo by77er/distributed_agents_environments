@@ -334,17 +334,22 @@ XYZ: dict[str, JsonValue] = {"x": INTEGER, "y": INTEGER, "z": INTEGER}
 AT = ["x", "y", "z"]
 
 WALKING = (
-    f"Walking digs through what is in the way if your tools break it within {spelled(LIMITS.walk_dig_seconds)} seconds "
-    f"a block, and bridges or pillars with {listed(LIMITS.scaffolding, 'or')} you carry where there is no other way. "
-    "Where it cannot get through, it stops and says what is in the way."
+    "Walking goes around what is in the way and breaks nothing but leaves, unless you say dig: then it digs through "
+    f"what is in the way if your tools break it within {spelled(LIMITS.walk_dig_seconds)} seconds a block (what you or "
+    f"your team built too). Either way it bridges or pillars with {listed(LIMITS.scaffolding, 'or')} you carry where "
+    "there is no other way. Where it cannot get through, it stops and says what is in the way."
 )
+DIG: dict[str, JsonValue] = {
+    "type": "boolean",
+    "description": "Dig through what is in the way (default false: walk around it, breaking nothing).",
+}
 
 ACTIONS = [
-    _action("move_to", f"Walk to a place you have seen. {WALKING}", XYZ, AT),
+    _action("move_to", f"Walk to a place you have seen. {WALKING}", {**XYZ, "dig": DIG}, AT),
     _action(
         "move",
         f"Walk up to {LIMITS.move_blocks} blocks in a direction. {WALKING}",
-        {"direction": DIRECTION, "blocks": COUNT},
+        {"direction": DIRECTION, "blocks": COUNT, "dig": DIG},
         ["direction"],
     ),
     _action(

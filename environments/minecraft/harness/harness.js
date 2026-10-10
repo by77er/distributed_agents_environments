@@ -53,6 +53,8 @@ function join (host, port, name, version) {
       // moves ("clipped into block"), putting the bot back every tick.
       bot.physics.playerHalfWidth = Math.fround(0.3)
       fixMaterials(bot.registry)
+      // Two ways to walk: around what is in the way (through leaves alone), or (`dig`, when the agent asks) through
+      // it. An agent that has built something must be able to walk to it without walking through it.
       const movements = new Movements(bot)
       movements.canDig = true
       movements.allowParkour = false
@@ -70,7 +72,13 @@ function join (host, port, name, version) {
         }
         return slow.get(block.type) ? 100 : 0
       })
-      bot.pathfinder.setMovements(movements)
+      // Walking that breaks nothing but leaves (a forest is no wall), so that what a team built stands.
+      const walking = new Movements(bot)
+      Object.assign(walking, { canDig: true, allowParkour: false, allowSprinting: true })
+      walking.blocksCantBreak = new Set(Object.values(bot.registry.blocks).filter(block => !block.name.endsWith('_leaves')).map(block => block.id))
+      walking.scafoldingBlocks = movements.scafoldingBlocks
+      bot.movements = { walking, digging: movements }
+      bot.pathfinder.setMovements(walking)
       bot.pathfinder.thinkTimeout = 2000
       resolve()
     })
