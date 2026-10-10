@@ -136,6 +136,7 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
         route("/health", this::health);
         route("/state", this::state);
         route("/holdings", this::holdings);
+        route("/blocks", this::blocksAt);
         route("/tick", this::tick);
         route("/episode", this::episode);
         route("/ores", this::ores);
@@ -275,6 +276,29 @@ public final class GroundTruthPlugin extends JavaPlugin implements Listener {
             stored.forEach(storedJson::addProperty);
             result.add("stored", storedJson);
             result.addProperty("containers", containers);
+            return result;
+        });
+    }
+
+    /** The block at each of the positions given (`positions`: [x, y, z] each, in `world`), by its id, in order. */
+    private JsonElement blocksAt(String method, Map<String, String> query, JsonObject body) throws Exception {
+        if (!method.equals("POST")) {
+            throw new IllegalArgumentException("POST the positions");
+        }
+        JsonArray positions = body.getAsJsonArray("positions");
+        if (positions.size() > 65536) {
+            throw new IllegalArgumentException("at most 65536 positions at a time");
+        }
+        return onMainThread(() -> {
+            World world = world(body);
+            JsonArray found = new JsonArray();
+            for (JsonElement position : positions) {
+                JsonArray at = position.getAsJsonArray();
+                Block block = world.getBlockAt(at.get(0).getAsInt(), at.get(1).getAsInt(), at.get(2).getAsInt());
+                found.add(block.getType().getKey().getKey());
+            }
+            JsonObject result = new JsonObject();
+            result.add("blocks", found);
             return result;
         });
     }

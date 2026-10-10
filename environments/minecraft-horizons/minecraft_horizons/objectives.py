@@ -1,7 +1,8 @@
 """Objectives with no ceiling: an amount the team ends a game with, measured from the plugin's ground truth.
 
 An objective is something the team holds (`Measure.HELD`: items, each worth so much of the objective's unit, in
-members' inventories and in the containers they placed), the advancements it earned (`Measure.ADVANCEMENTS`), or a
+members' inventories and in the containers they placed), blocks of a blueprint it built (`Measure.BUILT`), the
+advancements it earned (`Measure.ADVANCEMENTS`), or a
 milestone on the way to the dragon reached as fast as it can be (`Measure.PROGRESS`: a speedrun, whole or a segment of
 one). What the team held when the game began does not count: the amount is what it holds at the end beyond that,
 never below nothing. Nothing caps it, so a team can always do better in the time it has; how it gets there (mining
@@ -31,6 +32,8 @@ class Measure(StrEnum):
     """Advancements the team earned (each once, whoever earned it; recipes are not advancements)."""
     PROGRESS = "progress"
     """A milestone toward the dragon (`Objective.goal`), as fast as it can be reached."""
+    BUILT = "built"
+    """Blocks of a blueprint in their places on sites laid out for it (`minecraft_horizons.building`)."""
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,11 @@ OBJECTIVES: dict[str, Objective] = {
             "diamonds", "Diamonds", Measure.HELD, "diamonds",
             "diamonds and diamond ore one each, a block of diamond nine (diamonds made into tools or armor do not "
             "count)", {"diamond": 1.0, "diamond_ore": 1.0, "deepslate_diamond_ore": 1.0, "diamond_block": 9.0},
+        ),
+        Objective(
+            "huts", "Huts", Measure.BUILT, "blocks",
+            "every block of a hut's blueprint in its place on a site, of any planks, logs or wood, cobblestone, stone, "
+            "bricks, deepslate or the like (a whole hut is 71 blocks; there are sites for sixteen)",
         ),
         Objective(
             "advancements", "Advancements", Measure.ADVANCEMENTS, "advancements",

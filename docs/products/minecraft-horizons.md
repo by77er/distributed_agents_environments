@@ -5,8 +5,8 @@ Code: `environments/minecraft-horizons`
 **Read first:** [Minecraft team](minecraft-team.md). **Next:** [Gridworld](gridworld.md).
 
 One to four agents share a Minecraft world and race a budget of game time for as much of an objective as they can get
-(iron, food, advancements), or to a milestone on the way to the dragon as fast as they can (a speedrun, whole or in
-segments). Nothing caps the count, so a team can always do better; the agents see the clock, so what
+(iron, food, huts built, advancements), or to a milestone on the way to the dragon as fast as they can (a speedrun,
+whole or in segments). Nothing caps the count, so a team can always do better; the agents see the clock, so what
 pays depends on how much time there is. With five minutes the way to the most iron is the nearest ore. With two hours
 it may be better tools first, an enchanting table for Fortune, or an iron farm. Every objective comes at every budget
 of a ladder that doubles from 5 to 160 minutes, so what a policy gets as its budget grows is a curve, and a strategy
@@ -36,6 +36,7 @@ An objective is an amount the team ends the game with, measured from the plugin'
 | Iron | Raw iron, ingots and ore one each, a block of iron or of raw iron nine, a nugget a ninth; not iron made into tools or armor |
 | Gold | As iron |
 | Diamonds | Diamonds and diamond ore one each, a block nine; not diamonds made into tools or armor |
+| Huts | Every block of a hut's blueprint in its place on a site laid out for it, of any planks, logs or wood, cobblestone, stone, bricks, deepslate or the like, whoever placed it: a whole hut is 71 blocks, and there are sites for sixteen ([building](#building)) |
 | Advancements | Every advancement the team earns, once, whoever earns it (not recipes) |
 | Speedruns: an iron pickaxe, into the nether, a blaze rod, into a stronghold, into the end, the ender dragon | Progress along the milestones to the goal (the team package's path, `minecraft_team.tasks.path_of`, from 0 to 1; hurting the dragon counts for a little) and, once the goal is reached, which ends the game, the share of the budget left: from 0 to 2, higher the sooner the goal falls |
 
@@ -49,13 +50,23 @@ The reward is `log(1 + amount)`, the same for every agent of the team. Each doub
 so a team that ends with ten times its group's iron is clearly ahead, and one group's large numbers do not swamp every
 other group's in an update. Results report the amount itself.
 
+## Building
+
+A building task lays out 16 sites in a grid of four by four, from a few blocks south-east of where the team stands
+(`minecraft_horizons.building`): each a 5 by 5 square of smooth stone at the ground's height at its middle, the space
+above it cleared. The blueprint is a hut: walls three high around the square's edge but for a doorway one wide and two
+high in the middle of the north wall, and a flat roof over the whole square on top of them. The amount is every
+blueprint block that holds a building material, counted from the plugin's `/blocks` (the block at each position), so
+half a hut is worth half and the materials are the team's to gather. The system prompt gives every site's corner and
+the blueprint relative to it; the episode asks its world for the sites (`brief`) before it writes the prompt.
+
 ## Tasks
 
 A task is an objective, a setting and a budget (`minecraft_horizons.tasks`):
 
 | Setting | Where the team starts | Objectives |
 |---|---|---|
-| `fresh` | The game as it begins: on the surface beside trees, with nothing; easy mobs at night and in the dark; what you carry drops where you die | All |
+| `fresh` | The game as it begins: on the surface beside trees, with nothing; easy mobs at night and in the dark; what you carry drops where you die | All but the speedrun segments |
 | `underground` | In a natural cave with a stone pickaxe and sword, coal, a furnace, sticks and a table, food and torches | Coal, iron, gold, diamonds |
 | `portal-kit` | On the surface with iron armor and tools, 14 obsidian and flint and steel | Into the nether |
 | `fortress` | In the nether beside a fortress, with iron armor, a sword, a bow and arrows, food and blocks | A blaze rod |
@@ -66,7 +77,7 @@ A task is an objective, a setting and a budget (`minecraft_horizons.tasks`):
 The fresh start also hosts the speedruns to an iron pickaxe, into the nether, and the whole game to the dragon. Each
 objective comes from each of its settings at each budget of its ladder: `LADDER` (5, 10, 20, 40, 80 and 160 minutes of
 game time) for amounts and the iron pickaxe, `SEGMENT_LADDER` (5 to 80) for a speedrun's other segments, and
-`GAME_LADDER` (80, 160, 320 and 640) for the whole game: 106 tasks, with ids like `iron-underground-40m` and
+`GAME_LADDER` (80, 160, 320 and 640) for the whole game: 112 tasks, with ids like `iron-underground-40m` and
 `dragon-fresh-320m`. Settings are laid out by the team package's builders
 (`minecraft_team.tasks.build`, as natural survival worlds: a real day and night and weather). As for the team's tasks,
 turns are capped at 12 a minute of the budget. Game time passes only while actions happen, so a team can let it pass
@@ -112,7 +123,8 @@ earned, what it got hold of, blocks mined and events, and the game time and turn
 `minecraft-horizons`. For each lease it starts a Paper server from a template, connects the team's bots, lays out the
 setting, and notes what the team holds. Its operations are `observe`, `act` and `window`, as the team's worlds have
 them, and `score`: the objective's amount, its reward, and the ground truth it is measured from (the plugin's
-`/holdings` and `/state`). It counts the game time its windows ran; a window of a speedrun says whether its goal is
+`/holdings`, `/state` and, for a building task, `/blocks`). `brief` says what agents are told of how the world was laid
+out: a building task's sites. It counts the game time its windows ran; a window of a speedrun says whether its goal is
 reached (`done`).
 
 ## Tests
@@ -121,10 +133,12 @@ reached (`done`).
 
 - `test_objectives.py`: what each objective counts, that what the team began with does not, a speedrun's progress and
   time left, and the reward;
+- `test_building.py`: the hut's blueprint, what counts as a building material, and the goal naming every site;
 - `test_tasks.py`: the catalog and its order, the settings as the builders lay them out, starts in training worlds
   and evals in held-out ones, the goal's wording and the clock;
 - `test_episode.py`: an episode on a made-up world lasts its whole budget, shows the clock in every observation, and
   rewards every agent with `log(1 + amount)`; a speedrun's ends in the window its goal is reached;
 - `test_worlds.py` (live: Java and Node): a setting laid out on a real server; iron picked up counts, and so does iron
   stored in a chest a bot placed, but not the kit or a chest the team did not place; a speedrun's world starts with no
-  progress.
+  progress; a building world's sites are flat, floored and cleared, and planks set in the blueprint's places count but
+  dirt does not.

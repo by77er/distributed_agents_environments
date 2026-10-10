@@ -84,6 +84,8 @@ class MadeUpWorld:
                 value = observation(str(arguments["agent"]))
             case "act":
                 value = {"started": True}
+            case "brief":
+                value = {"sites": [{"x": 10, "y": 64, "z": 20}]}
             case "window":
                 self.windows += 1
                 value = {"ticks": WINDOW, "done": self.done_after is not None and self.windows >= self.done_after}
@@ -181,3 +183,10 @@ async def test_a_speedrun_ends_when_its_goal_is_reached() -> None:
     assert isinstance(result, dict)
     assert world.windows == 3 and result["turns"] == 3  # (of the thirty a ten-minute budget of such windows holds)
     assert result["ended"] == "goal reached" and result["solved"] is True
+
+
+async def test_a_building_task_tells_agents_the_sites_its_world_laid_out() -> None:
+    model, world = Waiting(), MadeUpWorld()
+    await play(model, world, "huts-fresh-5m")
+    system = model.requests[0].context.append[0].text  # (built once the world said where its sites are)
+    assert "1 at (10, 64, 20)" in system and "71 blocks a hut" in system

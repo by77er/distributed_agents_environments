@@ -25,6 +25,11 @@ class Control:
         dragon is dead and how much it was hurt."""
         return await self._request("GET", "/state")
 
+    async def blocks(self, positions: list[tuple[int, int, int]], *, world: str = "world") -> list[str]:
+        """The block at each of `positions`, by its id ("oak_planks", "air"), in order."""
+        body = {"positions": [list(position) for position in positions], "world": world}
+        return [str(block) for block in (await self._request("POST", "/blocks", body))["blocks"]]
+
     async def holdings(self) -> dict[str, Any]:
         """Every item the team holds, by its id: what members carry (`held`) and what is stored in the containers they
         placed since the baseline (`stored`), and how many of those containers still stand (`containers`)."""
