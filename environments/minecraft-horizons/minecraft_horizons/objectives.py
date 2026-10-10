@@ -1,10 +1,13 @@
 """Objectives with no ceiling: an amount the team ends a game with, measured from the plugin's ground truth.
 
-An objective is either something the team holds (`Measure.HELD`: items, each worth so much of the objective's unit, in
-members' inventories and in the containers they placed) or the advancements it earned (`Measure.ADVANCEMENTS`). What
-the team held when the game began does not count: the amount is what it holds at the end beyond that, never below
-nothing. Nothing caps it, so a team can always do better in the time it has; how it gets there (mining as it goes,
-better tools first, a farm) is its own affair.
+An objective is something the team holds (`Measure.HELD`: items, each worth so much of the objective's unit, in
+members' inventories and in the containers they placed), the advancements it earned (`Measure.ADVANCEMENTS`), or a
+milestone on the way to the dragon reached as fast as it can be (`Measure.PROGRESS`: a speedrun, whole or a segment of
+one). What the team held when the game began does not count: the amount is what it holds at the end beyond that,
+never below nothing. Nothing caps it, so a team can always do better in the time it has; how it gets there (mining
+as it goes, better tools first, a farm) is its own affair. A speedrun's amount is its progress along the milestones
+to its goal (from 0 to 1) and, once the goal is reached, which ends the game, the share of its time left
+(`progressed`): from 0 to 2, and higher the sooner the goal falls.
 
 The reward is `log(1 + amount)` (`reward`): each doubling is worth as much at any scale, so a team that builds a farm
 and ends with ten times its group's iron is ahead by a clear margin without its group's numbers swamping every other
@@ -16,7 +19,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-__all__ = ["OBJECTIVES", "Measure", "Measured", "Objective", "holdings", "measured", "reward", "value"]
+__all__ = [
+    "OBJECTIVES", "Measure", "Measured", "Objective", "holdings", "measured", "progressed", "reward", "value",
+]  # fmt: skip
 
 
 class Measure(StrEnum):
@@ -24,6 +29,8 @@ class Measure(StrEnum):
     """Items the team holds at the end, each worth `Objective.values` of the objective's unit."""
     ADVANCEMENTS = "advancements"
     """Advancements the team earned (each once, whoever earned it; recipes are not advancements)."""
+    PROGRESS = "progress"
+    """A milestone toward the dragon (`Objective.goal`), as fast as it can be reached."""
 
 
 @dataclass(frozen=True)
@@ -37,6 +44,9 @@ class Objective:
     """What counts toward it, as agents read it: the items and what each is worth."""
     values: Mapping[str, float] = field(default_factory=dict[str, float])
     """For `Measure.HELD`: what one of each item (by its id) is worth."""
+    goal: str | None = None
+    """For `Measure.PROGRESS`: the milestone (an advancement, of `minecraft_team.tasks.MILESTONES`) that ends the
+    game."""
 
 
 def _equivalents(material: str, ore: bool = True) -> dict[str, float]:
@@ -107,6 +117,17 @@ OBJECTIVES: dict[str, Objective] = {
             "advancements", "Advancements", Measure.ADVANCEMENTS, "advancements",
             "every advancement the team earns, once, whoever earns it (recipes are not advancements)",
         ),
+        *(
+            Objective(key, title, Measure.PROGRESS, "progress", "", goal=goal)
+            for key, title, goal in [
+                ("iron-tools", "An iron pickaxe", "story/iron_tools"),
+                ("nether", "Into the nether", "story/enter_the_nether"),
+                ("blaze-rods", "A blaze rod", "nether/obtain_blaze_rod"),
+                ("stronghold", "Into a stronghold", "story/follow_ender_eye"),
+                ("end", "Into the end", "story/enter_the_end"),
+                ("dragon", "The ender dragon", "end/kill_dragon"),
+            ]
+        ),
     ]
 }  # fmt: skip
 """Every objective, by its id, from the quickest to get some of to the slowest."""
@@ -144,14 +165,21 @@ def measured(
     held_at_start: Mapping[str, float],
     advancements: list[str],
 ) -> Measured:
-    """The amount of `objective` a team ended with: what it holds (`held`) beyond what it held at the start, or the
-    advancements it earned since."""
+    """The amount of a held or advancements `objective` a team ended with: what it holds (`held`) beyond what it held
+    at the start, or the advancements it earned since. (A speedrun's is `progressed`.)"""
     if objective.measure is Measure.ADVANCEMENTS:
         earned = sorted({name for name in advancements if not name.startswith("recipes/")})
         return Measured(float(len(earned)), dict.fromkeys(earned, 1.0))
     end, parts = value(objective, held)
     start, _ = value(objective, held_at_start)
     return Measured(max(end - start, 0.0), parts)
+
+
+def progressed(progress: float, reached: bool, minutes_spent: float, minutes: float) -> Measured:
+    """A speedrun's amount: its `progress` along the milestones to its goal (from 0 to 1) and, if the goal was
+    `reached`, the share of its `minutes` of game time left then."""
+    left = max(1.0 - minutes_spent / minutes, 0.0) if reached and minutes else 0.0
+    return Measured(progress + left, {"progress": progress, "time_left": left})
 
 
 def reward(amount: float) -> float:

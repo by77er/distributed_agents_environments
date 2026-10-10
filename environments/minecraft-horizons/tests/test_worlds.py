@@ -78,3 +78,16 @@ async def test_iron_stored_in_a_chest_the_team_placed_counts_and_what_it_began_w
     # A chest the team did not place (one the plugin set up) holds nothing of the team's.
     await episode.control.chest(x + 3, y, z + 3, [{"item": "raw_iron", "count": 9}])
     assert (await score(worlds))["amount"] == 5.0
+
+
+@pytest.mark.live
+@pytest.mark.asyncio(loop_scope="module")
+async def test_a_speedrun_world_starts_with_no_progress_and_no_time_spent(worlds: HorizonWorlds) -> None:
+    await worlds.delete(HANDLE)  # (the pool holds one world at a time)
+    await worlds.create(HANDLE, world("nether-portal-kit-5m", 12345, 3, CREW), {})
+    window = await worlds.call(HANDLE, "window", {}, effect_id="window", arguments_digest="")
+    assert window.structured is not None and window.structured["done"] is False  # type: ignore[index]
+    began = await score(worlds)
+    assert began["objective"] == "nether" and began["amount"] == 0.0
+    assert began["amount_parts"] == {"progress": 0.0, "time_left": 0.0}
+    assert began["held_at_start"].get("obsidian") == 28  # (the portal kit, two agents' worth: not progress)

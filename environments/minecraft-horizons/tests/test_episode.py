@@ -15,6 +15,7 @@ from minecraft_team.tasks import TEAM
 from rollout.contracts import (
     CapabilityContract,
     FinishReason,
+    RunEvent,
     RunEventType,
     SampleRequest,
     SampleResult,
@@ -54,8 +55,10 @@ class MadeUpWorld:
     size = 4
     deduplicates = False
 
-    def __init__(self) -> None:
+    def __init__(self, done_after: int | None = None) -> None:
         self.windows = 0
+        self.done_after = done_after
+        """Windows after which a speedrun's goal is reached (none: never)."""
         self.made: dict[str, SandboxSpec] = {}
 
     def operations(self) -> Sequence[ToolSpecification]:
@@ -83,7 +86,7 @@ class MadeUpWorld:
                 value = {"started": True}
             case "window":
                 self.windows += 1
-                value = {"ticks": WINDOW}
+                value = {"ticks": WINDOW, "done": self.done_after is not None and self.windows >= self.done_after}
             case _:
                 value = {"reward": math.log1p(10.0), "amount": 10.0, "objective": "iron", "unit": "iron"}
         return ToolResult(content=[Text(text=json.dumps(value))], structured=value)
@@ -133,22 +136,26 @@ class Waiting:
         return SampleResult(message=tool_call_reply(call), finish_reason=FinishReason.TOOL_USE, usage=usage)
 
 
-async def test_the_game_lasts_its_budget_every_observation_shows_the_clock_and_the_amount_is_the_reward() -> None:
-    model, world = Waiting(), MadeUpWorld()
+async def play(model: Waiting, world: MadeUpWorld, task: str) -> list[RunEvent]:
     runner = LocalRunner(providers={"scripted": lambda _: model}, pools={"worlds": SandboxPool(world)})
     binding = RunBinding(
         models={name: ModelBinding(direct=DirectModel(provider="scripted", model="m")) for name in TEAM},
         pools={KIND: PoolBinding(local="worlds")},
     )
-    parameters: dict[str, JsonValue] = {"task": TASK, "world_seed": 1, "layout_seed": 2, "names": list[JsonValue](CREW)}
+    parameters: dict[str, JsonValue] = {"task": task, "world_seed": 1, "layout_seed": 2, "names": list[JsonValue](CREW)}
     handle = await runner.start(
         RunSpecification(
             program=ProgramReference(program=register(HorizonEpisode), parameters=parameters), binding=binding
         )
     )
     outcome = await handle.result()
-    events = [event async for event in handle.events()]
     assert outcome.status is RunStatus.COMPLETED, outcome
+    return [event async for event in handle.events()]
+
+
+async def test_the_game_lasts_its_budget_every_observation_shows_the_clock_and_the_amount_is_the_reward() -> None:
+    model, world = Waiting(), MadeUpWorld()
+    events = await play(model, world, TASK)
     (result,) = [payload(event)["payload"] for event in events if event.type is RunEventType.OUTPUT_EMITTED]
     assert isinstance(result, dict)
     windows = math.ceil(5 * TICKS_PER_MINUTE / WINDOW)
@@ -165,3 +172,12 @@ async def test_the_game_lasts_its_budget_every_observation_shows_the_clock_and_t
     left = 5 - (windows - 1) * WINDOW / TICKS_PER_MINUTE
     assert last.startswith(f"Time left: {left:.1f} of 5 minutes of game time")
     assert "You are ada" in first
+
+
+async def test_a_speedrun_ends_when_its_goal_is_reached() -> None:
+    model, world = Waiting(), MadeUpWorld(done_after=3)
+    events = await play(model, world, "nether-portal-kit-10m")
+    (result,) = [payload(event)["payload"] for event in events if event.type is RunEventType.OUTPUT_EMITTED]
+    assert isinstance(result, dict)
+    assert world.windows == 3 and result["turns"] == 3  # (of the thirty a ten-minute budget of such windows holds)
+    assert result["ended"] == "goal reached" and result["solved"] is True

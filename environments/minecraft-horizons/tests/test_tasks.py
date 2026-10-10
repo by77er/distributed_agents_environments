@@ -7,17 +7,34 @@ from typing import cast
 from minecraft_horizons.environment import Horizons
 from minecraft_horizons.objectives import OBJECTIVES
 from minecraft_horizons.prompts import clock, goal, system_prompt
-from minecraft_horizons.tasks import LADDER, SETTINGS, TASKS, catalog
-from minecraft_team.tasks import TURNS_PER_MINUTE, Hazards, Kit, Start, Tier
+from minecraft_horizons.tasks import GAME_LADDER, LADDER, SEGMENT_LADDER, SETTINGS, TASKS, catalog, ladder
+from minecraft_team.tasks import KILL, TURNS_PER_MINUTE, Hazards, Kit, Start, Tier, path_of
 
 
-def test_every_objective_comes_from_each_of_its_settings_at_every_budget_of_the_ladder() -> None:
+def test_every_objective_comes_from_each_of_its_settings_at_every_budget_of_its_ladder() -> None:
     tasks = catalog()
-    assert len(tasks) == len(TASKS) == sum(len(SETTINGS[name]) for name in OBJECTIVES) * len(LADDER)
-    for name in OBJECTIVES:
-        for setting in SETTINGS[name]:
-            assert sorted(t.minutes for t in tasks if t.objective.id == name and t.setting is setting) == list(LADDER)
-    assert all(later == 2 * earlier for earlier, later in itertools.pairwise(LADDER))  # (it doubles)
+    assert len(tasks) == len(TASKS) == len({task.id for task in tasks})
+    for objective in OBJECTIVES.values():
+        for setting in SETTINGS[objective.id]:
+            found = sorted(t.minutes for t in tasks if t.objective is objective and t.setting is setting)
+            assert found == list(ladder(objective, setting))
+    for steps in (LADDER, SEGMENT_LADDER, GAME_LADDER):
+        assert all(later == 2 * earlier for earlier, later in itertools.pairwise(steps))  # (each doubles)
+    assert ladder(OBJECTIVES["iron"], SETTINGS["iron"][0]) == LADDER
+
+
+def test_a_speedrun_comes_whole_at_the_games_budgets_and_in_segments_at_a_segments() -> None:
+    whole = [task for task in catalog() if task.objective.id == "dragon" and task.setting.kit is Kit.NOTHING]
+    assert [task.minutes for task in whole] == list(GAME_LADDER)
+    segment = TASKS["blaze-rods-fortress-10m"].laid_out()
+    assert (
+        segment.start is Start.FORTRESS
+        and segment.kit is Kit.FORTRESS_READY
+        and segment.goal == "nether/obtain_blaze_rod"
+    )
+    assert [step for step, _, _ in path_of(segment)] == ["nether/find_fortress", "nether/obtain_blaze_rod"]
+    game = TASKS["dragon-fresh-80m"].laid_out()
+    assert path_of(game)[0][0] == "logs" and path_of(game)[-1][0] == KILL  # (from the first log to the dragon)
 
 
 def test_shorter_budgets_come_first_and_turns_follow_game_time() -> None:
@@ -57,6 +74,11 @@ def test_the_goal_says_what_counts_how_long_the_game_lasts_and_that_there_is_no_
     alone = goal(task, 1)
     assert alone.startswith("Goal: end the game") and "your inventory" in alone and "you began with" in alone
     assert "advancements" in goal(TASKS["advancements-fresh-10m"], 2)
+    speedrun = goal(TASKS["blaze-rods-fortress-20m"], 2)
+    assert speedrun.startswith("Goal: a speedrun as a team. The finish line is getting a blaze rod")
+    assert "finding a fortress, getting a blaze rod." in speedrun and "finishing sooner is always better" in speedrun
+    assert "Hurting the dragon without killing it" in goal(TASKS["dragon-end-5m"], 1)
+    assert "hurting it without killing it" in goal(TASKS["dragon-fresh-80m"], 1)
     prompt = system_prompt(task, ["ada", "ben"])
     assert "ada, ben" in prompt and "40 minutes of game time" in prompt and "how much is left" in prompt
 

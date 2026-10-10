@@ -9,6 +9,7 @@ knows, chat and teamwork) and how an observation reads are the team package's ow
 
 from collections.abc import Sequence
 
+from minecraft_horizons.objectives import Measure
 from minecraft_horizons.tasks import Task
 from minecraft_team.limits import LIMITS
 from minecraft_team.prompts import (
@@ -16,12 +17,16 @@ from minecraft_team.prompts import (
     ALONE_TURNS,
     CHAT,
     CHAT_LINES,
+    DRAGON,
+    DRAGON_ONLY,
+    MILESTONE_WORDS,
     SYSTEM,
     TEAM_OPENING,
     TEAM_TURNS,
     TEAMWORK,
     spelled,
 )
+from minecraft_team.tasks import KILL, path_of
 
 __all__ = ["clock", "goal", "system_prompt"]
 
@@ -36,11 +41,26 @@ earn what is close at hand; with more, what takes time to set up opens up many m
 always another to earn."""
 
 
+SPEEDRUN_GOAL = """Goal: a speedrun{together}. The finish line is {goal}: get there as fast as you can. \
+Getting there counts step by step, each step once, whoever does it, and only if it is done in this game: \
+{steps}.{dragon} Reaching the finish ends the game, and the more of the time is left then, the higher the score: \
+finishing sooner is always better. The game lasts at most {minutes} minutes of game time{turns}; every observation \
+shows how much is left."""
+
+
 def goal(task: Task, players: int) -> str:
     """What the task asks, and how long the game lasts, as agents read it."""
     together = "together, " if players > 1 else ""
     turns = f" or {task.turns} turns, whichever runs out first"
-    if task.objective.measure == "advancements":
+    if task.objective.measure is Measure.PROGRESS:
+        path = path_of(task.laid_out())
+        names = [MILESTONE_WORDS.get(name, name) for name, _, _ in path]
+        dragon = "" if task.objective.goal != KILL else DRAGON if len(path) > 1 else DRAGON_ONLY
+        return SPEEDRUN_GOAL.format(
+            together=" as a team" if players > 1 else "", goal=MILESTONE_WORDS[str(task.objective.goal)],
+            steps=", ".join(names), dragon=dragon, minutes=task.minutes, turns=turns,
+        )  # fmt: skip
+    if task.objective.measure is Measure.ADVANCEMENTS:
         return ADVANCEMENTS_GOAL.format(
             together=together, counted=task.objective.counted, minutes=task.minutes, turns=turns
         )

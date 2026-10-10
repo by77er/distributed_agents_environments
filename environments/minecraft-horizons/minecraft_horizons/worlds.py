@@ -5,8 +5,9 @@ them.
 each lease a Paper server from a template, the team's bots, and the task's setting laid out by the team package's
 builders (`minecraft_team.tasks.build`). Once the world is set up it notes what the team holds, so that what the team
 began with does not count. Its operations are the team package's (observe, act, run a window of game time) and a
-score: the objective's amount from the plugin's ground truth (`minecraft_horizons.objectives.measured`). Nothing ends
-a game early: there is always more to get.
+score: the objective's amount from the plugin's ground truth (`minecraft_horizons.objectives.measured`, or for a
+speedrun its progress and the time left, `progressed`). Nothing ends a game early, as there is always more to get,
+except a speedrun's goal reached: its window says so (`done`).
 
 A pool over it is served in the process that runs the episodes, or from a machine of its own (`rollout pool
 minecraft_horizons.worlds:worlds`), and an episode cannot tell which.
@@ -23,12 +24,13 @@ from typing import Any, ClassVar
 
 from pydantic import JsonValue
 
-from minecraft_horizons.objectives import holdings, measured, reward
+from minecraft_horizons.objectives import Measure, holdings, measured, progressed, reward
 from minecraft_horizons.tasks import TASKS, Task
 from minecraft_team.control import Control
 from minecraft_team.harness import Harness
+from minecraft_team.limits import TICKS_PER_SECOND
 from minecraft_team.paper import HEAP, Installation, PaperServer, sweep
-from minecraft_team.tasks import TEAM, build
+from minecraft_team.tasks import TEAM, build, scored, solved
 from minecraft_team.worlds import WINDOW_TICKS, loaded, run_window
 from rollout.contracts import RetryClass, Text, ToolResult, ToolSpecification
 from rollout.harness import Reach, SandboxSpec
@@ -62,6 +64,8 @@ class EpisodeWorld:
     team: list[str]
     held_at_start: dict[str, float]
     """What the team held once the world was set up (its kit): not counted."""
+    ticks: int = 0
+    """Game time run in windows so far."""
 
 
 @dataclass
@@ -164,8 +168,14 @@ class HorizonWorlds:
         return {"started": started}
 
     async def window(self, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
-        """Run game time until every action has finished or the window is over; then freeze."""
-        return {"ticks": await run_window(world.control, world.harness, ticks=WINDOW_TICKS, settle=0.3)}
+        """Run game time until every action has finished or the window is over; then freeze. `done` says a speedrun
+        reached its goal, which ends its game."""
+        ran = await run_window(world.control, world.harness, ticks=WINDOW_TICKS, settle=0.3)
+        world.ticks += ran
+        done = False
+        if world.task.objective.measure is Measure.PROGRESS:
+            done = solved(world.task.laid_out(), await world.control.state())
+        return {"ticks": ran, "done": done}
 
     async def score(self, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
         """Ground truth: the objective's amount (`objectives.measured`), its reward and what it is made of, everything
@@ -174,14 +184,19 @@ class HorizonWorlds:
         found = await world.control.holdings()
         held = holdings(found)
         advancements = [str(name) for name in state.get("team_advancements", [])]
-        amount = measured(world.task.objective, held, world.held_at_start, advancements)
+        if world.task.objective.measure is Measure.PROGRESS:
+            path = scored(world.task.laid_out(), state, None, len(world.team))
+            minutes = world.ticks / (60 * TICKS_PER_SECOND)
+            amount = progressed(path.progress, path.solved, minutes, world.task.minutes)
+        else:
+            amount = measured(world.task.objective, held, world.held_at_start, advancements)
         team = {name.lower() for name in world.team}  # (someone watching is a player too, and not the episode's)
         events = [
             event
             for event in await world.control.events()
             if "player" not in event or str(event["player"]).lower() in team
         ]
-        scored: dict[str, JsonValue] = {
+        result: dict[str, JsonValue] = {
             "reward": reward(amount.amount),
             "amount": amount.amount,
             "amount_parts": dict[str, JsonValue](amount.parts),
@@ -193,10 +208,12 @@ class HorizonWorlds:
             "held_at_start": dict[str, JsonValue](world.held_at_start),
             "team_advancements": list[JsonValue](advancements),
             "team_obtained": dict(state.get("team_obtained", {})),
+            "dragon_killed": bool(state.get("dragon_killed", False)),
+            "dragon_damage": float(state.get("dragon_damage", 0.0)),
             "events": dict[str, JsonValue](Counter(str(event["kind"]) for event in events)),
             "mined": dict[str, JsonValue](Counter(str(event["block"]) for event in events if event["kind"] == "mined")),
         }
-        return scored
+        return result
 
     def _world(self, handle: str) -> EpisodeWorld:
         world = self._worlds.get(handle)

@@ -5,12 +5,14 @@ calls one action tool while the world is frozen, then the world runs one window 
 talks in chat; each agent remembers its recent turns and a summary of older ones. What differs:
 
 - every observation begins with what is left of the game (`prompts.clock`): game time and turns, both;
-- nothing ends the game early: it lasts until its game time or its turns are spent, since there is always more to get;
+- nothing ends the game early, since there is always more to get: it lasts until its game time or its turns are
+  spent, or for a speedrun until its goal is reached (`done`), whose time left is what it scores;
 - the reward is the objective's amount scored at the end (`objectives.reward`: `log(1 + amount)`), the same for every
   agent of the team.
 
 The result reports the amount, its unit and breakdown, the amount a minute of game time, what the team holds, and the
-game time and turns spent (`duration` is turns).
+game time and turns spent (`duration` is turns). `solved` (what unlocks rows) is a speedrun's goal reached, or at least
+one of any other objective.
 """
 
 import random
@@ -20,6 +22,7 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from minecraft_horizons import worlds
+from minecraft_horizons.objectives import Measure
 from minecraft_horizons.prompts import clock, system_prompt
 from minecraft_horizons.tasks import TASKS, Task
 from minecraft_team.episode import TICKS_PER_MINUTE, action, answer, call
@@ -82,6 +85,7 @@ class HorizonEpisode(Program):
         budget = self.task.minutes * TICKS_PER_MINUTE
         spent = 0.0
         turn = 0
+        reached = False
         while spent < budget and turn < self.task.turns:
             turn += 1
             observations = await run.gather(
@@ -108,6 +112,9 @@ class HorizonEpisode(Program):
             )
             window = await call(world, "window")
             spent += float(cast(int, window["ticks"]))
+            if window.get("done"):  # a speedrun's goal: the sooner, the better
+                reached = True
+                break
         score = await call(world, "score")
         reward = float(cast(float, score["reward"]))
         for name in self.team:  # the team is rewarded equally
@@ -118,12 +125,12 @@ class HorizonEpisode(Program):
             **score,
             "task": self.task.id,
             "budget_minutes": self.task.minutes,
-            "solved": amount >= 1.0,  # (the curriculum's test: the team got at least one of the objective)
+            "solved": reached or (amount >= 1.0 and self.task.objective.measure is not Measure.PROGRESS),
             "amount_per_minute": amount / minutes if minutes else 0.0,
             "turns": turn,
             "duration": turn,
             "game_minutes": minutes,
-            "ended": "game time" if spent >= budget else "turns",
+            "ended": "goal reached" if reached else "game time" if spent >= budget else "turns",
             "compactions": max(memory.compactions for memory in memories.values()),
             "team": [self.names[slot] for slot in self.team],
         }

@@ -4,7 +4,8 @@ import math
 
 import pytest
 
-from minecraft_horizons.objectives import FOOD, OBJECTIVES, WOOD, Measure, holdings, measured, reward
+from minecraft_horizons.objectives import FOOD, OBJECTIVES, WOOD, Measure, holdings, measured, progressed, reward
+from minecraft_team.tasks import MILESTONES
 
 
 def test_metals_count_raw_ingot_and_ore_one_each_a_block_nine_and_a_nugget_a_ninth() -> None:
@@ -57,7 +58,17 @@ def test_the_reward_is_log_one_plus_the_amount() -> None:
     assert reward(99.0) - reward(9.0) == pytest.approx(math.log(10))  # (each tenfold, the same step)
 
 
-def test_every_held_objective_names_what_it_counts() -> None:
+def test_every_held_objective_names_what_it_counts_and_every_speedrun_its_goal() -> None:
     for objective in OBJECTIVES.values():
-        assert objective.counted and objective.unit
+        assert objective.unit
         assert (objective.measure is Measure.HELD) == bool(objective.values)
+        assert (objective.measure is Measure.PROGRESS) == (objective.goal in MILESTONES)
+        assert bool(objective.counted) == (objective.measure is not Measure.PROGRESS)
+
+
+def test_a_speedrun_scores_its_progress_and_once_it_reaches_its_goal_the_share_of_its_time_left() -> None:
+    assert progressed(0.4, False, 20.0, 20.0).amount == pytest.approx(0.4)  # (not there: progress alone)
+    assert progressed(1.0, True, 15.0, 20.0).amount == pytest.approx(1.25)
+    assert progressed(1.0, True, 5.0, 20.0).amount > progressed(1.0, True, 10.0, 20.0).amount  # (sooner is better)
+    assert progressed(1.0, True, 21.0, 20.0).amount == pytest.approx(1.0)  # (a last window run over: nothing left)
+    assert progressed(1.0, True, 5.0, 20.0).parts == {"progress": 1.0, "time_left": 0.75}
