@@ -22,6 +22,7 @@ from typing import Any, cast
 from pydantic import JsonValue
 
 from minecraft_horizons import worlds
+from minecraft_horizons.building import Site
 from minecraft_horizons.objectives import Measure
 from minecraft_horizons.prompts import clock, system_prompt
 from minecraft_horizons.tasks import TASKS, Task
@@ -80,6 +81,12 @@ class HorizonEpisode(Program):
 
     async def main(self, run: RunContext) -> None:
         world = run.sandbox("world")
+        if self.task.objective.measure is Measure.BUILT:  # (its sites are where the world laid them out)
+            brief = await call(world, "brief")
+            sites = [
+                Site(int(at["x"]), int(at["y"]), int(at["z"])) for at in cast(list[dict[str, int]], brief["sites"])
+            ]
+            self.system = Message.system(system_prompt(self.task, list(self.names.values()), sites))
         compact = COMPACT if len(self.team) > 1 else COMPACT_ALONE
         memories = {name: Memory(prompt=compact, remembered=REMEMBERED) for name in self.team}
         budget = self.task.minutes * TICKS_PER_MINUTE

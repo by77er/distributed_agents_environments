@@ -6,10 +6,11 @@ Needs Java and Node (and the network once, for Paper and the harness's packages)
 
 import shutil
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from minecraft_horizons.building import HUT, positions
 from minecraft_horizons.worlds import HorizonWorlds, world
 from minecraft_team.worlds import WINDOW_TICKS, run_window
 
@@ -91,3 +92,29 @@ async def test_a_speedrun_world_starts_with_no_progress_and_no_time_spent(worlds
     assert began["objective"] == "nether" and began["amount"] == 0.0
     assert began["amount_parts"] == {"progress": 0.0, "time_left": 0.0}
     assert began["held_at_start"].get("obsidian") == 28  # (the portal kit, two agents' worth: not progress)
+
+
+@pytest.mark.live
+@pytest.mark.asyncio(loop_scope="module")
+async def test_a_building_world_lays_out_its_sites_and_counts_materials_in_the_blueprint_s_places(
+    worlds: HorizonWorlds,
+) -> None:
+    await worlds.delete(HANDLE)
+    await worlds.create(HANDLE, world("huts-fresh-5m", 12345, 5, CREW), {})
+    episode = worlds._world(HANDLE)  # pyright: ignore[reportPrivateUsage]
+    brief = await worlds.call(HANDLE, "brief", {}, effect_id="brief", arguments_digest="")
+    sites = cast(list[dict[str, int]], brief.structured["sites"])  # type: ignore[index]
+    assert len(sites) == 16 and len(episode.sites) == 16
+    first = episode.sites[0]
+    floor = await episode.control.blocks(
+        [(first.x + dx, first.y - 1, first.z + dz) for dx in range(5) for dz in range(5)]
+    )
+    assert set(floor) == {"smooth_stone"}
+    assert set(await episode.control.blocks(positions([first]))) == {"air"}  # (cleared)
+    assert (await score(worlds))["amount"] == 0.0
+    for dx, dy, dz in HUT[:5]:
+        await episode.control.set_block(first.x + dx, first.y + dy, first.z + dz, "oak_planks")
+    dx, dy, dz = HUT[5]
+    await episode.control.set_block(first.x + dx, first.y + dy, first.z + dz, "dirt")  # (not a building material)
+    built = await score(worlds)
+    assert built["amount"] == 5.0 and list(built["amount_parts"].values()) == [5.0]

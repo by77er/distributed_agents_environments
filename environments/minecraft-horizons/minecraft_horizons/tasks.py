@@ -78,6 +78,7 @@ SETTINGS: dict[str, Sequence[Setting]] = {
     "iron": (FRESH, UNDERGROUND),
     "gold": (FRESH, UNDERGROUND),
     "diamonds": (FRESH, UNDERGROUND),
+    "huts": (FRESH,),
     "advancements": (FRESH,),
     "iron-tools": (FRESH,),
     "nether": (FRESH, PORTAL_KIT),

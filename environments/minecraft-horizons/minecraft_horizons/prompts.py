@@ -9,6 +9,7 @@ knows, chat and teamwork) and how an observation reads are the team package's ow
 
 from collections.abc import Sequence
 
+from minecraft_horizons.building import Site, describe
 from minecraft_horizons.objectives import Measure
 from minecraft_horizons.tasks import Task
 from minecraft_team.limits import LIMITS
@@ -48,10 +49,21 @@ finishing sooner is always better. The game lasts at most {minutes} minutes of g
 shows how much is left."""
 
 
-def goal(task: Task, players: int) -> str:
-    """What the task asks, and how long the game lasts, as agents read it."""
+BUILDING_GOAL = """Goal: {together}build as much of as many huts as you can on the sites laid out for them. What \
+counts is {counted}: whoever placed it, every block counts, so half a hut is worth half. {sites} The game lasts \
+{minutes} minutes of game time{turns}; every observation shows how much is left. Plan for the time you have: the \
+materials are yours to gather (wood to cut, stone to mine), and with more time, better tools first can pay off. \
+Nothing caps the count: there is always another block to place."""
+
+
+def goal(task: Task, players: int, sites: Sequence[Site] = ()) -> str:
+    """What the task asks, and how long the game lasts, as agents read it (a building task's `sites` among it)."""
     together = "together, " if players > 1 else ""
     turns = f" or {task.turns} turns, whichever runs out first"
+    if task.objective.measure is Measure.BUILT:
+        return BUILDING_GOAL.format(
+            together=together, counted=task.objective.counted, sites=describe(sites), minutes=task.minutes, turns=turns
+        )
     if task.objective.measure is Measure.PROGRESS:
         path = path_of(task.laid_out())
         names = [MILESTONE_WORDS.get(name, name) for name, _, _ in path]
@@ -76,14 +88,15 @@ def goal(task: Task, players: int) -> str:
     )  # fmt: skip
 
 
-def system_prompt(task: Task, team: Sequence[str]) -> str:
-    """The same for every agent of the team: nothing in it says which of them reads it (each observation does)."""
+def system_prompt(task: Task, team: Sequence[str], sites: Sequence[Site] = ()) -> str:
+    """The same for every agent of the team: nothing in it says which of them reads it (each observation does). A
+    building task's names its `sites`."""
     players = len(team)
     death = "with what you carried" if task.setting.keeps_inventory else "and what you carried lies where you died"
     return SYSTEM.format(
         opening=TEAM_OPENING.format(count=spelled(players), team=", ".join(team)) if players > 1
         else ALONE_OPENING.format(name=team[0]),
-        goal=goal(task, players),
+        goal=goal(task, players, sites),
         way="",
         turns=TEAM_TURNS.format(count=spelled(players)) if players > 1 else ALONE_TURNS,
         window=spelled(LIMITS.window_seconds),

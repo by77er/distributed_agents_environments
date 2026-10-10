@@ -3,10 +3,11 @@ them.
 
 `HorizonWorlds` is a sandbox provider (`rollout.harness.sandboxes.Provider`) built from the team package's parts: for
 each lease a Paper server from a template, the team's bots, and the task's setting laid out by the team package's
-builders (`minecraft_team.tasks.build`). Once the world is set up it notes what the team holds, so that what the team
-began with does not count. Its operations are the team package's (observe, act, run a window of game time) and a
-score: the objective's amount from the plugin's ground truth (`minecraft_horizons.objectives.measured`, or for a
-speedrun its progress and the time left, `progressed`). Nothing ends a game early, as there is always more to get,
+builders (`minecraft_team.tasks.build`), and for a building task the sites (`minecraft_horizons.building`). Once the
+world is set up it notes what the team holds, so that what the team began with does not count. Its operations are the
+team package's (observe, act, run a window of game time), `brief` (what agents are told of the layout: a building task's
+sites) and a score: the objective's amount from the plugin's ground truth (`minecraft_horizons.objectives.measured`, or
+for a speedrun its progress and the time left, `progressed`). Nothing ends a game early, as there is always more to get,
 except a speedrun's goal reached: its window says so (`done`).
 
 A pool over it is served in the process that runs the episodes, or from a machine of its own (`rollout pool
@@ -24,7 +25,8 @@ from typing import Any, ClassVar
 
 from pydantic import JsonValue
 
-from minecraft_horizons.objectives import Measure, holdings, measured, progressed, reward
+from minecraft_horizons.building import Site, count, prepare
+from minecraft_horizons.objectives import Measure, Measured, holdings, measured, progressed, reward
 from minecraft_horizons.tasks import TASKS, Task
 from minecraft_team.control import Control
 from minecraft_team.harness import Harness
@@ -66,6 +68,8 @@ class EpisodeWorld:
     """What the team held once the world was set up (its kit): not counted."""
     ticks: int = 0
     """Game time run in windows so far."""
+    sites: list[Site] = field(default_factory=list[Site])
+    """Where a building task's blueprint is to be built (`building.prepare`)."""
 
 
 @dataclass
@@ -116,12 +120,13 @@ class HorizonWorlds:
             harness = await Harness.start(log=log, installation=self.installation)
             await harness.connect("127.0.0.1", server.port, team, version=self.installation.version)
             await control.freeze()
-            await build(task.laid_out(), control, team, random.Random(int(parameters["layout_seed"])))
+            built = await build(task.laid_out(), control, team, random.Random(int(parameters["layout_seed"])))
+            sites = await prepare(control, built.anchor) if task.objective.measure is Measure.BUILT else []
             await run_window(control, harness, ticks=20, settle=1.0)  # teleports reach the bots
             await loaded(control, harness)  # and so does the world around them, before anyone looks at it
             await control.baseline()  # advancements the kit granted are not the episode's, nor containers placed
             held_at_start = holdings(await control.holdings())
-            world = EpisodeWorld(handle, task, server, control, harness, team, held_at_start)
+            world = EpisodeWorld(handle, task, server, control, harness, team, held_at_start, sites=sites)
         except BaseException:
             if harness is not None:
                 await harness.close()
@@ -167,6 +172,10 @@ class HorizonWorlds:
         started = await world.harness.act(str(arguments["agent"]), dict(action) if isinstance(action, dict) else {})
         return {"started": started}
 
+    async def brief(self, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
+        """What the world was laid out with that agents are told: a building task's sites."""
+        return {"sites": [{"x": site.x, "y": site.y, "z": site.z} for site in world.sites]}
+
     async def window(self, world: EpisodeWorld, arguments: Arguments) -> JsonValue:
         """Run game time until every action has finished or the window is over; then freeze. `done` says a speedrun
         reached its goal, which ends its game."""
@@ -184,7 +193,10 @@ class HorizonWorlds:
         found = await world.control.holdings()
         held = holdings(found)
         advancements = [str(name) for name in state.get("team_advancements", [])]
-        if world.task.objective.measure is Measure.PROGRESS:
+        if world.task.objective.measure is Measure.BUILT:
+            blocks, per_site = await count(world.control, world.sites)
+            amount = Measured(float(blocks), per_site)
+        elif world.task.objective.measure is Measure.PROGRESS:
             path = scored(world.task.laid_out(), state, None, len(world.team))
             minutes = world.ticks / (60 * TICKS_PER_SECOND)
             amount = progressed(path.progress, path.solved, minutes, world.task.minutes)
@@ -260,6 +272,7 @@ OPERATIONS: dict[str, Operation] = {
         RetryClass.SIDE_EFFECTING,
         HorizonWorlds.act,
     ),
+    "brief": Operation("What agents are told of how the world was laid out.", {}, RetryClass.PURE, HorizonWorlds.brief),
     "window": Operation("Run game time while actions happen.", {}, RetryClass.SIDE_EFFECTING, HorizonWorlds.window),
     "score": Operation(
         "The objective's amount, its reward, and the ground truth it is measured from.",
