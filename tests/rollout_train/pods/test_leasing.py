@@ -23,6 +23,7 @@ from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.pods.leases import HELD, IDLE, DatabasePodLeases, PodLease, pod_leases_of
 from rollout_train.pods.leasing import LeaseLost, PodNeed, Pods, PodsDidNotStart, needs_of, reap, tag_of
 from rollout_train.presence import presence_of
+from rollout_train.providers import pod_table
 from rollout_train.run_settings import RunSettings
 from rollout_train.testing import LEDGER_TOKEN
 from tests.rollout_runpod.fake import KEY, FakeRunPod
@@ -132,6 +133,29 @@ async def test_a_renewal_follows_a_pod_runpod_maps_to_another_port(
     assert store is not None
     assert (await store.get(lease.pod)).address == "https://203.0.113.7:40999"  # type: ignore[union-attr]
     await pods.release()
+
+
+async def test_a_pod_is_asked_for_its_providers_least_cpus_and_memory_and_its_lease_says_what_it_got(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    ledger, fake, _ = world
+    pods = pods_of("run_1", cluster_of(tmp_path, min_vcpus_per_gpu=12, min_memory_gb_per_gpu=96), ledger, fake)
+    (lease,) = await pods.claim([NEED])
+    (body,) = fake.created_bodies()
+    assert (body["minVCPUPerGPU"], body["minRAMPerGPU"]) == (12, 96)
+    assert (lease.vcpus, lease.memory_gb) == (16, 188.0)  # (as RunPod's answer said)
+    assert lease.id is not None
+    fake.pods[lease.id]["vcpuCount"] = 24  # (RunPod says more of it now)
+    await pods.renewed()
+    store = pod_leases_of(ledger)
+    assert store is not None
+    renewed = await store.get(lease.pod)
+    assert renewed is not None and (renewed.vcpus, renewed.memory_gb) == (24, 188.0)
+    await pods.release()
+    plain = cluster_of(tmp_path)
+    table = pod_table("runpod-inference", plain.inference["pods"].settings)
+    spec = pods_of("run_2", plain, ledger, fake)._spec(lease, table, NEED)  # pyright: ignore[reportPrivateUsage]
+    assert "minVCPUPerGPU" not in spec.body()  # (unsaid: RunPod's defaults)
 
 
 async def test_a_pod_whose_provider_says_its_thinking_starts_vllm_bounding_it(

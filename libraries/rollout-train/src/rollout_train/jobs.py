@@ -82,7 +82,7 @@ from rollout_train.inference.channel import MAX_LAG
 from rollout_train.launching import Refused, checked, declared, ray_free
 from rollout_train.ledger import Fence
 from rollout_train.machine import measured
-from rollout_train.pods.leasing import pods_store
+from rollout_train.pods.leasing import pods_store, serving
 from rollout_train.presence import presence_of
 from rollout_train.providers import INFERENCE_KINDS, RUNPOD, TrainerProvider, settings_of
 from rollout_train.record import ENDS, STARTS, LimitReached, end, ending, scope, start_header, table, trained_objective
@@ -826,13 +826,18 @@ class Run:
 
     async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
         """A pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes]`: one
-        served elsewhere (`url`) is reached there; any other is made here, with its keeper, its leases kept beside the
+        served from the run's pods (`on_pods`) is reached on the pods that serve it, with its keeper here; one served
+        elsewhere (`url`) is reached there; any other is made here, with its keeper, its leases kept beside the
         ledger."""
         pools: dict[str, Pool] = {}
         for kind in sorted(self.sandboxes):
             section = self.cluster.sandboxes.get(kind)
             if section is None:
                 continue  # (validation refused a run whose environment needs it)
+            if section.on_pods is not None and (served := self._on_pods(stack, kind, section.url)) is not None:
+                pools[kind] = served
+                self.pool_bindings[kind] = PoolBinding(local=kind)
+                continue
             if section.url is not None:
                 self.pool_bindings[kind] = PoolBinding(url=section.url)
                 continue
@@ -848,6 +853,33 @@ class Run:
             pools[kind] = pool
             self.pool_bindings[kind] = PoolBinding(local=kind)
         return pools
+
+    def _on_pods(self, stack: contextlib.AsyncExitStack, kind: str, url: str | None) -> Pool | None:
+        """The pools of `kind` the run's pods serve, as one (`rollout_train.pods.pools`), the pool at `url` behind them
+        for when they are full; swept here by a keeper as a pool of the run's own. None where the run leases no pod
+        that serves the kind (validation refused such a run unless the pool at `url` serves it)."""
+        from rollout.harness.remote import RemotePool
+        from rollout_train.pods.pools import PodPools
+        from rollout_train.pods.routing import LeasedPools
+        from rollout_train.sandboxes import FileLeases
+
+        providers = serving(self.cluster, kind)
+        if self.pods is None or not any(each.provider in providers for each in self.pods.leases.values()):
+            return None
+        auth = self.cluster.inference[providers[0]].auth
+        discover = LeasedPools(self.ledger, self.run.id, kind, providers, auth, self.cluster.tls)
+        stack.push_async_callback(discover.aclose)
+        fallback = RemotePool(url) if url is not None else None
+        if fallback is not None:
+            stack.push_async_callback(fallback.aclose)
+        beats = presence_of(self.ledger)
+        pool = PodPools(
+            kind, discover, name=f"{kind}@{self.run.id}", leases=FileLeases(self.directory / "pods" / kind),
+            admits=admits(self.ledger, beats), fallback=fallback,
+        )  # fmt: skip
+        stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
+        _background(stack, keep(pool, self.ledger, beats))
+        return pool
 
     def _about(self) -> dict[str, JsonValue]:
         """What the runner says in each beat: its machine, the run, what each channel serves, what the run holds of

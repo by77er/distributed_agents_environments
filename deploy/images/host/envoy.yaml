@@ -1,10 +1,11 @@
-# Envoy in front of a host pod's vLLM server and training service (deploy/images/host/README.md).
+# Envoy in front of a host pod's vLLM server, training service and sandbox pools (deploy/images/host/README.md).
 #
 # As on an inference pod and a training pod: a raw TCP port, mutual TLS ended here, and only a client whose certificate
 # chains to the cluster's root and carries the gateway's identity. It passes on what sampling needs (POST
-# /v1/completions and GET /v1/models, to vLLM) and the training API (POST /v1/steps, GET /v1/steps/CHECKPOINT and GET
-# /v1/trainer, to the training service), and nothing else: every other request is answered 404 here. Both servers
-# listen on 127.0.0.1 only.
+# /v1/completions and GET /v1/models, to vLLM), the training API (POST /v1/steps, GET /v1/steps/CHECKPOINT and GET
+# /v1/trainer, to the training service) and the sandbox pools' API (GET /v1/sandboxes/KIND/operations and .../capacity,
+# POST .../acquire, .../release and .../call, to the pools' process, as /KIND/...), and nothing else: every other
+# request is answered 404 here. Every server listens on 127.0.0.1 only.
 node: {id: rollout-host, cluster: rollout}   # (certificates over SDS need a node's id and cluster)
 admin:
   address:
@@ -129,6 +130,39 @@ static_resources:
                           route:
                             cluster: trainer
                             timeout: 30s
+                        # The sandbox pools, each under its kind: an acquire starts a sandbox (a Minecraft world: a Paper
+                        # server, its bots and its task, a minute or more), an operation runs up to a 20-second window.
+                        - name: sandboxes
+                          match:
+                            safe_regex: { regex: "/v1/sandboxes/[a-z0-9-]+/(operations|capacity)" }
+                            headers:
+                              - name: ":method"
+                                string_match: { exact: GET }
+                          route:
+                            cluster: sandboxes
+                            timeout: 30s
+                            regex_rewrite: { pattern: { regex: "^/v1/sandboxes/(.*)$" }, substitution: "/\\1" }
+                        - name: acquire
+                          match:
+                            safe_regex: { regex: "/v1/sandboxes/[a-z0-9-]+/acquire" }
+                            headers:
+                              - name: ":method"
+                                string_match: { exact: POST }
+                          route:
+                            cluster: sandboxes
+                            timeout: 600s
+                            idle_timeout: 600s
+                            regex_rewrite: { pattern: { regex: "^/v1/sandboxes/(.*)$" }, substitution: "/\\1" }
+                        - name: sandbox
+                          match:
+                            safe_regex: { regex: "/v1/sandboxes/[a-z0-9-]+/(release|call)" }
+                            headers:
+                              - name: ":method"
+                                string_match: { exact: POST }
+                          route:
+                            cluster: sandboxes
+                            timeout: 120s
+                            regex_rewrite: { pattern: { regex: "^/v1/sandboxes/(.*)$" }, substitution: "/\\1" }
                         - name: refused
                           match: { prefix: / }
                           direct_response: { status: 404 }
@@ -199,3 +233,21 @@ static_resources:
               - endpoint:
                   address:
                     socket_address: { address: 127.0.0.1, port_value: 8001 }
+    - name: sandboxes
+      type: STATIC
+      connect_timeout: 2s
+      # Uvicorn behind it (the pools' process) closes a connection idle for 5 s: Envoy closes its own first.
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          common_http_protocol_options:
+            idle_timeout: 4s
+          explicit_http_config:
+            http_protocol_options: {}
+      load_assignment:
+        cluster_name: sandboxes
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: 127.0.0.1, port_value: 8710 }

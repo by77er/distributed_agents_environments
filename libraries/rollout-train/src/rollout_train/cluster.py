@@ -61,6 +61,7 @@ __all__ = [
     "KubernetesSection",
     "LedgerSection",
     "MonitorSection",
+    "OnPods",
     "RaySection",
     "RunnersSection",
     "SandboxesSection",
@@ -192,10 +193,27 @@ class GuardsSection:
 
 
 @dataclass(frozen=True)
+class OnPods:
+    """Sandboxes of a kind served from the pods a run leases (`[sandboxes.KIND] on_pods`): each pod whose provider
+    lists the kind (`sandboxes`) serves a pool of them beside its engine and trainer, as many as its spare CPUs and
+    memory hold (`rollout_train.pods.sandboxes`)."""
+
+    size: int | None = None
+    """The most sandboxes a pod holds (none: as many as its spare CPUs and memory hold)."""
+    cpus: float = 1.0
+    """The vCPUs one sandbox takes (a Minecraft world: about one while it plays)."""
+    memory_gib: float = 2.4
+    """The memory one sandbox takes, in GiB (a Minecraft world: up to 2.4 when its bots roam far)."""
+    settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
+    """The provider's settings on a pod, over the section's own (a Minecraft cache on the pod's volume, say)."""
+
+
+@dataclass(frozen=True)
 class SandboxesSection:
     """A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`): made in each run's
-    driver from its provider, or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it. What
-    its sandboxes run and hold is the pool's business: a run's demand counts none of it."""
+    driver from its provider; or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it; or,
+    with `on_pods`, served from the pods a run leases, with the pool at `url` (if any) for when they are full. What its
+    sandboxes run and hold is the pool's business: a run's demand counts none of it."""
 
     kind: str
     provider: str | None = None
@@ -208,6 +226,8 @@ class SandboxesSection:
     pools: int = 1
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """The provider's own settings."""
+    on_pods: OnPods | None = None
+    """Served from the run's pods (none: not)."""
 
 
 @dataclass(frozen=True)
@@ -540,6 +560,7 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
     for kind, pool in sandboxes.items():
         if pool.python not in ("platform", *environments):
             raise ClusterError(f"[sandboxes.{kind}] python is platform or an environment of this cluster")
+    _served_on_pods(sandboxes, inference)
     placement: dict[str, Mapping[str, float]] = {}
     for role, each in table.tables("placement").items():
         if role not in ROLES:
@@ -808,6 +829,9 @@ def _sandboxes(kind: str, described: dict[str, Any]) -> SandboxesSection:
         raise ClusterError(f"{where} names its provider (made in each run), or the url it is served at, or both")
     if url is not None and not url.startswith(("http://", "https://")):
         raise ClusterError(f"{where} url is an http:// or https:// URL")
+    on_pods = _on_pods(where, said.take("on_pods", None))
+    if on_pods is not None and provider is None:
+        raise ClusterError(f"{where} names its provider: the pods that serve it make its sandboxes with it")
     return SandboxesSection(
         kind=kind,
         provider=provider,
@@ -816,7 +840,47 @@ def _sandboxes(kind: str, described: dict[str, Any]) -> SandboxesSection:
         url=url,
         pools=said.whole("pools", 1, least=1),
         settings=said.rest(),
+        on_pods=on_pods,
     )
+
+
+def _on_pods(where: str, given: Any) -> OnPods | None:
+    """`on_pods`: false or absent (none), true (the defaults), or a table of `size`, `cpus`, `memory_gib` and the
+    provider's `settings` on a pod."""
+    if given is None or given is False:
+        return None
+    if given is True:
+        return OnPods()
+    if not isinstance(given, dict):
+        raise ClusterError(f"{where} on_pods is true, or a table of size, cpus, memory_gib and settings")
+    said = _Table(dict(cast(dict[str, Any], given)), f"{where} on_pods")
+    size = said.whole("size", None, least=1)
+    cpus, memory = said.number("cpus", 1.0), said.number("memory_gib", 2.4)
+    settings = said.take("settings", {})
+    said.done()
+    if cpus <= 0 or memory <= 0:
+        raise ClusterError(f"{where} on_pods cpus and memory_gib are more than 0")
+    if not isinstance(settings, dict):
+        raise ClusterError(f"{where} on_pods settings is a table of the provider's settings")
+    return OnPods(size, cpus, memory, dict(cast(dict[str, JsonValue], settings)))
+
+
+def _served_on_pods(sandboxes: Mapping[str, SandboxesSection], inference: Mapping[str, InferenceProvider]) -> None:
+    """Each kind served from pods has a provider whose pods serve it, and each kind a provider's pods serve is one."""
+    serving: dict[str, list[str]] = {}
+    for name, provider in inference.items():
+        if provider.kind != "runpod-host":
+            continue
+        for kind in pod_table(provider.kind, provider.settings).sandboxes:
+            section = sandboxes.get(kind)
+            if section is None or section.on_pods is None:
+                raise ClusterError(f"[inference.{name}] sandboxes names {kind}, which is no [sandboxes.{kind}] with "
+                                   "on_pods")  # fmt: skip
+            serving.setdefault(kind, []).append(name)
+    for kind, section in sandboxes.items():
+        if section.on_pods is not None and kind not in serving:
+            raise ClusterError(f"[sandboxes.{kind}] on_pods: no runpod-host provider's pods serve {kind} (its "
+                               "sandboxes)")  # fmt: skip
 
 
 def _tool(name: str, described: dict[str, Any]) -> ToolsSection:

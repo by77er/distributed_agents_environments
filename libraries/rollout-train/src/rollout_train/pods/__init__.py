@@ -15,6 +15,9 @@ it listen on the pod's loopback interface.
 - `training`: the training service on a training pod: one step at a time, each idempotent by the checkpoint it makes
   (`TrainerService`).
 - `trainer`: `RemoteTrainer`, a `Trainer` over that service.
+- `sandboxes`: sandbox pools on a host pod's spare CPUs and memory, following its lease (`PodSandboxes`).
+- `pools`: the pools of a kind a run's pods serve, as one pool in the run's driver (`PodPools`), found and reached by
+  `routing` (`LeasedPools`), as the run's engines are (`LeasedServers`).
 
 The images that run these, and how the certificates are issued and renewed, are in `deploy/images`
 (docs/research/runpod-providers.md).

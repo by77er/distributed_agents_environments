@@ -2,7 +2,7 @@
 name = "minecraft-team"
 version = "0.0.0"
 description = "One to four agents in a Minecraft world, as a team: an environment for rollout"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "rollout",
     "httpx>=0.28",

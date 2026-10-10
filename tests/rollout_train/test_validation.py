@@ -741,7 +741,8 @@ def test_on_kubernetes_a_sandbox_pool_is_served_from_pods_of_its_own() -> None:
     kubernetes = dataclasses.replace(CLUSTER, kubernetes=KubernetesSection("rollout", "rayjob.yaml"))
     assert refused("environment", findings(environment=worlds, cluster=kubernetes)) == [
         f"{GSM8K} needs sandboxes of kind minecraft, whose pool this cluster makes in each run's pod, where Kubernetes "
-        "accounts nothing of what they hold: serve it from pods of its own ([sandboxes.minecraft] url)"
+        "accounts nothing of what they hold: serve it from pods of its own ([sandboxes.minecraft] url), or from its "
+        "RunPod pods (on_pods)"
     ]
     pool = dataclasses.replace(CLUSTER.sandboxes["minecraft"], url="http://sandboxes-minecraft.rollout:8710")
     served = dataclasses.replace(kubernetes, sandboxes={"minecraft": pool})

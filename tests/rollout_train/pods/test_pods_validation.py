@@ -3,12 +3,14 @@ its trained channel, charged once; a step's spend on pods is their hourly price 
 (not known: said so); a run is refused more pods than a provider's `max_pods`, pods with no step-ca, or a cluster
 whose pods cannot reach the ledger service; and pods are not the cluster's GPUs."""
 
+import dataclasses
 import tomllib
 
 import pytest
 
-from rollout_train.cluster import Cluster, parsed
-from rollout_train.pods.leasing import PodNeed, needs_of
+from rollout_train.cluster import Cluster, KubernetesSection, parsed
+from rollout_train.pods.leasing import PodNeed, needs_of, sandboxes_of, serving
+from rollout_train.providers import pod_table
 from rollout_train.run_settings import RunSettings
 from rollout_train.validation import EnvironmentFacts, LedgerFacts, check, spend_of
 
@@ -87,3 +89,45 @@ def test_a_run_is_refused_what_its_pods_cannot_be_given() -> None:
     assert any("cannot read a store of files" in each for each in refused(files, RunSettings(SETTINGS)))
     gpus = check(RunSettings(SETTINGS), cluster_of(), ENVIRONMENT, LedgerFacts(gpus=0.0))
     assert not [each for each in gpus if each.refuses and "GPUs" in each.reason]  # (pods are not the cluster's GPUs)
+
+
+SERVED = f"""step_ca = {STEP_CA}
+store = "r2"
+sandboxes = ["minecraft"]
+[sandboxes.minecraft]
+provider = "minecraft_team.worlds:worlds"
+on_pods = {{ settings = {{ cache = "/workspace/minecraft" }} }}
+[environments."gridworld.environment:environment"]
+python = "platform"
+"""
+
+
+def test_on_kubernetes_sandboxes_the_runs_pods_serve_need_no_pool_of_their_own() -> None:
+    worlds = dataclasses.replace(ENVIRONMENT, sandboxes=frozenset({"minecraft"}))
+    on_kubernetes = KubernetesSection("rollout", "rayjob.yaml")
+
+    def refused(cluster: Cluster) -> list[str]:
+        found = check(RunSettings(SETTINGS), dataclasses.replace(cluster, kubernetes=on_kubernetes), worlds)
+        return [each.reason for each in found if each.refuses and "sandboxes of kind" in each.reason]
+
+    assert refused(cluster_of(host=SERVED)) == []  # (the run leases an h100 pod, which serves them)
+    elsewhere = SERVED.replace('sandboxes = ["minecraft"]\n', "") + (
+        '[inference.a100]\nkind = "runpod-host"\nimage = "ghcr.io/by77er/rollout-host@sha256:0"\n'
+        'gpu_types = ["NVIDIA A100 80GB PCIe"]\nsandboxes = ["minecraft"]\n[inference.a100.models."m"]\ncontext = 8\n'
+    )
+    (said,) = refused(cluster_of(host=elsewhere))
+    assert "serves from the pods of a100, and the run leases none of them" in said
+    with_url = elsewhere.replace("[sandboxes.minecraft]\n", '[sandboxes.minecraft]\nurl = "http://sandboxes:8710"\n')
+    assert refused(cluster_of(host=with_url)) == []  # (the cluster's own pool serves them)
+
+
+def test_a_host_pod_is_told_the_pools_it_serves() -> None:
+    cluster = cluster_of(host=SERVED)
+    host = cluster.inference["h100"]
+    table = pod_table(host.kind, host.settings)
+    assert serving(cluster, "minecraft") == ["h100"] and table.sandboxes == ("minecraft",)
+    assert sandboxes_of(cluster, table) == {"minecraft": {
+        "provider": "minecraft_team.worlds:worlds", "settings": {"cache": "/workspace/minecraft"}, "size": None,
+        "cpus": 1.0, "memory_gib": 2.4,
+    }}  # fmt: skip
+    assert sandboxes_of(cluster_of(), pod_table(host.kind, cluster_of().inference["h100"].settings)) == {}

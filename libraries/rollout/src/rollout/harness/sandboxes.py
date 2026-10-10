@@ -304,6 +304,10 @@ class SandboxPool:
         """When each lease with a time limit is over, by key, on this process's monotonic clock."""
 
     @property
+    def kind(self) -> str:
+        return self.provider.kind
+
+    @property
     def deduplicates(self) -> bool:
         return deduplicates(self.provider)
 

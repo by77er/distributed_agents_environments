@@ -255,12 +255,14 @@ async def loaded(control: Control, harness: Harness, *, seconds: float = 30.0) -
         await asyncio.sleep(0.25)
 
 
-def worlds(directory: Path, size: int = 6, heap: str = HEAP) -> MinecraftWorlds:
+def worlds(directory: Path, size: int = 6, heap: str = HEAP, cache: str | None = None) -> MinecraftWorlds:
     """The worlds of a deployment whose state is under `directory` (the cluster config's `[sandboxes.minecraft]
-    provider` names this function, and its `size` and `heap` are this function's): at most `size` at once on this
-    machine, each server's heap at most `heap`, their logs kept there. Servers a stopped process left behind are
-    removed."""
-    made = MinecraftWorlds(logs=directory / "logs", size=size, heap=heap)
+    provider` names this function, and its `size`, `heap` and `cache` are this function's): at most `size` at once on
+    this machine, each server's heap at most `heap`, their logs kept there; the Paper jar, the plugin, the templates and
+    the servers under `cache` (by default `~/.cache/rollout/minecraft`: a pod's volume, say, so that a container started
+    again finds them). Servers a stopped process left behind are removed."""
+    installation = Installation(root=Path(cache).expanduser()) if cache else Installation()
+    made = MinecraftWorlds(installation=installation, logs=directory / "logs", size=size, heap=heap)
     (directory / "logs").mkdir(parents=True, exist_ok=True)
     sweep(made.installation)
     return made

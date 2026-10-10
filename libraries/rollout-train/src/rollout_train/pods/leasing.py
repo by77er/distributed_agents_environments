@@ -14,9 +14,12 @@ of the same run that this start of it does not hold (an earlier start of the run
 lease and pod deleted, where that lease is stale or RunPod has no pod of its id (said in the run's log); else a slot a
 warm pod holds; else the run waits, saying so. Where the pod is reached is what RunPod's API says (its public IP and the
 public port 8443/tcp is mapped to), written into its lease (`PodLease.address`) when RunPod answers the request with
-it, or when RunPod is next asked about the pod while the run waits for it. The pod is ready for the run once its lease
-has that address and it beats that it is ready (its beat names the run). A pod not ready within its provider's
-`start_timeout` is deleted, and the run fails saying which and why (`PodsDidNotStart`).
+it, or when RunPod is next asked about the pod while the run waits for it; so are the vCPUs and memory RunPod says it
+gave the pod (`PodLease.vcpus`, `memory_gb`). The pod is ready for the run once its lease has that address and it beats
+that it is ready (its beat names the run). A pod not ready within its provider's `start_timeout` is deleted, and the
+run fails saying which and why (`PodsDidNotStart`). A host pod whose provider lists kinds of sandboxes is told the
+pools it serves (`ROLLOUT_SANDBOXES`, `sandboxes_of`), and is asked of RunPod with the provider's least vCPUs and
+memory per GPU, where it says them.
 
 **Renewing** (`Pods.renewing`). Every `RENEW` seconds the run stamps each lease (`renewed`, writing where RunPod says
 its pod is reached into a lease that does not say it, or says another place: a pod started again, or given another
@@ -65,7 +68,7 @@ from rollout_train.presence import Beat, alive, presence_of
 from rollout_train.providers import RUNPOD, InferenceProvider, PodTable, TrainerProvider, pod_table
 
 if TYPE_CHECKING:
-    from rollout_runpod import PodSpec, RunPod, StepCa
+    from rollout_runpod import Pod, PodSpec, RunPod, StepCa
     from rollout_train.cluster import Cluster
     from rollout_train.run_settings import RunSettings
 
@@ -81,6 +84,8 @@ __all__ = [
     "pod_name",
     "pods_store",
     "reap",
+    "sandboxes_of",
+    "serving",
     "tag_of",
 ]
 
@@ -208,6 +213,37 @@ def _step_ca(table: PodTable) -> "StepCa | None":
     said = table.step_ca
     return StepCa.from_files(said["url"], provisioner=said["provisioner"], key=Path(said["key_file"]).expanduser(),
                              root=Path(said["root"]).expanduser(), system=said.get("trust") == "system")  # fmt: skip
+
+
+def serving(cluster: "Cluster", kind: str) -> list[str]:
+    """The providers whose pods serve sandboxes of `kind` (their tables' `sandboxes`), by name."""
+    return [
+        name for name, provider in cluster.inference.items()
+        if provider.kind == "runpod-host" and kind in pod_table(provider.kind, provider.settings).sandboxes
+    ]  # fmt: skip
+
+
+def sandboxes_of(cluster: "Cluster", table: PodTable) -> dict[str, JsonValue]:
+    """The pools a pod of `table` serves (`ROLLOUT_SANDBOXES`, read by `rollout_train.pods.sandboxes`): for each kind
+    its table lists, the provider that makes them, its settings on a pod, and what a pool of them is sized by."""
+    served: dict[str, JsonValue] = {}
+    for kind in table.sandboxes:
+        section = cluster.sandboxes.get(kind)
+        if section is None or section.on_pods is None or section.provider is None:
+            continue  # (the cluster config refuses it)
+        on = section.on_pods
+        served[kind] = {
+            "provider": section.provider, "settings": {**section.settings, **on.settings}, "size": on.size,
+            "cpus": on.cpus, "memory_gib": on.memory_gib,
+        }  # fmt: skip
+    return served
+
+
+def _gave(lease: PodLease, pod: "Pod | None") -> PodLease:
+    """The lease with the vCPUs and memory RunPod says it gave the pod, where it says them."""
+    if pod is None:
+        return lease
+    return replace(lease, vcpus=pod.vcpus or lease.vcpus, memory_gb=pod.memory_gb or lease.memory_gb)
 
 
 def _beat_of(beats: Sequence[Beat], pod: str) -> Mapping[str, Any] | None:
@@ -352,7 +388,8 @@ class Pods:
             with contextlib.suppress(Exception):
                 await self.store.delete(lease.pod, expect=lease.version)
             raise
-        given = replace(lease, id=pod.id, gpu=pod.gpu or lease.gpu, address=pod.address(PORT),
+        given = replace(lease, id=pod.id, gpu=pod.gpu or lease.gpu, address=pod.address(PORT), vcpus=pod.vcpus,
+                        memory_gb=pod.memory_gb,
                         price=pod.cost_per_hour if pod.cost_per_hour is not None else lease.price)  # fmt: skip
         made = await self.store.put(given, expect=lease.version)
         self.times[made.pod] = PodTime(time_key(made.pod, self.run, made.created), made.pod, self.run, made.provider,
@@ -424,6 +461,8 @@ class Pods:
             env["ROLLOUT_TRAINER"] = str(need.settings.get("implementation") or "rollout_lora:LoraTrainer")
             env["ROLLOUT_TRAINER_MODEL"] = str(need.settings.get("model") or lease.model)
             env["ROLLOUT_TRAINER_GPUS"] = str(table.gpu_count)  # (more than one: a process per GPU, sharded)
+        if served := sandboxes_of(self.cluster, table):
+            env["ROLLOUT_SANDBOXES"] = json.dumps(served)
         sensitive = {"ROLLOUT_LEDGER_TOKEN": lease.token or "", **keys}
         ca = self._ca(table)
         if ca is not None:
@@ -437,7 +476,8 @@ class Pods:
             name=lease.pod, image=table.image, gpu_types=list(table.gpu_types), gpu_count=table.gpu_count, env=env,
             secrets=dict(table.secrets), sensitive=sensitive, ports=(f"{PORT}/tcp",), volume_gb=table.volume_gb,
             container_disk_gb=table.container_disk_gb, cloud=table.cloud, data_centers=list(table.regions),
-            cuda_versions=list(table.cuda_versions),
+            cuda_versions=list(table.cuda_versions), min_vcpus_per_gpu=table.min_vcpus_per_gpu,
+            min_memory_gb_per_gpu=table.min_memory_gb_per_gpu,
         )  # fmt: skip
 
     async def _waited(self) -> None:
@@ -489,27 +529,31 @@ class Pods:
             await asyncio.sleep(self.look)
 
     async def _addressed(self, lease: PodLease) -> PodLease:
-        """The lease with where RunPod says its pod is reached (`_address`), written into the lease where it says
-        another than the lease does; the lease as it was while it says none, or the same."""
-        address = await self._address(lease)
-        if address is None or address == lease.address:
+        """The lease with where RunPod says its pod is reached and what it gave it (`_described`), written into the
+        lease where it says another than the lease does; the lease as it was while it says none, or the same."""
+        address, given = await self._described(lease)
+        if address is None or (address == lease.address and _gave(lease, given) == lease):
             return lease
-        return await self._put_own(lease, lambda there: replace(there, address=address), "address") or lease
 
-    async def _address(self, lease: PodLease) -> str | None:
-        """Where RunPod's API says a lease's pod is reached now (`https://IP:PORT`); none while it says none, where it
-        cannot be asked (asked again next time), or the pod has no id."""
+        def described(there: PodLease) -> PodLease:
+            return _gave(replace(there, address=address), given)
+
+        return await self._put_own(lease, described, "address") or lease
+
+    async def _described(self, lease: PodLease) -> "tuple[str | None, Pod | None]":
+        """Where RunPod's API says a lease's pod is reached now (`https://IP:PORT`), and the pod as it says; none
+        while it says none, where it cannot be asked (asked again next time), or the pod has no id."""
         if lease.id is None:
-            return None
+            return None, None
         try:
             pod = await self.api(lease.provider).pod(lease.id)
         except Exception as error:
             log.info("RunPod did not say where pod %s is: %s", lease.pod, error)
-            return None
+            return None, None
         address = pod.address(PORT)
         if address is not None and lease.address is not None and address != lease.address:
             log.info("pod %s is reached at %s now, not %s", lease.pod, address, lease.address)
-        return address
+        return address, pod
 
     async def _put_own(self, lease: PodLease, change: Callable[[PodLease], PodLease], what: str) -> PodLease | None:
         """Write `change` of a lease the run holds by compare-and-set, the lease as read; where it changed since, read
@@ -543,10 +587,10 @@ class Pods:
             there = await self.store.get(pod)
             if there is None or there.run != self.run:
                 raise LeaseLost(f"pod {pod} is no longer held by run {self.run} (its lease went stale and was reaped)")
-            address = await self._address(there)  # (none yet, or another public port since)
+            address, given = await self._described(there)  # (none yet, or another public port since)
 
-            def stamped(each: PodLease, address: str | None = address) -> PodLease:
-                return replace(each, renewed=now, address=address or each.address)
+            def stamped(each: PodLease, address: str | None = address, given: "Pod | None" = given) -> PodLease:
+                return _gave(replace(each, renewed=now, address=address or each.address), given)
 
             renewed = await self._put_own(there, stamped, "renew")
             if renewed is None:

@@ -51,8 +51,9 @@ def _failed(error: Exception) -> Any:
 
 
 class _Described:
-    """A client of a service at `url` that says once what it offers (`GET /LISTED`: the list under that key, and
-    whether it deduplicates), and answers 500 with the error of a call that raised."""
+    """A client of a service at `url` (which may end in a path: every route is under it) that says once what it offers
+    (`GET /LISTED`: the list under that key, and whether it deduplicates), and answers 500 with the error of a call that
+    raised. A client given reaches it as that client says (mutual TLS, say); `describe` asks over it."""
 
     listed: str
     """What it says it offers, and where (`specifications`, `operations`)."""
@@ -67,22 +68,40 @@ class _Described:
         deduplicating: bool,
         timeout: float,
     ) -> None:
-        self._url = url
-        self._http = client or httpx.AsyncClient(base_url=url, timeout=timeout)
+        self._url = url.rstrip("/")
+        self._http = client or httpx.AsyncClient(timeout=timeout)
         self._described = (list(offered), deduplicating) if offered is not None else None
+
+    @property
+    def url(self) -> str:
+        return self._url
 
     @property
     def deduplicates(self) -> bool:
         return self._describe()[1]
 
+    async def describe(self) -> None:
+        """Ask what it offers over its own client, once: after this, `deduplicates` and what it offers are known."""
+        if self._described is None:
+            self._described = self._offered(self._checked(await self._http.get(self._at(self.listed))))
+
+    async def aclose(self) -> None:
+        """Close its client."""
+        await self._http.aclose()
+
     def _describe(self) -> tuple[list[ToolSpecification], bool]:
         if self._described is None:  # (asked once, before any call: a plain request, as runs are being set up)
             response = httpx.get(f"{self._url}/{self.listed}", timeout=30)
             response.raise_for_status()
-            described = response.json()
-            offered = [ToolSpecification.model_validate(entry) for entry in described[self.listed]]
-            self._described = (offered, bool(described["deduplicates"]))
+            self._described = self._offered(response.json())
         return self._described
+
+    def _offered(self, described: Any) -> tuple[list[ToolSpecification], bool]:
+        offered = [ToolSpecification.model_validate(entry) for entry in described[self.listed]]
+        return offered, bool(described["deduplicates"])
+
+    def _at(self, route: str) -> str:
+        return f"{self._url}/{route}"
 
     def _checked(self, response: httpx.Response) -> Any:
         if response.status_code == 500:
@@ -149,7 +168,7 @@ class RemoteToolSet(_Described):
             "effect_id": effect_id,
             "arguments_digest": arguments_digest,
         }
-        return ToolResult.model_validate(self._checked(await self._http.post("/call", json=body)))
+        return ToolResult.model_validate(self._checked(await self._http.post(self._at("call"), json=body)))
 
 
 @cache
@@ -241,17 +260,17 @@ class RemotePool(_Described):
 
     async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease:
         body = {"spec": spec.model_dump(mode="json"), "key": key, "environment": dict(environment or {})}
-        response = await self._http.post("/acquire", json=body)
+        response = await self._http.post(self._at("acquire"), json=body)
         refused = {503: NoCapacity, 409: LeaseRefused, 410: SandboxLost}.get(response.status_code)
         if refused is not None:
             raise refused(response.json().get("error", f"the pool answered {response.status_code}"))
         return Lease.model_validate(self._checked(response))
 
     async def release(self, key: str) -> None:
-        self._checked(await self._http.post("/release", json={"key": key}))
+        self._checked(await self._http.post(self._at("release"), json={"key": key}))
 
     async def capacity(self) -> Capacity:
-        return Capacity.model_validate(self._checked(await self._http.get("/capacity")))
+        return Capacity.model_validate(self._checked(await self._http.get(self._at("capacity"))))
 
     async def call(
         self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
@@ -263,7 +282,7 @@ class RemotePool(_Described):
             "effect_id": effect_id,
             "arguments_digest": arguments_digest,
         }
-        return ToolResult.model_validate(self._checked(await self._http.post("/call", json=body)))
+        return ToolResult.model_validate(self._checked(await self._http.post(self._at("call"), json=body)))
 
 
 @cache

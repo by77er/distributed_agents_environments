@@ -16,7 +16,7 @@ do not edit by hand.
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#rollout_trainrolloutsplan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
-- **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
+- **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`Kept`](#kept), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Keeps`](#keeps), [`Labelled`](#labelled), [`Ledger`](#ledger), [`Made`](#made), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`OnDemand`](#ondemand), [`Pair`](#pair), [`Preferences`](#preferences), [`Progress`](#progress), [`Progressing`](#progressing), [`record_serving`](#record_serving), [`Remote`](#remote), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`StateLost`](#statelost), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#rollout_traininferencescores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
@@ -31,7 +31,7 @@ do not edit by hand.
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: identities, leases, a run's pods, the reaper, the trainer's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`HELD`](#held), [`IDLE`](#idle), [`LeasedTrainer`](#leasedtrainer), [`LeaseLost`](#leaselost), [`live`](#live), [`LivePod`](#livepod), [`needs_of`](#needs_of), [`pod_identity`](#pod_identity), [`pod_leases_of`](#pod_leases_of), [`PodLease`](#podlease), [`PodLeases`](#podleases), [`PodNeed`](#podneed), [`Pods`](#pods), [`PodsDidNotStart`](#podsdidnotstart), [`PodTime`](#podtime), [`reap`](#reap), [`RemoteTrainer`](#remotetrainer), [`STARTING`](#starting), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
 - **[`rollout_train.pki`](#rollout_trainpki)** — The certificates the platform holds, from the cluster's step-ca, published as Secrets. [`provisioner_key`](#provisioner_key), [`publish`](#rollout_trainpkipublish)
-- **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`CapacitySection`](#capacitysection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`KubernetesSection`](#kubernetessection), [`LedgerSection`](#ledgersection), [`load`](#load), [`located`](#located), [`MonitorSection`](#monitorsection), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
+- **[`rollout_train.cluster`](#rollout_traincluster)** — The cluster config: infrastructure, found, read strictly, with secrets only by name. [`auth_problem`](#auth_problem), [`BlobsSection`](#blobssection), [`BridgeSection`](#bridgesection), [`CapacitySection`](#capacitysection), [`Cluster`](#cluster), [`ClusterError`](#clustererror), [`EnvironmentSection`](#environmentsection), [`find`](#find), [`GatewaySection`](#gatewaysection), [`GuardsSection`](#guardssection), [`inspect`](#inspect), [`KubernetesSection`](#kubernetessection), [`LedgerSection`](#ledgersection), [`load`](#load), [`located`](#located), [`MonitorSection`](#monitorsection), [`OnPods`](#onpods), [`parsed`](#rollout_trainclusterparsed), [`RaySection`](#raysection), [`RunnersSection`](#runnerssection), [`SandboxesSection`](#sandboxessection), [`ToolsSection`](#toolssection)
 - **[`rollout_train.providers`](#rollout_trainproviders)** — Inference providers and trainers: kinds, capabilities, auth, allocation, routing. [`ALLOCATIONS`](#allocations), [`Auth`](#auth), [`AUTHS`](#auths), [`Capabilities`](#capabilities), [`INFERENCE_KINDS`](#inference_kinds), [`InferenceKind`](#inferencekind), [`InferenceProvider`](#inferenceprovider), [`is_local`](#is_local), [`ModelOffer`](#modeloffer), [`POD_FIELDS`](#pod_fields), [`pod_table`](#pod_table), [`PodTable`](#podtable), [`ROUTING`](#routing), [`Routing`](#routing), [`RUNPOD`](#runpod), [`Secret`](#secret), [`settings_of`](#settings_of), [`SettingSpec`](#settingspec), [`Tls`](#tls), [`TRAINER_KINDS`](#trainer_kinds), [`TrainerCapabilities`](#trainercapabilities), [`TrainerKind`](#trainerkind), [`TrainerProvider`](#trainerprovider)
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Distillation`](#distillation), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
@@ -999,6 +999,7 @@ A `Pool` over a `Provider`: at most `provider.size` leases at once, kept in `lea
 
 - `def __init__(self, provider: Provider, *, name: str | None = None, leases: Leases | None = None, admits: Callable[[str], Awaitable[bool]] | None = None) -> None` — `admits` says whether a key may hold a lease now (beside a ledger: whether its claim holds,
   `rollout_train.sandboxes.admits`); without it, every key may.
+- `@property def kind(self) -> str`
 - `@property def deduplicates(self) -> bool`
 - `def operations(self) -> Sequence[ToolSpecification]`
 - `async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease` — The lease of `key`, or a new sandbox. Raises `LeaseRefused` for a key `admits` refuses (releasing a lease
@@ -2746,12 +2747,31 @@ class FileLeases
 *function* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
 
 ```python
-async def keep(pool: SandboxPool, ledger: Ledger, presence: Presence | None, *, beat_as: str | None = None, every: float = 15.0) -> None
+async def keep(pool: Kept, ledger: Ledger, presence: Presence | None, *, beat_as: str | None = None, every: float = 15.0) -> None
 ```
 
 Sweep the pool every `every` seconds, until cancelled or another process takes the pool's fence, releasing a
 lease once its claim was found lapsed at two looks running and again just before (`ending`); with `beat_as`, beat
 under that name too.
+
+### `Kept`
+
+*class* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
+
+```python
+class Kept(Protocol)
+```
+
+A pool a keeper sweeps: a `SandboxPool`, or the pools of a run's pods (`rollout_train.pods.pools.PodPools`).
+
+**Methods**
+
+- `@property def name(self) -> str`
+- `@property def kind(self) -> str`
+- `async def held(self) -> list[Lease]` — Its leases, those whose sandboxes are lost included.
+- `async def sweep(self, ended: Callable[[Lease], bool] = ...) -> list[str]` — Release the leases `ended` says have ended (and what else the pool ends itself); the keys released or
+  marked lost.
+- `async def capacity(self) -> Capacity`
 
 ### `leases_of`
 
@@ -2778,7 +2798,7 @@ The scope whose fence a pool's keeper holds while it sweeps (`pools/NAME`).
 *function* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
 
 ```python
-async def sweep(pool: SandboxPool, ledger: Ledger, presence: Presence | None, *, lapsed: Collection[str] | None = None) -> tuple[list[str], set[str]]
+async def sweep(pool: Kept, ledger: Ledger, presence: Presence | None, *, lapsed: Collection[str] | None = None) -> tuple[list[str], set[str]]
 ```
 
 Release the pool's leases whose claims have ended (given `lapsed`, only those whose claims were found ended the
@@ -6546,6 +6566,8 @@ class PodLease
 | `cloud` | `str` | `'SECURE'` |  |
 | `id` | `str \| None` | `None` | RunPod's id for it, once asked for. |
 | `address` | `str \| None` | `None` | Where the pod is reached, `https://IP:PORT`: its public IP and the public port its 8443/tcp is mapped to, as RunPod's API says (`rollout_runpod.Pod.address`), read by whoever leased it; none until RunPod has said. The only address the pod is reached at: nothing the pod says of itself is. |
+| `vcpus` | `int \| None` | `None` | The vCPUs RunPod gave the pod (`rollout_runpod.Pod.vcpus`); none until RunPod has said. |
+| `memory_gb` | `float \| None` | `None` | The memory RunPod gave the pod, in GB (`rollout_runpod.Pod.memory_gb`); none until RunPod has said. |
 | `run` | `str \| None` | `None` | The run that holds it (none: idle). |
 | `channel` | `str \| None` | `None` | The run's channel it serves (an inference or host pod). |
 | `token` | `str \| None` | `None` | The ledger service's token for the pod and the run that holds it: read by the pod itself and the platform. |
@@ -7046,6 +7068,25 @@ class MonitorSection
 | `feed_episodes` | `int` | `80` | Episodes kept in a run's live feed. |
 | `token` | `Secret \| None` | `None` | The monitor's token (`token_env`, `token_file`), which its page and every client of its API present (`rollout_train.monitor.access`); none: `ROLLOUT_MONITOR_TOKEN`. |
 
+### `OnPods`
+
+*class* · `libraries/rollout-train/src/rollout_train/cluster.py`
+
+```python
+class OnPods
+```
+
+Sandboxes of a kind served from the pods a run leases (`[sandboxes.KIND] on_pods`): each pod whose provider
+lists the kind (`sandboxes`) serves a pool of them beside its engine and trainer, as many as its spare CPUs and
+memory hold (`rollout_train.pods.sandboxes`).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `size` | `int \| None` | `None` | The most sandboxes a pod holds (none: as many as its spare CPUs and memory hold). |
+| `cpus` | `float` | `1.0` | The vCPUs one sandbox takes (a Minecraft world: about one while it plays). |
+| `memory_gib` | `float` | `2.4` | The memory one sandbox takes, in GiB (a Minecraft world: up to 2.4 when its bots roam far). |
+| `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The provider's settings on a pod, over the section's own (a Minecraft cache on the pod's volume, say). |
+
 ### `parsed` {#rollout_trainclusterparsed}
 
 *function* · `libraries/rollout-train/src/rollout_train/cluster.py`
@@ -7094,8 +7135,9 @@ class SandboxesSection
 ```
 
 A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`): made in each run's
-driver from its provider, or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it. What
-its sandboxes run and hold is the pool's business: a run's demand counts none of it.
+driver from its provider; or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it; or,
+with `on_pods`, served from the pods a run leases, with the pool at `url` (if any) for when they are full. What its
+sandboxes run and hold is the pool's business: a run's demand counts none of it.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -7106,6 +7148,7 @@ its sandboxes run and hold is the pool's business: a run's demand counts none of
 | `url` | `str \| None` | `None` | Where the pool is served (`rollout.harness.remote.serve_pool`): runs acquire from it there. |
 | `pools` | `int` | `1` |  |
 | `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The provider's own settings. |
+| `on_pods` | `OnPods \| None` | `None` | Served from the run's pods (none: not). |
 
 ### `ToolsSection`
 
@@ -7211,7 +7254,7 @@ What an inference provider's kind can do.
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-INFERENCE_KINDS: Mapping[str, InferenceKind] = {each.name: each for each in (InferenceKind('vllm', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=True, loads=frozenset({'peft', 'full'})), auths=('none', 'bearer', 'mtls'), auth=Auth('none'), fields=('engine', 'listen', 'max_logprobs'), implementation='rollout_vllm:VllmEngine'), InferenceKind('vllm-servers', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'})), auths=('none', 'bearer', 'mtls'), auth=None, fields=('addresses', 'via', 'loader', 'max_logprobs'), implementation='rollout_train.inference:RemoteEngine', remote=True), InferenceKind('tinker', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'tinker'}), bills='tokens', unchecked=frozenset({'prompt_logprobs', 'top_logprobs'})), auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), implementation='rollout_tinker:TinkerEngine', allocation='metered'), InferenceKind('api', Capabilities(token_exact=False, sampled_logprobs=False, prompt_logprobs=False, top_logprobs=0, honours_sampling=False, adapters=False, full_reload=False, streaming=True, loads=frozenset(), bills='tokens'), auths=('vendor', 'bearer'), auth=Auth('vendor'), fields=('endpoint', 'base_url'), secrets=('api_key',), allocation='metered'), InferenceKind('runpod-inference', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=LEASED), fields=(*POD_FIELDS, 'max_logprobs', 'memory_fraction'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True), InferenceKind('runpod-host', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=LEASED), fields=(*POD_FIELDS, 'max_logprobs', 'memory_fraction', 'sleep'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True))}
+INFERENCE_KINDS: Mapping[str, InferenceKind] = {each.name: each for each in (InferenceKind('vllm', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=True, loads=frozenset({'peft', 'full'})), auths=('none', 'bearer', 'mtls'), auth=Auth('none'), fields=('engine', 'listen', 'max_logprobs'), implementation='rollout_vllm:VllmEngine'), InferenceKind('vllm-servers', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'})), auths=('none', 'bearer', 'mtls'), auth=None, fields=('addresses', 'via', 'loader', 'max_logprobs'), implementation='rollout_train.inference:RemoteEngine', remote=True), InferenceKind('tinker', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'tinker'}), bills='tokens', unchecked=frozenset({'prompt_logprobs', 'top_logprobs'})), auths=('vendor',), auth=Auth('vendor', key=Secret(env='TINKER_API_KEY')), fields=('project',), secrets=('project',), implementation='rollout_tinker:TinkerEngine', allocation='metered'), InferenceKind('api', Capabilities(token_exact=False, sampled_logprobs=False, prompt_logprobs=False, top_logprobs=0, honours_sampling=False, adapters=False, full_reload=False, streaming=True, loads=frozenset(), bills='tokens'), auths=('vendor', 'bearer'), auth=Auth('vendor'), fields=('endpoint', 'base_url'), secrets=('api_key',), allocation='metered'), InferenceKind('runpod-inference', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=LEASED), fields=(*POD_FIELDS, 'max_logprobs', 'memory_fraction'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True), InferenceKind('runpod-host', _token_level(prompt_logprobs=True, top_logprobs=20, full_reload=False, loads=frozenset({'peft'}), bills='hours'), auths=('mtls',), auth=Auth('mtls', identity=LEASED), fields=(*POD_FIELDS, 'max_logprobs', 'memory_fraction', 'sleep', 'sandboxes'), secrets=('api_key',), implementation='rollout_train.pods.inference:InferencePod', remote=True))}
 ```
 
 Every kind of inference provider, by name.
@@ -7301,7 +7344,7 @@ A model a provider serves here.
 *constant* · `libraries/rollout-train/src/rollout_train/providers.py`
 
 ```python
-POD_FIELDS = ('image', 'gpu_types', 'gpu_count', 'max_pods', 'idle_stop', 'start_timeout', 'cloud', 'regions', 'cuda_versions', 'price', 'volume_gb', 'container_disk_gb', 'secrets', 'step_ca', 'store')
+POD_FIELDS = ('image', 'gpu_types', 'gpu_count', 'max_pods', 'idle_stop', 'start_timeout', 'cloud', 'regions', 'cuda_versions', 'price', 'volume_gb', 'container_disk_gb', 'secrets', 'step_ca', 'store', 'min_vcpus_per_gpu', 'min_memory_gb_per_gpu')
 ```
 
 The settings of a RunPod kind's table that say what its pods are (`PodTable`).
@@ -7345,6 +7388,9 @@ What a RunPod kind's table says of its pods (`pod_table`).
 | `store` | `str \| None` | `None` | The blob store its pods read and write (`[stores.NAME]`; none: `[blobs]`). |
 | `memory_fraction` | `float \| None` | `None` | The share of the GPU's memory vLLM takes (`--gpu-memory-utilization`); on a `runpod-host` pod the trainer has the rest (0.42 unless said). |
 | `sleep` | `bool` | `False` | On a `runpod-host` pod: whether vLLM sleeps while a step is taken (`rollout_train.colocated`), for a GPU too small to hold both. |
+| `min_vcpus_per_gpu` | `int \| None` | `None` | The fewest vCPUs a pod may be given for each GPU (RunPod's `minVCPUPerGPU`; none: RunPod's default). |
+| `min_memory_gb_per_gpu` | `int \| None` | `None` | The least memory, in GB, a pod may be given for each GPU (RunPod's `minRAMPerGPU`; none: RunPod's default). |
+| `sandboxes` | `tuple[str, ...]` | `()` | On a `runpod-host` pod: the kinds of sandboxes it serves beside its engine and trainer, each a `[sandboxes.KIND]` with `on_pods` (`rollout_train.pods.sandboxes`). |
 
 ### `ROUTING`
 
@@ -10980,6 +11026,8 @@ A pod, as RunPod says it is.
 | `ports` | `Mapping[int, int]` | `field(default_factory=dict[int, int])` | Each exposed port of the pod, and the public port it is reached at. |
 | `cost_per_hour` | `float \| None` | `None` |  |
 | `gpu` | `str \| None` | `None` | The GPU type RunPod gave it, by its id (`NVIDIA H100 80GB HBM3`), where it says. |
+| `vcpus` | `int \| None` | `None` | The vCPUs RunPod gave it (`vcpuCount`), where it says. |
+| `memory_gb` | `float \| None` | `None` | The memory RunPod gave it, in GB (`memoryInGb`), where it says. |
 
 **Methods**
 
@@ -11013,6 +11061,8 @@ A pod, as it is asked for.
 | `data_centers` | `Sequence[str]` | `()` |  |
 | `cuda_versions` | `Sequence[str]` | `()` | The CUDA versions the pod's machine may support (none: any); its driver must run the image's CUDA. |
 | `interruptible` | `bool` | `False` |  |
+| `min_vcpus_per_gpu` | `int \| None` | `None` | The fewest vCPUs the pod may be given for each GPU (RunPod's `minVCPUPerGPU`; none: RunPod's default, 2). |
+| `min_memory_gb_per_gpu` | `int \| None` | `None` | The least memory, in GB, the pod may be given for each GPU (RunPod's `minRAMPerGPU`; none: RunPod's default, 8). |
 
 **Methods**
 

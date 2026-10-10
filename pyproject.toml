@@ -80,6 +80,7 @@ src = [
 "implementations/rollout-s3/**" = "py312"
 "implementations/rollout-objectives/**" = "py312"
 "implementations/rollout-lora/**" = "py312"
+"environments/minecraft/**" = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
@@ -115,6 +116,7 @@ executionEnvironments = [  # (what the pods run, which they run on the vLLM imag
     { root = "implementations/rollout-s3/src", pythonVersion = "3.12" },
     { root = "implementations/rollout-objectives/src", pythonVersion = "3.12" },
     { root = "implementations/rollout-lora/src", pythonVersion = "3.12" },
+    { root = "environments/minecraft/minecraft_team", pythonVersion = "3.12" },
 ]
 
 [tool.pytest.ini_options]
