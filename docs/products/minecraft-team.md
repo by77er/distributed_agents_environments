@@ -88,9 +88,12 @@ names for `minecraft` before the episode begins, and releases it when the episod
 builds the task and waits until every bot holds the chunks around it; the lease's addresses are where a player joins
 the world to watch it (`game`) and the plugin's control API (`control`). It holds at most `size` worlds at once (6),
 each a Paper server of its own and a Node process for its bots, and an episode runner claims an episode only while one
-more fits. `worlds(directory, size=6, heap="1536M")` makes it for a run's driver (the run's directory, and the pool's
-`size` and `heap`, the cluster config's `[sandboxes.minecraft]` settings), or for a pool served on its own (`rollout
-pool --kind minecraft`, with `[scratch]/sandboxes/minecraft`), keeping the bots' logs under `directory/logs`.
+more fits. `worlds(directory, size=6, heap="1536M", cache=None)` makes it for a run's driver (the run's directory,
+and the pool's `size`, `heap` and `cache`, the cluster config's `[sandboxes.minecraft]` settings), for a pool served on
+its own (`rollout pool --kind minecraft`, with `[scratch]/sandboxes/minecraft`), or for a pool on a run's host pod
+(`on_pods`, with `/workspace/sandboxes/minecraft`), keeping the bots' logs under `directory/logs`. `cache` is where the
+Paper jar, the plugin, the templates and the servers go (by default `~/.cache/rollout/minecraft`): on a pod, its volume
+(`/workspace/minecraft`), so a container started again finds them.
 
 A world takes 1.1 GiB on a staged task, 1.25 to 1.45 GiB in the nether and 1.75 to 1.85 GiB with four bots walking
 apart on the surface; bots that roam for long through terrain the template does not hold take up to 2.4 GiB (the
@@ -390,7 +393,7 @@ sleeps, the trainer) is kept inside it by these:
 | GPU memory in a step | No turn is longer than the trainer can hold, which is settled when the turn is sampled: a long prompt leaves less room to think. The trainer is held to the GPU memory that is free when it starts ([the memory bound](../implementations/rollout-lora.md#the-memory-bound)). With the engine asleep, what other programs hold of the card stays in use |
 | A failed step | It is written down with its error, the adapter stays as it was, and play goes on ([training](../libraries/rollout-train/training.md#the-loop)) |
 | Stopping | A run asked to stop ends its servers, its engine and a step in progress; its engine hosts and trainer end with its job ([deploying](../guide/deploying.md#stopping)) |
-| Disk, not memory | Servers, templates and downloads are under `~/.cache/rollout/minecraft` (a JDK, if one is downloaded, under `~/.cache/rollout/jdk`), and a run's directory under the cluster config's `[scratch]`, on disk (`/tmp` may be memory) |
+| Disk, not memory | Servers, templates and downloads are under `~/.cache/rollout/minecraft` (or the provider's `cache`; a JDK, if one is downloaded, beside it in `jdk`), and a run's directory under the cluster config's `[scratch]`, on disk (`/tmp` may be memory) |
 | Listening ports | A server's ports are chosen just before Java starts, from outside the range the system gives outgoing connections, and never one this process has given to a server that has yet to listen. A server must answer its health check by its own name; a start that fails is tried once more with other ports |
 | Evidence | In a run of two consecutive updates, logged every two seconds, available memory never fell below 7.2 GiB |
 

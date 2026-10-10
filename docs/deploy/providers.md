@@ -137,6 +137,8 @@ Beside what every provider has (`models`, `replicas`), a RunPod table says what 
 | `memory_fraction` | 0.42 on a host | vLLM's share of the GPU's memory (`--gpu-memory-utilization`) |
 | `sleep` | false | On a host: vLLM sleeps while a step is taken, for a GPU too small for both |
 | `max_logprobs` | 20 | The top-k logprobs its vLLM is started with |
+| `min_vcpus_per_gpu`, `min_memory_gb_per_gpu` | RunPod's (2, 8) | The fewest vCPUs and the least memory in GB a pod may be given for each GPU (RunPod's `minVCPUPerGPU`, `minRAMPerGPU`): what its sandbox pools are sized from |
+| `sandboxes` | none | On a host: the kinds of sandboxes its pods serve beside the engine and trainer (`["minecraft"]`), each a `[sandboxes.KIND]` with `on_pods` ([below](#sandboxes-on-a-host-pod)) |
 
 A `runpod-trainer` also says `trainer` (`lora` or `full`) and its `models`, and may say `gpu_memory_gib` (each GPU's
 memory, for the check's `memory` rule, where its GPU types do not say it); one that takes its steps on a host's pods
@@ -217,6 +219,44 @@ segment_tokens = 8000
 
 A run on it says `trainer.provider = "h100-lora"`, `channels.policy.provider = "h100"`, and a `limits.hours` (and
 `limits.spend`) that bounds it.
+
+A pod's lease records the vCPUs and memory RunPod says it gave the pod (`vcpus`, `memory_gb`, from its API's
+`vcpuCount` and `memoryInGb`), read when the pod is started and at each renewal.
+
+### Sandboxes on a host pod
+
+A host pod has more CPUs and memory than its engine and trainer use (an RTX PRO 6000 pod: 16 vCPUs and 188 GB). Its
+provider's `sandboxes` names kinds of sandboxes it serves there, and the run that holds the pod plays its episodes'
+sandboxes of those kinds on it: its Minecraft worlds on the pod, its runner and the rest of the run in the cluster.
+
+```toml
+[inference.pro6000]
+kind = "runpod-host"
+# ... as above
+sandboxes = ["minecraft"]
+min_vcpus_per_gpu = 16                         # room for 12 worlds beside vLLM and the trainer
+
+[sandboxes.minecraft]
+provider = "minecraft_team.worlds:worlds"
+url = "http://sandboxes-minecraft.rollout:8710"   # the cluster's own pool, for when the pods are full
+on_pods = { settings = { cache = "/workspace/minecraft" } }
+```
+
+- **On the pod**, the image's pools' process serves a pool of each kind behind the pod's Envoy
+  (`/v1/sandboxes/KIND/...`), one sandbox per spare vCPU and no more than the spare memory holds
+  (`deploy/images/host/README.md` has the routes, the sizing and the variables).
+  It admits only the keys of the run that holds the pod, releases every lease when another run takes it or it is
+  released, and is started again alone when it ends.
+- **In the run's driver**, the pods the run leases whose provider serves the kind are one pool
+  ([on a run's pods](../libraries/rollout/sandboxes.md#on-a-runs-pods)), reached over mutual TLS with the gateway's
+  certificate and each pod's identity checked, as the gateway reaches their engines. A new sandbox goes to the pod
+  with the most room, then to the pool at `url` when every pod is full.
+- **`on_pods`** is `true`, or a table: `size` (the most a pod holds; by default as many as fit), `cpus` and
+  `memory_gib` (what one sandbox takes: 1 and 2.4 by default, a Minecraft world's), and `settings` (the provider's
+  settings on a pod, over the section's: Minecraft's `cache` on the pod's volume, so a container started again finds
+  the Paper jar, the plugin and the world templates).
+- **Validation.** On Kubernetes, a run whose environment needs a kind served from pods is refused unless it leases a
+  pod whose provider serves the kind, or the section has a `url`.
 
 ### What a deployment provides
 

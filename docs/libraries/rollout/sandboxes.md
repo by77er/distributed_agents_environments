@@ -5,7 +5,7 @@ declaring sandboxes, pools and leases, and serving pools over HTTP.
 
 **Read first:** [the harness](README.md). **Next:** [Determinism](determinism.md).
 
-Code: `rollout.harness.sandboxes`, `rollout_train.sandboxes` · See [tools](../../guide/tools.md),
+Code: `rollout.harness.sandboxes`, `rollout_train.sandboxes`, `rollout_train.pods.pools`, `rollout_train.pods.sandboxes` · See [tools](../../guide/tools.md),
 [rollouts](../rollout-train/rollouts.md), [API reference](../../guide/reference.md#sandboxspec)
 
 A sandbox is something a program runs against for the length of one run, outside its own code: a Minecraft world, a
@@ -206,7 +206,9 @@ is; a binding names it with `PoolBinding(url=...)`.
 | `POST /release` | `key` | |
 | `POST /call` | `key`, `name`, `arguments`, `effect_id`, `arguments_digest` | a `ToolResult` |
 
-A pool that raises answers 500 with `error`, and the client raises it.
+A pool that raises answers 500 with `error`, and the client raises it. `url` may end in a path, under which every
+route is (`https://IP:PORT/v1/sandboxes/minecraft`); `RemotePool(url, client=...)` sends every request through the
+client given (one with a client certificate, say), and `await describe()` asks it once what the pool offers.
 
 `rollout pool FACTORY [--directory DIRECTORY] [--ledger WHERE] [--name NAME] [--host 127.0.0.1] [--port 8710]`
 serves a `SandboxPool` over the provider `FACTORY` (`module:function`, called with the directory) returns, named
@@ -221,6 +223,37 @@ its provider made with `--directory` (by default `[scratch]/sandboxes/KIND`), it
 its leases beside the cluster's ledger. Where the section also says `url`, runs reach the pool there and make none of
 their own ([the cluster config](../../guide/cluster.md#every-section)); the chart runs it in a pod of its own for each
 kind ([Where sandboxes run](../../research/sandbox-placement.md)).
+
+## On a run's pods
+
+A kind whose `[sandboxes.KIND]` says `on_pods` is served from the RunPod host pods a run leases, on the CPUs and memory
+their engine and trainer leave ([sandboxes on a host pod](../../deploy/providers.md#sandboxes-on-a-host-pod)). Each
+pod whose provider lists the kind serves a pool of it (`rollout_train.pods.sandboxes`), and the run's driver holds
+them all as one pool, `PodPools` (`rollout_train.pods.pools`), which its runner binds as a local pool
+(`PoolBinding(local=KIND)`), so the runner and its programs see a pool like any other.
+
+| `PodPools` | Does |
+|---|---|
+| Which pods | At each look (`LeasedPools`), the pods whose leases the run holds with an `https` address, of the providers that serve the kind, each a `RemotePool` at `ADDRESS/v1/sandboxes/KIND` reached over mutual TLS with the gateway's certificate, the pod's identity (`spiffe://rollout/pod/NAME`) checked in the handshake. A pod whose beat is fresh is live |
+| `acquire` | A key with a lease: from where its lease is, and only there. A new key: on the live pod with the most room (its pool's `capacity`, less the acquires on their way to it, one choice at a time, so acquires at once spread), the next while each answers full, then the pool at the section's `url` (the cluster's own, where it says one); else `NoCapacity` |
+| `release`, `call` | On the pod (or the cluster's pool) that holds the key's lease |
+| `capacity` | The live pods' pools' summed, and the cluster's pool's: the runner asks one pool for room, as before |
+| A lost pod | A lease whose pod the run no longer holds (released, deleted, taken by another run) is lost: its key gets `SandboxLost`, and its episode is played again. A pod that only misses beats takes no new lease and keeps answering for its own |
+| Where each lease is | Kept in the run's directory (`pods/KIND/sandboxes.json`), the pod's lease under the pool's name, its handle `POD/HANDLE`: a driver started again sends the leases of the runs it adopts to where they are |
+
+**Claims.** The pod's ledger token reads the pod's own lease and nothing of the run's claims, so claims are checked
+where the platform's token is, in the run's driver: `PodPools` refuses a key whose claim has lapsed (`admits`, as a pool
+beside the ledger does) and releases its lease on its pod, and a keeper (`keep`) sweeps it like any pool of the run's,
+releasing on its pod each lease whose claim it found lapsed at two looks running. The pod's own pool needs no scope of
+the ledger beyond its lease:
+
+- it admits a key only while it is of the run its lease names (the key's first part is the run's id, or one of its
+  evals', `RUN-...`), reading the lease again for a key of another run, and refuses others with `LeaseRefused`;
+- when the lease names another run, or none, it releases every lease of others and deletes their sandboxes;
+- it releases a lease that no acquire or operation has used for 30 minutes (`ROLLOUT_SANDBOX_IDLE`): what a driver
+  that stopped left behind. A run's episodes pause while its trainer takes a step, which this outlasts;
+- it keeps its leases on the pod's volume, so started again it answers `SandboxLost` for the sandboxes it lost rather
+  than making new ones under their keys.
 
 ## In training: a lease ends with its claim
 

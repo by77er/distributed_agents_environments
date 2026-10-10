@@ -1,8 +1,9 @@
 # Where a run runs: in the cluster, or on its pod
 
-**Status: proposed.** Nothing here is built. It is read against main `e8e06d8`, and its figures are measured from the
-run `run_01M4745DD5B1NHNDGEA9RGT030` (`gridworld-9b-pro6000`). A design note: see [Design notes](README.md) for the
-others.
+**Status: option 1 built; the rest proposed.** Sandbox pools on a run's host pods, played from the cluster, are built
+([Sandbox pools on a host pod](#sandbox-pools-on-a-host-pod-built)); hosting the run on its pod is proposed. The note
+is read against main `e8e06d8`, and its figures are measured from the run `run_01M4745DD5B1NHNDGEA9RGT030`
+(`gridworld-9b-pro6000`). A design note: see [Design notes](README.md) for the others.
 
 A run that rents a GPU pod on RunPod plays its episodes in the platform's Kubernetes cluster and samples every turn
 across the internet on the pod. A pod comes with much more CPU and memory than its GPU's work uses (an RTX PRO 6000
@@ -164,7 +165,7 @@ run like the one measured.
 |---|---|---|---|---|
 | Now | Engine, follower, training service | 2 to the pod, 3 to R2, from the cluster | Built; the cluster holds everything but the GPU | The failures; the cluster's CPU and memory bound how many episodes play; a gigabyte a step down |
 | 0. The remote path made sound | As now | As now, with fewer resampled turns | Small; needed under any placement | The cluster's capacity still bounds play |
-| 1. Sandbox pool on the pod | Also the pool (`rollout pool`), served on a second mapped port behind Envoy | As now, plus every sandbox operation from the cluster's runners to the pod | Worlds get the pod's CPU and memory | The hairpin the user named: runner at home, world on the pod, model on the pod. The pool's leases need the ledger, so new scopes too. A second public endpoint |
+| **1. Sandbox pool on the pod (built)** | Also the pools (`rollout_train.pods.sandboxes`), behind Envoy on the pod's one port under `/v1/sandboxes/KIND` | As now, plus every sandbox operation from the cluster's runners to the pod | Worlds get the pod's CPU and memory; no new ledger scope and no second endpoint ([below](#sandbox-pools-on-a-host-pod-built)) | The hairpin the user named: runner at home, world on the pod, model on the pod |
 | 2. A gateway on the pod | Also a gateway: the runner's turns go to it over the internet | 1 to the pod (the runner's request), 2 to the ledger through the tunnel, 3 to R2 from the pod | Generations stay on the pod; the internet carries one request a turn instead of two | The ledger is now two tunnel round trips a turn; play is still bounded by the cluster |
 | 3. Play on the pod | Also runners, the environment's code, the gateway and the pools; the loop stays in the cluster | Ledger records through the tunnel; R2 from the pod | Every turn and sandbox operation stays on the pod | Runners are no Ray actors of the run's Ray cluster at home (a pod cannot join it, below), so they need a supervisor of their own; each step's segments still go to the cluster and back as the batch |
 | **4. The run hosted on its pod** | The whole run: driver, loop, gateway, runners, environment, pools, trainer client, in a Ray cluster of its own on the pod | Ledger records through the tunnel, batched; R2 from the pod | Turns, sandbox operations and steps never leave the pod; the run's roles keep their Ray forms; the pod's spare CPU and memory are the run's | The pod holds more credentials and runs the environment's code beside the trainer; the monitor's live feed and the keeper need new paths; a pod's restart restarts the run's driver |
@@ -172,6 +173,68 @@ run like the one measured.
 
 Option 4 is the recommendation, reached in phases. Options 1 to 3 each keep one leg of the hairpin; 4 removes the legs
 and leaves the records, which batch well.
+
+## Sandbox pools on a host pod (built)
+
+Option 1, for runs that stay in the cluster: a host pod serves sandbox pools on its spare CPUs and memory, and the run
+that holds it plays its episodes' worlds there through the claiming interface. Code: `rollout_train.pods.sandboxes`
+(the pod's process), `rollout_train.pods.pools` (`PodPools`, the run's pool of its pods' pools),
+`rollout_train.pods.routing` (`LeasedPools`), `deploy/images/host`.
+
+| Part | Where | What it does |
+|---|---|---|
+| The pools' process | The pod, `127.0.0.1:8710` | A `SandboxPool` of each kind the pod's settings name (`ROLLOUT_SANDBOXES`), served under its kind |
+| Envoy | The pod's one public port | Passes `GET /v1/sandboxes/KIND/operations` and `.../capacity`, `POST .../acquire`, `.../release` and `.../call` to the pools as `/KIND/...`, from the gateway's certificate alone; acquire may take 600 s (a world starts in a minute or more), an operation 120 s (a window is 20 s) |
+| `PodPools` | The run's driver, in the cluster | The run's pods' pools as one: a new lease on the live pod with the most room, then the cluster's pool (`url`); releases and operations where the lease is; capacity summed; a pod the run no longer holds loses its leases (`SandboxLost`) |
+| `LeasedPools` | The run's driver | The run's leased pods of providers that serve the kind, at their leases' addresses, over mutual TLS with the gateway's certificate, each pod's identity checked, as `LeasedServers` reaches their engines |
+
+**How many worlds a pod holds.** One per spare vCPU, bounded by memory: the pod's vCPUs less 4 (vLLM, the trainer, the
+follower, Envoy), at 1 vCPU a world, and no more than its memory less 64 GiB at 2.4 GiB a world (a world roaming far,
+[Minecraft memory](minecraft-memory.md)), nor than the section's `on_pods.size`. A PRO 6000 pod (16 vCPUs, 188 GB)
+holds 12; the cheapest H100 SXM pod (8 vCPUs, 125 GB), 4. The pod's vCPUs and memory are what RunPod's API says it
+gave it (`vcpuCount`, `memoryInGb`), which its lease records when it is started and at each renewal; where the lease
+does not say, the container's cgroup limits. A provider may ask RunPod for more (`min_vcpus_per_gpu`,
+`min_memory_gb_per_gpu`: RunPod's `minVCPUPerGPU`, `minRAMPerGPU`).
+
+**How leases end, without a new scope.** Claims live in the ledger, which the pod's token cannot read beyond its own
+lease. The choice is to check claims where the platform's token already is, in the run's driver, and to have the pod
+follow only its lease:
+
+- In the driver, `PodPools` refuses a key whose claim has lapsed and releases its lease on its pod, and a keeper
+  sweeps it like any pool of the run's (`keep`): a lease whose claim it found lapsed twice running is ended in the
+  ledger and released on its pod. Where each lease is lives in the run's directory, so a driver started again finds
+  the leases of the runs it adopts.
+- On the pod, the pools admit only keys of the run the lease names (and its evals'), release every lease of others when
+  the lease names another run or none, release a lease unused for 30 minutes (what a driver that stopped left; longer
+  than a step, while episodes wait), and keep their leases on the volume, so a pool started again answers
+  `SandboxLost` for what it lost rather than making a new world under the same key.
+
+A narrow new pod scope (reading the run's claims and beats) would let the pod check claims itself, but would widen what
+a pod's token reads to every runner's beat and the run's claims, for a check the driver makes already. Correctness
+does not rest on the pod: an episode whose claim lapsed is refused its records by its fence wherever its world is.
+
+**Supervision.** The pools' process is not vital to the pod: `supervise.sh`'s `restarting` starts it again 5 seconds
+after it ends, alone, and vLLM, the trainer and the follower never go down with it. Its worlds end with it; their
+episodes get `SandboxLost` and are played again.
+
+**Configuration.**
+
+```toml
+[inference.pro6000]
+kind = "runpod-host"
+sandboxes = ["minecraft"]                      # its pods serve Minecraft worlds
+min_vcpus_per_gpu = 16
+
+[sandboxes.minecraft]
+provider = "minecraft_team.worlds:worlds"
+url = "http://sandboxes-minecraft.rollout:8710"   # the cluster's own pool, for when the pods are full
+on_pods = { settings = { cache = "/workspace/minecraft" } }   # also: size, cpus, memory_gib
+```
+
+The host image carries a Java 21 runtime, Node 22 and the Minecraft environment with its harness's packages, and
+Minecraft's cache (the Paper jar, the plugin, the templates) goes on the pod's volume through the provider's `cache`
+setting. The round trip of a sandbox operation from the cluster's runners to the pod is not measured: each round of
+an episode pays it for every operation (an observation and an action for each agent, then the window).
 
 ## The run hosted on its pod
 
@@ -384,7 +447,7 @@ What it costs to build, in days of work for one person who knows the code (rough
 | 0 | Keep a server across a missed look (drop it only after several, or only for `generate`'s own failures; a turn already waits one out); size the connection pool from the turns in flight (`episodes_at_once` × slots × 2) and keep those connections alive; add a checkpoint from a step's manifests without downloading them; the gateway's own index of its sessions' turns | 2 to 3 |
 | 1 | `placement` and its validation; the keeper (`Run._leased` as a job of its own); the launch in the lease; the run host on the pod and Ray's head in the host image's entrypoint; a run's token scope in the ledger service; loopback routing to the pod's own engine and training service; the cluster config a pod-hosted run is handed; the feed beside the ledger; tests with the fake RunPod and processes standing in for the pod | 10 to 15 |
 | 2 | `ledger/append_many` and the group-commit writer; temporary R2 credentials minted by the keeper | 4 to 6 |
-| 3 | Sandbox pools on the pod: Java, Node and the harness in the host image (or an image per environment), a pool sized from the pod, the pool's leases through the service | 4 to 6 |
+| 3 | Sandbox pools on the pod: Java, Node and the harness in the host image, a pool sized from the pod, its leases ended by the run's driver and the pod's lease (built for runs in the cluster, option 1); for a run hosted on its pod, the pool in the run's Ray | 4 to 6 |
 | 4 | Imported environments on pods: programs in a process of their own under a user with no secrets (with the environment worker) | 10 or more, mostly the environment worker's |
 | 5 | Several pods: parts in the lease (`host`, `play`, `trainer`), runners and a gateway per replica's pod, a trainer pod reached by the host | 10 to 15 |
 
@@ -397,7 +460,7 @@ Most value first. Each later phase waits for its trigger.
 | 0. The remote path made sound | As above | Now: 41% of episodes failed on it before main's wait for a server, the pool is still smaller than the turns in flight, and every multi-pod shape keeps a remote path |
 | 1. The run hosted on its pod, trusted environments, no sandboxes | `placement = "pod"` for runs whose trainer and trained channel are one `runpod-host` provider and whose environment needs no sandbox | Phase 0 done and the round trip to the pod measured: start when a run is bounded by the cluster's CPU or memory (more episodes at once than its RayJob holds), or when a short-reply workload spends a fifth of a turn on the path |
 | 2. Group commit, temporary bucket keys | As above | With or right after phase 1, once the ledger's round trip from the pod is measured: if recording a turn from the pod takes more than about 0.3 s |
-| 3. Minecraft on the pod | As above | The first Minecraft run on a pod, or when the cluster's 4 worlds bound a run |
+| 3. Minecraft on the pod | As above; built for runs in the cluster ([option 1](#sandbox-pools-on-a-host-pod-built)) | The first Minecraft run on a pod, or when the cluster's 4 worlds bound a run |
 | 4. Imported environments on pods | As above | The first run on a pod of an environment from a source the cluster does not trust |
 | 5. Several pods | As above | A run that needs more than one GPU's engine, or a trainer on a GPU of its own ([scaling](scaling-models-and-topologies.md) phases 2 and 4) |
 
@@ -436,9 +499,9 @@ A Secret for the Cloudflare account token that mints R2's temporary credentials,
 `sandboxes` Deployments are as now, for runs in the cluster.
 
 **The images.** The host image's entrypoint starts Ray's head and the run host (`rollout_train.pods.hosting`) beside
-its processes; `supervise.sh` ends the container when any ends, as now. Ray's temporary directory on the volume. For
-phase 3, Java 21, Node and the Minecraft harness's `node_modules` in the host image (about 400 MB more), or an image
-per environment (an open decision below). The inference and trainer images are unchanged.
+its processes; `supervise.sh` ends the container when any vital process ends, as now. Ray's temporary directory on the
+volume. The host image holds Java 21, Node and the Minecraft harness's `node_modules` already (option 1). The inference
+and trainer images are unchanged.
 
 **The code.** `rollout_train.jobs` runs as the keeper or as the driver by placement; `pods.leases` gains the launch and
 the run's token and keys; `pods.hosting` is new; `pods.routing` resolves the pod the gateway runs on to its loopback
@@ -471,12 +534,13 @@ address; `ledger_service.scopes` gains the run's scope; `ledger_service` gains `
    cluster's gateway over the tunnel, so their keys stay in the cluster.
 10. **One host image, or an image per environment.** Minecraft needs Java and Node. *Recommendation:* one host image
     with them while Minecraft is the one heavy environment; an environment declares what it needs of its image, and a
-    second image when a second environment needs something else.
+    second image when a second environment needs something else. *Built:* the host image holds them.
 11. **Several pods: one Ray cluster, or one each.** *Recommendation:* one each, coordinated through the ledger, which
     works without Global Networking and is what runners on several machines already do.
 12. **Which GPU types host runs.** CPU per GPU varies: 16 vCPUs on a PRO 6000 or H100 PCIe pod, 8 on the cheapest H100
-    SXM. *Recommendation:* `hosts_runs` per provider, with `run_cpus` from what RunPod gave the pod (its lease records
-    the pod's vCPUs and memory from RunPod's API) rather than from a fixed figure.
+    SXM. *Recommendation:* `hosts_runs` per provider, with `run_cpus` from what RunPod gave the pod rather than from a
+    fixed figure. *Built:* a pod's lease records its vCPUs and memory from RunPod's API (`vcpus`, `memory_gb`), and its
+    sandbox pools are sized from them.
 
 ## Sources
 

@@ -48,8 +48,11 @@ episode, and acquires, operates and releases over HTTP exactly as it does in pro
   would each delete the other's sandboxes), with requests for `size` worlds and a memory limit for `size` roaming
   ones, behind the Service `sandboxes-KIND`, and writes `url` into the cluster config. A pod started again finds its
   old leases lost; their episodes are played again.
-- On Kubernetes, validation refuses a run whose environment needs sandboxes whose pool has no `url`: a pool in the
-  run's pod would hold memory Kubernetes does not account.
+- On Kubernetes, validation refuses a run whose environment needs sandboxes whose pool has no `url` and that no pod
+  of the run's serves: a pool in the run's pod would hold memory Kubernetes does not account.
+- A kind may also be served from the RunPod host pods a run leases (`on_pods`), on the CPUs and memory their engine and
+  trainer leave, with the pool at `url` taking what they have no room for
+  ([sandbox pools on a host pod](run-placement.md#sandbox-pools-on-a-host-pod-built)).
 - On one machine, without `[kubernetes]`, the pool is made in each run's driver as before; `[guards] runs_gib` keeps a
   runner from claiming episodes while the machine is short of memory.
 
