@@ -79,8 +79,9 @@ CLOSED = "its runner closed"
 """Why an attempt was cut short when its runner closed: it is played again."""
 LAPSED = "its claim lapsed while its runner was stopped"
 """Why a run its runner found on starting again was cut short: it is played again."""
-LOST = "its sandboxes did not outlive its runner"
-"""Why a run its runner adopted was cut short: what it was playing in is gone, so it is played again."""
+LOST = "its sandbox was lost"
+"""Why a run was cut short whose sandbox is gone (its pool ended it, or was started again, or its runner was): what it
+was playing in cannot be had back, so it is played again."""
 SUPERSEDED = "another took its episode's fence: its record was refused"
 """Why an attempt that ended was not recorded (a newer attempt claimed its episode meanwhile, say)."""
 RELEASED = "its claim lapsed, and its pool released its sandboxes"
@@ -316,7 +317,7 @@ class EpisodeRunner:
         if self.presence is not None:
             beating = asyncio.create_task(self._beats())
         for each, key, handle, fence in self._adopting:
-            self._follow(key, self._watch(each, key, handle, fence, adopted=True))
+            self._follow(key, self._watch(each, key, handle, fence))
         for run_id in self._lapsed:
             self._follow(f"lapsed/{run_id}", self._cut_short(run_id))
         self._adopting, self._lapsed = [], []
@@ -566,6 +567,10 @@ class EpisodeRunner:
             self.recorder.admit(run_id, Attempt(each.run, fence, f"{each.group}/{each.number}", each.attempt))
             try:
                 handle = await self.runner.start(specification, run_id=run_id, labels=labels, lease=f"{each.run}/{key}")
+            except SandboxLost:  # (what it would play in is gone: played again)
+                self.recorder.forget(run_id)
+                await self._interrupt(each, key, LOST)
+                return
             except Exception as error:  # a run that cannot start is a failed episode like any other
                 self.recorder.forget(run_id)
                 detail = f"{type(error).__name__}: {error}"
@@ -582,10 +587,10 @@ class EpisodeRunner:
             await self._interrupt(each, key, CLOSED)  # the attempt is noted, and played again by someone
             raise
 
-    async def _watch(self, each: Open, key: str, handle: RunHandle, fence: Fence, *, adopted: bool = False) -> None:
+    async def _watch(self, each: Open, key: str, handle: RunHandle, fence: Fence) -> None:
         """Follow a run to its end, and record its episode under its episode's `fence`, with what the gateway recorded
-        of its samples (an adopted run's too, from before its runner stopped). An adopted run whose sandboxes are gone
-        is cut short, to be played again."""
+        of its samples (an adopted run's too, from before its runner stopped). A run that failed because a sandbox of
+        its is gone (`SandboxLost`), adopted or not, is cut short, to be played again."""
         assert self._fence is not None
         self._tell("started", run=each.run, group=each.group, episode=each.number, run_id=handle.run_id)
         events: list[RunEvent] = [event async for event in handle.events()]
@@ -594,7 +599,7 @@ class EpisodeRunner:
         finally:
             self.recorder.forget(handle.run_id)
         episode = assemble(events, segments, run=each.run, group=each.group, number=each.number)
-        if adopted and episode.outcome is Outcome.FAILED and SandboxLost.__name__ in str(episode.detail):
+        if episode.outcome is Outcome.FAILED and SandboxLost.__name__ in str(episode.detail):
             await self._interrupt(each, key, LOST)
             return
         await self._ended(each, key, episode, events, fence)

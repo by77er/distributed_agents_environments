@@ -29,7 +29,7 @@ from rollout_train.ledger import FileLedger, Ledger
 from rollout_train.presence import FilePresence
 from rollout_train.record import GROUPS, scope, table
 from rollout_train.rollouts import Plan, episodes_of, plan, playing
-from rollout_train.rollouts.scheduler import CLAIMS
+from rollout_train.rollouts.scheduler import CLAIMS, INTERRUPTED, LOST
 from rollout_train.sandboxes import FileLeases, keep, leases_of, sweep
 from tests.local_ray import LocalRay
 from tests.rollout_train.clusters import POLICY, a_cluster
@@ -92,6 +92,28 @@ async def test_a_new_attempt_gets_a_new_sandbox_and_the_old_one_is_deleted(tmp_p
     assert episode.info["key"] == "train/1/1/2/box" and episode.info["handle"] != old.handle
     assert sorted(await ledger.read(table("train", CLAIMS))) == ["1/1/1", "1/1/2"]
     assert old.handle in sandboxes.deleted and sandboxes.sandboxes == {}
+
+
+async def test_a_live_episode_whose_sandbox_is_lost_is_played_again_not_failed(tmp_path: Path) -> None:
+    sandboxes = FakeSandboxes()
+    pool = SandboxPool(sandboxes, leases=FileLeases(tmp_path / "ledger"))
+    played = episode_runner(tmp_path, pool)
+    await ask_boxed(played.ledger, {1: ({"gate": "lost"}, 1)})
+    BOX_GATES.pop("lost", None)
+    async with playing(played):
+
+        async def leased() -> bool:
+            return bool(await pool.held())
+
+        await until(leased)
+        (first,) = await pool.held()
+        await pool.lose(first.key)  # (its pool ended it while the episode played: its worker was started again, say)
+        BOX_GATES.setdefault("lost", asyncio.Event()).set()
+        (episode,) = await episodes_of(played.ledger, played.blobs, "train", 1, 1, every=0.01)
+    assert first.key == "train/1/1/1/box" and episode.info["key"] == "train/1/1/2/box"  # (a new attempt, a new box)
+    assert episode.outcome.value == "completed"
+    interrupted = await played.ledger.read(table("train", INTERRUPTED))
+    assert {key: record["why"] for key, record in interrupted.items()} == {"1/1/1": LOST}  # type: ignore[index]
 
 
 async def _gone(sandboxes: FakeSandboxes, handle: str) -> bool:
