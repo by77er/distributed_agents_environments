@@ -100,7 +100,8 @@ RUNPOD = ("runpod-inference", "runpod-host", "runpod-trainer")
 """The kinds whose servers are RunPod's pods, leased by the runs that use them."""
 POD_FIELDS = (
     "image", "gpu_types", "gpu_count", "max_pods", "idle_stop", "start_timeout", "cloud", "regions",
-    "cuda_versions", "price", "volume_gb", "container_disk_gb", "secrets", "step_ca", "store",
+    "cuda_versions", "price", "volume_gb", "container_disk_gb", "secrets", "step_ca", "store", "min_vcpus_per_gpu",
+    "min_memory_gb_per_gpu",
 )  # fmt: skip
 """The settings of a RunPod kind's table that say what its pods are (`PodTable`)."""
 ROUTING = ("spill", "weighted")
@@ -418,7 +419,7 @@ INFERENCE_KINDS: Mapping[str, InferenceKind] = {
             ),
             auths=("mtls",),
             auth=Auth("mtls", identity=LEASED),
-            fields=(*POD_FIELDS, "max_logprobs", "memory_fraction", "sleep"),
+            fields=(*POD_FIELDS, "max_logprobs", "memory_fraction", "sleep", "sandboxes"),
             secrets=("api_key",),
             implementation="rollout_train.pods.inference:InferencePod",
             remote=True,
@@ -725,6 +726,13 @@ class PodTable:
     sleep: bool = False
     """On a `runpod-host` pod: whether vLLM sleeps while a step is taken (`rollout_train.colocated`), for a GPU
     too small to hold both."""
+    min_vcpus_per_gpu: int | None = None
+    """The fewest vCPUs a pod may be given for each GPU (RunPod's `minVCPUPerGPU`; none: RunPod's default)."""
+    min_memory_gb_per_gpu: int | None = None
+    """The least memory, in GB, a pod may be given for each GPU (RunPod's `minRAMPerGPU`; none: RunPod's default)."""
+    sandboxes: tuple[str, ...] = ()
+    """On a `runpod-host` pod: the kinds of sandboxes it serves beside its engine and trainer, each a
+    `[sandboxes.KIND]` with `on_pods` (`rollout_train.pods.sandboxes`)."""
 
 
 CLOUDS = ("SECURE", "COMMUNITY")
@@ -788,6 +796,11 @@ def pod_table(kind: str, settings: Mapping[str, JsonValue]) -> PodTable:
         raise ValueError("sleep is true or false")
     if kind == "runpod-host" and whole("gpu_count", 1) > 1:
         raise ValueError("gpu_count is 1 for a host: its vLLM serves on one GPU, and its trainer steps on the same one")
+    least = {key: whole(key, 1) if settings.get(key) is not None else None
+             for key in ("min_vcpus_per_gpu", "min_memory_gb_per_gpu")}  # fmt: skip
+    sandboxes = texts("sandboxes")
+    if sandboxes and kind != "runpod-host":
+        raise ValueError("sandboxes are served beside a host's engine and trainer: a runpod-host's pods alone")
     cuda_versions = texts("cuda_versions") or ("13.0",)
     if unknown := sorted(set(cuda_versions) - set(CUDA_VERSIONS)):
         raise ValueError(f"cuda_versions are RunPod's ({', '.join(CUDA_VERSIONS)}), not {', '.join(unknown)}")
@@ -797,4 +810,6 @@ def pod_table(kind: str, settings: Mapping[str, JsonValue]) -> PodTable:
         cloud=cloud, regions=texts("regions"), price=number("price", None), volume_gb=whole("volume_gb", 50),
         container_disk_gb=whole("container_disk_gb", 50), secrets=table("secrets"), step_ca=step_ca, store=store,
         memory_fraction=fraction, sleep=sleep, cuda_versions=cuda_versions,
+        min_vcpus_per_gpu=least["min_vcpus_per_gpu"], min_memory_gb_per_gpu=least["min_memory_gb_per_gpu"],
+        sandboxes=sandboxes,
     )  # fmt: skip

@@ -132,11 +132,13 @@ def declared(environment: "Environment") -> tuple[frozenset[str], EnvironmentFac
     from rollout_train.slots import Declared
 
     program = instantiate(first_program(environment))
-    kinds = frozenset(spec.kind for spec in program.sandboxes().values())
+    specs = list(program.sandboxes().values())
+    kinds = frozenset(spec.kind for spec in specs)
     slots = Declared.of(program.model_slots())
     return kinds, EnvironmentFacts(
-        "", sandboxes=kinds, slots=slots.names, untrained=slots.untrained, judges=slots.judges
-    )
+        "", sandboxes=kinds, slotted=frozenset(spec.kind for spec in specs if spec.slots), slots=slots.names,
+        untrained=slots.untrained, judges=slots.judges,
+    )  # fmt: skip
 
 
 async def environment_facts(
@@ -180,8 +182,9 @@ def _facts(name: str, environment: "Environment") -> EnvironmentFacts:
         _, facts = declared(environment)
     except Exception as error:  # (a program that cannot be made: it does not load)
         return EnvironmentFacts(name, loads=False, why=f"{type(error).__name__}: {error}")
-    return EnvironmentFacts(name, sandboxes=facts.sandboxes, slots=facts.slots, untrained=facts.untrained,
-                            judges=facts.judges, **_sampling(environment.description.to_json()))  # fmt: skip
+    return EnvironmentFacts(name, sandboxes=facts.sandboxes, slotted=facts.slotted, slots=facts.slots,
+                            untrained=facts.untrained, judges=facts.judges,
+                            **_sampling(environment.description.to_json()))  # fmt: skip
 
 
 def _sampling(description: Mapping[str, Any]) -> dict[str, Any]:

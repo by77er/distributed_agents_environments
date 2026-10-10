@@ -103,6 +103,19 @@ def test_a_pod_is_read_from_what_runpod_says() -> None:
     )
 
 
+def test_a_pods_cpus_and_memory_are_read_where_runpod_says_them() -> None:
+    placed = Pod.of({"id": "x1", "name": "host-0", "desiredStatus": "RUNNING", "vcpuCount": 16, "memoryInGb": 188})
+    assert (placed.vcpus, placed.memory_gb) == (16, 188.0)
+    waiting = Pod.of({"id": "x2", "name": "host-1", "desiredStatus": "RUNNING", "vcpuCount": 0, "memoryInGb": None})
+    assert (waiting.vcpus, waiting.memory_gb) == (None, None)  # (not placed yet: it has said nothing)
+
+
+def test_a_pod_may_ask_for_the_fewest_cpus_and_least_memory_per_gpu() -> None:
+    assert not {"minVCPUPerGPU", "minRAMPerGPU"} & set(SPEC.body())  # (unsaid: RunPod's own defaults)
+    body = PodSpec(name="host-0", image="img", gpu_types=["g"], min_vcpus_per_gpu=12, min_memory_gb_per_gpu=96).body()
+    assert (body["minVCPUPerGPU"], body["minRAMPerGPU"]) == (12, 96)
+
+
 async def test_every_request_says_who_sends_it(monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx
 

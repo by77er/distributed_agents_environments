@@ -1,7 +1,8 @@
 """The pods' images, read as files: Envoy passes on only the requests each pod's role needs, from the gateway's
 certificate alone, with limits; the certificates' paths agree across Envoy and the script that writes them; the images
-are built from the workspace's vLLM and PyTorch, and what they run is checked for their Python; every variable the pods
-read is documented. (CI runs `envoy --mode validate` on both configurations and builds the images.)"""
+are built from the workspace's vLLM and PyTorch, and what they run is checked for their Python; a host pod's sandbox
+pools are started again alone when they end; every variable the pods read is documented. (CI runs `envoy --mode
+validate` on both configurations and builds the images.)"""
 
 import re
 import tomllib
@@ -25,7 +26,15 @@ ALLOWED = {
         ("GET", "/v1/trainer"): "trainer",
     },
 }
-ALLOWED["host"] = {**ALLOWED["inference"], **ALLOWED["trainer"]}
+ALLOWED["host"] = {
+    **ALLOWED["inference"],
+    **ALLOWED["trainer"],
+    ("GET", "/v1/sandboxes/minecraft/operations"): "sandboxes",
+    ("GET", "/v1/sandboxes/minecraft/capacity"): "sandboxes",
+    ("POST", "/v1/sandboxes/minecraft/acquire"): "sandboxes",
+    ("POST", "/v1/sandboxes/minecraft/release"): "sandboxes",
+    ("POST", "/v1/sandboxes/minecraft/call"): "sandboxes",
+}
 REFUSED = [
     ("GET", "/v1/completions"),
     ("POST", "/v1/models"),
@@ -44,6 +53,15 @@ REFUSED = [
     ("DELETE", "/v1/steps/kmnopqrstuvwxyzk"),
     ("GET", "/v1/completions/x"),
     ("GET", "/"),
+    ("GET", "/v1/sandboxes/minecraft/acquire"),
+    ("POST", "/v1/sandboxes/minecraft/capacity"),
+    ("GET", "/v1/sandboxes/minecraft/call"),
+    ("POST", "/v1/sandboxes/minecraft/leases"),
+    ("POST", "/v1/sandboxes/Minecraft/acquire"),
+    ("POST", "/v1/sandboxes/minecraft/x/acquire"),
+    ("POST", "/v1/sandboxes/acquire"),
+    ("GET", "/v1/sandboxes/"),
+    ("GET", "/minecraft/capacity"),
 ]
 
 
@@ -91,6 +109,49 @@ def test_only_the_requests_the_role_needs_are_passed_on(role: str) -> None:
     assert all("timeout" in route["route"] for route in host["routes"] if "route" in route)
 
 
+def test_a_host_pod_s_sandbox_pools_are_reached_under_their_kind_with_time_for_a_world_to_start() -> None:
+    (host,) = manager(envoy("host"))["route_config"]["virtual_hosts"]
+    routes = {route["name"]: route["route"] for route in host["routes"] if route.get("route", {}).get("cluster")
+              == "sandboxes"}  # fmt: skip
+    assert set(routes) == {"sandboxes", "acquire", "sandbox"}
+    for route in routes.values():  # (the pools' process serves each pool under its kind: /KIND/acquire)
+        rewrite = route["regex_rewrite"]
+        upstream = re.sub(rewrite["pattern"]["regex"], rewrite["substitution"].replace("\\1", r"\1"),
+                          "/v1/sandboxes/minecraft/acquire")  # fmt: skip
+        assert upstream == "/minecraft/acquire"
+    seconds = {name: int(route["timeout"].removesuffix("s")) for name, route in routes.items()}
+    assert seconds["acquire"] >= 300 and int(routes["acquire"]["idle_timeout"].removesuffix("s")) >= seconds["acquire"]
+    assert 20 < seconds["sandbox"] <= seconds["acquire"]  # (an operation runs up to a 20-second window)
+    (cluster,) = [each for each in envoy("host")["static_resources"]["clusters"] if each["name"] == "sandboxes"]
+    (endpoints,) = cluster["load_assignment"]["endpoints"]
+    (endpoint,) = endpoints["lb_endpoints"]
+    from rollout_train.pods.sandboxes import SOCKET
+
+    assert endpoint["endpoint"]["address"] == {"pipe": {"path": SOCKET}}  # (the sandbox host's, root's alone)
+    assert "mkdir -p -m 700 /run/rollout" in (IMAGES / "host" / "entrypoint.sh").read_text()
+
+
+def test_a_host_pod_s_sandbox_host_is_started_again_alone_when_it_ends_with_a_growing_wait() -> None:
+    entrypoint = (IMAGES / "host" / "entrypoint.sh").read_text()
+    assert "start sandboxes restarting /opt/rollout/venv/bin/python -m rollout_train.pods.sandboxes" in entrypoint
+    supervise = (IMAGES / "common" / "supervise.sh").read_text()
+    assert "restarting() {" in supervise and "RESTART_LIMIT" in supervise and "wait * 2 > 300" in supervise
+    for role in ROLES:  # (no other process is started again: the container ends with any of them)
+        assert role == "host" or "restarting" not in (IMAGES / role / "entrypoint.sh").read_text()
+
+
+def test_the_host_image_holds_no_environment_and_none_of_an_environments_system_dependencies() -> None:
+    dockerfile = (IMAGES / "host" / "Dockerfile").read_text()
+    for absent in ("java", "temurin", "node", "npm", "minecraft", "environments/"):
+        assert absent not in dockerfile.lower(), absent
+    assert "COPY --from=uv /uv /uvx /usr/local/bin/" in dockerfile  # (what makes each kind's Python on the pod)
+    from rollout_train.pods.sandboxes import USERS
+
+    made = re.search(r"for number in ([0-9 ]+); do", dockerfile)
+    assert made is not None and tuple(f"sandbox{each}" for each in made.group(1).split()) == USERS
+    assert "useradd --system" in dockerfile and "--shell /usr/sbin/nologin" in dockerfile  # (a user a kind runs as)
+
+
 @pytest.mark.parametrize("role", ROLES)
 def test_only_the_gateway_s_certificate_is_taken(role: str) -> None:
     config = envoy(role)
@@ -109,11 +170,19 @@ def test_only_the_gateway_s_certificate_is_taken(role: str) -> None:
         path = Path(secret["sds_config"]["path_config_source"]["path"])
         (resource,) = yaml.safe_load((IMAGES / "common" / "sds" / path.name).read_text())["resources"]
         assert resource["name"] == secret["name"]
-    assert config["admin"]["address"]["socket_address"]["address"] == "127.0.0.1"
+    admin = config["admin"]["address"]
+    if role == "host":  # (a pod that runs sandboxes' code: its admin interface on a socket root's alone)
+        assert admin == {"pipe": {"path": "/run/rollout/envoy-admin.sock", "mode": 0o600}}
+    else:
+        assert admin["socket_address"]["address"] == "127.0.0.1"
     for cluster in config["static_resources"]["clusters"]:  # (the pod's servers listen on its loopback interface)
         for endpoints in cluster["load_assignment"]["endpoints"]:
             for endpoint in endpoints["lb_endpoints"]:
-                assert endpoint["endpoint"]["address"]["socket_address"]["address"] == "127.0.0.1"
+                address = endpoint["endpoint"]["address"]
+                if "pipe" in address:  # (or on a Unix socket in a directory root's alone)
+                    assert Path(address["pipe"]["path"]).parent == Path("/run/rollout")
+                else:
+                    assert address["socket_address"]["address"] == "127.0.0.1"
 
 
 @pytest.mark.parametrize("role", ROLES)
@@ -206,6 +275,12 @@ def test_what_a_pod_runs_is_checked_for_the_python_of_its_image(role: str) -> No
         assert f"{directory}/src" in checked and targets[f"{directory}/**"] == "py312", directory
     order = [image.index(each) for each in ("install.sh dependencies", "COPY --chmod=755", "install.sh packages")]
     assert order == sorted(order)
+    for editable in re.findall(r"--editable (\S+)", image):  # (a package installed where its files are: Minecraft's)
+        (source,) = re.findall(rf"COPY (\S+) {re.escape(editable)}\n", image)
+        project = tomllib.loads((ROOT / source / "pyproject.toml").read_text())["project"]
+        assert project["requires-python"] == ">=3.12", source
+        package = f"{source}/{project['name'].replace('-', '_')}"
+        assert package in checked and targets[f"{source}/**"] == "py312", source
 
 
 def _read(path: Path) -> set[str]:
@@ -224,7 +299,8 @@ def _read(path: Path) -> set[str]:
 @pytest.mark.parametrize("role", ROLES)
 def test_every_variable_a_pod_reads_is_documented(role: str) -> None:
     pods = ROOT / "libraries" / "rollout-train" / "src" / "rollout_train" / "pods"
-    modules = {"inference": ["inference.py"], "trainer": ["training.py"], "host": ["inference.py", "training.py"]}[role]
+    host = ["inference.py", "training.py", "sandboxes.py"]
+    modules = {"inference": ["inference.py"], "trainer": ["training.py"], "host": host}[role]
     read: set[str] = set[str]().union(*(_read(each) for each in (
         *(pods / module for module in modules), pods / "environment.py", IMAGES / role / "entrypoint.sh",
         IMAGES / "common" / "pki.sh",

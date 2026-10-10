@@ -130,12 +130,16 @@ def test_a_project_needing_another_python_is_refused(tmp_path: Path) -> None:
         project_of(repository(tmp_path / "source", files), "", None)
 
 
-def test_the_same_files_pack_to_the_same_bytes_without_git_caches_or_virtual_environments(tmp_path: Path) -> None:
+def test_the_same_files_pack_to_the_same_bytes_without_git_caches_virtual_environments_or_node_modules(
+    tmp_path: Path,
+) -> None:
     one = repository(tmp_path / "one", TINY)
     (one / "__pycache__").mkdir()
     (one / "__pycache__" / "words.cpython-313.pyc").write_bytes(b"compiled")
     (one / ".venv" / "bin").mkdir(parents=True)
     (one / ".venv" / "bin" / "python").write_text("a virtual environment")
+    (one / "harness" / "node_modules" / "vec3").mkdir(parents=True)  # (what `npm ci` made: not the project's files)
+    (one / "harness" / "node_modules" / "vec3" / "index.js").write_text("module.exports = {}")
     (one / "run.sh").write_text("#!/bin/sh\n")
     os.chmod(one / "run.sh", 0o755)
     two = tmp_path / "two"

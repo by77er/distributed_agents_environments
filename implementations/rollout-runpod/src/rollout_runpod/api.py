@@ -77,6 +77,11 @@ class PodSpec:
     cuda_versions: Sequence[str] = ()
     """The CUDA versions the pod's machine may support (none: any); its driver must run the image's CUDA."""
     interruptible: bool = False
+    min_vcpus_per_gpu: int | None = None
+    """The fewest vCPUs the pod may be given for each GPU (RunPod's `minVCPUPerGPU`; none: RunPod's default, 2)."""
+    min_memory_gb_per_gpu: int | None = None
+    """The least memory, in GB, the pod may be given for each GPU (RunPod's `minRAMPerGPU`; none: RunPod's default,
+    8)."""
 
     def body(self) -> dict[str, Any]:
         """The pod as RunPod's API takes it."""
@@ -92,6 +97,10 @@ class PodSpec:
             body["dataCenterIds"] = list(self.data_centers)
         if self.cuda_versions:
             body["allowedCudaVersions"] = list(self.cuda_versions)
+        if self.min_vcpus_per_gpu is not None:
+            body["minVCPUPerGPU"] = self.min_vcpus_per_gpu
+        if self.min_memory_gb_per_gpu is not None:
+            body["minRAMPerGPU"] = self.min_memory_gb_per_gpu
         return body
 
 
@@ -110,6 +119,10 @@ class Pod:
     cost_per_hour: float | None = None
     gpu: str | None = None
     """The GPU type RunPod gave it, by its id (`NVIDIA H100 80GB HBM3`), where it says."""
+    vcpus: int | None = None
+    """The vCPUs RunPod gave it (`vcpuCount`), where it says."""
+    memory_gb: float | None = None
+    """The memory RunPod gave it, in GB (`memoryInGb`), where it says."""
 
     def address(self, port: int = 8443) -> str | None:
         """Where `port` is reached from outside, `https://IP:PORT`; None until RunPod has said."""
@@ -121,10 +134,12 @@ class Pod:
         mappings: Any = said.get("portMappings") or {}
         ports = {int(inside): int(outside) for inside, outside in cast(dict[str, Any], mappings).items()}
         cost = said.get("adjustedCostPerHr", said.get("costPerHr"))
+        vcpus, memory = _counted(said.get("vcpuCount")), _counted(said.get("memoryInGb"))
         return cls(
             id=str(said["id"]), name=str(said.get("name") or ""), status=str(said.get("desiredStatus") or ""),
             image=str(said.get("image") or said.get("imageName") or ""), public_ip=said.get("publicIp") or None,
             ports=ports, cost_per_hour=float(cost) if cost is not None else None, gpu=_gpu_of(said),
+            vcpus=int(vcpus) if vcpus is not None else None, memory_gb=memory,
         )  # fmt: skip
 
 
@@ -194,6 +209,13 @@ class RunPod:
             return response.json()
         except ValueError:
             raise RunPodError(f"{method} {path}: RunPod's answer is not JSON", response.status_code) from None
+
+
+def _counted(value: Any) -> float | None:
+    """A count RunPod said: a positive number (it says 0 or nothing while it has not placed the pod), else none."""
+    if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+        return float(value)
+    return None
 
 
 def _gpu_of(said: Mapping[str, Any]) -> str | None:

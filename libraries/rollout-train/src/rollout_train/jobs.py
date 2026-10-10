@@ -82,7 +82,7 @@ from rollout_train.inference.channel import MAX_LAG
 from rollout_train.launching import Refused, checked, declared, ray_free
 from rollout_train.ledger import Fence
 from rollout_train.machine import measured
-from rollout_train.pods.leasing import pods_store
+from rollout_train.pods.leasing import pods_store, serving
 from rollout_train.presence import presence_of
 from rollout_train.providers import INFERENCE_KINDS, RUNPOD, TrainerProvider, settings_of
 from rollout_train.record import ENDS, STARTS, LimitReached, end, ending, scope, start_header, table, trained_objective
@@ -137,6 +137,14 @@ class SpendReached(LimitReached):
 
 class HoursReached(LimitReached):
     """A run ran as long as its `limits.hours` allows."""
+
+
+class SandboxesUnserved(RuntimeError):
+    """No pod of a run's served a kind of sandbox it needs for `UNSERVED` seconds, and no pool of the cluster's does."""
+
+
+UNSERVED = 1800.0
+"""Seconds a run waits for a pod of its to serve a kind of sandbox it needs, where no pool of the cluster's does."""
 
 
 def available_memory_gib() -> float:
@@ -407,6 +415,9 @@ class Run:
     reserved_at: float | None = None
     """When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own)."""
     pods: Any = None
+    failing: "asyncio.Future[BaseException] | None" = None
+    """Done, with the error, once something the run runs beside its loop fails it: its pods' leases lost to it
+    (`LeaseLost`), or no pod of its serving a kind of sandbox it needs for `UNSERVED` seconds (`SandboxesUnserved`)."""
     """Its pods on RunPod (`rollout_train.pods.leasing.Pods`), where its providers give it any."""
     trainer_need: Any = None
     """The pod its trainer's steps need of its own (`rollout_train.pods.leasing.PodNeed`), leased once a step is coming
@@ -470,6 +481,7 @@ class Run:
         needs = needs_of(self.settings, self.cluster)
         if not needs:
             return
+        needs = await self._with_sandboxes(needs)
         pods = Pods(self.run.id, self.cluster, self.ledger, told=self._told)
         self.pods = pods
         stack.push_async_callback(pods.release)
@@ -477,7 +489,7 @@ class Run:
         self.trainer_need = next((each for each in needs if each.role == TRAINING_POD), None)
         await pods.claim([each for each in needs if each is not self.trainer_need])
         await self._pods_spent(earlier)
-        _background(stack, pods.renewing(self._pods_spent))
+        _background(stack, self._renewing(pods))
         if self.noted is not None:
             await self.noted("running")
 
@@ -826,13 +838,18 @@ class Run:
 
     async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
         """A pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes]`: one
-        served elsewhere (`url`) is reached there; any other is made here, with its keeper, its leases kept beside the
+        served from the run's pods (`on_pods`) is reached on the pods that serve it, with its keeper here; one served
+        elsewhere (`url`) is reached there; any other is made here, with its keeper, its leases kept beside the
         ledger."""
         pools: dict[str, Pool] = {}
         for kind in sorted(self.sandboxes):
             section = self.cluster.sandboxes.get(kind)
             if section is None:
                 continue  # (validation refused a run whose environment needs it)
+            if section.on_pods is not None and (served := self._on_pods(stack, kind, section.url)) is not None:
+                pools[kind] = served
+                self.pool_bindings[kind] = PoolBinding(local=kind)
+                continue
             if section.url is not None:
                 self.pool_bindings[kind] = PoolBinding(url=section.url)
                 continue
@@ -848,6 +865,101 @@ class Run:
             pools[kind] = pool
             self.pool_bindings[kind] = PoolBinding(local=kind)
         return pools
+
+    async def _with_sandboxes(self, needs: Sequence[Any]) -> list[Any]:
+        """`needs`, those of providers whose pods serve kinds of sandboxes the environment declares given those kinds'
+        sources (`rollout_train.pods.sources`): their code packed and stored in the pods' store, once per content."""
+        from rollout_train.pods.leasing import with_sandboxes
+        from rollout_train.pods.sources import sources_of
+        from rollout_train.published import environment_versions_of
+
+        kinds = {kind for kind in self.sandboxes if kind in self.cluster.sandboxes}
+        if not any(serving(self.cluster, kind) for kind in kinds):
+            return list(needs)
+        from rollout_train.stores import blobs_at, opened
+
+        published = opened(blobs_at(self.cluster))  # (where versions are published: the cluster's own store)
+        try:
+            sources = await sources_of(self.cluster, kinds, self.stores.blobs, environment_versions_of(self.ledger),
+                                       published=published)  # fmt: skip
+        finally:
+            closing: Any = getattr(published, "aclose", None) or getattr(published, "close", None)
+            if closing is not None:
+                with contextlib.suppress(Exception):
+                    if asyncio.iscoroutine(done := closing()):
+                        await done
+        return with_sandboxes(needs, self.cluster, {kind: each.to_json() for kind, each in sources.items()})
+
+    def _on_pods(self, stack: contextlib.AsyncExitStack, kind: str, url: str | None) -> Pool | None:
+        """The pools of `kind` the run's pods serve, as one (`rollout_train.pods.pools`), the pool at `url` behind them
+        for when they are full; swept here by a keeper as a pool of the run's own. None where the run leases no pod
+        that serves the kind (validation refused such a run unless the pool at `url` serves it)."""
+        from rollout.harness.remote import RemotePool
+        from rollout_train.pods.pools import FilePlacements, PodPools
+        from rollout_train.pods.routing import LeasedPools
+
+        providers = serving(self.cluster, kind)
+        if self.pods is None or not any(each.provider in providers for each in self.pods.leases.values()):
+            return None
+        auth = self.cluster.inference[providers[0]].auth
+        discover = LeasedPools(self.ledger, self.run.id, kind, providers, auth, self.cluster.tls)
+        stack.push_async_callback(discover.aclose)
+        fallback = RemotePool(url) if url is not None else None
+        if fallback is not None:
+            stack.push_async_callback(fallback.aclose)
+        beats = presence_of(self.ledger)
+        placements = FilePlacements(self.directory / "pods" / f"{kind}.json")
+        pool = PodPools(
+            kind, discover, name=f"{kind}@{self.run.id}", placements=placements, admits=admits(self.ledger, beats),
+            fallback=fallback,
+        )  # fmt: skip
+        stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
+        _background(stack, keep(pool, self.ledger, beats))
+        if fallback is None:  # (no pool of the cluster's to fall back on: the run waits for its pods, but not for ever)
+            _background(stack, self._served_by_pods(kind, pool))
+        return pool
+
+    def fail(self, error: BaseException) -> None:
+        """End the run failed with `error` (`failing`), from something it runs beside its loop."""
+        if self.failing is None:
+            self.failing = asyncio.get_running_loop().create_future()
+        if not self.failing.done():
+            self.failing.set_result(error)
+
+    async def _renewing(self, pods: Any) -> None:
+        """Renew the run's pods' leases until cancelled; a lease lost to the run ends it failed."""
+        from rollout_train.pods.leasing import LeaseLost
+
+        try:
+            await pods.renewing(self._pods_spent)
+        except LeaseLost as error:
+            self.fail(error)
+
+    async def _served_by_pods(self, kind: str, pool: Pool, *, every: float = 30.0, within: float = UNSERVED) -> None:
+        """Watch that some pod of the run's serves `kind`: while none does, say so (in the run's beat and on its
+        launch); once none has for `within` seconds, end the run failed (`SandboxesUnserved`)."""
+        since: float | None = None
+        while self.failing is None or not self.failing.done():
+            try:
+                size = (await pool.capacity()).size
+            except Exception:  # (nothing answers: none serves it)
+                size = 0
+            if size > 0:
+                if since is not None and self.noted is not None:
+                    await self.noted("running")
+                since = None
+            else:
+                since = since if since is not None else time.monotonic()
+                await self._told([f"a pod that serves {kind} sandboxes (none of the run's does now)"])
+                if time.monotonic() - since >= within:
+                    self.fail(
+                        SandboxesUnserved(
+                            f"no pod of the run's served {kind} sandboxes for {within / 60:.0f} "
+                            f"minutes, and no pool of the cluster's does ([sandboxes.{kind}] url)"
+                        )
+                    )
+                    return
+            await asyncio.sleep(every)
 
     def _about(self) -> dict[str, JsonValue]:
         """What the runner says in each beat: its machine, the run, what each channel serves, what the run holds of
@@ -1179,7 +1291,9 @@ async def _within_limits[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
     """Do a run's work, ending it once it reaches a limit its settings set: what it and the runs it plays spent reaches
     `limits.spend` (`SpendReached`: their turns on hosted APIs, and its pods' hours at their price), or it has run for
     `limits.hours` since it began (`HoursReached`). The run ends stopped, with the reason (`ending`), and the parts it
-    played end failed with the same reason. Without a limit, just do it."""
+    played end failed with the same reason. A run that something it runs beside its loop fails (`Run.fail`: its pods'
+    leases lost to it, or its pods serving none of a kind of sandbox it needs for `UNSERVED` seconds) ends failed with
+    that error. Without a limit or anything to fail it, just do it."""
 
     def number(value: Any) -> float | None:
         return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
@@ -1193,6 +1307,11 @@ async def _within_limits[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
         watched["spend"] = asyncio.ensure_future(_pods_reach(live, spend))
     if hours is not None:
         watched["hours"] = asyncio.ensure_future(asyncio.sleep(max(0.0, live.began + hours * 3600 - time.time())))
+    if hasattr(live, "failing"):  # (what the run runs beside its loop, failing it)
+        if live.failing is None:
+            live.failing = asyncio.get_running_loop().create_future()
+        watched["failing"] = live.failing
+    failing: asyncio.Future[BaseException] | None = watched.get("failing")
     if not watched:
         return await work
     task = asyncio.ensure_future(work)
@@ -1205,6 +1324,11 @@ async def _within_limits[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
         return task.result()
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
+    if failing is not None and failing.done() and not failing.cancelled():
+        failed = failing.result()
+        for each in sorted(live.runs - {live.run.id}):
+            await end(live.ledger, each, RUN_FAILED, f"{type(failed).__name__}: {failed}")
+        raise failed
     reached: LimitReached
     if "spend" in watched and watched["spend"].done() and not watched["spend"].cancelled():
         total = await spending.total(live.runs) if spending is not None else float(getattr(live.pods, "spent", 0.0))

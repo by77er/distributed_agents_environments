@@ -5,7 +5,7 @@ declaring sandboxes, pools and leases, and serving pools over HTTP.
 
 **Read first:** [the harness](README.md). **Next:** [Determinism](determinism.md).
 
-Code: `rollout.harness.sandboxes`, `rollout_train.sandboxes` · See [tools](../../guide/tools.md),
+Code: `rollout.harness.sandboxes`, `rollout.harness.pool_server`, `rollout_train.sandboxes`, `rollout_train.pods` (`sources`, `sandboxes`, `pools`) · See [tools](../../guide/tools.md),
 [rollouts](../rollout-train/rollouts.md), [API reference](../../guide/reference.md#sandboxspec)
 
 A sandbox is something a program runs against for the length of one run, outside its own code: a Minecraft world, a
@@ -131,11 +131,11 @@ A [`Pool`](../../guide/reference.md#pool) hands out sandboxes of one kind under 
 
 | Member | Does |
 |---|---|
-| `await acquire(spec, key, environment)` | the lease of `key`: the one there is, or a new sandbox given `environment`. Raises `NoCapacity` when the pool is full, `LeaseRefused` for a key that may hold no lease now (its claim lapsed), and `SandboxLost` for a key whose sandbox is gone |
+| `await acquire(spec, key, environment)` | the lease of `key`: the one there is, or a new sandbox given `environment`. Raises `NoCapacity` when the pool is full (`PoolUnavailable`, a kind of it, when the pool does not answer now), `LeaseRefused` for a key that may hold no lease now (its claim lapsed), and `SandboxLost` for a key whose sandbox is gone |
 | `await release(key)` | ends the lease and deletes its sandbox; nothing when there is no such lease |
 | `await capacity()` | a `Capacity`: `size`, `leased`, and `free` |
 | `operations()`, `deduplicates` | what can be done to its sandboxes, and whether it performs each `effect_id` at most once |
-| `await call(key, name, arguments, *, effect_id, arguments_digest)` | an operation on the sandbox leased under `key` |
+| `await call(key, name, arguments, *, effect_id, arguments_digest)` | an operation on the sandbox leased under `key`; `SandboxLost` where the key has no live lease |
 
 [`SandboxPool(provider, name=..., leases=..., admits=...)`](../../guide/reference.md#sandboxpool) is a pool over a
 provider:
@@ -154,6 +154,8 @@ provider:
   playing in.
 - **`sweep(ended)`** releases the leases `ended` says have ended and those past their time limit, marks lost those
   whose sandbox is gone, and deletes the sandboxes no lease names. A lost lease holds no room.
+- **`lose(key)`** deletes a lease's sandbox and keeps the lease, marked lost: its key gets `SandboxLost`, from an
+  operation as from an acquire, until its run releases it.
 - **`close()`** releases every lease it holds and closes the provider.
 
 A [`Provider`](../../guide/reference.md#provider) makes, deletes and operates sandboxes of one kind:
@@ -202,11 +204,15 @@ is; a binding names it with `PoolBinding(url=...)`.
 |---|---|---|
 | `GET /operations` | | `operations`, `deduplicates` |
 | `GET /capacity` | | a `Capacity` |
-| `POST /acquire` | `spec`, `key`, `environment` | a `Lease`; 503 when the pool is full, 409 for a key it refuses (`LeaseRefused`), 410 for a key whose sandbox is gone (`SandboxLost`) |
+| `POST /acquire` | `spec`, `key`, `environment` | a `Lease`; 503 with `"full": true` when the pool is full, 409 for a key it refuses (`LeaseRefused`), 410 for a key whose sandbox is gone (`SandboxLost`) |
 | `POST /release` | `key` | |
-| `POST /call` | `key`, `name`, `arguments`, `effect_id`, `arguments_digest` | a `ToolResult` |
+| `POST /call` | `key`, `name`, `arguments`, `effect_id`, `arguments_digest` | a `ToolResult`; 410 for a key with no live sandbox (`SandboxLost`) |
 
-A pool that raises answers 500 with `error`, and the client raises it.
+A pool that raises answers 500 with `error`, and the client raises it. A 503 that does not say the pool is full (a
+proxy whose pool is not up) is `PoolUnavailable`; asking a pool how full it is, or what it offers, takes 10 seconds at
+most. `url` may end in a path, under which every
+route is (`https://IP:PORT/v1/sandboxes/minecraft`); `RemotePool(url, client=...)` sends every request through the
+client given (one with a client certificate, say), and `await describe()` asks it once what the pool offers.
 
 `rollout pool FACTORY [--directory DIRECTORY] [--ledger WHERE] [--name NAME] [--host 127.0.0.1] [--port 8710]`
 serves a `SandboxPool` over the provider `FACTORY` (`module:function`, called with the directory) returns, named
@@ -221,6 +227,52 @@ its provider made with `--directory` (by default `[scratch]/sandboxes/KIND`), it
 its leases beside the cluster's ledger. Where the section also says `url`, runs reach the pool there and make none of
 their own ([the cluster config](../../guide/cluster.md#every-section)); the chart runs it in a pod of its own for each
 kind ([Where sandboxes run](../../research/sandbox-placement.md)).
+
+## On a run's pods
+
+A kind whose `[sandboxes.KIND]` says `on_pods` is served from the RunPod host pods a run leases, on the CPUs and memory
+their engine and trainer leave ([sandboxes on a host pod](../../deploy/providers.md#sandboxes-on-a-host-pod)). Any kind
+can be: a pod's image holds no environment's code, and what it serves is data its lease gives it.
+
+| Part | Where | Does |
+|---|---|---|
+| The source (`rollout_train.pods.sources`) | Made by the run's driver | The provider (`module:name`) and its settings; its code, as projects' zips in the pods' blob store, packed as an imported environment is (a cluster's own kind: the provider's project, the platform's projects it depends on and `rollout`; a published version: its zip, read from the store versions are published to, and the platform's projects its dependencies name); pins of everything else, at the platform's versions; the Python (3.13); what a pool is sized by. A distribution the platform holds neither as a project nor installed is refused: nothing is ever fetched by a name alone. Given to each pod in its lease's settings (`sandboxes`, by kind) |
+| The sandbox host (`rollout_train.pods.sandboxes`) | Each host pod | Follows its lease: makes each kind's Python environment with uv (the projects editable, the pins with nothing resolved), once per digest of its source, kept on the volume; runs each kind's pool in a process and as a user of its own, on a Unix socket only the host reaches; passes `/KIND/...` on to it; tells it which run it serves, and whether to take new keys |
+| The pool's process (`rollout.harness.pool_server`) | Each kind on the pod, in its own Python, as its own user, given no secret | A `SandboxPool` over the provider, for one run at a time, its leases kept on the volume |
+| `PodPools` (`rollout_train.pods.pools`) | The run's driver | The run's pods' pools of a kind as one pool, bound as a local pool (`PoolBinding(local=KIND)`): the runner and its programs see a pool like any other |
+
+| `PodPools` | Does |
+|---|---|
+| Which pods | At each look (`LeasedPools`), the pods whose leases the run holds with an `https` address, of the providers that serve the kind, each a `RemotePool` at `ADDRESS/v1/sandboxes/KIND` reached over mutual TLS with the gateway's certificate, the pod's identity (`spiffe://rollout/pod/NAME`) checked in the handshake; given up on in 5 seconds where it does not connect. A pod whose beat is fresh is live |
+| `acquire` | A key with a lease: from where its lease is, and only there. A new key: on a live pod with room, the most first (every pod asked at once, outside any lock; the acquires on their way to a pod, or sent since it was asked, order the pods and exclude none), the next while each answers full, is not taking new keys, or does not answer, then the pool at the section's `url` (the cluster's own, where it says one); else `NoCapacity`. Where it goes is kept before the pod is asked, so an acquire whose answer is lost is released on its pod, at once or at the next sweep |
+| `release`, `call` | On the pod (or the cluster's pool) that holds the key's lease. A release that fails is kept and tried again at each sweep |
+| `capacity` | The live pods' pools' summed, and the cluster's pool's: the runner asks one pool for room, as before |
+| A lost pod | A lease whose pod the run no longer holds (released, deleted, taken by another run) is lost: its key gets `SandboxLost`, and its episode is played again. A pod that only misses beats takes no new lease and keeps answering for its own |
+| Where each lease is | Kept in the run's directory (`pods/KIND.json`): a driver started again sends the leases of the runs it adopts to where they are |
+| No pod serves it | Where the section has no `url`, the driver says in the run's beat and on its launch that it waits for a pod that serves the kind, and ends the run failed once none has for 30 minutes (`SandboxesUnserved`); a run would otherwise wait for ever, claiming no episode. A `url` is not required: a run on one pod may rather fail than play its worlds in the cluster |
+
+**Claims.** The pod's ledger token reads the pod's own lease and nothing of the run's claims, so claims are checked
+where the platform's token is, in the run's driver: `PodPools` refuses a key whose claim has lapsed (`admits`, as a pool
+beside the ledger does) and releases its lease on its pod, and a keeper (`keep`) sweeps it like any pool of the run's,
+releasing on its pod each lease whose claim it found lapsed at two looks running. The pod follows only its lease:
+
+- a kind's process admits a key only while it is of the run the lease names (the key's first part is the run's id, or
+  one of its evals', `RUN-...`), and refuses others with `LeaseRefused`; the host reads the lease again for an acquire
+  of another run's key first;
+- when the lease names another run, each process forgets the other runs' leases; when its `renewed` is older than 5
+  minutes (the driver renews it every 30 seconds, but may stall), each takes no new keys and goes on serving those it
+  holds; when it names no run, is idle, or `renewed` is older than 30 minutes (the driver is gone), each marks every
+  lease lost;
+- a lost lease's key gets `SandboxLost` until its run releases it, so its episode is played again, never in a fresh
+  sandbox under the same key;
+- its leases are kept on the pod's volume, so a process started again answers `SandboxLost` for the sandboxes it lost;
+- an episode that fails because its sandbox is lost is played again as a new attempt, whether or not its runner adopted
+  it, and recorded failed at its third ([rollouts](../rollout-train/rollouts.md#a-runner));
+- the run's driver renews the pods' leases every 30 seconds, trying again after a renewal that fails; a lease lost to
+  the run (another took it, or the reaper did) ends the run failed (`LeaseLost`).
+
+A kind whose specs name model slots is not served from pods: a harness inside reaches its model at the run's gateway,
+on the driver's loopback interface, which a pod cannot reach.
 
 ## In training: a lease ends with its claim
 

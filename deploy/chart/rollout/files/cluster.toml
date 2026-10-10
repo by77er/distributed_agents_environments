@@ -72,6 +72,8 @@ prefix = "{{ .Values.stores.prefix }}"
 # store = "r2"
 # volume_gb = 100
 # step_ca = { url = "https://ca.example.com", provisioner = "launcher", trust = "system", key_file = "/etc/rollout-secrets/step-ca/provisioner.jwk", root = "/etc/rollout-secrets/step-ca/root_ca.crt" }
+# sandboxes = ["minecraft"]                 # its pods also serve Minecraft worlds (sandboxes.minecraft.onPods)
+# min_vcpus_per_gpu = 16                    # room for 12 worlds beside vLLM and the trainer
 # [inference.h100.models."Qwen/Qwen3.5-9B"]
 # context = 8192
 # options = { max_lora_rank = 32, args = "--max-model-len 8192" }
@@ -189,6 +191,9 @@ costs = { "Qwen/Qwen3.5-4B" = { train = 0.737 }, "Qwen/Qwen3.5-9B" = { train = 1
 provider = "{{ $pool.provider }}"
 size = {{ $pool.size }}
 url = "http://sandboxes-{{ $kind }}.{{ $.Release.Namespace }}:{{ $pool.port }}"
+{{- with $pool.onPods }}
+on_pods = {{ . }}                             # also served from the runs' host pods whose provider lists it
+{{- end }}
 {{- end }}
 {{- end }}
 

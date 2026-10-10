@@ -394,9 +394,59 @@ def test_a_runpod_providers_table_says_what_its_pods_are() -> None:
         (('colocate_with = "h100"', 'colocate_with = "local"'), "not a runpod-host provider"),
         (('colocate_with = "h100"', 'colocate_with = "h100"\nmax_pods = 2'), "takes its steps on h100's pods"),
         (("idle_stop = 300", 'idle_stop = 300\nstore = "r2"'), "store names 'r2', which is no"),
+        (("idle_stop = 300", "idle_stop = 300\nmin_vcpus_per_gpu = 0"), "min_vcpus_per_gpu is a whole number"),
+        (("idle_stop = 300", 'idle_stop = 300\nmin_memory_gb_per_gpu = "lots"'), "min_memory_gb_per_gpu is a whole"),
+        (("idle_stop = 300", 'idle_stop = 300\nsandboxes = ["minecraft"]'), "which is no .sandboxes.minecraft. with"),
     ):
         with pytest.raises(ClusterError, match=says):
             cluster_of(SMALL + TLS + HOST.replace(*change))
+    assert (said.min_vcpus_per_gpu, said.min_memory_gb_per_gpu, said.sandboxes) == (None, None, ())
+    asking = cluster_of(SMALL + TLS + HOST.replace("idle_stop = 300", "idle_stop = 300\nmin_vcpus_per_gpu = 16\n"
+                                                   "min_memory_gb_per_gpu = 128"))  # fmt: skip
+    table = pod_table("runpod-host", asking.inference["h100"].settings)
+    assert (table.min_vcpus_per_gpu, table.min_memory_gb_per_gpu) == (16, 128)
+
+
+WORLDS = '\n[sandboxes.minecraft]\nprovider = "minecraft_team.worlds:worlds"\n'
+
+
+def test_a_kind_of_sandbox_may_be_served_from_the_pods_whose_provider_lists_it() -> None:
+    from rollout_train.cluster import OnPods
+    from rollout_train.providers import pod_table
+
+    serving = HOST.replace("idle_stop = 300", 'idle_stop = 300\nsandboxes = ["minecraft"]')
+    cluster = cluster_of(SMALL + TLS + serving + WORLDS + 'on_pods = true\nheap = "1G"\n')
+    section = cluster.sandboxes["minecraft"]
+    assert section.on_pods == OnPods() and section.settings == {"heap": "1G"} and section.url is None
+    assert pod_table("runpod-host", cluster.inference["h100"].settings).sandboxes == ("minecraft",)
+    told = cluster_of(SMALL + TLS + serving + WORLDS + 'on_pods = { size = 8, cpus = 1.5, memory_gib = 3, share = 0.5, '
+                      'settings = { heap = "2G" }, version = "minecraft-team@abc" }\n'
+                      'url = "http://sandboxes-minecraft:8710"\n')  # fmt: skip
+    said = OnPods(size=8, cpus=1.5, memory_gib=3.0, share=0.5, settings={"heap": "2G"}, version="minecraft-team@abc")
+    assert told.sandboxes["minecraft"].on_pods == said
+    two = HOST.replace("idle_stop = 300", 'idle_stop = 300\nsandboxes = ["minecraft", "boxes"]')
+    boxes = '\n[sandboxes.boxes]\nprovider = "tests.rollout_train.pods.sandbox_kinds:boxes"\non_pods = { size = 4 }\n'
+    cluster_of(SMALL + TLS + two + WORLDS + "on_pods = { share = 0.5 }\n" + boxes)  # (each says how much it takes)
+    for text, says in (
+        (SMALL + TLS + HOST + WORLDS + "on_pods = true\n", "no runpod-host provider's pods serve minecraft"),
+        (SMALL + TLS + serving + WORLDS, "which is no .sandboxes.minecraft. with on_pods"),
+        (SMALL + TLS + serving + WORLDS + "on_pods = { cpus = 0 }\n", "cpus and memory_gib are more than 0"),
+        (SMALL + TLS + serving + WORLDS + "on_pods = { gpus = 1 }\n", "on_pods has no gpus"),
+        (SMALL + TLS + serving + WORLDS + 'on_pods = "yes"\n', "on_pods is true, or a table"),
+        (SMALL + TLS + serving + WORLDS + "on_pods = { share = 1.5 }\n", "share is a part of a pod's spare"),
+        (SMALL + TLS + serving + WORLDS + 'on_pods = { version = "abc" }\n', "version names a published version"),
+        (SMALL + TLS + two + WORLDS + "on_pods = true\n" + boxes, "each says its size or its share in on_pods, and "
+         "minecraft says neither"),
+        (SMALL + TLS + two + WORLDS + "on_pods = { share = 0.8 }\n" + boxes.replace("size = 4", "share = 0.5"),
+         "shares add up to more than 1"),
+        (SMALL + TLS + HOST.replace("idle_stop = 300", 'sandboxes = ["Mine_craft"]') + WORLDS.replace(
+         "minecraft]", "Mine_craft]") + "on_pods = true\n", "named with lowercase letters, digits and hyphens"),
+        (SMALL + TLS + serving + '\n[sandboxes.minecraft]\nurl = "http://x:1"\non_pods = true\n', "names its provider"),
+        (SMALL + TLS + HOST.replace("idle_stop = 300", 'sandboxes = ["minecraft"]').replace('kind = "runpod-host"',
+         'kind = "runpod-inference"') + WORLDS + "on_pods = true\n", "has no sandboxes|a runpod-host's pods alone"),
+    ):  # fmt: skip
+        with pytest.raises(ClusterError, match=says):
+            cluster_of(text)
 
 
 def test_each_provider_and_trainer_is_metered_or_scheduled_by_its_kind_unless_it_says() -> None:

@@ -1,6 +1,8 @@
 # A host pod: a stock vLLM server and the follower that keeps it serving what the run that holds the pod says, the
-# training service over rollout-lora's trainers beside it on the same GPU, the certificate's renewal, and Envoy in
-# front with mutual TLS (deploy/images/host/README.md).
+# training service over rollout-lora's trainers beside it on the same GPU, the sandbox host (whatever kinds of sandbox
+# the run asks for, each in a Python environment uv makes on the pod from the run's sources: nothing of any
+# environment is in the image), the certificate's renewal, and Envoy in front with mutual TLS
+# (deploy/images/host/README.md).
 # Built from the repository's root, by .github/workflows/images.yml:
 #   docker build -f deploy/images/host/Dockerfile --build-arg VLLM_VERSION=0.30.0 .
 # VLLM_VERSION is the workspace's (uv.lock), so the server is the vLLM the engines here are tested with. The platform's
@@ -20,7 +22,13 @@ RUN --mount=type=bind,target=/source --mount=from=uv,source=/uv,target=/usr/loca
 FROM base
 COPY --from=envoy /usr/local/bin/envoy /usr/local/bin/envoy
 COPY --from=step /usr/local/bin/step /usr/local/bin/step
-RUN envoy --version && step version
+COPY --from=uv /uv /uvx /usr/local/bin/
+# The users the sandbox host runs each kind's pool as, one a kind: no home, no shell, nothing of root's.
+RUN for number in 1 2 3 4 5 6 7 8; do \
+        useradd --system --uid $((20000 + number)) --user-group --no-create-home --home-dir /nonexistent \
+            --shell /usr/sbin/nologin "sandbox$number"; \
+    done
+RUN envoy --version && step version && uv --version
 RUN --mount=from=locked,source=/locked.txt,target=/locked.txt \
     --mount=type=bind,source=deploy/images/common/install.sh,target=/install.sh \
     --mount=from=uv,source=/uv,target=/usr/local/bin/uv \

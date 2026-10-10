@@ -35,8 +35,9 @@ commented with why its numbers are what they are. The run's driver writes the mo
 it sees (the map included), what it thinks, what it does and what comes back
 ([monitor](../libraries/rollout-train/monitor.md)).
 
-Servers need `java` on the path and episodes need `node` and `npm`. Paper, a JDK to compile the plugin if there is no
-`javac`, and the harness's packages are downloaded on first use ([where they are kept](#imported-from-git)). Starting a
+Servers run on the `java` on the path and the bots on the `node` and `npm` on the path. Where there are none (a rented
+GPU pod), a JDK and Node 22 are downloaded on first use and used from the cache; so are Paper, a JDK to compile the
+plugin if there is no `javac`, and the harness's packages ([where they are kept](#imported-from-git)). Starting a
 server accepts the Minecraft EULA for a local, offline server.
 
 ## The pieces
@@ -89,8 +90,9 @@ builds the task and waits until every bot holds the chunks around it; the lease'
 the world to watch it (`game`) and the plugin's control API (`control`). It holds at most `size` worlds at once (6),
 each a Paper server of its own and a Node process for its bots, and an episode runner claims an episode only while one
 more fits. `worlds(directory, size=6, heap="1536M")` makes it for a run's driver (the run's directory, and the pool's
-`size` and `heap`, the cluster config's `[sandboxes.minecraft]` settings), or for a pool served on its own (`rollout
-pool --kind minecraft`, with `[scratch]/sandboxes/minecraft`), keeping the bots' logs under `directory/logs`.
+`size` and `heap`, the cluster config's `[sandboxes.minecraft]` settings), for a pool served on its own (`rollout pool
+--kind minecraft`, with `[scratch]/sandboxes/minecraft`), or for a pool on a run's host pod (`on_pods`, in a process
+of its own whose home is on the pod's volume), keeping the bots' logs under `directory/logs`.
 
 A world takes 1.1 GiB on a staged task, 1.25 to 1.45 GiB in the nether and 1.75 to 1.85 GiB with four bots walking
 apart on the surface; bots that roam for long through terrain the template does not hold take up to 2.4 GiB (the
@@ -390,7 +392,7 @@ sleeps, the trainer) is kept inside it by these:
 | GPU memory in a step | No turn is longer than the trainer can hold, which is settled when the turn is sampled: a long prompt leaves less room to think. The trainer is held to the GPU memory that is free when it starts ([the memory bound](../implementations/rollout-lora.md#the-memory-bound)). With the engine asleep, what other programs hold of the card stays in use |
 | A failed step | It is written down with its error, the adapter stays as it was, and play goes on ([training](../libraries/rollout-train/training.md#the-loop)) |
 | Stopping | A run asked to stop ends its servers, its engine and a step in progress; its engine hosts and trainer end with its job ([deploying](../guide/deploying.md#stopping)) |
-| Disk, not memory | Servers, templates and downloads are under `~/.cache/rollout/minecraft` (a JDK, if one is downloaded, under `~/.cache/rollout/jdk`), and a run's directory under the cluster config's `[scratch]`, on disk (`/tmp` may be memory) |
+| Disk, not memory | Servers, templates and downloads are under `~/.cache/rollout/minecraft` (a JDK and Node, where they are downloaded, beside it in `jdk` and `node`), and a run's directory under the cluster config's `[scratch]`, on disk (`/tmp` may be memory) |
 | Listening ports | A server's ports are chosen just before Java starts, from outside the range the system gives outgoing connections, and never one this process has given to a server that has yet to listen. A server must answer its health check by its own name; a start that fails is tried once more with other ports |
 | Evidence | In a run of two consecutive updates, logged every two seconds, available memory never fell below 7.2 GiB |
 
@@ -406,19 +408,21 @@ program declares a `minecraft` sandbox: that finding passes, flagged.
 A run on a version plays in the cluster's `[sandboxes.minecraft]` pool. Where the pool is made in the run's driver,
 the job starts in the version's files, which come first on its path, so the provider the pool names
 (`minecraft_team.worlds:worlds`) is the version's own, with its plugin, configuration and harness; a pool served from
-a pod of its own (the chart's) runs the provider of its pod's image. What a provider needs beyond its files is made
-where it runs, the first time an episode needs it, under `~/.cache/rollout` (the state volume, on the chart's cluster),
-each under a file lock so that episodes starting together make it once:
+a pod of its own (the chart's) runs the provider of its pod's image; a pool on a run's host pods runs the provider of
+the source its run gave the pod. What a provider needs beyond its files is made where it runs, the first time an episode
+needs it, under `~/.cache/rollout` (the state volume, on the chart's cluster; the pod's volume, on a host pod), each
+under a file lock so that episodes starting together make it once:
 
 | What | Where | Made |
 |---|---|---|
 | The harness's packages | `minecraft/harness/DIGEST/node_modules` | `npm ci` once per `package-lock.json` (DIGEST covers it and `package.json`): 470 MB, in seconds where npm's own cache holds them. Where the harness's own `node_modules` is installed beside its sources (a checkout after `npm ci`, the platform image's built-in copy), that is used |
 | Paper | `minecraft/paper/` | Downloaded once per version and build, checked against its SHA-256 |
-| A JDK, for `javac` | `jdk/` | Downloaded once where no `javac` is on the path (the platform image has a Java runtime only) |
+| A JDK, for `javac` and `java` | `jdk/` | Downloaded once (Eclipse Temurin 21, the release `JDK_RELEASE` pins, for the machine's architecture, checked against the SHA-256 pinned beside it) where no `javac` is on the path (the platform image has a Java runtime only); its `java` runs Paper where no `java` is on the path |
+| Node 22, for the bots | `node/` | Downloaded once (the release `NODE_VERSION` pins, for the machine's architecture, checked against the SHA-256 pinned beside it) where no `node` and `npm` are on the path; its `npm` installs the harness's packages |
 | The plugin | `minecraft/plugin/` | Compiled from the version's `plugin/` once per digest of its sources and the Paper version |
 | A template per world seed | `minecraft/templates/` | Generated once per seed and digest of `config/`: half a minute on 20 cores |
 
-The network is needed for the first three: the npm registry, PaperMC's downloads and Adoptium's.
+The network is needed for the first four: the npm registry, PaperMC's downloads, Adoptium's and nodejs.org.
 
 ## Reporting
 

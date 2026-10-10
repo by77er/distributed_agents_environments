@@ -41,7 +41,7 @@ nothing more.
 |---|---|---|
 | `runs/RUN/claims` | `GROUP/EPISODE/ATTEMPT` | the runner that plays that attempt, the number of its fence, when, and the run that plays it (`run_id`) |
 | `runs/RUN/episodes` | `GROUP/EPISODE` | the episode's [`Record`](../../guide/reference.md#record), once it has ended, appended under [the episode's fence](#each-episodes-fence) |
-| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt cut short, and why: its runner closed, the claim lapsed while its runner was stopped, the run's sandboxes did not outlive it, another took the episode's fence before it was recorded, or its pool released its sandboxes |
+| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt cut short, and why: its runner closed, the claim lapsed while its runner was stopped, a sandbox of its was lost (its pool ended it or was started again), another took the episode's fence before it was recorded, or its pool released its sandboxes |
 | `runs/RUN/adopted` | `GROUP/EPISODE/ATTEMPT/FENCE` | an attempt whose run its runner, started again, took up under its new fence, appended under the episode's fence |
 
 - **First append wins.** A claim is an append to a key no one has written, so two runners never play one attempt:
@@ -138,8 +138,9 @@ claims it held lapse, and their episodes are open again for any runner with room
 - **Cut short:** a run of its own claim that lapsed meanwhile (another runner took the episode up, say), still
   going. The attempt is noted in `interrupted` and the run cancelled; a pool beside the ledger refuses it its
   sandboxes and releases them.
-- **Played again:** an adopted run whose sandboxes did not outlive its runner (`SandboxLost`) is noted in
-  `interrupted`, and the episode is played as a new attempt.
+- **Played again:** a run that fails because a sandbox of its is gone (`SandboxLost`: its pool ended its lease, was
+  started again, or did not outlive the runner), adopted or not, is noted in `interrupted`, and the episode is played
+  as a new attempt; its third such attempt is recorded failed, saying its sandbox was lost three times running.
 
 `serve()` runs until cancelled; `async with playing(runner):` serves while a block runs.
 [`episodes_of(ledger, blobs, run, group, count)`](../../guide/reference.md#episodes_of) waits until all `count`

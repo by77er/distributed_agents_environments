@@ -158,6 +158,11 @@ class SandboxLost(Exception):
     """The key's sandbox is gone, and a new one would not be the one its run was using."""
 
 
+class PoolUnavailable(NoCapacity):
+    """The pool does not answer now (its process is starting, or was started again): an acquire may succeed once it
+    does. A runner waits for it as for room."""
+
+
 class PoolBinding(ContractModel):
     """How a kind of sandbox is served. Exactly one kind is set."""
 
@@ -304,6 +309,10 @@ class SandboxPool:
         """When each lease with a time limit is over, by key, on this process's monotonic clock."""
 
     @property
+    def kind(self) -> str:
+        return self.provider.kind
+
+    @property
     def deduplicates(self) -> bool:
         return deduplicates(self.provider)
 
@@ -375,9 +384,30 @@ class SandboxPool:
     async def call(
         self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
     ) -> ToolResult:
+        """Perform an operation on the sandbox of `key`. Raises `SandboxLost` for a key with no live lease here (its
+        lease was lost, or ended by the pool): its run cannot go on in another sandbox."""
+        await self._load()
+        lease = self._held.get(key)
+        if lease is None or lease.lost:
+            raise SandboxLost(f"the pool {self.name} holds no live sandbox of {key}")
         return await self.provider.call(
-            handle_of(key), name, arguments, effect_id=effect_id, arguments_digest=arguments_digest
+            lease.handle, name, arguments, effect_id=effect_id, arguments_digest=arguments_digest
         )
+
+    async def lose(self, key: str) -> None:
+        """Delete the sandbox of `key` and keep its lease, marked lost: the key gets `SandboxLost` from then on, until
+        its lease is released. Nothing when there is no such lease."""
+        await self._load()
+        async with self._lock(key):
+            lease = self._held.get(key)
+            if lease is None or lease.lost:
+                return
+            await self.provider.delete(lease.handle)
+            self._made.discard(lease.handle)
+            self._ends.pop(key, None)
+            lost = lease.model_copy(update={"lost": True})
+            await self.leases.put(lost)
+            self._held[key] = lost
 
     async def held(self) -> list[Lease]:
         """This pool's leases, those whose sandboxes are lost included."""

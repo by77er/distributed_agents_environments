@@ -8,7 +8,7 @@ at a public TCP port over mutual TLS:
 |---|---|---|
 | `ghcr.io/by77er/rollout-inference` | [inference](inference/README.md) | A stock vLLM server (the workspace's version), the follower that keeps it serving what one run's channel should (`rollout_train.pods.inference`), Envoy in front |
 | `ghcr.io/by77er/rollout-trainer` | [trainer](trainer/README.md) | The training service over rollout-lora's trainers (`rollout_train.pods.training`), Envoy in front |
-| `ghcr.io/by77er/rollout-host` | [host](host/README.md) | Both on one GPU: vLLM with its share of the GPU's memory and the follower, the training service beside it, one Envoy in front |
+| `ghcr.io/by77er/rollout-host` | [host](host/README.md) | Both on one GPU: vLLM with its share of the GPU's memory and the follower, the training service beside it, one Envoy in front; and the sandbox host, which serves the kinds of sandbox the run asks for on its spare CPUs and memory, each in a Python environment uv makes on the pod |
 
 They are built by `.github/workflows/images.yml` on a version tag (`v*`) or when it is run by hand, after
 `envoy --mode validate` has checked each Envoy configuration. Each image is tagged with the repository's version
@@ -22,7 +22,7 @@ Each is a widely used public image, as it is published, with a thin layer of the
 | Image | Base | Compressed | The platform's layers |
 |---|---|---|---|
 | inference | `vllm/vllm-openai:vVLLM_VERSION` (8.7 GB) | 8.8 GB | 85 MB: Envoy and step (51 MB), the follower's dependencies (31 MB), the platform's packages (2 MB) |
-| host | `vllm/vllm-openai:vVLLM_VERSION` | 8.8 GB | 110 MB: Envoy and step, the follower's and rollout-lora's dependencies (57 MB), the packages (2 MB) |
+| host | `vllm/vllm-openai:vVLLM_VERSION` | 8.8 GB | 110 MB: Envoy and step, the follower's and rollout-lora's dependencies (57 MB), the packages (2 MB); and uv's binaries (about 40 MB, not measured in this image) |
 | trainer | `pytorch/pytorch:TORCH-cuda13.0-cudnn9-runtime` (3.0 GB) | 3.2 GB | 170 MB: Envoy and step, rollout-lora's dependencies (transformers, accelerate, flash-linear-attention, …: 116 MB), the packages (2 MB) |
 
 - **One PyTorch.** The platform's packages run on the base image's Python (3.12), in `/opt/rollout/venv`: a virtual
@@ -54,7 +54,7 @@ What they share is in `common/`:
 |---|---|
 | `install.sh` | Exports the locked dependencies, and installs them and the workspace packages into `/opt/rollout/venv` on the image's Python ([What is in them](#what-is-in-them)) |
 | `pki.sh` | The pod's certificate from step-ca: the first with a one-time token, then renewed by the pod itself, each new one published for Envoy |
-| `supervise.sh` | Starts the pod's processes and ends them all when one ends, so the container exits and RunPod starts it again |
+| `supervise.sh` | Starts the pod's processes and ends them all when one ends, so the container exits and RunPod starts it again; a process the others do not need (a host pod's sandbox host, `restarting`) is started again alone when it ends, with a growing wait and a limit |
 | `sds/certificate.yaml`, `sds/ca.yaml` | Where Envoy reads the pod's certificate and the cluster's root: `/certs/current`, which `pki.sh` swaps in one rename |
 
 ## Certificates

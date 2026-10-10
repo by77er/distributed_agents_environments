@@ -95,6 +95,7 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `rayjob.ttlSeconds` | `30` | How long a finished run's Ray cluster stays (and holds what it asked for) |
 | `kueue.enabled`, `kueue.queue`, `kueue.quota` | `false`, `runs`, 12 CPUs, 9 GiB, one GPU | Kueue's admission of runs ([Kueue](#kueue)) |
 | `sandboxes.minecraft.enabled`, `.size`, `.resources` | `true`, `4`, 4 CPUs and 7.5 GiB requested, 10 GiB as the limit | The Minecraft worlds' pool: at most `size` worlds at once, each asking for 1.75 GiB and a CPU |
+| `sandboxes.minecraft.onPods` | none | The section's `on_pods`, as TOML (`true`, or `'{ memory_gib = 2.4 }'`): the worlds are also served from the host pods a run leases whose provider (in `clusterExtra`) lists `sandboxes = ["minecraft"]`, with this pool behind them ([sandboxes on a host pod](providers.md#sandboxes-on-a-host-pod)) |
 | `gateway.replicas`, `gateway.port`, `gateway.host` | `1`, `8900`, `gateway.localhost` | The gateway's replicas, port and Ingress host |
 | `monitors.NAME.ingress`, `.host`, `.hosts` | `false`, `monitor.localhost`, none | Whether a monitor has an Ingress, its host, and more names the monitor answers under (beside `localhost`, `127.0.0.1` and its Service's names) |
 | `secrets.monitor` | `monitor-token` | The monitors' token (`ROLLOUT_MONITOR_TOKEN`), which the chart makes where it is missing |

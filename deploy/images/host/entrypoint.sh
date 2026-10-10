@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # A host pod (deploy/images/host/README.md): its certificate first, then the renewal daemon, Envoy, the vLLM server
 # (with its share of the GPU's memory), the follower and the training service. When any of them ends, the others are
-# ended and the container exits.
+# ended and the container exits. The sandbox host (whatever kinds of sandbox the run that holds the pod asks for) runs
+# too, started again alone when it ends, with a growing wait: vLLM and the trainer never go down with it.
 set -euo pipefail
 source /opt/rollout/bin/supervise.sh
 
@@ -37,6 +38,8 @@ if [ -n "${VLLM_REASONING_PARSER:-}" ]; then
     reasoning_options=(--reasoning-parser "$VLLM_REASONING_PARSER" --reasoning-config "$VLLM_REASONING_CONFIG")
 fi
 
+# (the sandbox host's socket and Envoy's admin socket: root's alone, out of reach of the kinds' processes)
+mkdir -p -m 700 /run/rollout
 start certificates /opt/rollout/bin/pki.sh renew
 start envoy envoy --config-path "${ENVOY_CONFIG:-/etc/envoy/envoy.yaml}" --log-level "${ENVOY_LOG_LEVEL:-warn}" \
     --concurrency "${ENVOY_CONCURRENCY:-4}" # (by default Envoy runs a worker per hardware thread the machine has, not the pod)
@@ -47,5 +50,6 @@ start trainer /opt/rollout/venv/bin/python -m rollout_train.pods.training
 # (the follower says the pod is ready once vLLM serves what the run says and the training service holds its trainer)
 export ROLLOUT_TRAINER_URL=${ROLLOUT_TRAINER_URL:-http://127.0.0.1:8001}
 start follower /opt/rollout/venv/bin/python -m rollout_train.pods.inference
+start sandboxes restarting /opt/rollout/venv/bin/python -m rollout_train.pods.sandboxes
 
 supervise

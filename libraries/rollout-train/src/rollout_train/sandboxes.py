@@ -35,21 +35,43 @@ import socket
 import time
 from collections.abc import Awaitable, Callable, Collection
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import JsonValue
 
-from rollout.harness.sandboxes import Lease, Leases, SandboxPool
+from rollout.harness.sandboxes import Capacity, Lease, Leases
 from rollout_train.ledger import Fenced, FileLedger, Ledger, locked
 from rollout_train.presence import Presence
 from rollout_train.record import runs_in, table
 from rollout_train.rollouts.scheduler import INTERRUPTED, RELEASED, Claims, episode_scope, holding
 
-__all__ = ["FileLeases", "admits", "ended", "ending", "keep", "leases_of", "pool_scope", "sweep"]
+__all__ = ["FileLeases", "Kept", "admits", "ended", "ending", "keep", "leases_of", "pool_scope", "sweep"]
 
 logger = logging.getLogger(__name__)
 
 POOL = "pool"
 """The `kind` of a pool's beat."""
+
+
+class Kept(Protocol):
+    """A pool a keeper sweeps: a `SandboxPool`, or the pools of a run's pods (`rollout_train.pods.pools.PodPools`)."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def kind(self) -> str: ...
+
+    async def held(self) -> list[Lease]:
+        """Its leases, those whose sandboxes are lost included."""
+        ...
+
+    async def sweep(self, ended: Callable[[Lease], bool] = ...) -> list[str]:
+        """Release the leases `ended` says have ended (and what else the pool ends itself); the keys released or
+        marked lost."""
+        ...
+
+    async def capacity(self) -> Capacity: ...
 
 
 def leases_of(ledger: Ledger) -> Leases | None:
@@ -131,7 +153,7 @@ async def ending(keys: Collection[str], ledger: Ledger, presence: Presence | Non
 
 
 async def sweep(
-    pool: SandboxPool, ledger: Ledger, presence: Presence | None, *, lapsed: Collection[str] | None = None
+    pool: Kept, ledger: Ledger, presence: Presence | None, *, lapsed: Collection[str] | None = None
 ) -> tuple[list[str], set[str]]:
     """Release the pool's leases whose claims have ended (given `lapsed`, only those whose claims were found ended the
     look before too: the keys it holds), ending the claims in the ledger first (`ending`), and delete what no lease
@@ -145,7 +167,7 @@ async def sweep(
 
 
 async def keep(
-    pool: SandboxPool,
+    pool: Kept,
     ledger: Ledger,
     presence: Presence | None,
     *,
@@ -171,7 +193,7 @@ async def keep(
             with contextlib.suppress(Exception):  # (a beat missed is noticed only if many are)
                 capacity = (await pool.capacity()).to_json()
                 about: dict[str, JsonValue] = {"kind": POOL, "host": socket.gethostname(), "pool": pool.name}
-                await presence.beat(beat_as, {**about, "sandboxes": pool.provider.kind, **capacity})
+                await presence.beat(beat_as, {**about, "sandboxes": pool.kind, **capacity})
         await asyncio.sleep(every)
 
 

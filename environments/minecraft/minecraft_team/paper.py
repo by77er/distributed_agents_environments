@@ -16,8 +16,13 @@ Everything is cached under `~/.cache/rollout/minecraft` (not `/tmp`, which may b
 - `servers/`: temporary servers, copies of a template, deleted when stopped. A server ends with the process that
   started it, and what such a process left behind is removed by the next one (`sweep`).
 
-A JDK, only to compile the plugin when there is no `javac` on the path (a Java runtime is enough to run Paper), is
-downloaded beside it, to `~/.cache/rollout/jdk`.
+The runtimes are the machine's where it has them on the path (`java`, `javac`, `node` and `npm`). Where it does not,
+they are downloaded once beside the cache, for the machine's architecture, and used from there: a JDK (Eclipse Temurin,
+`JDK_RELEASE`) to `~/.cache/rollout/jdk`, whose `java` runs Paper where there is no `java` and whose `javac` compiles
+the plugin where there is no `javac`; and Node (`NODE_VERSION`) to `~/.cache/rollout/node`, whose `node` runs the bots
+and whose `npm` installs their packages. Each is refused unless it matches the SHA-256 pinned here, and is unpacked
+beside its place and renamed into it, under a lock. A machine that only runs processes (a rented GPU pod) needs
+nothing installed for Minecraft.
 
 Starting a server means accepting the Minecraft EULA (https://aka.ms/MinecraftEULA) for a local, offline server.
 """
@@ -26,14 +31,17 @@ import asyncio
 import contextlib
 import fcntl
 import hashlib
+import io
 import json
 import os
+import platform
 import random
 import shutil
 import signal
 import socket
 import subprocess
 import tarfile
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -64,6 +72,22 @@ GENERATED_CHUNKS = 19
 within 240 blocks of it and reach 40 further."""
 SHARED = ("libraries", "versions", "cache")
 """Directories every server shares with the bootstrap server, so none downloads or patches anything."""
+NODE_VERSION = "v22.23.3"
+"""The Node a machine without one downloads, by its release."""
+NODE = f"https://nodejs.org/dist/{NODE_VERSION}"
+NODE_SHA256 = {
+    "x64": "df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de",
+    "arm64": "a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f",
+}
+"""Each linux tarball's SHA-256, as the release's `SHASUMS256.txt` says it."""
+JDK_RELEASE = "jdk-21.0.12.1+1"
+"""The JDK (Eclipse Temurin 21) a machine without `javac` downloads, by its release."""
+JDK = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1"
+JDK_SHA256 = {
+    "x64": "ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94",
+    "aarch64": "23e37e026f12f3e706f18938ff611db3032d075b09d0879a25d06718c773e223",
+}
+"""Each linux JDK's SHA-256, as Adoptium publishes it beside the archive."""
 HEAP = "1536M"
 """A server's largest heap. Four bots roaming apart through terrain the template does not hold keep up to 1 GiB live
 (docs/research/minecraft-memory.md); in 15 turns of a task the live set grows from 214 MiB to 420 to 560 MiB."""
@@ -108,7 +132,33 @@ class Installation:
     def command(self, heap: str, *options: str) -> list[str]:
         """How Java starts a server in its directory: `heap` its largest heap, `options` more of Java's options (the
         plugin's system properties)."""
-        return [self.java, f"-Xmx{heap}", *JVM, *options, "-jar", str(self.paper_jar()), "--nogui"]
+        return [self.java_executable(), f"-Xmx{heap}", *JVM, *options, "-jar", str(self.paper_jar()), "--nogui"]
+
+    # The runtimes: the machine's on the path, else downloaded once beside the cache
+
+    def java_executable(self) -> str:
+        """The `java` that runs Paper: the machine's on the path, else the downloaded JDK's (`jdk`)."""
+        return shutil.which(self.java) or str(self.jdk() / "java")
+
+    def node(self) -> Path:
+        """The directory of the `node` and `npm` that run the bots and install their packages: the machine's on the
+        path, else Node 22's, downloaded once (`_node`)."""
+        if (system := shutil.which("node")) and shutil.which("npm"):
+            return Path(system).parent
+        with self._lock("node"):
+            return self._node()
+
+    def _node(self) -> Path:
+        arch = _architecture({"x86_64": "x64", "amd64": "x64", "aarch64": "arm64", "arm64": "arm64"}, "Node")
+        name = f"node-{NODE_VERSION}-linux-{arch}"
+        target = self.root.parent / "node"
+        if not (target / name / "bin" / "node").is_file():
+            _unpacked(f"{NODE}/{name}.tar.xz", NODE_SHA256[arch], target, name)
+        return target / name / "bin"
+
+    def node_environment(self) -> dict[str, str]:
+        """This process's environment with the `node` and `npm` it uses first on the path (npm runs `node` by name)."""
+        return {**os.environ, "PATH": f"{self.node()}{os.pathsep}{os.environ.get('PATH', '')}"}
 
     @contextlib.contextmanager
     def _lock(self, name: str) -> Generator[None]:
@@ -149,26 +199,19 @@ class Installation:
         return directory
 
     def jdk(self) -> Path:
-        """A JDK's bin directory, downloaded if no `javac` is on the path."""
+        """A JDK's bin directory: the machine's, where `javac` is on the path; else `JDK_RELEASE`, downloaded once for
+        this machine's architecture, checked, and unpacked whole before it is used."""
         if system := shutil.which("javac"):
             return Path(system).parent
-        found = sorted((self.root.parent / "jdk").glob("jdk-21*/bin/javac"))
-        if found:
-            return found[-1].parent
+        arch = _architecture({"x86_64": "x64", "amd64": "x64", "aarch64": "aarch64", "arm64": "aarch64"}, "A JDK")
         target = self.root.parent / "jdk"
-        target.mkdir(parents=True, exist_ok=True)
-        asset = _json(
-            "https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse"
-        )[0]["binary"]["package"]
-        data = _fetch(asset["link"])
-        if hashlib.sha256(data).hexdigest() != asset["checksum"]:
-            raise RuntimeError("the JDK download does not match its checksum")
-        archive = target / asset["name"]
-        archive.write_bytes(data)
-        with tarfile.open(archive) as tar:
-            tar.extractall(target, filter="data")
-        archive.unlink()
-        return sorted(target.glob("jdk-21*/bin/javac"))[-1].parent
+        if not (target / JDK_RELEASE / "bin" / "javac").is_file():
+            with self._lock("jdk"):
+                if not (target / JDK_RELEASE / "bin" / "javac").is_file():
+                    version = JDK_RELEASE.removeprefix("jdk-").replace("+", "_")
+                    archive = f"{JDK}/OpenJDK21U-jdk_{arch}_linux_hotspot_{version}.tar.gz"
+                    _unpacked(archive, JDK_SHA256[arch], target, JDK_RELEASE)
+        return target / JDK_RELEASE / "bin"
 
     def plugin_jar(self) -> Path:
         """The ground-truth plugin, compiled against this Paper's API; rebuilt when its sources change."""
@@ -228,9 +271,10 @@ class Installation:
         directory.mkdir(parents=True)
         for path in manifests:
             shutil.copy2(path, directory / path.name)
+        npm = str(self.node() / "npm")
         installed = subprocess.run(
-            ["npm", "ci", "--omit=dev", "--no-audit", "--no-fund"], cwd=directory, capture_output=True, text=True,
-            check=False,
+            [npm, "ci", "--omit=dev", "--no-audit", "--no-fund"], cwd=directory, capture_output=True, text=True,
+            check=False, env=self.node_environment(),
         )  # fmt: skip
         if installed.returncode != 0:
             raise RuntimeError(f"npm ci failed for the harness:\n{installed.stderr[-4000:]}")
@@ -576,6 +620,33 @@ def _json(url: str) -> Any:
 def _fetch(url: str) -> bytes:
     with urllib.request.urlopen(url, timeout=120) as response:
         return response.read()
+
+
+def _architecture(names: dict[str, str], what: str) -> str:
+    """This machine's architecture as a download names it; `RuntimeError` saying so where none is pinned for it."""
+    machine = platform.machine().lower()
+    if machine not in names:
+        raise RuntimeError(f"{what} is pinned here for {', '.join(sorted(set(names.values())))} machines, not this one "
+                           f"({machine}): put it on the path")  # fmt: skip
+    return names[machine]
+
+
+def _unpacked(url: str, sha256: str, target: Path, name: str) -> None:
+    """Download the tarball at `url`, refuse it unless its SHA-256 is `sha256`, and unpack its one top directory as
+    `target/name`: into a directory beside it first, then renamed, so a half unpacked one is never found."""
+    data = _fetch(url)
+    if hashlib.sha256(data).hexdigest() != sha256:
+        raise RuntimeError(f"the download {url} does not match its checksum")
+    target.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(dir=target, prefix=".partial-"))
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
+            tar.extractall(staging, filter="data")
+        (unpacked,) = [each for each in staging.iterdir() if each.is_dir()]
+        shutil.rmtree(target / name, ignore_errors=True)
+        unpacked.replace(target / name)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def _write_atomically(path: Path, data: bytes) -> None:
