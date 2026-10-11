@@ -482,8 +482,9 @@ async def _dataset(
 
         first: Any = next(iter((await ledger.read(f"runs/{ids[0]}/{EPISODES}")).values()), None)
         at = await where_blobs_are(ledger, ids[0], Record.from_json(first).trajectories if first else None)
+    beside = where.blobs if not isinstance(where, str) else None  # (the cluster's)
     made = await make_dataset(ledger, rule, ids, into=opened(at), at=at, turns=turns or [ALL], cut=cut or [],
-                              per_task=per_task)  # fmt: skip
+                              per_task=per_task, beside=beside)  # fmt: skip
     if name:
         await registry.name_dataset(name, made.id)
     counts = ", ".join(f"{value} {key.replace('_', ' ')}" for key, value in made.counts.items())
@@ -552,11 +553,10 @@ def _registry_at(where: "str | Stores") -> "tuple[Ledger, Registry]":
 async def _merge(who: str, where: "str | Stores", base: str | None, merger: str, bookmark: str | None) -> None:
     from rollout.harness.blobs import Blobs, FileBlobStore
     from rollout_train.checkpoints import Checkpoints
-    from rollout_train.datasets import where_blobs_are
+    from rollout_train.datasets import run_blobs
     from rollout_train.layout import BLOBS
     from rollout_train.merging import SCOPE, merge
     from rollout_train.registry import resolved
-    from rollout_train.stores import opened
 
     ledger, registry = _registry_at(where)
     lora = await resolved(ledger, registry, who)
@@ -568,7 +568,7 @@ async def _merge(who: str, where: "str | Stores", base: str | None, merger: str,
         beside = where.blobs  # (the cluster's)
     made = await Checkpoints(ledger, beside).checkpoint(lora)  # (its record only)
     try:
-        blobs = opened(await where_blobs_are(ledger, made.run)) if made.run else beside
+        blobs = await run_blobs(ledger, made.run, beside=beside) if made.run else beside
     except ValueError:  # (a run that does not say where its blobs are keeps them beside its ledger)
         blobs = beside
     fence = await ledger.take(SCOPE)

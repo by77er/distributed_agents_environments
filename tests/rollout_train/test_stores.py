@@ -139,6 +139,32 @@ async def test_a_runs_checkpoints_in_another_store_are_read_from_where_its_start
     assert (fetched / "adapter.safetensors").read_bytes() == b"trained on a pod"
 
 
+async def test_a_runs_blobs_copied_into_the_clusters_store_are_read_there_once_its_own_store_is_retired(
+    tmp_path: Path,
+) -> None:
+    from rollout_train.datasets import run_blobs
+    from rollout_train.record import STARTS, table
+    from rollout_train.stores import Fallback
+
+    cluster = cluster_of(cluster_toml(f'url = "sqlite:///{tmp_path}/ledger.db"', f'directory = "{tmp_path}/blobs"'))
+    stores = Stores.open(cluster)
+    retired = FileBlobStore(tmp_path / "retired")
+    fence = await stores.ledger.take("runs/r")
+    await stores.ledger.append(
+        table("r", STARTS), "1", {"blobs": {"kind": FILES, "directory": str(tmp_path / "retired")}}, fence
+    )
+    reference = await stores.blobs.put(b"an episode", "text/plain")  # (copied into the cluster's store; not in its own)
+    with pytest.raises(Exception):  # noqa: B017 (its own store has it no longer)
+        await (await run_blobs(stores.ledger, "r")).read(reference)
+    store = await run_blobs(stores.ledger, "r", beside=stores.blobs)
+    assert isinstance(store, Fallback) and await store.read(reference) == b"an episode"
+    written = await store.put(b"new", "text/plain")  # (puts and deletes go to the run's own store)
+    assert await retired.read(written) == b"new"
+    await store.delete(written)
+    with pytest.raises(Exception):  # noqa: B017
+        await retired.read(written)
+
+
 def run(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], *arguments: str) -> tuple[int, str]:
     """A command's exit status and what it printed (and exited saying)."""
     from rollout_train.cli import main

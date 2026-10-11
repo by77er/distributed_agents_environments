@@ -207,7 +207,9 @@ role's references do not resolve (by name, never by value) and which environment
   credentials come from the node's `AWS_*` environment, or from the variables it names (`access_key_id_env`,
   `secret_access_key_env`), never from the config. `Stores.open(cluster, store=NAME)` writes to `[stores.NAME]`
   instead. Every blob reference says its store in its URI (`s3://BUCKET/PREFIX…`); a checkpoint's files are read from
-  the store that holds them, which a run's start names, so a process that reads them holds every store's key.
+  the store that holds them, which a run's start names, so a process that reads them holds every store's key. A
+  run's episodes and checkpoints are read from the cluster's own store too, where the store its start names lacks
+  them (`Fallback`): its blobs may be copied into the cluster's store and its own store retired.
 
 `Stores.location` is where the blob store is, as any process opens it: what a run's start records. The stores beside
 the ledger are reached through it: `checkpoints`, `registry` and `presets`.

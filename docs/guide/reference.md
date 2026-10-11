@@ -36,7 +36,7 @@ do not edit by hand.
 - **[`rollout_train.bridges`](#rollout_trainbridges)** — Bridges between checkpoint formats: the registry, paths, refused pairs, their tasks. [`Bridge`](#bridge), [`bridge_of`](#bridge_of), [`BRIDGED`](#bridged), [`bridged`](#bridged), [`BRIDGES`](#bridges), [`BRIDGING`](#bridging), [`by_name`](#by_name), [`checkpoint_of`](#checkpoint_of), [`Context`](#context), [`format_of`](#format_of), [`FORMATS`](#formats), [`key`](#key), [`made`](#made), [`NoBridge`](#nobridge), [`on_ray`](#on_ray), [`path`](#path), [`rank_factor`](#rank_factor), [`REFUSED`](#refused), [`verbatim`](#verbatim)
 - **[`rollout_train.objectives`](#rollout_trainobjectives)** — Objectives declared: families, components, presets, and resolving them. [`Advantage`](#advantage), [`Clip`](#clip), [`Component`](#component), [`component`](#component), [`COMPONENTS`](#components), [`composed`](#composed), [`DEFAULT`](#default), [`Distillation`](#distillation), [`Entropy`](#entropy), [`FAMILIES`](#families), [`from_trainer_settings`](#from_trainer_settings), [`Importance`](#importance), [`Kl`](#kl), [`LEGACY`](#legacy), [`Likelihood`](#likelihood), [`Objective`](#objective), [`objective_of`](#objective_of), [`Preference`](#preference), [`Preset`](#rollout_trainobjectivespreset), [`PRESETS`](#presets), [`problems`](#rollout_trainobjectivesproblems), [`resolved`](#resolved)
 - **[`rollout_train.run_settings`](#rollout_trainrun_settings)** — A run's settings: the schema, layers, flags and files, a full copy, diffs. [`Change`](#change), [`diff`](#diff), [`flattened`](#flattened), [`from_file`](#from_file), [`from_flags`](#from_flags), [`is_trainers`](#is_trainers), [`Key`](#key), [`key_of`](#key_of), [`KEYS`](#keys), [`KINDS`](#kinds), [`layered`](#layered), [`objective_in`](#objective_in), [`recorded`](#recorded), [`RunSettings`](#runsettings), [`shortcuts`](#shortcuts), [`WEIGHTS`](#weights)
-- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`described`](#described), [`FILES`](#files), [`for_pods`](#for_pods), [`ledger_at`](#ledger_at), [`ledger_of`](#ledger_of), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`opened_ledger`](#opened_ledger), [`store_named`](#store_named), [`Stores`](#stores)
+- **[`rollout_train.stores`](#rollout_trainstores)** — The ledger and the blob store a cluster config names, opened on this node. [`blobs_at`](#blobs_at), [`cluster_ledger`](#cluster_ledger), [`described`](#described), [`Fallback`](#fallback), [`FILES`](#files), [`for_pods`](#for_pods), [`ledger_at`](#ledger_at), [`ledger_of`](#ledger_of), [`ledger_url`](#ledger_url), [`location`](#location), [`opened`](#opened), [`opened_ledger`](#opened_ledger), [`store_named`](#store_named), [`Stores`](#stores)
 - **[`rollout_train.ledger_service`](#rollout_trainledger_service)** — The ledger over HTTP: the service, the client every role can use, pods' tokens. [`app`](#app), [`Conflict`](#rollout_trainledger_serviceconflict), [`Forbidden`](#forbidden), [`HttpLedger`](#httpledger), [`LedgerUnreachable`](#ledgerunreachable), [`PLATFORM`](#platform), [`pod_token`](#pod_token), [`Scope`](#scope), [`scope_of`](#scope_of)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
@@ -3327,13 +3327,14 @@ state, whole or (`complete` false) only what was kept with the weights so far.
 *function* · `libraries/rollout-train/src/rollout_train/datasets.py`
 
 ```python
-async def make_dataset(ledger: Ledger, rule: str, runs: Sequence[str], *, into: Blobs, at: Mapping[str, JsonValue], turns: Sequence[str] = (ALL,), cut: Sequence[str] = ('way',), per_task: int | None = None, by: str | None = None) -> Dataset
+async def make_dataset(ledger: Ledger, rule: str, runs: Sequence[str], *, into: Blobs, at: Mapping[str, JsonValue], turns: Sequence[str] = (ALL,), cut: Sequence[str] = ('way',), per_task: int | None = None, by: str | None = None, beside: Blobs | None = None) -> Dataset
 ```
 
 Make a dataset of the episodes `runs` (by id) completed: those `rule` picks (an episode rule, or a preference
 rule's pairs or labelled examples), and of them the turns every filter of `turns` keeps. Its manifest is kept in
 `into`, which is at `at` (as `rollout_train.stores.opened` reads it). Episodes are read one at a time, from where
-each run's blobs are. Raises `ValueError` for a rule or filter that does not exist, or a dataset of no examples.
+each run's blobs are, else from `beside` (`run_blobs`). Raises `ValueError` for a rule or filter that does not
+exist, or a dataset of no examples.
 
 ### `make_suite`
 
@@ -8454,6 +8455,24 @@ def described(where: Mapping[str, Any], name: str | None = None) -> dict[str, Js
 A blob store as a page says it, from its location (`blobs_at`, `location`): its `name` (`[stores.NAME]`; none:
 `[blobs]`), its `kind` (`files`, or `module:name`), and its `bucket` and `prefix` or its `directory`; never a key,
 nor the variables one is read from.
+
+### `Fallback`
+
+*class* · `libraries/rollout-train/src/rollout_train/stores.py`
+
+```python
+class Fallback
+```
+
+Blobs read from the first of several stores that has them: a run's own store, then one its blobs were copied
+into (the cluster's, when the run's store was retired). Puts and deletes go to the first.
+
+**Methods**
+
+- `def __init__(self, first: Blobs, *rest: Blobs) -> None`
+- `async def put(self, data: bytes, media_type: str) -> BlobReference`
+- `async def read(self, reference: BlobReference) -> bytes`
+- `async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None`
 
 ### `FILES`
 

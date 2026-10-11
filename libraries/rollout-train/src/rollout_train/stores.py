@@ -12,14 +12,15 @@ A cluster may name blob stores beside the default (`[stores.NAME]`: an R2 bucket
 writes to one store (`Stores.open(cluster, store=NAME)`: a run whose trainer or servers are RunPod's writes to the
 store its RunPod providers name), and its `starts` record notes where that is (`location`, `Stores.location`), with
 the names of the variables its key is read from, never the key. Every blob reference says its store in its URI
-(`s3://BUCKET/PREFIX…`), and whoever reads a checkpoint's files finds each in the store that holds it: its own, or
-the store a run's start names (`rollout_train.checkpoints.Checkpoints.files`). A process that reads such references
-holds the keys of every store. The monitor reads finished episodes from where a run's start says, wherever it runs
-(`opened`). A pod gets a store's location and a key of its own (`for_pods`): the read-only key (the store's `reader`)
-for one that only reads, the store's own for one that writes. A process the run starts elsewhere (an engine host, a
-bridge's task) is told where the ledger is as `ledger_at`: the cluster config itself, so that it reads the ledger's URL
-on its own node (`cluster_ledger`), and no secret is handed on. A page says a store as `described` says it: its name
-(`store_named` finds it from a location), its kind, and its bucket and prefix or its directory.
+(`s3://BUCKET/PREFIX…`), and whoever reads a checkpoint's files finds each in the store that holds it: its own, or the
+store a run's start names (`rollout_train.checkpoints.Checkpoints.files`). A process that reads such references holds
+the keys of every store. The monitor reads finished episodes from where a run's start says, wherever it runs (`opened`),
+and from the cluster's own store where that one lacks them (`Fallback`: a run's blobs copied into it when the run's
+store was retired). A pod gets a store's location and a key of its own (`for_pods`): the read-only key (the store's
+`reader`) for one that only reads, the store's own for one that writes. A process the run starts elsewhere (an engine
+host, a bridge's task) is told where the ledger is as `ledger_at`: the cluster config itself, so that it reads the
+ledger's URL on its own node (`cluster_ledger`), and no secret is handed on. A page says a store as `described` says
+it: its name (`store_named` finds it from a location), its kind, and its bucket and prefix or its directory.
 """
 
 from collections.abc import Mapping
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
 
+from rollout.contracts import BlobReference
 from rollout.harness.blobs import Blobs, FileBlobStore
 from rollout.names import named
 
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FILES",
+    "Fallback",
     "Stores",
     "blobs_at",
     "cluster_ledger",
@@ -83,6 +86,28 @@ def opened(where: Mapping[str, Any]) -> Blobs:
     if kind == FILES:
         return FileBlobStore(Path(str(settings["directory"])).expanduser())
     return named(kind)(**settings)
+
+
+class Fallback:
+    """Blobs read from the first of several stores that has them: a run's own store, then one its blobs were copied
+    into (the cluster's, when the run's store was retired). Puts and deletes go to the first."""
+
+    def __init__(self, first: Blobs, *rest: Blobs) -> None:
+        self.stores = (first, *rest)
+
+    async def put(self, data: bytes, media_type: str) -> BlobReference:
+        return await self.stores[0].put(data, media_type)
+
+    async def read(self, reference: BlobReference) -> bytes:
+        for store in self.stores[:-1]:
+            try:
+                return await store.read(reference)
+            except Exception:  # (not there: the next store may have it)
+                continue
+        return await self.stores[-1].read(reference)
+
+    async def delete(self, reference: BlobReference, *, unused_for: float = 0.0) -> None:
+        await self.stores[0].delete(reference, unused_for=unused_for)
 
 
 def described(where: Mapping[str, Any], name: str | None = None) -> dict[str, JsonValue]:

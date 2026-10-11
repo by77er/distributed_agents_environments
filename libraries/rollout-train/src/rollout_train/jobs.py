@@ -1389,7 +1389,7 @@ async def _imitate(run: Run) -> None:
     model = run.settings.trainer_model
     if renderer_name is None or model is None:
         raise ValueError(f"an imitate run renders its examples with channels.{channel}.renderer over its model")
-    taught = await dataset_examples(ledger, made, named(str(renderer_name))(str(model)))
+    taught = await dataset_examples(ledger, made, named(str(renderer_name))(str(model)), run.stores.blobs)
     if not taught.items:
         raise ValueError("the dataset has no examples")
     objective = imitated(run.settings, made.kind)

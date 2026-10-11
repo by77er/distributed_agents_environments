@@ -69,7 +69,7 @@ from rollout_train.recorder.segments import BEHAVIOUR, TOKEN_LEVEL, Segment
 from rollout_train.registry import Registry
 from rollout_train.rollouts.episodes import COMPRESSED, Episode, Record, events_of, loaded
 from rollout_train.rollouts.scheduler import EPISODES
-from rollout_train.stores import FILES, opened
+from rollout_train.stores import FILES, Fallback, opened
 from rollout_train.trainer import Distilled, Labelled, Pair, Weighted
 
 DATASETS = "datasets"
@@ -275,11 +275,13 @@ async def make_dataset(
     cut: Sequence[str] = ("way",),
     per_task: int | None = None,
     by: str | None = None,
+    beside: Blobs | None = None,
 ) -> Dataset:
     """Make a dataset of the episodes `runs` (by id) completed: those `rule` picks (an episode rule, or a preference
     rule's pairs or labelled examples), and of them the turns every filter of `turns` keeps. Its manifest is kept in
     `into`, which is at `at` (as `rollout_train.stores.opened` reads it). Episodes are read one at a time, from where
-    each run's blobs are. Raises `ValueError` for a rule or filter that does not exist, or a dataset of no examples."""
+    each run's blobs are, else from `beside` (`run_blobs`). Raises `ValueError` for a rule or filter that does not
+    exist, or a dataset of no examples."""
     if rule not in RULES and rule not in PREFERENCE_RULES:
         raise ValueError(f"there is no rule {rule!r}: one of {', '.join([*RULES, *PREFERENCE_RULES])}")
     filters = [turn_filter(name) for name in turns]
@@ -308,7 +310,7 @@ async def make_dataset(
     async def kept(candidate: Candidate) -> list[dict[str, JsonValue]]:
         """A line for each of an episode's turns that every filter keeps (and what the filters saw of it)."""
         nonlocal seen, supervision
-        store = opened(await where_blobs_are(ledger, candidate.run, candidate.record.trajectories))
+        store = await run_blobs(ledger, candidate.run, candidate.record.trajectories, beside)
         episode = await loaded(candidate.record, store)
         events = await events_of(candidate.record, store)
         listed = turns_of(episode)
@@ -464,6 +466,15 @@ async def where_blobs_are(ledger: Ledger, run: str, reference: BlobReference | N
     raise ValueError(f"the run {run} does not say where its blobs are")
 
 
+async def run_blobs(
+    ledger: Ledger, run: str, reference: BlobReference | None = None, beside: Blobs | None = None
+) -> Blobs:
+    """The store a run's blobs are in (`where_blobs_are`), read from `beside` too where they are not there: the
+    cluster's store, which they were copied into when the run's own store was retired."""
+    store = opened(await where_blobs_are(ledger, run, reference))
+    return store if beside is None else Fallback(store, beside)
+
+
 async def dataset_of(ledger: Ledger, id: str) -> Dataset:
     """The dataset an id says."""
     found = (await ledger.read(DATASETS)).get(id)
@@ -499,8 +510,9 @@ async def manifest_of(dataset: Dataset) -> list[dict[str, Any]]:
     return [json.loads(line) for line in text.splitlines() if line]
 
 
-async def examples(ledger: Ledger, dataset: Dataset, renderer: Renderer) -> Examples:
-    """A dataset's examples, made from its episodes' blobs (each episode read once), with the guidance its manifest
+async def examples(ledger: Ledger, dataset: Dataset, renderer: Renderer, beside: Blobs | None = None) -> Examples:
+    """A dataset's examples, made from its episodes' blobs (each episode read once, from where its run's blobs are,
+    else from `beside`: `run_blobs`), with the guidance its manifest
     names cut from each turn's prompt: each weighted 1, as pairs or labelled examples (`Examples.preferences`), or, for
     a dataset of teacher samples, as distilled segments (`Examples.distilled`). A turn whose cut cannot be made exactly
     is left out, and a pair or example with it."""
@@ -520,7 +532,7 @@ async def examples(ledger: Ledger, dataset: Dataset, renderer: Renderer) -> Exam
         if run not in records:
             records[run] = await ledger.read(table(run, EPISODES))
         record = Record.from_json(cast(dict[str, Any], records[run][key]))
-        episode = await loaded(record, opened(await where_blobs_are(ledger, run, record.trajectories)))
+        episode = await loaded(record, await run_blobs(ledger, run, record.trajectories, beside))
         guidance: Any = episode.info.get(GUIDANCE) or {}
         found.episodes += 1
         for turn in chosen:

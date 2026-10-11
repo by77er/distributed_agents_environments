@@ -101,7 +101,7 @@ from rollout_train.serving import SERVING
 from rollout_train.settings import EVALS_SUITE, GROUPS_PER_STEP, TRAINER, Desired, desired_settings_of
 from rollout_train.settings import PAUSED as PAUSE
 from rollout_train.settings import checked as checked_setting
-from rollout_train.stores import opened
+from rollout_train.stores import Fallback, blobs_at, opened
 from rollout_train.submitting import KubernetesApi, backend_of, followed, stopped, submit
 from rollout_train.validation import with_weights
 
@@ -1002,14 +1002,20 @@ class System:
         return (found if isinstance(found, _Place) else None), ended, None
 
     async def _store(self, run: str) -> Blobs | None:
-        """The blob store a run's newest start says its blobs are in (as any machine opens it), if it says."""
+        """The blob store a run's newest start says its blobs are in (as any machine opens it), if it says; with the
+        cluster config's, read from the cluster's store too where that one lacks a blob (`Fallback`: a run's blobs
+        copied into the cluster's store when the run's own was retired)."""
         try:
             where = await where_blobs_are(self._ledger, run)
         except ValueError:
             return None
         key = json.dumps(where, sort_keys=True)
         if key not in self._stores:
-            self._stores[key] = await asyncio.to_thread(opened, where)
+            store = await asyncio.to_thread(opened, where)
+            own = blobs_at(self._cluster) if self._cluster is not None else None
+            if own is not None and own != dict(where):
+                store = Fallback(store, await asyncio.to_thread(opened, own))
+            self._stores[key] = store
         return self._stores[key]
 
     async def _turns(self, store: Blobs, run: str, run_id: str) -> list[dict[str, Any]]:
