@@ -111,7 +111,8 @@ async def test_a_store_reads_its_own_credentials_from_the_variables_it_names(
     reference = await store.put(b"named", "text/plain")
     assert store.holds(reference) and await store.read(reference) == b"named"
     assert not S3BlobStore("another-bucket", client=store.client).holds(reference)
-    with pytest.raises(ValueError, match="not set here: MISSING_SECRET"):
-        S3BlobStore(s3_bucket, access_key_id_env="WRITER_KEY_ID", secret_access_key_env="MISSING_SECRET")
+    unkeyed = S3BlobStore(s3_bucket, access_key_id_env="WRITER_KEY_ID", secret_access_key_env="MISSING_SECRET")
+    with pytest.raises(ValueError, match="not set here: MISSING_SECRET"):  # (only once it is used)
+        await unkeyed.read(reference)
     with pytest.raises(ValueError, match="named both"):
         S3BlobStore(s3_bucket, access_key_id_env="WRITER_KEY_ID")

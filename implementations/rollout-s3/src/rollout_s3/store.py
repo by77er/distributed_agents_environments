@@ -13,9 +13,9 @@ requests: a put that finds the object between them is not seen.
 Connection settings come from boto3's usual sources unless given: credentials (environment variables, `~/.aws`,
 instance and pod roles), the region, and the endpoint of an S3-compatible service (`AWS_ENDPOINT_URL_S3` or
 `AWS_ENDPOINT_URL`). A store's own credentials may be named instead (`access_key_id_env`, `secret_access_key_env`: the
-environment variables they are read from when the store is made), so that one process holds several stores, each with
-its own key: the cluster's bucket and an R2 bucket, say. With a custom endpoint, requests use path-style addressing
-(`endpoint/bucket/key`), which every S3-compatible service accepts.
+environment variables they are read from when the store is first used), so that one process holds several stores, each
+with its own key: the cluster's bucket and an R2 bucket, say. With a custom endpoint, requests use path-style
+addressing (`endpoint/bucket/key`), which every S3-compatible service accepts.
 """
 
 import asyncio
@@ -60,11 +60,24 @@ class S3BlobStore:
     ) -> None:
         """`client` replaces the boto3 client this store would create (e.g. with custom credentials).
         `access_key_id_env` and `secret_access_key_env` name the environment variables the store's key is read from
-        (both, or neither: boto3's usual sources). Raises `ValueError` where one is named and not set."""
+        (both, or neither: boto3's usual sources), the first time the store is used, so a process that opens the store
+        and never uses it needs no key. Raises `ValueError` where only one is named."""
+        if (access_key_id_env is None) != (secret_access_key_env is None):
+            raise ValueError("a store's credentials are named both: access_key_id_env and secret_access_key_env")
         self.bucket = bucket
         self.prefix = prefix if not prefix or prefix.endswith("/") else f"{prefix}/"
-        self.client = client or _client(endpoint_url, region, _credentials(access_key_id_env, secret_access_key_env))
+        self._client = client
+        self._connection = (endpoint_url, region, access_key_id_env, secret_access_key_env)
         self.refresh_after = refresh_after
+
+    @property
+    def client(self) -> "S3Client":
+        """The boto3 client, made the first time it is asked for. Raises `ValueError` where the store's key is named
+        and not set here."""
+        if self._client is None:
+            endpoint_url, region, key_env, secret_env = self._connection
+            self._client = _client(endpoint_url, region, _credentials(key_env, secret_env))
+        return self._client
 
     @classmethod
     def from_url(cls, url: str, **options: Any) -> "S3BlobStore":

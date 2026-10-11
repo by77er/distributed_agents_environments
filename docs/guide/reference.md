@@ -11008,7 +11008,10 @@ Implements `Blobs` in an S3 bucket.
 
 - `def __init__(self, bucket: str, *, prefix: str = 'blobs/', endpoint_url: str | None = None, region: str | None = None, client: 'S3Client | None' = None, refresh_after: float = REFRESH_AFTER, access_key_id_env: str | None = None, secret_access_key_env: str | None = None) -> None` — `client` replaces the boto3 client this store would create (e.g. with custom credentials).
   `access_key_id_env` and `secret_access_key_env` name the environment variables the store's key is read from
-  (both, or neither: boto3's usual sources). Raises `ValueError` where one is named and not set.
+  (both, or neither: boto3's usual sources), the first time the store is used, so a process that opens the store
+  and never uses it needs no key. Raises `ValueError` where only one is named.
+- `@property def client(self) -> 'S3Client'` — The boto3 client, made the first time it is asked for. Raises `ValueError` where the store's key is named
+  and not set here.
 - `@classmethod def from_url(cls, url: str, **options: Any) -> 'S3BlobStore'` — A store for `s3://bucket/prefix`.
 - `def holds(self, reference: BlobReference) -> bool` — Whether a reference names an object of this store's bucket and prefix (`s3://BUCKET/PREFIX…`).
 - `async def put(self, data: bytes, media_type: str) -> BlobReference`
