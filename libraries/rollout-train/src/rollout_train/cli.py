@@ -293,6 +293,10 @@ async def _pool(arguments: argparse.Namespace) -> None:
         section = cluster.sandboxes.get(arguments.kind)
         if section is None or section.provider is None:
             raise SystemExit(f"the cluster config names no provider of {arguments.kind} sandboxes ([sandboxes])")
+        if section.pools > 1 and name not in section.urls:  # (else runs' routers never find it among the kind's pools)
+            last = section.pools - 1
+            raise SystemExit(f"the cluster config serves {arguments.kind} sandboxes as {section.pools} pools: say "
+                             f"which this is, --name {arguments.kind}-N with N from 0 to {last}")  # fmt: skip
         scratch = Path(cluster.scratch).expanduser()  # noqa: ASYNC240 (before it serves)
         directory = arguments.directory or scratch / "sandboxes" / arguments.kind
         directory.mkdir(parents=True, exist_ok=True)
@@ -1108,7 +1112,10 @@ def main() -> None:
         help="keep the leases beside this ledger, ending with their claims: a run's directory, a ledger's "
         "directory, or a database's URL (without it, they are kept in the process, and end only when released)",
     )
-    pooling.add_argument("--name", help="what the pool is called among those sharing the ledger (KIND@HOST, or KIND)")
+    pooling.add_argument(
+        "--name", help="what the pool is called among those sharing the ledger (KIND@HOST, or KIND; KIND-N where the "
+        "cluster config serves the kind as several pools)",
+    )  # fmt: skip
     pooling.add_argument("--host", default="127.0.0.1")
     pooling.add_argument("--port", type=int, default=8710)
     gateway = commands.add_parser("gateway", help="serve a replica of the gateway, which records every turn")

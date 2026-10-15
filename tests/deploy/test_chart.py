@@ -1,8 +1,9 @@
 """The Helm chart (deploy/chart/rollout), rendered: its cluster config reads as the code reads it, names the cluster's
 stores and makes each run's job a RayJob from its template, which renders into a run's RayJob; its presets are run
 settings that cluster takes; the monitors' account may make RayJobs and, with Kueue, read the queue; every container
-says what it needs and the most memory it may take; every volume is of the class `storageClass` names. Skipped where
-helm is not installed."""
+says what it needs and the most memory it may take; every volume is of the class `storageClass` names; each kind of
+sandbox is served by a StatefulSet, a pool in each pod, several each reached at its own name. Skipped where helm is not
+installed."""
 
 import shutil
 import tomllib
@@ -163,7 +164,7 @@ def test_every_volume_is_of_the_class_storage_class_names(rendered: list[dict[st
             template["spec"]
             for each in rendered
             if each["kind"] == "StatefulSet"
-            for template in each["spec"]["volumeClaimTemplates"]
+            for template in each["spec"].get("volumeClaimTemplates", [])
         ]
         return [claim["storageClassName"] for claim in claims]
 
@@ -182,31 +183,64 @@ def containers_of(rendered: list[dict[str, Any]], app: str) -> list[dict[str, An
     ]
 
 
+def objects(rendered: list[dict[str, Any]], kind: str, name: str) -> list[dict[str, Any]]:
+    return [each for each in rendered if each["kind"] == kind and each["metadata"]["name"] == name]
+
+
 def test_the_minecraft_worlds_are_served_from_a_pod_of_their_own_that_runs_reach_at_its_url(
     rendered: list[dict[str, Any]],
 ) -> None:
     cluster = parsed(tomllib.loads(config_of(rendered)["cluster.toml"]))
     pool = cluster.sandboxes["minecraft"]
-    assert (pool.provider, pool.size, pool.url) == (
+    assert (pool.provider, pool.size, pool.url, pool.pools) == (
         "minecraft_team.worlds:worlds",
         4,
         "http://sandboxes-minecraft.rollout:8710",
+        1,
     )
-    (deployment,) = [each for each in rendered if each["kind"] == "Deployment"
-                     and each["metadata"]["name"] == "sandboxes-minecraft"]  # fmt: skip
-    assert deployment["spec"]["replicas"] == 1 and deployment["spec"]["strategy"] == {"type": "Recreate"}
-    (container,) = deployment["spec"]["template"]["spec"]["containers"]
+    (pods,) = objects(rendered, "StatefulSet", "sandboxes-minecraft")  # (one pod at a time, never two of one ordinal)
+    assert (pods["spec"]["replicas"], pods["spec"]["podManagementPolicy"]) == (1, "Parallel")
+    (container,) = pods["spec"]["template"]["spec"]["containers"]
     assert container["command"] == ["rollout", "pool", "--kind", "minecraft", "--cluster", "--host", "0.0.0.0",
                                     "--port", "8710"]  # fmt: skip
+    assert {"name": "state", "mountPath": "/root/.cache/rollout"} in container["volumeMounts"]  # (the whole volume)
     resources = container["resources"]
     assert (resources["requests"]["memory"], resources["limits"]["memory"]) == ("7680Mi", "10Gi")  # (1.75 GiB a world)
-    (service,) = [each for each in rendered if each["kind"] == "Service"
-                  and each["metadata"]["name"] == "sandboxes-minecraft"]  # fmt: skip
-    assert service["spec"]["selector"] == deployment["spec"]["selector"]["matchLabels"]
+    (service,) = objects(rendered, "Service", "sandboxes-minecraft")  # (where runs reach it, as before)
+    (headless,) = objects(rendered, "Service", pods["spec"]["serviceName"])
+    assert service["spec"]["selector"] == headless["spec"]["selector"] == pods["spec"]["selector"]["matchLabels"]
+    assert headless["spec"]["clusterIP"] == "None" and "clusterIP" not in service["spec"]
     off = render("--set", "sandboxes.minecraft.enabled=false")
     assert "minecraft" not in parsed(tomllib.loads(config_of(off)["cluster.toml"])).sandboxes
-    assert not [each for each in off if each["metadata"]["name"] == "sandboxes-minecraft"]
+    assert not [each for each in off if each["metadata"]["name"].startswith("sandboxes-minecraft")]
     assert pool.on_pods is None
+
+
+def test_the_minecraft_worlds_may_be_served_by_several_pools_each_reached_at_its_own_name() -> None:
+    rendered = render("--set", "sandboxes.minecraft.replicas=3")
+    pool = parsed(tomllib.loads(config_of(rendered)["cluster.toml"])).sandboxes["minecraft"]
+    assert (pool.pools, pool.size) == (3, 4)
+    assert pool.urls == {f"minecraft-{n}": f"http://sandboxes-minecraft-{n}.sandboxes-minecraft-pools.rollout:8710"
+                         for n in range(3)}  # fmt: skip
+    (pods,) = objects(rendered, "StatefulSet", "sandboxes-minecraft")
+    assert (pods["spec"]["replicas"], pods["spec"]["podManagementPolicy"]) == (3, "Parallel")
+    (headless,) = objects(rendered, "Service", "sandboxes-minecraft-pools")  # (pod N: sandboxes-minecraft-N.its name)
+    assert pods["spec"]["serviceName"] == "sandboxes-minecraft-pools" and headless["spec"]["clusterIP"] == "None"
+    assert headless["spec"]["publishNotReadyAddresses"] is True  # (each answers for its leases, ready or not)
+    assert objects(rendered, "Service", "sandboxes-minecraft") == []  # (none balances over pools that hold apart)
+    (container,) = pods["spec"]["template"]["spec"]["containers"]
+    assert container["command"][-2:] == ["--name", "minecraft-$(POOL)"]  # (each its own leases, fence and beat)
+    (number,) = [each for each in container["env"] if each["name"] == "POOL"]
+    assert number["valueFrom"] == {"fieldRef": {"fieldPath": "metadata.labels['apps.kubernetes.io/pod-index']"}}
+    assert {"name": "state", "mountPath": "/root/.cache/rollout",
+            "subPathExpr": "pools/minecraft-$(POOL)"} in container["volumeMounts"]  # fmt: skip
+    given = workloads(rendered)["sandboxes-minecraft"]
+    assert secrets_of(given) == GIVEN["sandboxes-minecraft"]
+    policies = [each["spec"] for each in rendered if each["kind"] == "NetworkPolicy"
+                and each["metadata"]["name"].startswith("sandboxes-minecraft")]  # fmt: skip
+    assert len(policies) == 2 and all(
+        policy["podSelector"]["matchLabels"].items() <= given["metadata"]["labels"].items() for policy in policies
+    )  # (its pods are let reached by runs, and reach what they did)
 
 
 def test_the_minecraft_worlds_may_be_served_from_the_runs_host_pods_too(tmp_path: Path) -> None:

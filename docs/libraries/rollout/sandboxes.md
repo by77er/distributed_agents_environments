@@ -227,10 +227,36 @@ whether a claim holds: it admits every key, keeps its leases in the process, and
 run's own release, when it ends). A pool that serves training runs is served with `--ledger`.
 
 `rollout pool --kind KIND --cluster [PATH or NAME]` serves the pool the cluster config's `[sandboxes.KIND]` describes:
-its provider made with `--directory` (by default `[scratch]/sandboxes/KIND`), its `size` and its settings, named `KIND`,
-its leases beside the cluster's ledger. Where the section also says `url`, runs reach the pool there and make none of
-their own ([the cluster config](../../guide/cluster.md#every-section)); the chart runs it in a pod of its own for each
-kind ([Where sandboxes run](../../research/sandbox-placement.md)).
+its provider made with `--directory` (by default `[scratch]/sandboxes/KIND`), its `size` and its settings, named `KIND`
+(or `--name`: `KIND-N` where several pools serve the kind), its leases beside the cluster's ledger. Where the section
+also says `url`, runs reach the pool there and make none of their own
+([the cluster config](../../guide/cluster.md#every-section)); the chart runs it in a pod of its own for each kind, or
+in each pod of several ([Where sandboxes run](../../research/sandbox-placement.md)).
+
+## Several pools of a kind
+
+Where one machine cannot hold what a kind needs, several pools serve it (`[sandboxes.KIND] pools = N`), each holding
+`size` under a name of its own, `KIND-N` for N from 0 (`rollout pool --kind KIND --name KIND-N`). So they share no
+lease, fence or beat: each keeper sweeps only its own pool's leases, and none deletes another's sandboxes as named by
+no lease. The section's `url` says where each is, `{pool}` standing for N
+(`url = "http://sandboxes-minecraft-{pool}.sandboxes-minecraft-pools:8710"`; `SandboxesSection.urls` names each one's).
+A run's driver reaches them as one pool, bound as a local pool (`PoolBinding(local=KIND)`): `PodPools`, which spreads
+a run's leases over its pods ([on a run's pods](#on-a-runs-pods)), over the pools `ClusterPools` finds
+(`rollout_train.sandboxes`).
+
+| | Does |
+|---|---|
+| Which pools | At each look, every pool the section names, a `RemotePool` at its URL: live while its keeper beats fresh (`pools/KIND-N`). Beside a ledger that keeps no heartbeats, each is live, and one that does not answer takes no new lease |
+| `acquire` | A key with a lease: from the pool that holds it, and only there. A new key: on the live pool with the most room, the next while each answers full or does not answer; else `NoCapacity` |
+| `release`, `call` | On the pool that holds the key's lease. A pool that misses beats takes no new lease and still answers for its own |
+| `capacity` | The live pools' summed |
+| Where each lease is | Kept in the run's directory (`pools/KIND.json`): a driver started again sends the leases of the runs it adopts to where they are |
+| Claims | As a pool of the run's own: a key whose claim has lapsed is refused (`admits`), and a keeper in the driver (`keep`) releases, on its pool, each lease whose claim it found lapsed, as each pool's own keeper does |
+| Behind a run's pods | Where a run's pods serve the kind too (`on_pods`), these pools, as one, take what the pods have no room for, with a keeper of their own (named `KIND@RUN/cluster`, apart from the pods' `KIND@RUN`) |
+
+A pool started again finds its leases lost, as one does. A run's driver keeps the cluster config it started with, so
+change how many pools serve a kind while no run plays. The chart serves each pool from a pod of a StatefulSet,
+reached at its own name ([the chart's values](../../deploy/helm.md#the-charts-values)).
 
 ## On a run's pods
 
@@ -248,7 +274,7 @@ can be: a pod's image holds no environment's code, and what it serves is data it
 | `PodPools` | Does |
 |---|---|
 | Which pods | At each look (`LeasedPools`), the pods whose leases the run holds with an `https` address, of the providers that serve the kind, each a `RemotePool` at `ADDRESS/v1/sandboxes/KIND` reached over mutual TLS with the gateway's certificate, the pod's identity (`spiffe://rollout/pod/NAME`) checked in the handshake; given up on in 5 seconds where it does not connect. A pod whose beat is fresh is live |
-| `acquire` | A key with a lease: from where its lease is, and only there. A new key: on a live pod with room, the most first (every pod asked at once, outside any lock; the acquires on their way to a pod, or sent since it was asked, order the pods and exclude none), the next while each answers full, is not taking new keys, or does not answer, then the pool at the section's `url` (the cluster's own, where it says one); else `NoCapacity`. Where it goes is kept before the pod is asked, so an acquire whose answer is lost is released on its pod, at once or at the next sweep |
+| `acquire` | A key with a lease: from where its lease is, and only there. A new key: on a live pod with room, the most first (every pod asked at once, outside any lock; the acquires on their way to a pod, or sent since it was asked, order the pods and exclude none), the next while each answers full, is not taking new keys, or does not answer, then the pool at the section's `url` (the cluster's own, where it says one; its pools as one, where several serve the kind); else `NoCapacity`. Where it goes is kept before the pod is asked, so an acquire whose answer is lost is released on its pod, at once or at the next sweep |
 | `release`, `call` | On the pod (or the cluster's pool) that holds the key's lease. A release that fails is kept and tried again at each sweep |
 | `capacity` | The live pods' pools' summed, and the cluster's pool's: the runner asks one pool for room, as it asks any pool |
 | A lost pod | A lease whose pod the run no longer holds (released, deleted, taken by another run) is lost: its key gets `SandboxLost`, and its episode is played again. A pod that only misses beats takes no new lease and keeps answering for its own |

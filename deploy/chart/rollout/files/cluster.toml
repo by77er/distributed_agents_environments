@@ -191,10 +191,15 @@ costs = { "Qwen/Qwen3.5-4B" = { train = 0.737 }, "Qwen/Qwen3.5-9B" = { train = 1
 {{- range $kind, $pool := .Values.sandboxes }}
 {{- if $pool.enabled }}
 
-[sandboxes.{{ $kind }}]                        # served from a pod of its own (templates/sandboxes.yaml)
+[sandboxes.{{ $kind }}]                        # served from pods of their own (templates/sandboxes.yaml)
 provider = "{{ $pool.provider }}"
-size = {{ $pool.size }}
+size = {{ $pool.size }}                                      # each pool's
+{{- if gt (int ($pool.replicas | default 1)) 1 }}
+pools = {{ int $pool.replicas }}                                     # a pool in each pod, each at its own name
+url = "http://sandboxes-{{ $kind }}-{pool}.sandboxes-{{ $kind }}-pools.{{ $.Release.Namespace }}:{{ $pool.port }}"
+{{- else }}
 url = "http://sandboxes-{{ $kind }}.{{ $.Release.Namespace }}:{{ $pool.port }}"
+{{- end }}
 {{- with $pool.onPods }}
 on_pods = {{ . }}                             # also served from the runs' host pods whose provider lists it
 {{- end }}

@@ -86,6 +86,8 @@ KEYED_BY_THE_GATEWAY = ("api", "vllm", "vllm-servers")
 SCRATCH = "~/.cache/rollout/scratch"
 """Where a node keeps its working files unless the config says (`[scratch] directory`): on disk, since a machine's /tmp
 may be memory."""
+POOL_NUMBER = "{pool}"
+"""What stands for each pool's number in the `url` of a kind several pools serve (`[sandboxes.KIND] pools`)."""
 HANDED = "ROLLOUT_CLUSTER_JSON"
 """The environment variable a run's job is handed its cluster config in, as JSON (`Cluster.described`)."""
 SECRET_WORDS = ("secret", "password", "token", "credential", "access_key", "api_key", "private_key")
@@ -216,9 +218,10 @@ class OnPods:
 @dataclass(frozen=True)
 class SandboxesSection:
     """A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`): made in each run's
-    driver from its provider; or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it; or,
-    with `on_pods`, served from the pods a run leases, with the pool at `url` (if any) for when they are full. What its
-    sandboxes run and hold is the pool's business: a run's demand counts none of it."""
+    driver from its provider; or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it, by
+    several pools where `pools` says so; or, with `on_pods`, served from the pods a run leases, with the pool at `url`
+    (if any) for when they are full. What its sandboxes run and hold is the pool's business: a run's demand counts none
+    of it."""
 
     kind: str
     provider: str | None = None
@@ -226,13 +229,27 @@ class SandboxesSection:
     python: str = "platform"
     """`platform`, or the name of an environment whose Python the provider is in."""
     size: int = 1
+    """The most sandboxes a pool holds at once."""
     url: str | None = None
-    """Where the pool is served (`rollout.harness.remote.serve_pool`): runs acquire from it there."""
+    """Where the pool is served (`rollout.harness.remote.serve_pool`): runs acquire from it there. Where there are
+    several, `{pool}` in it stands for each one's number."""
     pools: int = 1
+    """How many pools serve the kind at `url`, each under a name of its own (`KIND-N`, N from 0): a run spreads its
+    leases over them and sends each lease's calls to the pool that holds it (`urls`)."""
     settings: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
     """The provider's own settings."""
     on_pods: OnPods | None = None
     """Served from the run's pods (none: not)."""
+
+    @property
+    def urls(self) -> dict[str, str]:
+        """Where each pool of the kind is served, by its name: one pool, named `KIND`, at `url`; or each of several,
+        `KIND-N`, at `url` with N for `{pool}`. Empty without `url` (a pool made in each run's driver)."""
+        if self.url is None:
+            return {}
+        if self.pools == 1:
+            return {self.kind: self.url}
+        return {f"{self.kind}-{number}": self.url.replace(POOL_NUMBER, str(number)) for number in range(self.pools)}
 
 
 @dataclass(frozen=True)
@@ -838,13 +855,18 @@ def _sandboxes(kind: str, described: dict[str, Any]) -> SandboxesSection:
     on_pods = _on_pods(where, said.take("on_pods", None))
     if on_pods is not None and provider is None:
         raise ClusterError(f"{where} names its provider: the pods that serve it make its sandboxes with it")
+    pools = said.whole("pools", 1, least=1)
+    if pools > 1 and (url is None or POOL_NUMBER not in url):
+        raise ClusterError(f"{where} pools = {pools}: its url says where each one is, {POOL_NUMBER} for its number")
+    if pools == 1 and url is not None and POOL_NUMBER in url:
+        raise ClusterError(f"{where} url says {POOL_NUMBER}, a pool's number, and there is one pool (pools)")
     return SandboxesSection(
         kind=kind,
         provider=provider,
         python=said.text("python", "platform"),
         size=said.whole("size", 1, least=1),
         url=url,
-        pools=said.whole("pools", 1, least=1),
+        pools=pools,
         settings=said.rest(),
         on_pods=on_pods,
     )

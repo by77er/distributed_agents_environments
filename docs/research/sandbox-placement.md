@@ -1,7 +1,8 @@
 # Where sandboxes run
 
-**Status: built.** A pool served from a pod of its own on Kubernetes, reached through the claiming interface, and a
-kind served from a run's RunPod host pods (`on_pods`). A design note: see [Design notes](README.md) for the others.
+**Status: built.** A pool served from a pod of its own on Kubernetes, reached through the claiming interface; several
+such pools of a kind (`pools`), each a pod of a StatefulSet, reached as one pool from the run's driver; and a kind
+served from a run's RunPod host pods (`on_pods`). A design note: see [Design notes](README.md) for the others.
 
 A run and its sandboxes are separate systems. A run reaches a sandbox only through the claiming interface
 ([sandboxes](../libraries/rollout/sandboxes.md)): it acquires a lease under its episode's claim
@@ -11,7 +12,8 @@ runs the pool. A run's demand ([what a run needs](../libraries/rollout-train/lau
 nothing of its sandboxes.
 
 Code: `rollout.harness.remote` (`serve_pool`, `RemotePool`), `rollout train`'s `rollout pool`,
-`rollout_train.jobs.Run._pools`, `deploy/chart/rollout/templates/sandboxes.yaml`.
+`rollout_train.jobs.Run._pools`, `rollout_train.sandboxes.ClusterPools`, `rollout_train.pods.pools.PodPools`,
+`deploy/chart/rollout/templates/sandboxes.yaml`.
 
 ## What a Minecraft world is
 
@@ -29,8 +31,8 @@ on about one CPU.
 | Option | What runs where | For | Against |
 |---|---|---|---|
 | A pool in the run's driver | The provider in the driver's process, its worlds beside it in the run's pod | No service to run; the run's own pool | Kubernetes accounts nothing of what the worlds hold unless the run's demand models them, which puts the provider's internals in the platform |
-| **A pool served from a pod of its own** | A Deployment of one pod running `rollout pool --kind KIND`, its worlds inside; a Service runs reach | The claiming interface, served over HTTP, is the only coupling; Kubernetes accounts the worlds by the pod's requests; built from what exists (`serve_pool`, `RemotePool`, leases beside the ledger) | The pod's requests are held while it is idle; one pod is the most a pool has, so its size is one node's worth |
-| One world per pod (a StatefulSet) | Each pod a pool of one world, and a pool in front that spreads leases over them | A world over its memory limit is killed alone | A pool of pools to route leases and operations; the same requests held while idle |
+| **A pool served from a pod of its own** | A pod running `rollout pool --kind KIND`, its worlds inside, reached at a Service; several of them where one pod is not enough (`pools`), each a pool of its own | The claiming interface, served over HTTP, is the only coupling; Kubernetes accounts the worlds by the pods' requests; built from what exists (`serve_pool`, `RemotePool`, leases beside the ledger, and for several pools, the pool that spreads a run's leases over its pods) | The pods' requests are held while they are idle; one pod's pool is one node's worth at most |
+| One world per pod (a StatefulSet) | Each pod a pool of one world, and a pool in front that spreads leases over them | A world over its memory limit is killed alone | The same requests held while idle. Now the option above with `size = 1` and one pool per world (`pools`): the pool in front is built |
 | A pod for each lease | The provider creates a pod per world through the Kubernetes API, and deletes it with the lease | Memory is requested only while a world exists; an unschedulable world waits like a full pool | The provider needs the API (a service account, a pod template, waiting for readiness), and each world waits for a pod to start |
 | Ray actors in a resource pool of their own | A Ray cluster for sandboxes, each world an actor | Ray schedules worlds by declared memory | A second Ray cluster beside the runs' RayJobs, and the provider's footprint declared to Ray again |
 
@@ -44,10 +46,21 @@ episode, and acquires, operates and releases over HTTP exactly as it does in pro
   `url`, runs reach the pool there and make none of their own; `rollout pool --kind KIND --cluster` serves the pool the
   section describes, its provider made with `[scratch]/sandboxes/KIND`, its leases beside the cluster's ledger
   (ending with their claims, swept by its keeper, which beats as `pools/KIND`).
-- The chart runs one Deployment per enabled kind (`sandboxes` in its values): one pod, `Recreate` (two pods of one pool
-  would each delete the other's sandboxes), with requests for `size` worlds and a memory limit for `size` roaming
-  ones, behind the Service `sandboxes-KIND`, and writes `url` into the cluster config. A pod started again finds its
-  old leases lost; their episodes are played again.
+- The chart runs one StatefulSet per enabled kind (`sandboxes` in its values): `replicas` pods, one by default, never
+  two of one ordinal at once (two pods of one pool would each delete the other's sandboxes), each with requests for
+  `size` worlds and a memory limit for `size` roaming ones. One pod is behind the Service `sandboxes-KIND`, whose
+  `url` the chart writes into the cluster config. A pod started again finds its old leases lost; their episodes are
+  played again.
+- Several pods are each a pool of its own, `KIND-N` (`rollout pool --kind KIND --name KIND-N`, N the pod's ordinal),
+  so they share no lease, fence or beat, each reached at its own name under the headless Service
+  `sandboxes-KIND-pools`, and each with its own part of the state volume (a pool that starts removes the servers that
+  processes which are gone left behind, and another pod's processes are gone to it). The cluster config says `pools`
+  (the key the [runtime design](runtime-design.md) kept for more than one pool of a kind) and each one's `url`
+  (`{pool}` for N). A run's driver reaches them as one pool: `PodPools`, which spreads a run's
+  leases over its RunPod pods, over `ClusterPools`, which finds each pool at its URL, live while its keeper beats. A
+  new lease goes to the live pool with the most room, and each lease's operations and release to the pool that holds
+  it; where each is, is kept in the run's directory ([several pools of a
+  kind](../libraries/rollout/sandboxes.md#several-pools-of-a-kind)).
 - On Kubernetes, validation refuses a run whose environment needs sandboxes whose pool has no `url` and that no pod
   of the run's serves: a pool in the run's pod would hold memory Kubernetes does not account.
 - A kind may also be served from the RunPod host pods a run leases (`on_pods`), on the CPUs and memory their engine and

@@ -25,6 +25,11 @@ The keeper takes its pool's fence (`pools/NAME`) when it starts, and stops sweep
 two processes of one pool's name (a run's directory started twice on one machine) never delete each other's
 sandboxes as named by no lease. With a name to beat under, the keeper beats too, saying how full the pool is: a pool
 served from a machine of its own.
+
+A kind several pools serve (`[sandboxes.KIND] pools`) is served by each under a name of its own (`KIND-N`), so they
+share no lease, fence or beat. A run reaches them as one pool (`rollout_train.pods.pools.PodPools`, as it reaches the
+pools of its pods), which finds them at each look by `ClusterPools`: each a `RemotePool` at its URL, live while its
+keeper beats.
 """
 
 import asyncio
@@ -33,19 +38,35 @@ import json
 import logging
 import socket
 import time
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
+import httpx
 from pydantic import JsonValue
 
+from rollout.harness.remote import RemotePool
 from rollout.harness.sandboxes import Capacity, Lease, Leases
 from rollout_train.ledger import Fenced, FileLedger, Ledger, locked
-from rollout_train.presence import Presence
+from rollout_train.presence import Presence, alive
 from rollout_train.record import runs_in, table
 from rollout_train.rollouts.scheduler import INTERRUPTED, RELEASED, Claims, episode_scope, holding
 
-__all__ = ["FileLeases", "Kept", "admits", "ended", "ending", "keep", "leases_of", "pool_scope", "sweep"]
+if TYPE_CHECKING:
+    from rollout_train.pods.pools import Reached
+
+__all__ = [
+    "ClusterPools",
+    "FileLeases",
+    "Kept",
+    "admits",
+    "ended",
+    "ending",
+    "keep",
+    "leases_of",
+    "pool_scope",
+    "sweep",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +75,8 @@ POOL = "pool"
 
 
 class Kept(Protocol):
-    """A pool a keeper sweeps: a `SandboxPool`, or the pools of a run's pods (`rollout_train.pods.pools.PodPools`)."""
+    """A pool a keeper sweeps: a `SandboxPool`, or the pools of a run's pods, or several of the cluster's, as one
+    (`rollout_train.pods.pools.PodPools`)."""
 
     @property
     def name(self) -> str: ...
@@ -195,6 +217,34 @@ async def keep(
                 about: dict[str, JsonValue] = {"kind": POOL, "host": socket.gethostname(), "pool": pool.name}
                 await presence.beat(beat_as, {**about, "sandboxes": pool.kind, **capacity})
         await asyncio.sleep(every)
+
+
+class ClusterPools:
+    """The pools that serve a kind at `urls` (`rollout_train.cluster.SandboxesSection.urls`, by name), as a run's
+    `rollout_train.pods.pools.PodPools` asks for them at each look: each a `RemotePool` at its URL (through `client`,
+    where one is given), live while its keeper beats fresh (`pools/NAME`, as `rollout pool` beats). Beside a ledger
+    that keeps no heartbeats, each is live, and one that does not answer takes no new lease. One that is not live still
+    answers for the leases it holds."""
+
+    def __init__(
+        self, urls: Mapping[str, str], presence: Presence | None, *, client: httpx.AsyncClient | None = None
+    ) -> None:
+        self.presence = presence
+        self.pools = {name: RemotePool(url, client=client) for name, url in urls.items()}
+
+    async def __call__(self) -> dict[str, "Reached"]:
+        from rollout_train.pods.pools import Reached  # (here: rollout_train.pods imports this module)
+
+        beats = {beat.runner: beat for beat in await self.presence.beats()} if self.presence is not None else None
+        return {
+            name: Reached(pool, live=beats is None or alive(beats.get(f"pools/{name}")))
+            for name, pool in self.pools.items()
+        }
+
+    async def aclose(self) -> None:
+        """Close the clients of its pools."""
+        for pool in self.pools.values():
+            await pool.aclose()
 
 
 class FileLeases:

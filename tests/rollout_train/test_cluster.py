@@ -469,6 +469,24 @@ def test_a_kind_of_sandbox_may_be_served_from_the_pods_whose_provider_lists_it()
             cluster_of(text)
 
 
+def test_a_kind_of_sandbox_may_be_served_by_several_pools_each_at_its_own_url() -> None:
+    one = cluster_of(SMALL + WORLDS + 'url = "http://sandboxes-minecraft:8710"\n').sandboxes["minecraft"]
+    assert one.pools == 1 and one.urls == {"minecraft": "http://sandboxes-minecraft:8710"}  # (named by its kind)
+    url = "http://sandboxes-minecraft-{pool}.sandboxes-minecraft-pools:8710"
+    several = cluster_of(SMALL + WORLDS + f'url = "{url}"\npools = 3\n').sandboxes["minecraft"]
+    assert several.urls == {f"minecraft-{n}": f"http://sandboxes-minecraft-{n}.sandboxes-minecraft-pools:8710"
+                            for n in range(3)}  # fmt: skip
+    assert cluster_of(SMALL + WORLDS).sandboxes["minecraft"].urls == {}  # (made in each run's driver)
+    for text, says in (
+        (WORLDS + 'url = "http://sandboxes-minecraft:8710"\npools = 2\n', r"pools = 2: its url says where each one is"),
+        (WORLDS + "pools = 2\n", r"pools = 2: its url says where each one is, \{pool\} for its number"),
+        (WORLDS + f'url = "{url}"\n', r"url says \{pool\}, a pool's number, and there is one pool"),
+        (WORLDS + f'url = "{url}"\npools = 0\n', "pools is a whole number, 1 at least"),
+    ):
+        with pytest.raises(ClusterError, match=says):
+            cluster_of(SMALL + text)
+
+
 def test_each_provider_and_trainer_is_metered_or_scheduled_by_its_kind_unless_it_says() -> None:
     cluster = load(EXAMPLE)
     assert {name: each.allocation for name, each in cluster.inference.items()} == {

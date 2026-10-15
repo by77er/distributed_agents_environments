@@ -16,7 +16,7 @@ do not edit by hand.
 - **[`rollout.local`](#rolloutlocal)** — The runner in this process. [`EndpointFactory`](#endpointfactory), [`LocalRunContext`](#localruncontext), [`LocalRunHandle`](#localrunhandle), [`LocalRunner`](#localrunner), [`RewardAssignment`](#rewardassignment)
 - **[`rollout.testing`](#rollouttesting)** — Test doubles: a scripted model endpoint and helpers. [`events_of`](#rollouttestingevents_of), [`FakeSandbox`](#fakesandbox), [`FakeSandboxes`](#fakesandboxes), [`LedgerEndpoint`](#ledgerendpoint), [`local_run`](#local_run), [`payload`](#payload), [`ScriptedModelEndpoint`](#scriptedmodelendpoint), [`ScriptedReply`](#scriptedreply), [`tool_call_reply`](#tool_call_reply), [`until`](#until)
 - **[`rollout_train.rollouts`](#rollout_trainrollouts)** — Episodes a run asks for in the ledger, claimed and played by runners, and read back. [`Episode`](#episode), [`EpisodeRunner`](#episoderunner), [`episodes_of`](#episodes_of), [`events_of`](#rollout_trainrolloutsevents_of), [`Hooks`](#hooks), [`loaded`](#rollout_trainrolloutsloaded), [`Outcome`](#outcome), [`Plan`](#rollout_trainrolloutsplan), [`plan`](#plan), [`playing`](#playing), [`Record`](#record), [`Recorded`](#recorded), [`stored`](#rollout_trainrolloutsstored), [`Trajectory`](#trajectory)
-- **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`Kept`](#kept), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
+- **[`rollout_train.sandboxes`](#rollout_trainsandboxes)** — Sandboxes' leases beside the ledger, each ending with its episode's claim. [`admits`](#admits), [`ClusterPools`](#clusterpools), [`ended`](#ended), [`ending`](#ending), [`FileLeases`](#fileleases), [`keep`](#keep), [`Kept`](#kept), [`leases_of`](#leases_of), [`pool_scope`](#pool_scope), [`sweep`](#sweep)
 - **[`rollout_train`](#rollout_train)** — The training loop, the group algorithm, evals, and what they ask of a trainer. [`Algorithm`](#algorithm), [`algorithm_for`](#algorithm_for), [`Batch`](#batch), [`Budget`](#budget), [`Changeable`](#changeable), [`Checkpoint`](#checkpoint), [`Checkpoints`](#checkpoints), [`Colocated`](#colocated), [`Dataset`](#dataset), [`dataset_of`](#dataset_of), [`Distillations`](#distillations), [`Distilled`](#distilled), [`edit_suite`](#edit_suite), [`evaluate`](#evaluate), [`Fence`](#fence), [`Fenced`](#fenced), [`FileLedger`](#fileledger), [`Files`](#files), [`Follower`](#follower), [`group_advantages`](#group_advantages), [`Grpo`](#grpo), [`Keeps`](#keeps), [`Labelled`](#labelled), [`Ledger`](#ledger), [`Made`](#made), [`make_dataset`](#make_dataset), [`make_suite`](#make_suite), [`Manifest`](#manifest), [`OnDemand`](#ondemand), [`Pair`](#pair), [`Preferences`](#preferences), [`Progress`](#progress), [`Progressing`](#progressing), [`record_serving`](#record_serving), [`Remote`](#remote), [`Resident`](#resident), [`Result`](#result), [`results`](#results), [`Retention`](#retention), [`Schedule`](#schedule), [`Serving`](#serving), [`StateLost`](#statelost), [`Step`](#step), [`StepFailed`](#stepfailed), [`Suite`](#suite), [`suite_entry`](#suite_entry), [`suite_for`](#suite_for), [`suite_of`](#suite_of), [`SuiteEntry`](#suiteentry), [`train`](#train), [`Trained`](#trained), [`trained`](#trained), [`Trainer`](#trainer), [`wanted`](#wanted), [`Weighted`](#weighted)
 - **[`rollout_train.inference`](#rollout_traininference)** — Channels: trainable models being served, and what they ask of an engine. [`Channel`](#channel), [`CheckpointServer`](#checkpointserver), [`Connection`](#connection), [`Engine`](#engine), [`Generation`](#generation), [`Limits`](#limits), [`NotLoaded`](#notloaded), [`RemoteChannel`](#remotechannel), [`RemoteEngine`](#remoteengine), [`Route`](#route), [`Routes`](#routes), [`Sampler`](#sampler), [`Scores`](#rollout_traininferencescores), [`Unserved`](#unserved)
 - **[`rollout_train.inference.hosts`](#rollout_traininferencehosts)** — Engine hosts: a replica's engines as a Ray actor, serving runs by checkpoint. [`EngineHost`](#enginehost), [`host_spec`](#host_spec), [`HostPausable`](#hostpausable), [`HostServer`](#hostserver), [`HostSpec`](#hostspec), [`started`](#started)
@@ -2720,6 +2720,25 @@ def admits(ledger: Ledger, presence: Presence | None) -> Callable[[str], Awaitab
 For a pool beside a ledger (`SandboxPool(admits=...)`): whether a key may hold a lease now. A key whose run the
 ledger knows may while its claim holds; any other key may.
 
+### `ClusterPools`
+
+*class* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
+
+```python
+class ClusterPools
+```
+
+The pools that serve a kind at `urls` (`rollout_train.cluster.SandboxesSection.urls`, by name), as a run's
+`rollout_train.pods.pools.PodPools` asks for them at each look: each a `RemotePool` at its URL (through `client`,
+where one is given), live while its keeper beats fresh (`pools/NAME`, as `rollout pool` beats). Beside a ledger
+that keeps no heartbeats, each is live, and one that does not answer takes no new lease. One that is not live still
+answers for the leases it holds.
+
+**Methods**
+
+- `def __init__(self, urls: Mapping[str, str], presence: Presence | None, *, client: httpx.AsyncClient | None = None) -> None`
+- `async def aclose(self) -> None` — Close the clients of its pools.
+
 ### `ended`
 
 *function* · `libraries/rollout-train/src/rollout_train/sandboxes.py`
@@ -2781,7 +2800,8 @@ under that name too.
 class Kept(Protocol)
 ```
 
-A pool a keeper sweeps: a `SandboxPool`, or the pools of a run's pods (`rollout_train.pods.pools.PodPools`).
+A pool a keeper sweeps: a `SandboxPool`, or the pools of a run's pods, or several of the cluster's, as one
+(`rollout_train.pods.pools.PodPools`).
 
 **Methods**
 
@@ -7208,20 +7228,26 @@ class SandboxesSection
 ```
 
 A pool of sandboxes of one kind, which environments declare they need (`[sandboxes.KIND]`): made in each run's
-driver from its provider; or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it; or,
-with `on_pods`, served from the pods a run leases, with the pool at `url` (if any) for when they are full. What its
-sandboxes run and hold is the pool's business: a run's demand counts none of it.
+driver from its provider; or, with `url`, served elsewhere (`rollout pool --kind KIND`), where runs reach it, by
+several pools where `pools` says so; or, with `on_pods`, served from the pods a run leases, with the pool at `url`
+(if any) for when they are full. What its sandboxes run and hold is the pool's business: a run's demand counts none
+of it.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `kind` | `str` | required |  |
 | `provider` | `str \| None` | `None` | `module:name` of what makes them. |
 | `python` | `str` | `'platform'` | `platform`, or the name of an environment whose Python the provider is in. |
-| `size` | `int` | `1` |  |
-| `url` | `str \| None` | `None` | Where the pool is served (`rollout.harness.remote.serve_pool`): runs acquire from it there. |
-| `pools` | `int` | `1` |  |
+| `size` | `int` | `1` | The most sandboxes a pool holds at once. |
+| `url` | `str \| None` | `None` | Where the pool is served (`rollout.harness.remote.serve_pool`): runs acquire from it there. Where there are several, `{pool}` in it stands for each one's number. |
+| `pools` | `int` | `1` | How many pools serve the kind at `url`, each under a name of its own (`KIND-N`, N from 0): a run spreads its leases over them and sends each lease's calls to the pool that holds it (`urls`). |
 | `settings` | `Mapping[str, JsonValue]` | `field(default_factory=dict[str, JsonValue])` | The provider's own settings. |
 | `on_pods` | `OnPods \| None` | `None` | Served from the run's pods (none: not). |
+
+**Methods**
+
+- `@property def urls(self) -> dict[str, str]` — Where each pool of the kind is served, by its name: one pool, named `KIND`, at `url`; or each of several,
+  `KIND-N`, at `url` with N for `{pool}`. Empty without `url` (a pool made in each run's driver).
 
 ### `ToolsSection`
 

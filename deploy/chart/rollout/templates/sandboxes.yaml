@@ -1,19 +1,27 @@
-# Each kind of sandbox `sandboxes` enables, served from a pod of its own: `rollout pool --kind KIND` makes the pool of
-# the cluster config's [sandboxes.KIND] (its provider and size), keeps its leases beside the ledger, ending with the
-# claims of the episodes they were acquired for, and serves it over HTTP behind the Service `sandboxes-KIND`, where runs
-# acquire from it. Its sandboxes live and die with the pod: one started again finds its old leases lost, and their
-# episodes are played again.
+# Each kind of sandbox `sandboxes` enables, served from pods of their own: a StatefulSet of `replicas` pods, each
+# running `rollout pool --kind KIND`, which makes a pool of the cluster config's [sandboxes.KIND] (its provider and
+# size), keeps its leases beside the ledger, ending with the claims of the episodes they were acquired for, and serves
+# it over HTTP, where runs acquire from it. One pod is the pool `KIND`, behind the Service `sandboxes-KIND`. Several are
+# each a pool of their own, `KIND-N` (N the pod's ordinal), reached at its own name
+# (`sandboxes-KIND-N.sandboxes-KIND-pools`): a run spreads its leases over them and sends each lease's calls to the pool
+# that holds it, so no Service balances over them. Each has a part of the state volume of its own as its
+# ~/.cache/rollout (its scratch, its provider's caches and servers): a pool that starts removes what processes that are
+# gone left there, and another pod's processes are gone to it. A StatefulSet never runs two pods of one ordinal at once
+# (two pods of one pool would each delete the other's sandboxes). Its sandboxes live and die with the pod: one started
+# again finds its old leases lost, and their episodes are played again.
 {{- range $kind, $pool := .Values.sandboxes }}
 {{- if $pool.enabled }}
+{{- $replicas := int ($pool.replicas | default 1) }}
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: sandboxes-{{ $kind }}
   labels: {{- include "rollout.labels" $ | nindent 4 }}
 spec:
-  replicas: 1
-  strategy: {type: Recreate}  # (two pods of one pool would each delete the other's sandboxes)
+  replicas: {{ $replicas }}
+  serviceName: sandboxes-{{ $kind }}-pools
+  podManagementPolicy: Parallel  # (each pod a pool of its own: none waits for another to start or stop)
   selector: {matchLabels: {app: sandboxes, sandboxes: {{ $kind }}}}
   template:
     metadata: {labels: {app: sandboxes, sandboxes: {{ $kind }}}}
@@ -23,15 +31,43 @@ spec:
           image: {{ include "rollout.image" $ }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           workingDir: /opt/rollout/source
+          {{- if gt $replicas 1 }}
+          command: [rollout, pool, --kind, {{ $kind }}, --cluster, --host, 0.0.0.0, --port, {{ $pool.port | quote }},
+                    --name, "{{ $kind }}-$(POOL)"]
+          {{- else }}
           command: [rollout, pool, --kind, {{ $kind }}, --cluster, --host, 0.0.0.0, --port, {{ $pool.port | quote }}]
+          {{- end }}
           env:  # (the ledger, which its leases are kept beside: nothing else)
             {{- include "rollout.configEnv" $ | nindent 12 }}
             {{- include "rollout.ledgerEnv" $ | nindent 12 }}
+            {{- if gt $replicas 1 }}
+            - name: POOL  # (the pod's ordinal: its pool's number)
+              valueFrom: {fieldRef: {fieldPath: "metadata.labels['apps.kubernetes.io/pod-index']"}}
+            {{- end }}
           ports: [{containerPort: {{ $pool.port }}, name: http}]
           readinessProbe: {httpGet: {path: /capacity, port: http}, periodSeconds: 10, timeoutSeconds: 5}
+          {{- if gt $replicas 1 }}
+          volumeMounts:
+            - {name: state, mountPath: {{ $.Values.state.path }}, subPathExpr: "pools/{{ $kind }}-$(POOL)"}
+            {{- include "rollout.volumeMounts" (dict "root" $ "names" (list "config")) | trim | nindent 12 }}
+          {{- else }}
           volumeMounts: {{- include "rollout.volumeMounts" (dict "root" $ "names" (list "state" "config")) | nindent 12 }}
+          {{- end }}
           resources: {{- toYaml $pool.resources | nindent 12 }}
       volumes: {{- include "rollout.volumes" (dict "root" $ "names" (list "state" "config")) | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandboxes-{{ $kind }}-pools
+  labels: {{- include "rollout.labels" $ | nindent 4 }}
+spec:
+  clusterIP: None  # (each pod at a name of its own: sandboxes-KIND-N.sandboxes-KIND-pools)
+  publishNotReadyAddresses: true  # (a pool answers for its leases whatever its readiness; its keeper's beat says
+                                  # whether it takes new ones)
+  selector: {app: sandboxes, sandboxes: {{ $kind }}}
+  ports: [{port: {{ $pool.port }}, targetPort: http}]
+{{- if eq $replicas 1 }}
 ---
 apiVersion: v1
 kind: Service
@@ -41,5 +77,6 @@ metadata:
 spec:
   selector: {app: sandboxes, sandboxes: {{ $kind }}}
   ports: [{port: {{ $pool.port }}, targetPort: http}]
+{{- end }}
 {{- end }}
 {{- end }}

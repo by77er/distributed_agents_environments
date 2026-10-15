@@ -31,11 +31,15 @@ By role, in the namespace it is installed into (these pages use `rollout`):
   provisioner key (the Secret `step-ca`) and a gateway certificate (`gateway-tls`), under a ServiceAccount `pki` that
   may write those two Secrets; with `tunnel.enabled`, a Deployment `tunnel` running cloudflared, which carries
   `tunnel.hostnames` to the ledger service and step-ca.
-- **The sandbox pools.** For each kind `sandboxes` enables (`minecraft`), a Deployment of one pod running `rollout pool
-  --kind KIND --cluster`, which holds at most `size` sandboxes and keeps their leases beside the ledger, behind the
-  Service `sandboxes-KIND` (`sandboxes-minecraft.rollout:8710`); the cluster config's `[sandboxes.KIND]` names it as
-  its `url`, and runs acquire from it there. Its requests are its sandboxes' memory, which runs' pods do not hold
-  ([Where sandboxes run](../research/sandbox-placement.md)).
+- **The sandbox pools.** For each kind `sandboxes` enables (`minecraft`), a StatefulSet `sandboxes-KIND` of `replicas`
+  pods (one by default), each running `rollout pool --kind KIND --cluster`, which holds at most `size` sandboxes and
+  keeps their leases beside the ledger. One pod is behind the Service `sandboxes-KIND`
+  (`sandboxes-minecraft.rollout:8710`), which the cluster config's `[sandboxes.KIND]` names as its `url`, and runs
+  acquire from it there. Several are each a pool of their own, `KIND-N`, reached at its own name under the headless
+  Service `sandboxes-KIND-pools` (`sandboxes-minecraft-0.sandboxes-minecraft-pools.rollout:8710`), which the section
+  names as `pools` and a `url` for each; a run spreads its leases over them
+  ([several pools of a kind](../libraries/rollout/sandboxes.md#several-pools-of-a-kind)). Each pod's requests are its
+  sandboxes' memory, which runs' pods do not hold ([Where sandboxes run](../research/sandbox-placement.md)).
 - **The monitor.** One Deployment per entry of `monitors`, each behind a Service (and an Ingress where
   `monitors.NAME.ingress` asks), and an Ingress for Ray's dashboard; and the Secret `monitor-token`, the token the
   monitors ask for, made where it is missing ([opening the monitor](access.md#opening-the-monitor)).
@@ -97,6 +101,7 @@ one (a ledger's URL, or a run's directory on the state volume), and asks for run
 | `rayjob.ttlSeconds` | `30` | How long a finished run's Ray cluster stays (and holds what it asked for) |
 | `kueue.enabled`, `kueue.queue`, `kueue.quota` | `false`, `runs`, 12 CPUs, 9 GiB, one GPU | Kueue's admission of runs ([Kueue](#kueue)) |
 | `sandboxes.minecraft.enabled`, `.size`, `.resources` | `true`, `4`, 4 CPUs and 7.5 GiB requested, 10 GiB as the limit | The Minecraft worlds' pool: at most `size` worlds at once, each asking for 1.75 GiB and a CPU |
+| `sandboxes.minecraft.replicas` | `1` | The pods that serve the worlds, each a pool of `size` with `resources` of its own; with more than one, each is reached at its own name and keeps its caches in a part of the state volume of its own (`pools/minecraft-N`). Change it while no run plays ([upgrading](#install-and-upgrade)) |
 | `sandboxes.minecraft.onPods` | none | The section's `on_pods`, as TOML (`true`, or `'{ memory_gib = 2.4 }'`): the worlds are also served from the host pods a run leases whose provider (in `clusterExtra`) lists `sandboxes = ["minecraft"]`, with this pool behind them ([sandboxes on a host pod](providers.md#sandboxes-on-a-host-pod)) |
 | `gateway.replicas`, `gateway.port`, `gateway.host` | `1`, `8900`, `gateway.localhost` | The gateway's replicas, port and Ingress host |
 | `monitors.NAME.ingress`, `.host`, `.hosts` | `false`, `monitor.localhost`, none | Whether a monitor has an Ingress, its host, and more names the monitor answers under (beside `localhost`, `127.0.0.1` and its Service's names) |
@@ -367,7 +372,8 @@ On K3s, name `local-path-retain` there, so that deleting a claim keeps its direc
 
 The state volume is `ReadWriteOnce`: every pod that mounts it must run on the same node. On a cluster of several
 nodes, give it a storage class that several nodes can mount at once (`ReadWriteMany`, such as NFS or CephFS) and
-change the claim's access mode in `templates/config.yaml`.
+change the claim's access mode in `templates/config.yaml`; so too where a kind's several sandbox pools are to spread
+over nodes. Each of those mounts only its own part of it, `pools/KIND-N`, as its `~/.cache/rollout`.
 
 [Volumes and backups](backups.md) covers reclaim policies and backups.
 
@@ -393,7 +399,20 @@ Before an upgrade:
     ```
 
 - leave `storageClass`, `stores.postgres.storage` and `stores.s3.storage` as they were: Kubernetes refuses to change
-  them ([an upgrade fails on an immutable field](troubleshooting.md#an-upgrade-fails-on-an-immutable-field)).
+  them ([an upgrade fails on an immutable field](troubleshooting.md#an-upgrade-fails-on-an-immutable-field));
+- change `sandboxes.KIND.replicas` only while no run plays: a run's driver keeps the cluster config it started with,
+  so a run started before reaches the pools as they were. Each pool started anew finds its old leases lost, and their
+  episodes are played again; the leases of a pool no longer served (`KIND` once there are several, `KIND-N` past the
+  new count) stay beside the ledger, swept by no keeper.
+
+From a chart whose sandbox pools were Deployments, an upgrade makes each kind's StatefulSet `sandboxes-KIND` and its
+headless Service `sandboxes-KIND-pools`, and keeps the Service `sandboxes-KIND` as it was (a Service's cluster IP
+cannot change, so the headless one has a name of its own). Kubernetes and Helm know a resource by its kind and name,
+so the StatefulSet is made beside the old Deployment, not as a change to it, and the upgrade needs no `--force`. Helm
+deletes the Deployment `sandboxes-KIND` itself, as a resource the chart no longer renders, once the StatefulSet is
+made: for a moment both pods run under one pool's name. The new pod takes the pool's fence, and the old pod's
+sandboxes end with it, their episodes played again, as when the pool's pod is started again; upgrade while no run
+plays to have none.
 
 After installing, check that the stores and the Ray head are ready and the bucket was made:
 

@@ -71,7 +71,7 @@ from rollout.local import LocalRunner
 from rollout.names import named
 from rollout_train.bridges import AUTO, Bridge, NoBridge, format_of, on_ray, path
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
-from rollout_train.cluster import Cluster, located
+from rollout_train.cluster import Cluster, SandboxesSection, located
 from rollout_train.colocated import Colocated
 from rollout_train.demand import BRIDGE, TRAINER, Demand, Resources, colocating, demand, placed, played_channel, reserve
 from rollout_train.evals import Fetched
@@ -102,7 +102,7 @@ from rollout_train.record import FAILED as RUN_FAILED
 from rollout_train.registry import Entry, registry_of, resolved
 from rollout_train.rollouts.scheduler import EpisodeRunner
 from rollout_train.run_settings import KINDS, RunSettings, is_trainers, objective_in, recorded
-from rollout_train.sandboxes import admits, keep, leases_of
+from rollout_train.sandboxes import ClusterPools, admits, keep, leases_of
 from rollout_train.stores import Stores, blobs_at, ledger_at
 from rollout_train.trainer import Budget, Files, Item, Progress, Progressing, Step, Trainer, objective_of
 
@@ -853,15 +853,19 @@ class Run:
     async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
         """A pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes]`: one
         served from the run's pods (`on_pods`) is reached on the pods that serve it, with its keeper here; one served
-        elsewhere (`url`) is reached there; any other is made here, with its keeper, its leases kept beside the
-        ledger."""
+        elsewhere (`url`) is reached there, and where several pools serve it (`pools`), on each, through a pool here
+        with its keeper (`_served`); any other is made here, with its keeper, its leases kept beside the ledger."""
         pools: dict[str, Pool] = {}
         for kind in sorted(self.sandboxes):
             section = self.cluster.sandboxes.get(kind)
             if section is None:
                 continue  # (validation refused a run whose environment needs it)
-            if section.on_pods is not None and (served := self._on_pods(stack, kind, section.url)) is not None:
+            if section.on_pods is not None and (served := self._on_pods(stack, kind, section)) is not None:
                 pools[kind] = served
+                self.pool_bindings[kind] = PoolBinding(local=kind)
+                continue
+            if section.pools > 1:
+                pools[kind] = self._served(stack, kind, section, f"{kind}@{self.run.id}")
                 self.pool_bindings[kind] = PoolBinding(local=kind)
                 continue
             if section.url is not None:
@@ -879,6 +883,22 @@ class Run:
             pools[kind] = pool
             self.pool_bindings[kind] = PoolBinding(local=kind)
         return pools
+
+    def _served(self, stack: contextlib.AsyncExitStack, kind: str, section: SandboxesSection, name: str) -> Pool:
+        """The pools that serve `kind` elsewhere (the section's `urls`), as one pool named `name`
+        (`rollout_train.pods.pools.PodPools` over `rollout_train.sandboxes.ClusterPools`): a new lease on the one with
+        the most room whose keeper beats, each lease's calls on the one that holds it, where each is kept in the run's
+        directory; swept here by a keeper as a pool of the run's own."""
+        from rollout_train.pods.pools import FilePlacements, PodPools
+
+        beats = presence_of(self.ledger)
+        discover = ClusterPools(section.urls, beats)
+        stack.push_async_callback(discover.aclose)
+        placements = FilePlacements(self.directory / "pools" / f"{kind}.json")
+        pool = PodPools(kind, discover, name=name, placements=placements, admits=admits(self.ledger, beats))
+        stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
+        _background(stack, keep(pool, self.ledger, beats), self.fail)
+        return pool
 
     async def _with_sandboxes(self, needs: Sequence[Any]) -> list[Any]:
         """`needs`, those of providers whose pods serve kinds of sandboxes the environment declares given those kinds'
@@ -904,10 +924,11 @@ class Run:
                         await done
         return with_sandboxes(needs, self.cluster, {kind: each.to_json() for kind, each in sources.items()})
 
-    def _on_pods(self, stack: contextlib.AsyncExitStack, kind: str, url: str | None) -> Pool | None:
-        """The pools of `kind` the run's pods serve, as one (`rollout_train.pods.pools`), the pool at `url` behind them
-        for when they are full; swept here by a keeper as a pool of the run's own. None where the run leases no pod
-        that serves the kind (validation refused such a run unless the pool at `url` serves it)."""
+    def _on_pods(self, stack: contextlib.AsyncExitStack, kind: str, section: SandboxesSection) -> Pool | None:
+        """The pools of `kind` the run's pods serve, as one (`rollout_train.pods.pools`), the pool at the section's
+        `url` behind them for when they are full (where several serve it, those as one: `_served`); swept here by a
+        keeper as a pool of the run's own. None where the run leases no pod that serves the kind (validation refused
+        such a run unless the pool at `url` serves it)."""
         from rollout.harness.remote import RemotePool
         from rollout_train.pods.pools import FilePlacements, PodPools
         from rollout_train.pods.routing import LeasedPools
@@ -918,8 +939,11 @@ class Run:
         auth = self.cluster.inference[providers[0]].auth
         discover = LeasedPools(self.ledger, self.run.id, kind, providers, auth, self.cluster.tls)
         stack.push_async_callback(discover.aclose)
-        fallback = RemotePool(url) if url is not None else None
-        if fallback is not None:
+        fallback: Pool | None = None
+        if section.pools > 1:  # (named apart from the pool of its pods: each keeper takes its own pool's fence)
+            fallback = self._served(stack, kind, section, f"{kind}@{self.run.id}/cluster")
+        elif section.url is not None:
+            fallback = RemotePool(section.url)
             stack.push_async_callback(fallback.aclose)
         beats = presence_of(self.ledger)
         placements = FilePlacements(self.directory / "pods" / f"{kind}.json")

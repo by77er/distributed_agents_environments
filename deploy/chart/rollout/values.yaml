@@ -152,20 +152,24 @@ runpod:
   schedule: "* * * * *"
   resources: {requests: {cpu: 50m, memory: 256Mi}, limits: {memory: 512Mi}}
 
-# Each kind of sandbox is served from a pod of its own, outside the runs' RayJobs (templates/sandboxes.yaml): a
-# Deployment of one pod running `rollout pool --kind KIND`, which holds at most `size` sandboxes, behind the Service
-# `sandboxes-KIND` that runs acquire from (the cluster config's [sandboxes.KIND] url). Kubernetes accounts what the
-# sandboxes hold in that pod, by its requests. A Minecraft world (a Paper server and its bots' Node process) holds 1.1
+# Each kind of sandbox is served from pods of its own, outside the runs' RayJobs (templates/sandboxes.yaml): a
+# StatefulSet of `replicas` pods, each running `rollout pool --kind KIND`, which holds at most `size` sandboxes. One pod
+# is behind the Service `sandboxes-KIND` that runs acquire from (the cluster config's [sandboxes.KIND] url). With more,
+# each pod is a pool of its own (`KIND-N`, N its ordinal, from its `apps.kubernetes.io/pod-index` label), at its own
+# name under the headless Service `sandboxes-KIND-pools` (the cluster config says `pools` and each one's url), and a
+# run spreads its leases over them, each lease's calls going to the pool that holds it. Kubernetes accounts what the
+# sandboxes hold in each pod, by its requests. A Minecraft world (a Paper server and its bots' Node process) holds 1.1
 # to 1.85 GiB, up to 2.4 GiB when the bots roam far (docs/research/minecraft-memory.md): four ask for 1.75 GiB each and
 # the pool's process 0.5 GiB, and are held to about 2.4 GiB each; each asks for a CPU, about what its server and bots
 # use during play. `onPods` (TOML: `true`, or `{ size, cpus, memory_gib, settings }`) also serves the kind from the
-# host pods a run leases whose provider lists it (`sandboxes = ["KIND"]` in clusterExtra), with this pool behind them
-# for when they are full (docs/deploy/providers.md#sandboxes-on-a-host-pod).
+# host pods a run leases whose provider lists it (`sandboxes = ["KIND"]` in clusterExtra), with these pools behind
+# them for when they are full (docs/deploy/providers.md#sandboxes-on-a-host-pod).
 sandboxes:
   minecraft:
     enabled: true
     provider: minecraft_team.worlds:worlds
-    size: 4
+    size: 4                   # each pod's
+    replicas: 1               # pods, each a pool of `size`; change it while no run plays (docs/deploy/helm.md)
     port: 8710
     onPods: ""                # e.g. '{ memory_gib = 2.4 }': a world, roaming far
     resources: {requests: {cpu: "4", memory: 7680Mi}, limits: {memory: 10Gi}}
