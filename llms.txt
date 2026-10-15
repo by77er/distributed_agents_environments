@@ -136,4 +136,5 @@ with what it covers and who it is for, then "Read first" and "Next" links.
   [RunPod pods as providers](docs/research/runpod-providers.md), [ledger guarantees](docs/research/ledger-guarantees.md),
   [the checkpoint graph](docs/research/policy-dag.md), [curricula](docs/research/curricula.md),
   [SFT datasets](docs/research/sft-datasets.md), [Thinking Machines' API](docs/research/thinking-machines.md),
-  [Prime Intellect's verifiers](docs/research/prime-compat.md), [cleanup inventory](docs/research/cleanup-inventory.md)
+  [Prime Intellect's verifiers](docs/research/prime-compat.md), [cleanup inventory](docs/research/cleanup-inventory.md),
+  [core systems review](docs/research/core-systems-review.md)
