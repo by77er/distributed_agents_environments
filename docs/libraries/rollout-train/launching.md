@@ -58,21 +58,21 @@ needs](#what-a-run-needs)), and the launch, kind and name as its metadata.
 
 ### A RayJob
 
-On a cluster config with `[kubernetes]`, the job is a RayJob custom resource (`RayJobResources`), made from the
-template `[kubernetes] rayjob` names (a RayJob as YAML: its Ray cluster, image, volumes, retries) by `rendered`: its
-name (`run-…`, as above), its namespace, its labels (`app.kubernetes.io/managed-by: rollout`, `rollout/launch`,
+On a cluster config with `[kubernetes]`, the job is a RayJob custom resource (`RayJobResources`), made from the template
+`[kubernetes] rayjob` names (a RayJob as YAML: its Ray cluster, image, volumes, retries) by `rendered`: its name
+(`run-…`, as above), its namespace, its labels (`app.kubernetes.io/managed-by: rollout`, `rollout/launch`,
 `rollout/kind`), its entrypoint and the driver's CPUs (`entrypointNumCpus`), its job id, its runtime environment
 (`runtimeEnvYAML`) and its metadata; its Ray cluster sized from the run's demand (`sized`, below); and, with
 `[kubernetes] queue`, Kueue's label (`kueue.x-k8s.io/queue-name`) and `suspend: true`. Everything else is the
-template's. It is created through the API server
-(`KubernetesApi`: `[kubernetes] api`, with the pod's service account token and CA), which the account must allow:
-create, get, list, watch and delete on `rayjobs` in `ray.io`. KubeRay starts a Ray cluster for it, runs the driver
-there, and removes the cluster when the job ends; when the driver or its pod is lost, the template's `backoffLimit`
-submits it again, and the run goes on from the ledger. A job submitted again for a launch that has failed fails too
-(it exits 1 without running), so a run that fails leaves its RayJob `FAILED`; one whose launch ended or stopped
-exits 0. The chart's template is `deploy/chart/rollout/files/rayjob.yaml`
-([Deploying](../../guide/deploying.md#on-kubernetes)); its `submitterPodTemplate` asks for what the pod that submits
-the job uses (`SUBMITTER`: 0.1 CPU, 256 MiB).
+template's. It is created through the API server (`KubernetesApi`: `[kubernetes] api`, with the pod's service account
+token and CA), which the account must allow: create, get, list, watch and delete on `rayjobs` in `ray.io`. KubeRay
+starts a Ray cluster for it, runs the driver there, and removes the cluster when the job ends; when the driver or its
+pod is lost, the template's `backoffLimit` submits it again, and the run goes on from the ledger, playing the groups its
+launch has left (`jobs.owed`: its `groups`, less those played since the launch first started). A job submitted again for
+a launch that has failed fails too (it exits 1 without running), so a run that fails leaves its RayJob `FAILED`; one
+whose launch ended or stopped exits 0. The chart's template is `deploy/chart/rollout/files/rayjob.yaml`
+([Deploying](../../guide/deploying.md#on-kubernetes)); its `submitterPodTemplate` asks for what the pod that submits the
+job uses (`SUBMITTER`: 0.1 CPU, 256 MiB).
 
 `sized` sizes the Ray cluster from the run's demand. Its head pod asks Kubernetes for what its parts ask for (whole
 GPUs) and room for Ray's own processes (`HEADROOM`: 0.25 CPU, 2 GiB), and Ray starts with its CPUs (rounded up to

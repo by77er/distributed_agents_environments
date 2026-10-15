@@ -80,12 +80,24 @@ from rollout_train.inference import Channel, Connection, Limits, Route, Routes
 from rollout_train.inference.api import ApiChannel, Hosted
 from rollout_train.inference.channel import MAX_LAG
 from rollout_train.launching import Refused, checked, declared, ray_free
-from rollout_train.ledger import Fence
+from rollout_train.ledger import Fence, Ledger
 from rollout_train.machine import measured
 from rollout_train.pods.leasing import pods_store, serving
 from rollout_train.presence import presence_of
 from rollout_train.providers import INFERENCE_KINDS, RUNPOD, TrainerProvider, settings_of
-from rollout_train.record import ENDS, STARTS, LimitReached, end, ending, scope, start_header, table, trained_objective
+from rollout_train.record import (
+    ENDS,
+    RESULTS,
+    STARTS,
+    LimitReached,
+    end,
+    ending,
+    mapping,
+    scope,
+    start_header,
+    table,
+    trained_objective,
+)
 from rollout_train.record import FAILED as RUN_FAILED
 from rollout_train.registry import Entry, registry_of, resolved
 from rollout_train.rollouts.scheduler import EpisodeRunner
@@ -108,6 +120,7 @@ __all__ = [
     "driven",
     "imitated",
     "main",
+    "owed",
     "ran",
     "run_directory",
     "taken_by",
@@ -1205,6 +1218,20 @@ async def ran(run: Run) -> None:
         await _check(run)
 
 
+async def owed(ledger: Ledger, run: str, launch: str | None, groups: int) -> int:
+    """The groups a training run's launch has left to play: its `groups`, less those played since its first start. A
+    launch's job may be started again (KubeRay submits a lost driver's job again), and its loop plays `groups` more
+    groups from each start: without this, each driver lost would play up to `groups` more."""
+    if launch is None:
+        return groups
+    starts = [mapping(each) for each in (await ledger.read(table(run, STARTS))).values()]
+    began = [float(str(each["started"])) for each in starts if each.get("launch") == launch and "started" in each]
+    if not began:
+        return groups
+    results = [mapping(each) for each in (await ledger.read(table(run, RESULTS))).values()]
+    return max(0, groups - sum(1 for each in results if float(str(each.get("time") or 0.0)) >= min(began)))
+
+
 async def _train(run: Run) -> None:
     from rollout_train.algorithm import algorithm_for
     from rollout_train.evals import Schedule, environments_of, suite_of
@@ -1244,11 +1271,15 @@ async def _train(run: Run) -> None:
                 schedule = dataclasses.replace(schedule, named=suite)
         run.started["blobs"] = dict(run.stores.location)
         run.started["directory"] = str(live.directory)
+        launch = run.started.get("launch")
+        groups = await owed(
+            run.ledger, run.run.id, str(launch) if launch else None, int(cast(int, run.settings["groups"]))
+        )
         async with ending(run.ledger, run.run.id):
             await _within_limits(live, train(
                 environment, live.trainer, run.checkpoints, start=live.origin, channel=live.channel,
                 base=str(run.settings.get(f"channels.{live.channel}.model")), directory=live.directory / "checkpoints",
-                publish=live.publish, groups=int(cast(int, run.settings["groups"])),
+                publish=live.publish, groups=groups,
                 groups_per_step=int(cast(int, run.settings["groups_per_step"])),
                 groups_ahead=cast(int | None, run.settings["groups_ahead"]), algorithm=algorithm_for(
                     objective_of(live.trainer), cast(int | None, run.settings["group_size"])),

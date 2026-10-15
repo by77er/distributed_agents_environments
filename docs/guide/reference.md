@@ -23,7 +23,7 @@ do not edit by hand.
 - **[`rollout_train.inference.api`](#rollout_traininferenceapi)** — Channels on hosted APIs: by message, never trained on, spend counted. [`ApiChannel`](#apichannel), [`ATTEMPTS`](#attempts), [`Hosted`](#hosted), [`HostedEndpoint`](#hostedendpoint), [`priced`](#priced)
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rollout_trainrecorderrendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
-- **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`HoursReached`](#hoursreached), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`ran`](#ran), [`Run`](#rollout_trainjobsrun), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`Stepping`](#stepping), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
+- **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`HoursReached`](#hoursreached), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`owed`](#owed), [`ran`](#ran), [`Run`](#rollout_trainjobsrun), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`Stepping`](#stepping), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
 - **[`rollout_train.demand`](#rollout_traindemand)** — What a run's scheduled parts need, and the placement group that reserves them together. [`BRIDGE`](#bridge), [`bridge_asks`](#bridge_asks), [`Bundle`](#bundle), [`colocating`](#colocating), [`Demand`](#demand), [`demand`](#demand), [`HEADROOM`](#headroom), [`Part`](#part), [`placed`](#placed), [`played_channel`](#played_channel), [`Pod`](#pod), [`pods`](#pods), [`requested`](#requested), [`reserve`](#reserve), [`Resources`](#resources), [`SUBMITTER`](#submitter), [`TRAINER`](#trainer)
 - **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`checkpoints_at`](#checkpoints_at), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`POD_SECURITY`](#pod_security), [`pod_security`](#pod_security), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
@@ -5241,6 +5241,18 @@ class NotEnoughMemory(Exception)
 ```
 
 Stopping is better than exhausting the machine (a host may shut down rather than kill one process).
+
+### `owed`
+
+*function* · `libraries/rollout-train/src/rollout_train/jobs.py`
+
+```python
+async def owed(ledger: Ledger, run: str, launch: str | None, groups: int) -> int
+```
+
+The groups a training run's launch has left to play: its `groups`, less those played since its first start. A
+launch's job may be started again (KubeRay submits a lost driver's job again), and its loop plays `groups` more
+groups from each start: without this, each driver lost would play up to `groups` more.
 
 ### `ran`
 

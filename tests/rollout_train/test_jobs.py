@@ -367,3 +367,21 @@ async def _answers(client: httpx.AsyncClient, url: str) -> bool:
     with contextlib.suppress(httpx.TransportError):
         return (await client.get(url)).status_code == 200
     return False
+
+
+async def test_a_launchs_job_started_again_plays_only_the_groups_its_launch_has_left(tmp_path: Path) -> None:
+    from rollout_train.ledger import FileLedger
+    from rollout_train.record import scope
+
+    ledger = FileLedger(tmp_path / "ledger")
+    assert await jobs.owed(ledger, "r", "launch_b", 8) == 8  # (its first start: nothing played yet)
+    fence = await ledger.take(scope("r"))
+    await ledger.append(table("r", STARTS), "1", {"launch": "launch_a", "started": 10.0}, fence)
+    await ledger.append(table("r", RESULTS), "1", {"group": 1, "time": 20.0, "task": "t"}, fence)  # (launch_a's)
+    fence = await ledger.take(scope("r"))
+    await ledger.append(table("r", STARTS), str(fence.number), {"launch": "launch_b", "started": 100.0}, fence)
+    for group, written in ((2, 110.0), (3, 120.0), (4, 130.0)):
+        await ledger.append(table("r", RESULTS), str(group), {"group": group, "time": written, "task": "t"}, fence)
+    assert await jobs.owed(ledger, "r", "launch_b", 8) == 5  # (its driver lost after 3, submitted again by KubeRay)
+    assert await jobs.owed(ledger, "r", "launch_b", 2) == 0
+    assert await jobs.owed(ledger, "r", "launch_c", 8) == 8 and await jobs.owed(ledger, "r", None, 8) == 8
