@@ -177,3 +177,19 @@ async def test_over_http_a_lost_keys_operation_is_sandbox_lost_and_an_unanswered
     with pytest.raises(PoolUnavailable):
         await RemotePool("http://starting", client=httpx.AsyncClient(
             transport=httpx.ASGITransport(app=starting))).acquire(BOX, "run_a/1/3/1/box")  # fmt: skip
+
+
+async def test_with_no_run_a_held_key_gets_sandbox_lost_and_its_lease_is_kept_until_released(tmp_path: Path) -> None:
+    sandboxes = FakeSandboxes()
+    pool = pool_of(tmp_path, sandboxes)
+    lease = await pool.acquire(BOX, "run_a/1/1/1/box")
+    await pool.follow(None)  # (its run's driver is gone)
+    with pytest.raises(SandboxLost):  # (not refused: its episode is played again)
+        await pool.acquire(BOX, lease.key)
+    assert [each.lost for each in await pool.held()] == [True]
+    await pool.follow("run_a")  # (the driver is back: its key is still lost)
+    with pytest.raises(SandboxLost):
+        await pool.acquire(BOX, lease.key)
+    assert sandboxes.made == [lease.handle]
+    await pool.release(lease.key)  # (its run released it)
+    assert (await pool.acquire(BOX, lease.key)).handle in sandboxes.sandboxes

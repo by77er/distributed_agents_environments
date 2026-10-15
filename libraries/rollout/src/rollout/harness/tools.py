@@ -1,7 +1,8 @@
 """`@tool` methods: the action space a task declares (docs/guide/tools.md).
 
 A tool's specification comes from its signature (type hints → JSON Schema, via pydantic) and its docstring. Tool
-bodies are task code, not effects; exceptions they raise are returned to the model as error results.
+bodies are task code, not effects; exceptions they raise are returned to the model as error results, except
+`SandboxLost`: a run cannot go on without its sandbox, so it ends, and its episode is played again.
 """
 
 import asyncio
@@ -26,6 +27,7 @@ from rollout.contracts import (
     ToolResultBlock,
     ToolSpecification,
 )
+from rollout.harness.sandboxes import SandboxLost
 
 _TOOL_ATTRIBUTE = "__rollout_tool__"
 
@@ -125,7 +127,8 @@ def _declare(attribute: str, function: Callable[..., Any], options: ToolOptions)
 async def execute_tool(
     owner: object, declared: DeclaredTool, arguments: Mapping[str, JsonValue], run: object = None
 ) -> ToolResult:
-    """Validate the arguments, run the tool body and normalize what it returns. Failures become error results."""
+    """Validate the arguments, run the tool body and normalize what it returns. Failures become error results, except
+    `SandboxLost`, which is raised: the run ends, to be played again."""
     try:
         validated = declared.arguments_model.model_validate(arguments)
     except ValidationError as error:
@@ -141,6 +144,8 @@ async def execute_tool(
                 value = await value
     except TimeoutError:
         return error_result(f"{declared.specification.name} timed out after {declared.timeout}")
+    except SandboxLost:
+        raise
     except Exception as error:
         return error_result(f"{type(error).__name__}: {error}")
     return normalize_result(value)

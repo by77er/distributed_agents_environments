@@ -134,7 +134,14 @@ class LocalRunContext:
         self.record_event(RunEventType.TRAINING_EXCLUDED, {"reason": reason})
 
     async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]:
-        return list(await asyncio.gather(*awaitables))
+        branches = [asyncio.ensure_future(each) for each in awaitables]
+        try:
+            return list(await asyncio.gather(*branches))
+        except BaseException:  # (one raised, or the run was cancelled: none goes on after the run ends)
+            for branch in branches:
+                branch.cancel()
+            await asyncio.gather(*branches, return_exceptions=True)
+            raise
 
     async def emit(self, kind: str, payload: JsonValue) -> None:
         """Output of the run, such as its result. Recorded as an `output.emit` effect."""
@@ -171,7 +178,8 @@ class LocalRunContext:
 
     async def acquire_sandboxes(self, specs: Mapping[str, SandboxSpec], pools: Mapping[str, Pool], lease: str) -> None:
         """Acquire each declared sandbox from the pool of its kind, under `lease` and its name, giving a harness
-        inside it its slots' model addresses; then record them."""
+        inside it its slots' model addresses; then record them, without their environments (which carry the slots'
+        keys)."""
         for name, spec in specs.items():
             environment = harness_environment(spec.slots, lambda slot: self._models[slot].address())
             pool, key = pools[spec.kind], f"{lease}/{name}"
@@ -179,7 +187,8 @@ class LocalRunContext:
             self._sandboxes[name] = Sandbox(name, await acquire(pool, spec, key, environment), pool, self)
         if self._sandboxes:
             leases: dict[str, JsonValue] = {
-                name: sandbox.lease.model_dump(mode="json") for name, sandbox in self._sandboxes.items()
+                name: sandbox.lease.model_dump(mode="json", exclude={"environment"})
+                for name, sandbox in self._sandboxes.items()
             }
             self.record_event(RunEventType.SANDBOXES_ACQUIRED, {"sandboxes": leases})
 

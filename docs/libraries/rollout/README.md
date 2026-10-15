@@ -108,8 +108,10 @@ What the protocols guarantee:
 - A handle's `events(from_seq=...)` yields every event from `from_seq`, then new ones as they are recorded, and
   ends with the run. `recorded_events()` returns what is recorded so far. `outcome` is `None` while the run is live.
 - `cancel` records `run.cancel_requested`, lets `teardown` run, and returns once the run has ended. The
-  `LocalRunner` cancels the run's task at once.
-- When a run ends, its runner releases its sandboxes.
+  `LocalRunner` cancels the run's task at once; a run cancelled before its program began ends `run.cancelled` all
+  the same, and `result()` returns its outcome rather than raising.
+- When a run ends, its runner releases its sandboxes. A cancel while it releases them (a second one, or the process
+  shutting down) does not cut the release short.
 
 A `LocalRunHandle` also has `context`, the run's `LocalRunContext`.
 
@@ -122,6 +124,7 @@ A `LocalRunHandle` also has `context`, the run's `LocalRunContext`.
 | A sandbox cannot be acquired: its pool stays full for `ACQUIRE_SECONDS`, refuses the key (`LeaseRefused`), or has lost its sandbox (`SandboxLost`) | `run.failed` with class `task_error`, before the program starts ([sandboxes](sandboxes.md#the-runner)) |
 | A `@tool` body raises or times out, its arguments do not validate, or the model calls a tool that does not exist | no failure: the model receives an error result ([tools](../../guide/tools.md#tool-errors-are-observations)) |
 | An imported tool set raises | no failure: the effect completes as `failed` and the model receives an error result |
+| A `@tool` body or an imported tool set raises `SandboxLost` (the run's sandbox is gone) | `run.failed` with class `task_error` and detail `SandboxLost: ...`; the reply's other tool calls are cancelled. In training the episode is played again |
 | A binding leaves a model slot, an import or a kind of sandbox unserved | `LocalRunner.start` raises `ValueError` |
 | The process crashes | its runs are lost; an episode runner's episodes are open again in the [ledger](../rollout-train/checkpoints.md#the-ledger), and are played again |
 

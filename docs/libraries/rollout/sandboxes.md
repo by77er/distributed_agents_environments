@@ -99,7 +99,8 @@ Every call is a `tool.call` effect whose payload is `{"sandbox", "tool", "argume
 a run never carries a handle. An operation's `retry_class` says whether it is safe to perform again, as for
 [imported tools](../../guide/tools.md#retry-classes): `PURE` and `IDEMPOTENT` operations are, and `SIDE_EFFECTING` and
 `UNKNOWN` ones are only when the pool deduplicates. The run records its leases, once
-acquired, in a [`sandboxes.acquired`](contracts/run-events.md#lifecycle) event.
+acquired, in a [`sandboxes.acquired`](contracts/run-events.md#lifecycle) event, without their environments (which
+carry the slots' keys).
 
 ## Harnesses inside a sandbox
 
@@ -145,14 +146,16 @@ provider:
   the key, and the provider makes a handle once.
 - **At most `provider.size`** leases at once, counting those being made.
 - **Its leases are kept** in `leases` (in memory by default) under its `name`, the provider's kind unless it is
-  given one: pools that share a table need names of their own. A key leased from another pool is refused.
+  given one: pools that share a table need names of their own. A key leased from another pool is refused. The table
+  keeps no slot's key (`OPENAI_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, suffixed or not): an acquire that finds a lease there
+  gives it the keys it was given.
 - **`admits(key)`**, when given, says whether a key may hold a lease now. A key it refuses raises `LeaseRefused`, and
   the lease the key had is released: nothing is made for it, even for a moment. Beside a ledger it says whether the
   key's claim holds ([in training, a lease ends with its claim](#in-training-a-lease-ends-with-its-claim)); without it
   every key is admitted.
 - **A sandbox is never made again under a key whose lease it was.** A lease whose sandbox is gone (it ended with
-  the pool's process, say) is lost, and its key gets `SandboxLost`: a new sandbox would not be the one its run was
-  playing in.
+  the pool's process, say) is lost, and its key gets `SandboxLost` until its run releases it: a new sandbox would not
+  be the one its run was playing in.
 - **`sweep(ended)`** releases the leases `ended` says have ended and those past their time limit, marks lost those
   whose sandbox is gone, and deletes the sandboxes no lease names. A lost lease holds no room.
 - **`lose(key)`** deletes a lease's sandbox and keeps the lease, marked lost: its key gets `SandboxLost`, from an

@@ -8,15 +8,18 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
-from rollout.contracts import ModelAddress, RunEventType
+from rollout.contracts import ModelAddress, RunEventType, ToolCall, ToolResult
 from rollout.harness import (
     DirectModel,
+    Lease,
     LeaseRefused,
+    MemoryLeases,
     ModelBinding,
     ModelSlot,
     Mount,
     Network,
     NoCapacity,
+    Observation,
     Pool,
     PoolBinding,
     Process,
@@ -31,12 +34,16 @@ from rollout.harness import (
     SandboxPool,
     SandboxSpec,
     Scratch,
+    Task,
+    agent_program,
     bind,
     register,
+    tool,
 )
 from rollout.harness.remote import RemotePool, serve_pool
+from rollout.harness.sandboxes import harness_environment
 from rollout.local import LocalRunner
-from rollout.testing import FakeSandboxes, ScriptedModelEndpoint, payload
+from rollout.testing import FakeSandboxes, ScriptedModelEndpoint, payload, tool_call_reply
 
 BOX = SandboxSpec(kind="fake", parameters={"image": "alpine"})
 
@@ -84,13 +91,17 @@ async def test_a_sweep_releases_what_has_ended_and_deletes_what_no_lease_names()
     assert gone == ["ending/box"] and set(sandboxes.sandboxes) == {staying.handle}
     assert set(sandboxes.deleted) == {ending.handle, "s-left-behind"}
 
-    restarted = SandboxPool(FakeSandboxes(), leases=pool.leases)  # the pool started again: its sandboxes are gone
+    again = FakeSandboxes()
+    restarted = SandboxPool(again, leases=pool.leases)  # the pool started again: its sandboxes are gone
     assert [lease.key for lease in await restarted.held()] == ["staying/box"]
     assert await restarted.sweep() == ["staying/box"]  # marked lost: its key cannot have it back
     (lost,) = await restarted.held()
     assert lost.lost and (await restarted.capacity()).leased == 0
-    with pytest.raises(SandboxLost):  # (a new one would not be the one its run was playing in)
-        await restarted.acquire(BOX, "staying/box")
+    for _ in range(2):  # (a new one would not be the one its run was playing in: never, until its run releases it)
+        with pytest.raises(SandboxLost):
+            await restarted.acquire(BOX, "staying/box")
+    assert [lease.lost for lease in await restarted.held()] == [True] and again.made == []
+    await restarted.release("staying/box")
     assert await restarted.held() == [] and (await restarted.acquire(BOX, "staying/box")).key == "staying/box"
 
 
@@ -337,3 +348,142 @@ async def test_a_pool_started_again_counts_the_time_its_leases_have_lasted() -> 
     leases.leases[old.key] = old.model_copy(update={"at": old.at - 61})  # made a minute and more ago
     again = SandboxPool(sandboxes, leases=leases)  # the pool's process started again: its clock starts anew
     assert await again.sweep() == ["old/worker"] and list(sandboxes.sandboxes) == [young.handle]
+
+
+async def test_a_lost_key_gets_sandbox_lost_at_every_acquire_until_its_run_releases_it() -> None:
+    sandboxes, leases = FakeSandboxes(), MemoryLeases()
+    pool = SandboxPool(sandboxes, leases=leases)
+    lost = await pool.acquire(BOX, "run/1/1/1/box")
+    await pool.lose(lost.key)  # (its pool ended it while the episode played)
+    found = await pool.acquire(BOX, "run/1/2/1/box")
+    again = FakeSandboxes()
+    restarted = SandboxPool(again, leases=leases)  # (started again: no sweep has looked, the acquire finds it gone)
+    for asked, key in ((pool, lost.key), (restarted, found.key)):
+        for _ in range(2):
+            with pytest.raises(SandboxLost):
+                await asked.acquire(BOX, key)
+        assert leases.leases[key].lost  # (kept, marked lost: never forgotten until its run releases it)
+    assert sandboxes.made == [lost.handle, found.handle] and again.made == []
+    await restarted.release(found.key)  # (its run ended, and released it)
+    assert found.key not in leases.leases and (await restarted.acquire(BOX, found.key)).handle in again.sandboxes
+
+
+async def test_two_first_loads_at_once_keep_a_lease_made_in_between() -> None:
+    class Slow(MemoryLeases):
+        looks = 0
+
+        async def all(self) -> list[Lease]:
+            Slow.looks += 1
+            found = list(self.leases.values())  # (read now, answered late the first time)
+            await asyncio.sleep(0.1 if Slow.looks == 1 else 0)
+            return found
+
+    pool = SandboxPool(FakeSandboxes(size=1), leases=Slow())
+    looking = asyncio.ensure_future(pool.held())  # (a keeper's first sweep, say)
+    await asyncio.sleep(0)
+    lease = await pool.acquire(BOX, "run/1/1/1/box")  # (a run starts meanwhile)
+    await looking
+    assert await pool.held() == [lease] and (await pool.capacity()).free == 0
+    await pool.call(lease.key, "describe", {}, effect_id="e", arguments_digest="d")
+
+
+async def test_a_pools_table_keeps_no_key_of_a_slot_and_an_acquire_that_finds_a_lease_there_is_given_them() -> None:
+    address = ModelAddress(base_url="http://models/v1", api_key="key-of-the-run", model="scripted")
+    given = harness_environment(["coder"], lambda slot: address)
+    sandboxes, leases = FakeSandboxes(), MemoryLeases()
+    lease = await SandboxPool(sandboxes, leases=leases).acquire(BOX, "run/1/1/1/box", given)
+    assert lease.environment == given  # (what runs inside it is given the keys)
+    (kept,) = leases.leases.values()
+    assert "key-of-the-run" not in kept.model_dump_json() and kept.environment["OPENAI_MODEL_CODER"] == "scripted"
+    again = SandboxPool(sandboxes, leases=leases)  # (started again: its sandbox is still there)
+    assert await again.acquire(BOX, lease.key, given) == lease and len(sandboxes.made) == 1
+    await again.lose(lease.key)
+    assert "key-of-the-run" not in leases.leases[lease.key].model_dump_json()
+
+
+async def test_a_runs_sandboxes_acquired_event_records_no_key_of_its_slots() -> None:
+    runner, specification = runner_with(SandboxPool(FakeSandboxes()))
+    handle = await runner.start(specification, run_id="run_3")
+    assert (await handle.result()).status is RunStatus.COMPLETED
+    (acquired,) = [event for event in handle.recorded_events() if event.type is RunEventType.SANDBOXES_ACQUIRED]
+    leases = payload(acquired)["sandboxes"]
+    assert isinstance(leases, dict) and sorted(leases) == ["box", "shared"]
+    assert all(isinstance(lease, dict) and "environment" not in lease for lease in leases.values())
+    assert "key-run_3" not in acquired.model_dump_json()
+
+
+class Pokes(Task):
+    """Two tool calls at once: one reaches its box, which its pool loses, while the other waits. Scored 1 whatever
+    happens."""
+
+    sandboxes = {"box": BOX}
+    cancelled: list[str] = []
+
+    async def start(self, run: RunContext) -> Observation:
+        return Observation("go")
+
+    @tool
+    async def poke(self, run: RunContext) -> str:
+        """Reach the box."""
+        await asyncio.sleep(0.01)
+        return str((await run.sandbox("box").call("describe")).structured)
+
+    @tool
+    async def wait(self, run: RunContext) -> str:
+        """Wait a while."""
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            Pokes.cancelled.append(run.run_id)
+            raise
+        return "waited"
+
+    async def score(self, run: RunContext) -> float:
+        return 1.0
+
+
+class Losing(SandboxPool):
+    """Loses a sandbox as an operation reaches it (its process was started again, say)."""
+
+    async def call(
+        self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
+    ) -> ToolResult:
+        await self.lose(key)
+        return await super().call(key, name, arguments, effect_id=effect_id, arguments_digest=arguments_digest)
+
+
+async def test_a_tool_whose_sandbox_is_lost_fails_the_run_to_be_played_again_and_ends_the_other_calls() -> None:
+    pool = Losing(FakeSandboxes())
+    calls = [ToolCall(call_id="c1", name="poke", arguments={}), ToolCall(call_id="c2", name="wait", arguments={})]
+    endpoint = ScriptedModelEndpoint([tool_call_reply(*calls), "done"])
+    runner = LocalRunner(providers={"scripted": lambda model: endpoint}, pools={"boxes": pool})
+    binding = RunBinding(
+        models={"policy": ModelBinding(direct=DirectModel(provider="scripted", model="s"))},
+        pools={"fake": PoolBinding(local="boxes")},
+    )
+    handle = await runner.start(RunSpecification(program=agent_program(Pokes), binding=binding))
+    outcome = await handle.result()
+    assert outcome.status is RunStatus.FAILED and SandboxLost.__name__ in str(outcome.detail)  # (what is played again)
+    types = [event.type for event in handle.recorded_events()]
+    assert RunEventType.REWARD_ASSIGNED not in types and types[-1] is RunEventType.RUN_FAILED
+    assert handle.run_id in Pokes.cancelled and await pool.held() == []  # (its run released the lost lease)
+
+
+class Slow(FakeSandboxes):
+    async def delete(self, handle: str) -> None:
+        await asyncio.sleep(0.05)
+        await super().delete(handle)
+
+
+async def test_a_second_cancel_does_not_cut_a_runs_release_of_its_sandboxes_short() -> None:
+    sandboxes = Slow()
+    runner, specification = runner_with(SandboxPool(sandboxes))
+    specification = specification.model_copy(update={"program": ProgramReference(program=register(Waits))})
+    handle = await runner.start(specification)
+    await asyncio.sleep(0.02)
+    first = asyncio.ensure_future(runner.cancel(handle.run_id, reason="lapsed"))
+    await asyncio.sleep(0.02)  # (it is releasing its first sandbox now)
+    await runner.cancel(handle.run_id, reason="closing")  # (at shutdown, say)
+    await first
+    assert (await handle.result()).status is RunStatus.CANCELLED
+    assert sandboxes.sandboxes == {} and len(sandboxes.deleted) == 2

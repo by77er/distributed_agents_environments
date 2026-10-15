@@ -29,7 +29,7 @@ internals.
 |---|---|---|
 | `run.created` | a runner starts the run. It is the run's first event. | `specification`, `labels` |
 | `tools.resolved` | the run starts with tools. It follows `run.created`. | `specifications`: the program's `@tool` methods, then the imported tools |
-| `sandboxes.acquired` | the runner has acquired the sandboxes the program declares, before the program starts | `sandboxes`: each one's `Lease` by its name ([sandboxes](../sandboxes.md)) |
+| `sandboxes.acquired` | the runner has acquired the sandboxes the program declares, before the program starts | `sandboxes`: each one's `Lease` by its name, without its `environment` (which carries the slots' keys) ([sandboxes](../sandboxes.md)) |
 | `run.cancel_requested` | a cancellation reaches the run | `reason`, `by` |
 | `run.completed` | the program returned | `outcome` |
 | `run.failed` | the program raised | `class` (a [`RunFailureClass`](../../../guide/reference.md#runfailureclass)), `detail` ([failures](../README.md#failures)) |

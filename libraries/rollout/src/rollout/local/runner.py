@@ -1,6 +1,7 @@
 """`LocalRunner`: runs programs on the current asyncio loop. Nothing persists; a process crash loses in-flight runs."""
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 
 from pydantic import JsonValue
@@ -18,7 +19,7 @@ from rollout.harness.hooks import RunHooks, observed, publish
 from rollout.harness.imports import ToolSet
 from rollout.harness.observation import InvalidObservation
 from rollout.harness.program import Program
-from rollout.harness.remote import remote_pool, remote_tool_set
+from rollout.harness.remote import RemoteToolSet, remote_pool, remote_tool_set
 from rollout.harness.runner import (
     DirectModel,
     RecordedEndpoints,
@@ -62,7 +63,7 @@ class LocalRunHandle:
 
     async def result(self) -> RunOutcome:
         if self._task is not None:
-            await asyncio.shield(self._task)
+            await asyncio.wait([self._task])  # (a run cancelled ends with an outcome; its caller was not cancelled)
         assert self._outcome is not None
         return self._outcome
 
@@ -93,6 +94,13 @@ class LocalRunHandle:
 
     def attach(self, task: asyncio.Task[None]) -> None:
         self._task = task
+        task.add_done_callback(self._ended)
+
+    def _ended(self, task: asyncio.Task[None]) -> None:
+        """A run whose task ended before it finished (cancelled before its first step) ends cancelled."""
+        if not self.done:
+            self.context.record_event(RunEventType.RUN_CANCELLED, None)
+            self.finish(RunOutcome(status=RunStatus.CANCELLED))
 
     def finish(self, outcome: RunOutcome) -> None:
         self._outcome = outcome
@@ -154,12 +162,15 @@ class LocalRunner:
         lease: str | None = None,
     ) -> LocalRunHandle:
         run_id = run_id or new_run_id()
+        program = instantiate(specification.program)
+        tool_sets = resolve_tool_sets(program, specification.binding, self._tool_sets)
+        for tool_set in tool_sets.values():
+            if isinstance(tool_set, RemoteToolSet):
+                await tool_set.describe()  # (asked over its own client: never a blocking request on the loop)
         if run_id in self._runs:
             raise ValueError(f"run {run_id} already exists")
-        program = instantiate(specification.program)
         endpoints = resolve_endpoints(program, specification.binding, self._providers, self._gateway)
         endpoints = observed(endpoints, self._hooks, run_id)
-        tool_sets = resolve_tool_sets(program, specification.binding, self._tool_sets)
         pools = resolve_pools(program, specification.binding, self._pools)
         handle = LocalRunHandle(run_id, specification, lease)
         handle.context = LocalRunContext(
@@ -218,7 +229,10 @@ class LocalRunner:
             detail = f"{type(error).__name__}: {error}"
             outcome = RunOutcome(status=RunStatus.FAILED, failure_class=RunFailureClass.TASK_ERROR, detail=detail)
             context.record_event(RunEventType.RUN_FAILED, {"class": "task_error", "detail": detail})
-        await context.release_sandboxes()
+        releasing = asyncio.ensure_future(context.release_sandboxes())
+        while not releasing.done():  # (a cancel while it releases, at shutdown say, does not cut the release short)
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.shield(releasing)
         handle.finish(outcome)
 
 

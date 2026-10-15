@@ -128,6 +128,9 @@ class FollowingPool(SandboxPool):
 
     async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease:
         await self._load()
+        if self.run is None and key in self._held:  # (lost when its run stopped being served: kept until released)
+            await self.lose(key)  # (nothing where it is lost already)
+            raise SandboxLost(f"the sandbox of {key} was lost: no run is served here now")
         if not self.admitting and of_run(key, self.run) and key not in self._held:
             raise PoolUnavailable(f"the pool {self.name} takes no new sandbox now: its run's driver does not answer")
         lease = await super().acquire(spec, key, environment)

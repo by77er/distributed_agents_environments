@@ -22,7 +22,7 @@ async def test_a_file_is_kept_as_a_link_to_it_and_both_are_read_only(tmp_path: P
     assert reference == await store.put(b"weights" * 1000, "application/octet-stream")  # (the same blob either way)
     kept = Path(reference.uri.removeprefix("file://"))
     assert os.path.samefile(kept, made) and made.stat().st_nlink == 2  # noqa: ASYNC240 (one file on disk, not two)
-    assert not os.access(made, os.W_OK)  # (changing it would change the blob)
+    assert not made.stat().st_mode & 0o222  # (no one may write it: changing it would change the blob)
     assert await store.read(reference) == b"weights" * 1000
 
 
@@ -123,3 +123,18 @@ async def test_a_blob_changed_in_place_is_not_put_in_place(tmp_path: Path) -> No
     with pytest.raises(ValueError, match="corrupt"):
         await store.link(reference, tmp_path / "fetched" / "adapter.bin")
     assert not (tmp_path / "fetched" / "adapter.bin").exists()
+
+
+async def test_a_reference_whose_digest_is_not_a_sha256_reaches_nothing_outside_the_store(tmp_path: Path) -> None:
+    from rollout.contracts import BlobReference
+
+    store = FileBlobStore(tmp_path / "blobs")
+    kept = tmp_path / "kept.txt"
+    kept.write_text("not a blob")
+    for digest in (str(kept), "../kept.txt", "AB" * 32, "ab" * 31):
+        crafted = BlobReference(uri=kept.as_uri(), sha256=digest, size=10, media_type="text/plain")
+        with pytest.raises(ValueError, match="not a blob's SHA-256"):
+            await store.delete(crafted)
+        with pytest.raises(ValueError, match="not a blob's SHA-256"):
+            await store.read(crafted)
+    assert kept.read_text() == "not a blob"

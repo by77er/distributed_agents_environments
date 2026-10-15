@@ -117,3 +117,39 @@ async def test_unknown_providers_are_rejected() -> None:
     runner = LocalRunner()
     with pytest.raises(ValueError, match="no endpoint factory"):
         await runner.start(RunSpecification(program=agent_program(Echo), binding=binding()))
+
+
+async def test_a_run_cancelled_before_its_first_step_ends_cancelled() -> None:
+    runner, _ = runner_with([])
+    handle = await runner.start(RunSpecification(program=agent_program(Echo), binding=binding()))
+    await runner.cancel(handle.run_id, reason="test")  # (its task has not run yet)
+    assert handle.done and (await handle.result()).status is RunStatus.CANCELLED  # (not raised into its caller)
+    streamed = [event.type async for event in handle.events()]  # (it ends)
+    assert streamed[-2:] == [RunEventType.RUN_CANCEL_REQUESTED, RunEventType.RUN_CANCELLED]
+
+
+class Branches(Task):
+    """Samples on one branch while the other raises."""
+
+    async def start(self, run: RunContext) -> Observation:
+        async def broken() -> None:
+            await asyncio.sleep(0.01)
+            raise RuntimeError("one branch broke")
+
+        await run.gather(run.model.sample([Message.user("hi")]), broken())
+        return Observation("unreached")
+
+
+async def test_a_branch_that_raises_ends_the_others_before_the_run_ends() -> None:
+    async def slow(request: object) -> Message:
+        await asyncio.sleep(0.2)
+        return Message.assistant("late")
+
+    runner, _ = runner_with([slow])
+    handle = await runner.start(RunSpecification(program=agent_program(Branches), binding=binding()))
+    assert (await handle.result()).status is RunStatus.FAILED
+    await asyncio.sleep(0.3)  # (a sample left running would have completed by now)
+    types = [event.type for event in handle.recorded_events()]
+    assert types[-2:] == [RunEventType.EFFECT_COMPLETED, RunEventType.RUN_FAILED]  # (the sample, cancelled, first)
+    (completed,) = [event for event in handle.recorded_events() if event.type is RunEventType.EFFECT_COMPLETED]
+    assert payload(completed)["error_class"] == "cancelled"

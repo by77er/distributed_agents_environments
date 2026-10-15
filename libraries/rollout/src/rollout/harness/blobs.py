@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import hashlib
 import os
+import re
 import secrets
 import shutil
 import tempfile
@@ -36,6 +37,9 @@ class Blobs(Protocol):
         Whoever stored the same bytes holds the same blob: delete only what nothing else names, and with `unused_for`
         longer than any writer takes from putting a blob to naming it."""
         ...
+
+
+_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 def blob_digest(data: bytes) -> str:
@@ -93,6 +97,8 @@ class FileBlobStore:
         return True
 
     def _path(self, digest: str) -> Path:
+        if not _DIGEST.fullmatch(digest):  # (a reference's digest names a file of the store, never one outside it)
+            raise ValueError(f"{digest!r} is not a blob's SHA-256: 64 lowercase hexadecimal digits")
         return self.directory / digest[:2] / digest
 
 

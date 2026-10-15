@@ -98,8 +98,8 @@ class _Described:
         await self._http.aclose()
 
     def _describe(self) -> tuple[list[ToolSpecification], bool]:
-        if self._described is None:  # (asked once, before any call: a plain request, as runs are being set up)
-            response = httpx.get(f"{self._url}/{self.listed}", timeout=30)
+        if self._described is None:  # (asked once, with a plain request, by a caller that did not await `describe`)
+            response = httpx.get(f"{self._url}/{self.listed}", timeout=QUICK)
             response.raise_for_status()
             self._described = self._offered(response.json())
         return self._described

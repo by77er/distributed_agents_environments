@@ -114,7 +114,8 @@ class RunContext(Protocol):
         ...
 
     async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]:
-        """Await concurrently, in order. Equivalent to `asyncio.gather`."""
+        """Await concurrently; the results in order, as `asyncio.gather` gives them. When one raises (or the run is
+        cancelled), the others are cancelled and awaited before it is raised: nothing a run began goes on after it."""
         ...
 
     async def emit(self, kind: str, payload: JsonValue) -> None:

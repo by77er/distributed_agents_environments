@@ -1,6 +1,5 @@
 """`Task`: the environment an agent acts in, in the reinforcement-learning sense (docs/guide/tasks.md)."""
 
-import asyncio
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -8,7 +7,7 @@ from rollout.contracts import Message, ToolResult, ToolSpecification
 from rollout.harness.context import RunContext
 from rollout.harness.history import ContextHints
 from rollout.harness.observation import End, Observation
-from rollout.harness.sandboxes import SandboxSpec
+from rollout.harness.sandboxes import SandboxLost, SandboxSpec
 from rollout.harness.tools import DeclaredTool, collect_tools, error_result, execute_tool, tool_message
 
 
@@ -89,11 +88,12 @@ class Task:
         return declared + imported
 
     async def run_tools(self, run: RunContext, reply: Message) -> Observation:
-        """Execute every tool call in `reply` concurrently; one TOOL message answers them all."""
+        """Execute every tool call in `reply` concurrently (`run.gather`); one TOOL message answers them all. A call
+        whose sandbox is lost (`SandboxLost`) ends the others and the run."""
         calls = reply.tool_calls
         if not calls:
             return End()
-        results = await asyncio.gather(*(self._call(run, call.name, call.arguments) for call in calls))
+        results = await run.gather(*(self._call(run, call.name, call.arguments) for call in calls))
         return Observation(tool_message(calls, results))
 
     async def _call(self, run: RunContext, name: str, arguments: Any) -> ToolResult:
@@ -103,6 +103,8 @@ class Task:
         if name in run.tools:
             try:
                 return await run.tools.call(name, arguments)
+            except SandboxLost:
+                raise
             except Exception as error:  # a platform failure: recorded as a failed effect, shown to the model
                 return error_result(f"{name} is unavailable: {type(error).__name__}: {error}")
         return error_result(f"unknown tool {name!r}")

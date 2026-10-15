@@ -21,6 +21,7 @@ from rollout.harness import (
     RunContext,
     RunSpecification,
     RunStatus,
+    SandboxLost,
     Task,
     ToolBinding,
     agent_program,
@@ -29,6 +30,7 @@ from rollout.harness import (
 from rollout.harness.imports import deduplicates
 from rollout.harness.remote import RemoteToolSet, serve
 from rollout.local import LocalRunner
+from rollout.local import runner as runner_module
 from rollout.testing import ScriptedModelEndpoint, ScriptedReply, payload, tool_call_reply
 
 
@@ -144,3 +146,42 @@ async def test_an_unbound_import_is_rejected() -> None:
     runner, _, specification = run_with(Counter(), [], imports={})
     with pytest.raises(ValueError, match="does not say how to serve the import 'counter'"):
         await runner.start(specification)
+
+
+async def test_a_remote_tool_set_is_asked_what_it_offers_without_blocking_the_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    counter = Counter()
+
+    def blocking(url: str, **options: object) -> httpx.Response:
+        raise AssertionError(f"a blocking request on the event loop: {url}")
+
+    monkeypatch.setattr(httpx, "get", blocking)
+    runner, endpoint, specification = run_with(
+        counter, [tool_call_reply(INCREMENT), "done"], imports={"counter": ToolBinding(url="http://counter")}
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=serve(counter)), base_url="http://c") as client:
+
+        def remote(url: str) -> RemoteToolSet:
+            return RemoteToolSet(url, client=client)
+
+        monkeypatch.setattr(runner_module, "remote_tool_set", remote)
+        handle = await runner.start(specification)  # (asked over the tool set's own client, awaited)
+        assert (await handle.result()).status is RunStatus.COMPLETED
+    assert [tool.name for tool in endpoint.requests[0].tools] == ["local_echo", "increment"] and len(counter.calls) == 1
+
+
+class Losing(Counter):
+    """A tool set whose call reaches a sandbox that is gone."""
+
+    async def call(
+        self, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str
+    ) -> ToolResult:
+        raise SandboxLost("the sandbox of r/box is gone")
+
+
+async def test_an_imported_tool_whose_sandbox_is_lost_fails_the_run_to_be_played_again() -> None:
+    runner, _, specification = run_with(Losing(), [tool_call_reply(INCREMENT), "done"])
+    handle = await runner.start(specification)
+    outcome = await handle.result()
+    assert outcome.status is RunStatus.FAILED and SandboxLost.__name__ in str(outcome.detail)

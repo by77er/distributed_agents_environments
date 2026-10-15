@@ -96,6 +96,10 @@ with `is_error=True` and a message:
 - the model calls a tool that does not exist;
 - the body exceeds its `timeout`.
 
+One exception is not shown to the model: `SandboxLost`, raised when a run's
+[sandbox](../libraries/rollout/sandboxes.md) is gone. The run cannot go on without it, so the reply's other calls are
+cancelled and the run fails, and in training its episode is played again.
+
 ## Tool calls in an episode
 
 With the default `respond`, a reply that makes tool calls gets their results back, and a reply without tool calls
@@ -231,7 +235,7 @@ asyncio.run(imported())
 ```
 
 If a tool set raises, the effect is recorded as failed and the model receives an error result, so every tool call
-still gets an answer.
+still gets an answer (`SandboxLost` aside, which ends the run as it does from a `@tool` body).
 
 A tool set is shared by the runs it serves. What a run needs for itself alone, made when it starts and deleted when
 it ends (a Minecraft world, a container), is a [sandbox](../libraries/rollout/sandboxes.md): the program declares it,
@@ -256,8 +260,9 @@ set served over HTTP reports the attribute of the one behind it
 | `POST /call` | `name`, `arguments`, `effect_id`, `arguments_digest` | the `ToolResult`; status 500 with `error` when the tool set raised |
 
 `rollout tools FACTORY [--directory DIRECTORY] [--host 127.0.0.1] [--port 8700]` serves the tool set that
-`FACTORY` (`module:function`, called with the directory) returns. A run reaches it with `ToolBinding(url=...)`;
-task code calls `run.tools` the same way in both cases. A cluster config names each tool set served elsewhere once
+`FACTORY` (`module:function`, called with the directory) returns. A run reaches it with `ToolBinding(url=...)`
+(the runner asks it what it offers as the first run that binds it starts, taking 10 seconds at most and holding up
+no other run); task code calls `run.tools` the same way in both cases. A cluster config names each tool set served elsewhere once
 (`[tools.NAME] url`, [the cluster config](cluster.md)), and a run binds its programs' imports of that name to it.
 
 ## What tools are not

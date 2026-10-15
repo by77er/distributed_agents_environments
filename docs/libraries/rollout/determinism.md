@@ -18,7 +18,7 @@ and the rules that keep a run's effects identified and its draws reproducible.
 | An effect: a model sample, an imported tool call, a sandbox operation, `run.emit` | its result; the effect is recorded as run events ([effects](contracts/effects.md)) |
 | `run.now()` | the wall clock, in UTC |
 | `run.random` | a `random.Random` seeded from `run_id`: a run with the same id draws the same sequence |
-| `await run.gather(*awaitables)` | awaits concurrently and returns results in argument order, as `asyncio.gather` does |
+| `await run.gather(*awaitables)` | awaits concurrently and returns results in argument order, as `asyncio.gather` does; when one raises, the others are cancelled, and awaited, before it is raised |
 | Everything else: task hooks, `@tool` bodies, `__init__` of the task and the agent, `run.blobs.put`, `run.reward` | runs as written; none of it is an effect |
 
 ## Effect identity
