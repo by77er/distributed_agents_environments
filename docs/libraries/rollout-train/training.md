@@ -67,6 +67,20 @@ besides where and by what it was started, the environment (as `module:name`), it
   checkpoint the run made (its first, from `start`); the checkpoint it makes is appended under the run's fence and served
   on the channel, and `made` is told of it (the run's `bookmark` moves there). Tokens sampled under an
   older checkpoint are corrected for by the trainer's objective. One step is taken at a time.
+- **How old a trained token may be** (`max_age`, none by default). `max_lag` bounds the checkpoint a turn begins on, not
+  how many steps pass before a step trains it: a long episode's first turns can be many checkpoints old by the step that
+  takes its group, with only the objective's truncated importance weight to correct them. With `max_age`, a step trains
+  on no span sampled more than that many checkpoints before the checkpoint it starts from: the span stays in its segment
+  as context, its behaviour logprobs (and a teacher's scores of its tokens) taken out with it
+  (`rollout_train.trainer.aged`). A segment left with no span is left out, and so is a pair either side of which is left
+  with none, or a labelled example left with none. The step's note says how many spans and sampled tokens were left out
+  so (`too_old_spans`, `too_old_tokens`, among its metrics); a step left with nothing to train on is written down as
+  failed (`nothing to train on`), its weights as they were, without counting toward `FAILED_UPDATES`. It is none by
+  default, as runs trained before it: leaving out a long episode's first turns trains on its endings alone, and the
+  importance weight already bounds what a stale token can do. To set it, take at least `max_lag + 1`: a turn that begins
+  `max_lag` behind the newest and ends while a step is being taken is that old to the step after it, so a smaller bound
+  leaves out turns of even one-turn episodes (validation notes it); at `max_lag + 1` only turns of episodes played
+  across more than one step are left out.
 - **Evals between steps.** With `evals` (a [`Schedule`](../../guide/reference.md#schedule)), the checkpoint of every
   `every`th step is evaluated once it is served, and the next step waits until the eval has played every start
   ([evals during training](evals.md#evals-during-training)).
@@ -89,7 +103,7 @@ what happens are appended to the run's tables in the [ledger](checkpoints.md#the
 | `runs/RUN/groups` | group | when a group is decided: runners play it from there | the row, the start every episode of the group is given, and how many episodes it asks for |
 | `runs/RUN/results` | group | when its last episode ends | how it went: a [`Result`](../../guide/reference.md#result) |
 | `runs/RUN/steps` | step | before the trainer is called | the groups it covers, the checkpoint it starts from (`parent`), the id of the one it will make (`makes`), the batch (a blob) and how many segments it has, the seed, when it was decided, its changeable settings (`settings`) and the version of the suite its evals play (`suite_version`) |
-| `runs/RUN/failures` | step | when a step's trainer fails | its error |
+| `runs/RUN/failures` | step | when a step's trainer fails, or a step is left nothing to train on (`max_age`) | its error |
 | `runs/RUN/evals` | step | when the eval of the checkpoint the step made has played every start | the suite, the version played, the checkpoint, the eval's run, and how it went ([evals during training](evals.md#evals-during-training)) |
 
 A step's outcome is the checkpoint it makes, in the ledger's `checkpoints` table. A group is done with once its result trains on
@@ -192,8 +206,9 @@ the composed loss with a transcription of the paper's formula): `default` (Dr. G
 A paper's loss assumes on-policy samples, and a run's turns may begin up to `max_lag` checkpoints behind the newest,
 sampled by an engine that computes slightly differently from the trainer: so every policy-gradient preset, and the
 policy-gradient form of distillation (`on_policy_distillation`, `mopd`), weighs each sampled token by its importance
-weight from where it was sampled to the step's start, truncated at 2, as `default` does
-([how presets meet off-policy samples](../../research/objectives-design.md#presets-and-off-policy-samples)).
+weight from where it was sampled to the step's start, truncated at 2, as `default` does ([how presets meet off-policy
+samples](../../research/objectives-design.md#presets-and-off-policy-samples)). A long episode's first turns may be older
+still by the step that trains them, unless the run bounds that too (`max_age`: [the loop](#the-loop)).
 `importance.paper_exact = true` takes it away, for comparing with a paper on a run whose samples are on-policy;
 validation notes a run without a correction while `max_lag` is above 0. A run names one (`objective.preset`) and
 overrides any component (`objective.kl.target = "reference"`, `objective.kl.coefficient = 0.01`); `resolved(preset,
@@ -368,12 +383,13 @@ where it is `Progressing`.
 A run's settings are named by dotted key ([run settings](../../guide/cluster.md#run-settings)), and are of two kinds.
 **Changeable** ones can change between two steps without breaking the run: `groups_per_step`, `groups_ahead`, `max_lag`
 (written into what the channel should serve with each checkpoint it serves, so runners elsewhere take it with that
-checkpoint), the evals it makes (`evals.suite`: a suite by name, which follows its newest version, a version by id, or
-none for no evals; `evals.every`; `evals.episodes`, none for the suite's own), and its trainer's (`trainer.NAME` for
-each of its `changeable`, and the numbers of its objective by their own keys, `objective.kl.coefficient`). **Fixed**
-ones make what the run is: its trainer and model, the adapter's rank and the trainer's other settings, the channels and
-their providers, how many episodes it plays at once, and the groups and seed the loop was started with. The run's start
-records both (`run_settings`: `fixed`, and `changeable` with their values as it starts).
+checkpoint), `max_age` ([how old a trained token may be](#the-loop)), the evals it makes (`evals.suite`: a suite by
+name, which follows its newest version, a version by id, or none for no evals; `evals.every`; `evals.episodes`, none for
+the suite's own), and its trainer's (`trainer.NAME` for each of its `changeable`, and the numbers of its objective by
+their own keys, `objective.kl.coefficient`). **Fixed** ones make what the run is: its trainer and model, the adapter's
+rank and the trainer's other settings, the channels and their providers, how many episodes it plays at once, and the
+groups and seed the loop was started with. The run's start records both (`run_settings`: `fixed`, and `changeable` with
+their values as it starts).
 
 What someone wants of a run's changeable settings (its **desired settings**) is ordinary state beside the ledger,
 changed in place and not appended: `settings.json` beside a ledger of files, the `run_settings` table in a database
@@ -384,17 +400,18 @@ The loop (`train(desired=…, scheduled=…)`) reads them each time it is about 
 it says what its channel should serve (so a loop started again serves with a `max_lag` changed meanwhile). Each one it
 has, with a value it can take (`checked`: a whole number of 1 at least for `groups_per_step`, `groups_ahead`,
 `evals.every` and `evals.episodes`, of which `groups_ahead` and `evals.episodes` may also be none; 0 at least for
-`max_lag`), is taken in place of what it used (`applied`); its trainer is told its own (`change`), and one the trainer
-refuses leaves the trainer's as they were, noted to the hooks as a `settings` note with the error. A change is noted as
-a `settings` note with what changed. The step is decided with the settings then in effect, and its record in `steps`
-says them (`settings`), with the version of the suite they name as its name points then (`suite_version`); a step taken
-again after a stop is taken with those. Whether a step's checkpoint is evaluated is that step's evals, and the version
-played is the one its record names: `scheduled(suite, every, episodes)` gives the schedule of a suite by name (the
-version its name points to now) or of a version by id. A run's driver gives the ledger's version; for a name the ledger
-has no suite of (asking for one is refused: a name never becomes a suite by itself), or a suite whose environments do
-not all load where the run is, there is none, and nothing is evaluated. An edit of the suite (a new version,
-[versions](evals.md#versions)) is played from the next step decided. So a change made while a step is being taken
-applies from the next one, and a run that is stopped takes it when it is started again.
+`max_lag` and `max_age`, of which `max_age` may also be none), is taken in place of what it used (`applied`); its
+trainer is told its own (`change`), and one the trainer refuses leaves the trainer's as they were, noted to the hooks as
+a `settings` note with the error. A change is noted as a `settings` note with what changed. The step is decided with the
+settings then in effect, and its record in `steps` says them (`settings`), with the version of the suite they name as
+its name points then (`suite_version`); a step taken again after a stop is taken with those. Whether a step's checkpoint
+is evaluated is that step's evals, and the version played is the one its record names:
+`scheduled(suite, every, episodes)` gives the schedule of a suite by name (the version its name points to now) or of a
+version by id. A run's driver gives the ledger's version; for a name the ledger has no suite of (asking for one is
+refused: a name never becomes a suite by itself), or a suite whose environments do not all load where the run is, there
+is none, and nothing is evaluated. An edit of the suite (a new version, [versions](evals.md#versions)) is played from
+the next step decided. So a change made while a step is being taken applies from the next one, and a run that is stopped
+takes it when it is started again.
 
 ## Pausing and resuming
 

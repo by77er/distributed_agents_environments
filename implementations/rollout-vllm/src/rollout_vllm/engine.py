@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from rollout.processes import children
-from rollout_train.inference.channel import Generation, Scores, most_likely, scored_range
+from rollout_train.inference.channel import LORA_SLOTS, Generation, Scores, most_likely, scored_range
 
 LORA_RANKS = (1, 8, 16, 32, 64, 128, 256, 320, 512)
 """The ranks vLLM allocates adapter room for; an engine asked for another takes the next one up."""
@@ -50,7 +50,7 @@ class VllmEngine:
         max_num_seqs: int = 32,
         max_num_batched_tokens: int = 4096,
         max_lora_rank: int = 32,
-        max_loras: int = 2,
+        max_loras: int = LORA_SLOTS,
         language_model_only: bool = True,
         speculative: Mapping[str, Any] | None = None,
         quantization: str | None = None,
@@ -59,7 +59,9 @@ class VllmEngine:
         reasoning: Mapping[str, str] | None = None,
     ) -> None:
         """`reasoning` (`parser`, vLLM's reasoning parser for the model, and `open` and `close`, the renderer's thinking
-        open and forced close) has the engine bound a generation's thinking itself (`generate`'s `thinking_budget`)."""
+        open and forced close) has the engine bound a generation's thinking itself (`generate`'s `thinking_budget`).
+        `max_loras` is how many adapters one batch may mix: at least the windows of the channels it serves (each run's
+        `max_lag + 1`), side by side."""
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
         from vllm import AsyncEngineArgs
         from vllm.config.reasoning import ReasoningConfig
@@ -91,6 +93,9 @@ class VllmEngine:
         """The most tokens a request may ask for at each position, with their logprobs (`top`)."""
         self.max_model_len = max_model_len
         """The longest sequence (prompt and completion) the engine accepts; a channel reads it."""
+        self.max_loras = max_loras
+        """How many adapters it holds at once (`rollout_train.inference.channel.lora_slots`): a follower whose channels
+        keep more on it says so."""
         self._engine: Any = AsyncLLM.from_engine_args(arguments)
         self._requests = itertools.count()
         self._adapters: dict[str, Any] = {}

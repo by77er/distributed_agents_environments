@@ -48,7 +48,8 @@ def test_keys_that_kept_their_meaning_kept_their_names() -> None:
     )
     changeable = {each.pattern for each in KEYS if each.changeable and not each.pattern.startswith("objective.")}
     assert changeable == {
-        "groups_per_step", "groups_ahead", "max_lag", "evals.suite", "evals.every", "evals.episodes", "limits.spend",
+        "groups_per_step", "groups_ahead", "max_lag", "max_age", "evals.suite", "evals.every", "evals.episodes",
+        "limits.spend",
     }  # fmt: skip
 
 
@@ -59,6 +60,8 @@ def test_keys_that_kept_their_meaning_kept_their_names() -> None:
         ("groups", 2.5, "is a whole number, not 2.5"),
         ("groups", "ten", 'is a whole number, not "ten"'),
         ("max_lag", -1, "is at least 0, not -1"),
+        ("max_age", -1, "is at least 0, not -1"),
+        ("max_age", 1.5, "is a whole number or null, not 1.5"),
         ("channels.policy.routing", "random", "is one of spill, weighted, not 'random'"),
         ("channels.policy.thinking_tokens", True, "is a whole number or null, not true"),
         ("objective.clip.dual", 1, "is above 1, not 1"),
@@ -75,7 +78,8 @@ def test_a_key_says_what_is_wrong_with_a_value(key: str, value: object, problem:
 
 
 def test_a_key_takes_what_it_says() -> None:
-    for key, value in [("groups", 3), ("groups", 3.0), ("limits.spend", 2), ("limits.spend", None), ("max_lag", 0)]:
+    for key, value in [("groups", 3), ("groups", 3.0), ("limits.spend", 2), ("limits.spend", None), ("max_lag", 0),
+                       ("max_age", None), ("max_age", 2)]:  # fmt: skip
         found = key_of(key)
         assert found is not None and found.problem(value) is None, key
 

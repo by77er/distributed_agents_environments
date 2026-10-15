@@ -139,13 +139,14 @@ fetched bases. Everything else is in the ledger and the blob store: a run on any
 
 Some of a run's settings can change between two steps without breaking it, and are taken from its next step on:
 `groups_per_step`, `groups_ahead`, `max_lag` (how many checkpoints behind the newest a turn of the trained channel may
-begin), the evals (`evals.suite`, `evals.every`, `evals.episodes`; an edit of the suite, too, as a new version its name
-points to), `limits.spend`, the numbers of the objective's components, and the settings its trainer takes between steps
+begin), `max_age` (how many checkpoints before a step's start a span it trains on may have been sampled), the evals
+(`evals.suite`, `evals.every`, `evals.episodes`; an edit of the suite, too, as a new version its name points to),
+`limits.spend`, the numbers of the objective's components, and the settings its trainer takes between steps
 (`trainer.learning_rate`, `trainer.tokens_per_step`, `trainer.max_kl` and `trainer.max_gradient_norm`). The rest are
 fixed when it starts. The monitor's run page changes the changeable ones and shows the fixed ones; what is wanted is
-kept beside the ledger, and each step's record says the settings it used
-([changing a running run's settings](../libraries/rollout-train/training.md#changing-a-running-runs-settings)). A run
-submitted again starts from its recorded settings and takes what is wanted at its next step.
+kept beside the ledger, and each step's record says the settings it used ([changing a running run's
+settings](../libraries/rollout-train/training.md#changing-a-running-runs-settings)). A run submitted again starts from
+its recorded settings and takes what is wanted at its next step.
 
 ## Runners
 

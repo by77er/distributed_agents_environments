@@ -232,3 +232,22 @@ def test_sandboxes_whose_specs_name_model_slots_are_not_served_from_pods() -> No
         "its model at the run's gateway, which a pod cannot reach, so they are not served from pods "
         "([sandboxes.minecraft] on_pods)"
     ]
+
+
+def test_a_window_of_more_adapters_than_the_pods_hold_at_once_is_noted() -> None:
+    def noted(cluster: Cluster, settings: RunSettings) -> list[str]:
+        return [each.reason for each in check(settings, cluster, ENVIRONMENT) if each.rule == "weights"]
+
+    assert noted(cluster_of(), RunSettings(SETTINGS)) == []  # (max_lag 1: two adapters, as the pods' vLLM holds)
+    lagging = RunSettings({**SETTINGS, "max_lag": 3})
+    assert noted(cluster_of(), lagging) == [
+        "channel policy keeps 4 adapters loaded (max_lag + 1), and provider h100's servers hold 2 at once (vLLM's "
+        "--max-loras): vLLM swaps them in and out of its batches, which slows every turn. --max-loras 4 in the "
+        "model's args holds them"
+    ]
+    assert not any(each.refuses for each in check(lagging, cluster_of(), ENVIRONMENT) if each.rule == "weights")
+    cluster = cluster_of()
+    offer = cluster.inference["h100"].models["Qwen/Qwen3.5-9B"]
+    roomy = dataclasses.replace(offer, options={**offer.options, "args": "--max-num-seqs 16 --max-loras=4"})
+    provider = dataclasses.replace(cluster.inference["h100"], models={"Qwen/Qwen3.5-9B": roomy})
+    assert noted(dataclasses.replace(cluster, inference={**cluster.inference, "h100": provider}), lagging) == []

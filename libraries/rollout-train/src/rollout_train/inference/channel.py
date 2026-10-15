@@ -144,6 +144,17 @@ class NotLoaded(Unserved):
 MAX_LAG = 1
 """Checkpoints behind what its channel should serve a sample may be, unless the run says otherwise (`max_lag`): one,
 the checkpoint before, which a server serves while it loads the newest."""
+LORA_SLOTS = MAX_LAG + 1
+"""Adapters an engine holds at once unless it is started with more (vLLM's `max_loras`, `VllmEngine`'s default): one
+channel's window at the default `max_lag`."""
+
+
+def lora_slots(engine: object) -> int | None:
+    """How many adapters an engine holds at once, where it says (`max_loras`, as `VllmEngine` does); none where it does
+    not (a server elsewhere: vLLM's `/v1/models` does not say). The channels on an engine keep their windows side by
+    side (`Channel.keep` each); past its slots, vLLM swaps adapters in and out of its batches."""
+    said = getattr(engine, "max_loras", None)
+    return said if isinstance(said, int) and not isinstance(said, bool) else None
 
 
 @dataclass(frozen=True)

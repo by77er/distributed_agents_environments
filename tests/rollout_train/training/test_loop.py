@@ -29,15 +29,17 @@ from rollout_train import (
     train,
     trained,
 )
-from rollout_train.checkpoints import Retention
+from rollout_train.algorithm import Batch
+from rollout_train.checkpoints import Retention, new_id
 from rollout_train.evals import Fetched
 from rollout_train.ledger import Fenced
 from rollout_train.objectives import PRESETS
-from rollout_train.record import GROUPS, STARTS, STEPS, table
-from rollout_train.rollouts import Record, loaded
-from rollout_train.rollouts.scheduler import EPISODES
+from rollout_train.record import GROUPS, STARTS, STEPS, scope, table
+from rollout_train.recorder import Segment, Span
+from rollout_train.rollouts import Episode, Record, loaded
+from rollout_train.rollouts.scheduler import EPISODES, Hooks
 from rollout_train.testing import Policy, ScriptedEngine, plain_channel
-from rollout_train.trainer import MINIBATCH, START, WEIGHTS, Item, OnDemand, Pair, Progress, Progressing
+from rollout_train.trainer import MINIBATCH, START, WEIGHTS, Item, OnDemand, Pair, Progress, Progressing, Weighted
 from tests.rollout_train.rollouts.games import Words
 from tests.rollout_train.support import Counting, Notes, Running, Seen, answering, here, made_by
 
@@ -490,6 +492,81 @@ async def test_a_loop_started_again_serves_with_the_max_lag_wanted_meanwhile(tmp
     first, *_ = await made_by(checkpoints)  # (the step it had decided, made now)
     served: Any = await checkpoints.ledger.read(table("train", SERVING))
     assert served["policy/base"]["max_lag"] == 1 and served[f"policy/{first.id}"]["max_lag"] == 3
+
+
+@dataclasses.dataclass(frozen=True)
+class Aging:
+    """An algorithm that trains, in each group, on one segment: its first span sampled at depth 1 and its second at
+    depth 5 (a long episode's first turn and its last), each with logprobs of its own."""
+
+    group_size: int = 2
+
+    def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Item]:
+        spans = [Span(1, 3, 1, "first"), Span(3, 5, 5, "last")]
+        segment = Segment([65, 66, 67, 68, 69], spans, [-0.1, -0.1, -0.5, -0.5])
+        return Batch([Weighted(segment, 1.0, f"train/{group[0].group}/1/policy/0")])
+
+
+class Told(Hooks):
+    """Keeps every note it is told."""
+
+    def __init__(self) -> None:
+        self.notes: list[Mapping[str, JsonValue]] = []
+
+    def on_note(self, event: Mapping[str, JsonValue]) -> None:
+        self.notes.append(event)
+
+
+async def line_of(checkpoints: Checkpoints, tmp_path: Path, depth: int) -> Checkpoint:
+    """Another run's line of `depth` checkpoints: its newest, which a run may start from."""
+    fence = await checkpoints.ledger.take(scope("before"))
+    newest: Checkpoint | None = None
+    for _ in range(depth):
+        id = new_id()
+        (tmp_path / "before" / id).mkdir(parents=True)
+        (tmp_path / "before" / id / "adapter.bin").write_text(f"weights of {id}")
+        newest = await checkpoints.add(fence, id, weights=tmp_path / "before" / id, run="before", base="words-base",
+                                       parents=[newest.id] if newest else [])  # fmt: skip
+    assert newest is not None and newest.depth == depth
+    return newest
+
+
+@pytest.mark.parametrize(("given", "wanted"), [(2, None), (None, None), (None, 0)])
+async def test_a_span_sampled_more_than_max_age_checkpoints_before_a_steps_start_is_not_trained_on(
+    tmp_path: Path, given: int | None, wanted: int | None
+) -> None:
+    recorder, checkpoints, trainer, told = answering(), checkpoints_in(tmp_path), Counting(), Told()
+    start = await line_of(checkpoints, tmp_path, 6)  # (the step starts from depth 6)
+
+    async def desired() -> Mapping[str, JsonValue]:
+        return {"max_age": wanted} if wanted is not None else {}
+
+    async with here(checkpoints.ledger, recorder, checkpoints.blobs):
+        await train(
+            Words(), trainer, checkpoints, start=start.id, channel="policy", directory=tmp_path / "v",
+            publish=recorder.publish, algorithm=Aging(), groups=1, groups_per_step=1, max_age=given, seed=1,
+            hooks=[told], desired=desired,
+        )  # fmt: skip
+    steps: Any = await checkpoints.ledger.read(table("train", STEPS))
+    (step,) = [note for note in told.notes if note["kind"] == "step"]
+    metrics = cast(dict[str, Any], step["metrics"])
+    if given == 2:  # the span sampled at depth 1 is 5 old: context, and not trained on; the one at 5 is trained
+        ((weighted,),) = trainer.batches
+        assert isinstance(weighted, Weighted) and weighted.segment.tokens == [65, 66, 67, 68, 69]
+        assert weighted.segment.spans == [Span(3, 5, 5, "last")] and weighted.segment.logprobs == [-0.5, -0.5]
+        assert (metrics["too_old_spans"], metrics["too_old_tokens"]) == (1, 2)
+        assert steps["1"]["settings"]["max_age"] == 2 and steps["1"]["segments"] == 1
+    elif wanted is None:  # (none, by default: every span is trained, as before)
+        ((weighted,),) = trainer.batches
+        assert [span.version for span in weighted.segment.spans] == [1, 5] and len(weighted.segment.logprobs) == 4
+        assert "too_old_spans" not in metrics and steps["1"]["settings"]["max_age"] is None
+    else:  # (0, as the run's desired settings say: both spans are too old, and the step has nothing to train on)
+        assert trainer.batches == [] and await made_by(checkpoints) == []
+        assert (await trained(checkpoints.ledger))[1].error == (
+            "nothing to train on: every span was sampled more than 0 checkpoints before the step's start (max_age)"
+        )
+        assert (metrics["too_old_spans"], metrics["too_old_tokens"]) == (2, 4)
+        assert steps["1"]["settings"]["max_age"] == 0 and steps["1"]["segments"] == 0
 
 
 class Turns:

@@ -161,6 +161,12 @@ published first. A load that fails is tried again at the next look.
   engines that may be shared, so several runs' adapters sit side by side on one engine.
 - **Each channel keeps its run's window**: `max_lag + 1` adapters (from the newest `Serving.max_lag`; two when the
   record does not say), following changes to it.
+- **It says where the windows are more than an engine holds.** The channels on one engine keep their windows side by
+  side; where they add up to more adapters than the engine holds at once (`lora_slots(engine)`: its `max_loras`, as
+  `VllmEngine` says; a server elsewhere does not, since vLLM's `/v1/models` lists no such number), vLLM swaps adapters
+  in and out of its batches, which slows every turn. The follower then says so once in its log, naming each run's
+  channel and its window, and in its beats (`crowded`) for as long as it lasts; channels serving full weights take no
+  adapter's slot.
 - **Full weights load replica by replica.** A follower that is replica `i` of `n` loads a channel's new full
   checkpoint only once every replica before it that still beats holds it, so the others serve the checkpoint before
   meanwhile.
@@ -172,7 +178,8 @@ published first. A load that fails is tried again at the next look.
 With a `Presence`, it beats (kind `engines`; `runs`, and `follows` where it serves one run; its `replica`) with what
 each channel serves and how fast, why a load failed, if one did, and each engine's address (for a server elsewhere)
 with every adapter it holds, each with its run, channel, checkpoint and depth, so that a turn can go to an engine that
-holds its checkpoint; at once when something changed, every 15 seconds otherwise.
+holds its checkpoint, and where its windows are more adapters than an engine holds, what it says of them
+(`crowded`); at once when something changed, every 15 seconds otherwise.
 
 ## Engine hosts
 
@@ -195,10 +202,14 @@ own replica, started by the run's job in its bundle of the run's placement group
 | `bind`, `unbind`, `bound`, `follow`, `served`, `about` | what it serves, a look now, what its beats say |
 
 `host_spec(cluster, provider, model, settings=)` says what a host of a `vllm` provider's model asks for: the kind's
-engine, the model's options with the provider's `max_logprobs` (the top-k it declares), a replica's `gpus` (half of them where the run's trainer shares the provider's card,
-`colocate_with`), and the custom resources `[placement.engines]` names. Ray places it by those: on Kubernetes, a GPU
-share no node has free makes KubeRay's autoscaler start a GPU worker. Ray starts a host again when it dies
-(`max_restarts=-1`); its engines start afresh and its follower loads what the serving records say again.
+engine, the model's options with the provider's `max_logprobs` (the top-k it declares), a replica's `gpus` (half of
+them where the run's trainer shares the provider's card, `colocate_with`), and the custom resources
+`[placement.engines]` names. Ray places it by those: on Kubernetes, a GPU share no node has free makes KubeRay's
+autoscaler start a GPU worker. Ray starts a host again when it dies (`max_restarts=-1`); its engines start afresh and
+its follower loads what the serving records say again. A training run's host is started to hold its window of adapters
+at once, for a trainer that makes adapters: `max_loras` at least the run's `max_lag + 1` as it starts (2,
+`LORA_SLOTS`, unless the options say more). A pool's host, started with no run's settings, holds what its options say;
+a `max_lag` raised past either later is what its follower says (`crowded`).
 
 `HostServer(handle, address)` is a `CheckpointServer` over a host's handle, for a `RemoteChannel` in the same Ray
 cluster: a host that does not answer is `Unreachable`. `HostPausable(handle)` is what

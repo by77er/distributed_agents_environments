@@ -21,7 +21,8 @@ it to its hooks, and a training pod puts it in its beats and its answer about th
 The loop marks the weighted and distilled segments sampled wholly on the weights a step starts from
 (`sampled_at_start`, `marked_at_start`): their behaviour logprobs are where the step starts, up to how the engine and
 the trainer compute differently, so a trainer may take them for its own instead of computing them
-(`rollout_objectives.settings.StepSettings.old_logprobs`).
+(`rollout_objectives.settings.StepSettings.old_logprobs`). With a run's `max_age`, it first takes out what was sampled
+too long before the step's start (`aged`): a trainer is never given a span more than that many checkpoints old.
 """
 
 import math
@@ -34,7 +35,7 @@ from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoint, Manifest
 from rollout_train.objectives import DEFAULT, Objective
-from rollout_train.recorder import Segment, TeacherScores
+from rollout_train.recorder import Segment, Span, TeacherScores
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,85 @@ def marked_at_start(items: Sequence[Item], depth: int) -> list[Item]:
         else item
         for item in items
     ]
+
+
+@dataclass(frozen=True)
+class Aged:
+    """What a step trains on of its items once what was sampled too long before its start is taken out (`aged`), and
+    how much was taken out."""
+
+    items: list[Item]
+    spans: int = 0
+    """Spans taken out as too old."""
+    tokens: int = 0
+    """The tokens they sampled."""
+
+
+def aged(items: Sequence[Item], depth: int, max_age: int | None) -> Aged:
+    """`items` without the spans sampled more than `max_age` checkpoints before `depth` (the depth of the weights a step
+    starts from: 0, the base model's): such a span stays in its segment as context, and is not trained on, its
+    behaviour logprobs (and a teacher's scores of its tokens) taken out with it. A segment left with no span is left
+    out, and so is an item left with no segment: a pair either side of which is left with none. None: every item as it
+    is."""
+    if max_age is None:
+        return Aged(list(items))
+    oldest = depth - max_age
+    old = [span for item in items for segment in segments_of(item) for span in segment.spans if span.version < oldest]
+    kept = [made for item in items if (made := _since(item, oldest)) is not None]
+    return Aged(kept, len(old), sum(span.end - span.start for span in old))
+
+
+def _since(item: Item, oldest: int) -> Item | None:
+    """An item with only the spans sampled at depth `oldest` or later; none where it is left nothing to train on."""
+    if isinstance(item, Weighted):
+        found = _recent(item.segment, oldest)
+        return replace(item, segment=found[0]) if found is not None else None
+    if isinstance(item, Distilled):
+        found = _recent(item.segment, oldest)
+        return replace(item, segment=found[0], scores=_scored(item.scores, found[1])) if found is not None else None
+    if isinstance(item, Pair):
+        chosen, rejected = _side(item.chosen, oldest), _side(item.rejected, oldest)
+        return replace(item, chosen=chosen, rejected=rejected) if chosen and rejected else None
+    side = _side(item.side, oldest)
+    return replace(item, side=side) if side else None
+
+
+def _side(segments: Sequence[Segment], oldest: int) -> tuple[Segment, ...]:
+    return tuple(found[0] for segment in segments if (found := _recent(segment, oldest)) is not None)
+
+
+def _recent(segment: Segment, oldest: int) -> tuple[Segment, list[tuple[int, int]]] | None:
+    """A segment with only its spans sampled at depth `oldest` or later, and where their tokens are among those it
+    sampled (from each span's first to the one after its last); none where it is left with no span."""
+    spans: list[Span] = []
+    places: list[tuple[int, int]] = []
+    at = 0  # (where a span's tokens begin among those the segment sampled: its logprobs are its spans', in order)
+    for span in segment.spans:
+        size = span.end - span.start
+        if span.version >= oldest:
+            spans.append(span)
+            places.append((at, at + size))
+        at += size
+    if not spans:
+        return None
+    if len(spans) == len(segment.spans):
+        return segment, places
+    teacher = _scored(segment.teacher, places) if segment.teacher is not None else None
+    return replace(segment, spans=spans, logprobs=_taken(segment.logprobs, places), teacher=teacher), places
+
+
+def _scored(scores: TeacherScores, places: Sequence[tuple[int, int]]) -> TeacherScores:
+    """A teacher's scores of the sampled tokens at `places` alone."""
+    return replace(
+        scores,
+        logprobs=_taken(scores.logprobs, places),
+        top_tokens=_taken(scores.top_tokens, places),
+        top_logprobs=_taken(scores.top_logprobs, places),
+    )
+
+
+def _taken[Each](values: Sequence[Each], places: Sequence[tuple[int, int]]) -> list[Each]:
+    return [value for start, end in places for value in values[start:end]]
 
 
 def weight_of(item: Item) -> float:

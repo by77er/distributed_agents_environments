@@ -17,7 +17,8 @@ unset STEP_TOKEN # (used, and good for nothing more: no other process sees it)
 export HF_HOME=${HF_HOME:-/workspace/huggingface}
 export VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
 read -r -a vllm_options <<<"${VLLM_ARGS:-}"
-# Adapters one batch may mix: every bound run's window (its max_lag + 1) side by side; the CPU cache holds more.
+# Adapters one batch may mix: every bound run's window (its max_lag + 1) side by side, or vLLM swaps them in and out
+# (a --max-loras in VLLM_ARGS comes after and wins); the CPU cache holds more.
 lora_options=(--max-loras "${VLLM_MAX_LORAS:-2}")
 if [ -n "${VLLM_MAX_CPU_LORAS:-}" ]; then
     lora_options+=(--max-cpu-loras "$VLLM_MAX_CPU_LORAS")

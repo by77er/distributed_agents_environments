@@ -1283,7 +1283,8 @@ async def _train(run: Run) -> None:
                 groups_per_step=int(cast(int, run.settings["groups_per_step"])),
                 groups_ahead=cast(int | None, run.settings["groups_ahead"]), algorithm=algorithm_for(
                     objective_of(live.trainer), cast(int | None, run.settings["group_size"])),
-                max_lag=int(cast(int, run.settings["max_lag"])), seed=int(cast(int, run.settings["seed"])),
+                max_lag=int(cast(int, run.settings["max_lag"])), max_age=cast(int | None, run.settings["max_age"]),
+                seed=int(cast(int, run.settings["seed"])),
                 episodes_at_once=int(cast(int, run.settings["episodes_at_once"])), binding=live.binding(environment),
                 run=run.run.id, started=run.started, hooks=[live.feed, live.stepping], kept=live.bookmarked,
                 made=live.made,

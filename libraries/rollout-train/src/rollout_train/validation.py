@@ -27,6 +27,7 @@ from rollout_train.bridges import AUTO, Bridge, NoBridge, path, rank_factor
 from rollout_train.cluster import Cluster, auth_problem
 from rollout_train.demand import HEADROOM, Demand, Resources, demand, played_channel, requested
 from rollout_train.distillation import routes_of
+from rollout_train.inference.channel import LORA_SLOTS
 from rollout_train.memory import ModelFacts, TrainerMemory, gpu_memory_gib, trainer_memory
 from rollout_train.objectives import DEFAULT, LIKELIHOOD, POLICY_GRADIENT, PREFERENCE, Objective, composed
 from rollout_train.providers import InferenceProvider, SettingSpec, TrainerProvider, settings_of
@@ -695,6 +696,40 @@ def _weights(run: _Run) -> None:
         if target == "full" and not provider.capabilities.full_reload:
             run.refuse("weights", f"channels.{channel}.provider", f"provider {name} cannot reload full weights, and "
                        f"{channel} serves full weights")  # fmt: skip
+    _slots(run)
+
+
+def _slots(run: _Run) -> None:
+    """A note for a training run whose channels serving its LoRA keep more adapters loaded (its `max_lag + 1`) than a
+    provider's servers hold at once, where the cluster config says how many (`_slots_of`): vLLM then swaps them in and
+    out of its batches, which slows every turn."""
+    lag = run.settings["max_lag"]
+    if run.kind != "train" or run.weights != "lora" or not isinstance(lag, int) or isinstance(lag, bool):
+        return
+    for channel in run.serving():
+        if run.settings[f"channels.{channel}.bridge"] == "merge-quantize":
+            continue  # (served as full weights)
+        model = str(run.settings.get(f"channels.{channel}.model"))
+        for name, provider in run.providers(channel):
+            slots = _slots_of(provider, model)
+            if slots is not None and lag + 1 > slots:
+                run.note("weights", "max_lag", f"channel {channel} keeps {lag + 1} adapters loaded (max_lag + 1), and "
+                         f"provider {name}'s servers hold {slots} at once (vLLM's --max-loras): vLLM swaps them in and "
+                         f"out of its batches, which slows every turn. --max-loras {lag + 1} in the model's args holds "
+                         "them")  # fmt: skip
+
+
+def _slots_of(provider: InferenceProvider, model: str) -> int | None:
+    """How many adapters a provider's servers of `model` hold at once, where the cluster config says: RunPod's pods
+    start vLLM with `--max-loras` as the model's `args` say, else with their image's `VLLM_MAX_LORAS` (`LORA_SLOTS`,
+    as deploy/images starts them). None for the others: a `vllm` provider's own engine hosts are started with room
+    for their run's window (`rollout_train.inference.hosts.host_spec`), and servers elsewhere do not say."""
+    if provider.kind not in ("runpod-inference", "runpod-host"):
+        return None
+    offer = provider.models.get(model)
+    words = str(offer.options.get("args") or "").replace("=", " ").split() if offer is not None else []
+    said = [words[at + 1] for at, word in enumerate(words[:-1]) if word == "--max-loras"]  # (the last one counts)
+    return int(said[-1]) if said and said[-1].isdigit() else LORA_SLOTS
 
 
 def _models(run: _Run) -> None:
@@ -944,6 +979,7 @@ def _objective(run: _Run) -> None:
                    f"advantages: a likelihood or preference preset, not {preset}")  # fmt: skip
     _grouped(run, objective)
     _uncorrected(run, objective)
+    _aged(run)
     trainer = run.trainer
     if trainer is None:
         return
@@ -1006,6 +1042,19 @@ def _uncorrected(run: _Run, objective: Objective) -> None:
              f"up to {lag} checkpoint{'' if lag == 1 else 's'} behind the newest, sampled by an engine that computes "
              f"slightly differently from the trainer, are trained on as if on-policy. {fix} weighs them; max_lag = 0 "
              "keeps them nearer")  # fmt: skip
+
+
+def _aged(run: _Run) -> None:
+    """A note for a training run whose `max_age` is below `max_lag + 1`: a turn that begins `max_lag` behind the newest
+    checkpoint and ends while a step is being taken is that old to the step after it, so turns of even the shortest
+    episodes are not trained on."""
+    age, lag = run.settings["max_age"], run.settings["max_lag"]
+    if run.kind != "train" or not isinstance(age, int) or not isinstance(lag, int) or age > lag:
+        return
+    run.note("objective", "max_age", f"max_age is {age}, and a turn that begins max_lag ({lag}) behind the newest "
+             f"checkpoint and ends while a step is being taken is {lag + 1} old to the step after it: such turns are "
+             f"not trained on, even those of one-turn episodes. max_age = {lag + 1} trains them, and leaves out only "
+             "turns of episodes played across more than one step")  # fmt: skip
 
 
 def _reads(objective: Objective) -> str:

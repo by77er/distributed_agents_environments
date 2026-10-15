@@ -1,11 +1,14 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 # (Ray's handles are partly untyped.)
 """Engine hosts on the session's Ray, with scripted engines: a host follows what the runs bound to it serve, keeping
-as many adapters as each run's `max_lag` lets a turn sample from; turns go to a host that holds a checkpoint within
-lag, through `HostServer`; full weights load replica by replica, and a turn caught by a load is sampled again; a host
-started again loads what it served; and it asks Ray for its share of a GPU."""
+as many adapters as each run's `max_lag` lets a turn sample from, and says where they are more than its engine holds
+at once; turns go to a host that holds a checkpoint within lag, through `HostServer`; full weights load replica by
+replica, and a turn caught by a load is sampled again; a host started again loads what it served; and it asks Ray for
+its share of a GPU, and its engine for room for its run's adapters."""
 
 import asyncio
+import dataclasses
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
@@ -18,17 +21,20 @@ import pytest
 from rollout.harness.blobs import FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.cluster import load
-from rollout_train.inference import NotLoaded, RemoteChannel
+from rollout_train.following import Follower
+from rollout_train.inference import Channel, NotLoaded, RemoteChannel
+from rollout_train.inference.channel import lora_slots
 from rollout_train.inference.hosts import HostPausable, HostServer, HostSpec, host_spec, started
 from rollout_train.inference.remote import ENGINES, Unreachable
 from rollout_train.ledger import Fence, FileLedger
 from rollout_train.presence import FilePresence
 from rollout_train.record import scope
 from rollout_train.recorder import Renderer
+from rollout_train.recorder.renderers import Tokenizer
 from rollout_train.run_settings import RunSettings
-from rollout_train.serving import Serving, record_serving, serving_of
+from rollout_train.serving import Serving, qualified, record_serving, serving_of
 from rollout_train.stores import FILES
-from rollout_train.testing import PlainRenderer
+from rollout_train.testing import Characters, PlainRenderer, ScriptedEngine
 from tests.local_ray import LocalRay
 
 MODEL = "tiny"
@@ -163,6 +169,50 @@ async def test_a_host_follows_its_runs_and_keeps_what_their_lag_lets_a_turn_samp
         await host.unbind.remote("s", "policy")
         await until(lambda: _not_holding(host, other.id))
         assert await host.bound.remote() == [("r", "policy")]
+
+
+class Slotted(ScriptedEngine):
+    """A scripted engine that says how many adapters it holds at once, as `VllmEngine` does."""
+
+    max_loras = 3
+
+
+async def test_a_follower_says_once_where_its_runs_windows_are_more_adapters_than_its_engine_holds(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    stores = Stores(tmp_path)
+    engine = Slotted(cast(Tokenizer, Characters()), always=[("yes\n", "stop")])
+    assert lora_slots(engine) == 3 and lora_slots(ScriptedEngine(cast(Tokenizer, Characters()))) is None
+    bound = {("r", "policy")}
+
+    async def bindings() -> set[tuple[str, str]]:
+        return set(bound)
+
+    def opened(run: str, channel: str) -> Channel:  # (each run's channel over the one engine, as a host's are)
+        return Channel(qualified(run, channel), [engine], cast(Renderer, PlainRenderer()), model=MODEL)
+
+    follower = Follower("host", stores.checkpoints, None, {}, tmp_path / "files", bindings=bindings, opened=opened,
+                        presence=stores.presence())  # fmt: skip
+    await stores.served("r")
+    assert await follower.follow() and follower.crowded is None  # (r keeps two: within the three it holds)
+    bound.add(("s", "policy"))
+    first = await stores.served("s")
+    with caplog.at_level(logging.WARNING, logger="rollout_train.following"):
+        assert await follower.follow()
+        assert not await follower.follow()  # (said once, not at every look)
+    said = (
+        "its channels keep 4 adapters on an engine that holds 3 at once (max_loras), so vLLM swaps them in and out of "
+        "its batches: r/policy 2, s/policy 2 (each run's max_lag + 1)"
+    )
+    assert follower.crowded == said and [record.getMessage() for record in caplog.records] == [f"host: {said}"]
+    await follower.beat()
+    (beat,) = await stores.presence().beats()
+    assert beat.about["crowded"] == said
+    await stores.served("s", parent=first, max_lag=0)  # (s now keeps one: three in all)
+    assert await follower.follow() and follower.crowded is None
+    await follower.beat()
+    (beat,) = await stores.presence().beats()
+    assert "crowded" not in beat.about
 
 
 async def _holding(host: Any, name: str) -> bool:
@@ -327,6 +377,17 @@ def test_a_hosts_share_of_a_gpu_and_its_engine_come_from_the_cluster_and_the_run
         cluster, "local-vllm", "Qwen/Qwen3.5-4B", settings=RunSettings({**ranked, "trainer.provider": "tinker-lora"})
     )
     assert (own.options["max_lora_rank"], bridged.options["max_lora_rank"]) == (16, 48)  # (Tinker's q, k and v: x3)
+    assert "max_loras" not in own.options  # (max_lag 1: two adapters at once, as a vLLM engine holds unless told)
+    lagging = {**ranked, "trainer.provider": "local-lora", "max_lag": 3}
+    wide = host_spec(cluster, "local-vllm", "Qwen/Qwen3.5-4B", settings=RunSettings(lagging))
+    assert wide.options["max_loras"] == 4  # (the run's window: each adapter a turn may still sample from, at once)
+    full = RunSettings({**lagging, "trainer.provider": "local-full"})  # (full weights take no adapter's slot)
+    assert "max_loras" not in host_spec(cluster, "local-vllm", "Qwen/Qwen3.5-4B", settings=full).options
+    roomy = dataclasses.replace(offer, options={**offer.options, "max_loras": 8})  # (what the options say, if more)
+    more = dataclasses.replace(offered, models={**offered.models, "Qwen/Qwen3.5-4B": roomy})
+    configured = dataclasses.replace(cluster, inference={**cluster.inference, "local-vllm": more})
+    said = host_spec(configured, "local-vllm", "Qwen/Qwen3.5-4B", settings=RunSettings(lagging))
+    assert said.options["max_loras"] == 8
     with pytest.raises(ValueError, match="runs no engine host"):
         host_spec(cluster, "tinker", "Qwen/Qwen3.5-4B")
     with pytest.raises(ValueError, match="does not serve"):

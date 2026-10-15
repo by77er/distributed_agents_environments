@@ -13,7 +13,8 @@
 - `steps`: what the run decided to train on, by the step's number: the groups it covers, the checkpoint it starts
   from, the one it will make, the batch. Written before the trainer is called. The checkpoint it makes, in the
   ledger's `checkpoints` table, is its outcome.
-- `failures`: the steps whose trainer failed, and why, by the step's number.
+- `failures`: the steps whose trainer failed, and why, by the step's number (and those left with nothing to train on
+  once spans older than `max_age` were taken out).
 - `evals`: the evals of the checkpoints it made that its schedule names (`rollout_train.evals.Schedule`), by the
   number of the step that made each: the suite, the checkpoint, the eval's run, and how it went. Written when the eval
   has played every start.

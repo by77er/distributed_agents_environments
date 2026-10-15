@@ -23,6 +23,8 @@ export ROLLOUT_ROLE=host
 # (what the training service keeps and the follower loads, on the pod's own disk: no round trip through the bucket)
 export ROLLOUT_BLOB_CACHE=${ROLLOUT_BLOB_CACHE:-/workspace/blobs}
 read -r -a vllm_options <<<"${VLLM_ARGS:---gpu-memory-utilization 0.42}"
+# Adapters one batch may mix: the run's window (its max_lag + 1), or vLLM swaps them in and out (a --max-loras in
+# VLLM_ARGS comes after and wins).
 lora_options=(--max-loras "${VLLM_MAX_LORAS:-2}")
 if [ -n "${VLLM_MAX_CPU_LORAS:-}" ]; then
     lora_options+=(--max-cpu-loras "$VLLM_MAX_CPU_LORAS")

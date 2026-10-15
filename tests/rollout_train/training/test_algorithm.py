@@ -25,7 +25,7 @@ from rollout_train.algorithm import (
 from rollout_train.objectives import PRESETS, Advantage, resolved
 from rollout_train.recorder import TOKEN_LEVEL, Segment, Span, TeacherScores
 from rollout_train.rollouts import Episode, Outcome, Trajectory
-from rollout_train.trainer import Distilled, Labelled, Pair
+from rollout_train.trainer import Aged, Distilled, Labelled, Pair, Weighted, aged
 
 
 def episode(
@@ -208,3 +208,23 @@ def test_a_policy_gradient_with_a_distillation_term_keeps_every_segment_with_its
     same = algorithm.batch([scored(episode(1.0, number=n)) for n in (1, 2)], Budget(), random.Random(0))
     assert len(same.items) == 8 and {each.advantage for each in same.items} == {0.0}  # (the teacher still trains)
     assert algorithm.batch([episode(1.0), episode(0.0)], Budget(), random.Random(0)).skipped is not None
+
+
+def test_a_span_sampled_too_long_before_a_steps_start_is_context_and_its_item_goes_with_its_last_span() -> None:
+    old, new = Span(1, 3, 1, "first"), Span(3, 5, 5, "last")
+    scores = TeacherScores("teacher", [-1.0, -2.0, -3.0, -4.0], [[7], [8], [9], [10]], [[-0.1], [-0.2], [-0.3], [-0.4]])
+    both = Segment([65, 66, 67, 68, 69], [old, new], [-0.1, -0.2, -0.5, -0.6], "policy", teacher=scores)
+    first = Segment([65, 66, 67], [old], [-0.1, -0.2], "policy")
+    items = [Weighted(both, 1.0), Distilled(both, scores, 0.5), Pair((first, both), (both,)), Pair((both,), (first,)),
+             Labelled((first,), True), Labelled((first, both), False)]  # fmt: skip
+    assert aged(items, 6, None) == Aged(items)  # (none: every span, of any age)
+    assert aged(items, 6, 5).items == items  # (sampled at 1, five before 6: not too old)
+    kept = aged(items, 6, 2)  # the spans sampled at 1 are too old: the one at 5 is trained, with its own logprobs
+    weighted, distilled, pair, labelled = kept.items
+    assert (kept.spans, kept.tokens) == (10, 20)  # (each span sampled at 1, as often as items hold it)
+    trimmed = replace(scores, logprobs=[-3.0, -4.0], top_tokens=[[9], [10]], top_logprobs=[[-0.3], [-0.4]])
+    recent = Segment([65, 66, 67, 68, 69], [new], [-0.5, -0.6], "policy", teacher=trimmed)
+    assert weighted == Weighted(recent, 1.0) and distilled == Distilled(recent, trimmed, 0.5)  # (a teacher's too)
+    assert pair == Pair((recent,), (recent,))  # (a segment left with no span is left out of its side)
+    assert labelled == Labelled((recent,), False)  # (a side left with none: its pair, or its example, is left out)
+    assert aged(items, 6, 0) == Aged([], 16, 32)  # (sampled at 5, one before 6: too old for 0)

@@ -661,6 +661,19 @@ def test_an_objective_without_an_importance_correction_is_noted_while_turns_may_
         assert noted("objective", findings({**LOCAL_LORA, "objective.preset": preset})) == [], preset
 
 
+def test_a_max_age_that_leaves_out_turns_of_even_one_turn_episodes_is_noted() -> None:
+    found = findings({**LOCAL_LORA, "max_lag": 2, "max_age": 2})
+    assert [(each.key, each.reason) for each in found if each.rule == "objective"] == [
+        ("max_age", "max_age is 2, and a turn that begins max_lag (2) behind the newest checkpoint and ends while a "
+         "step is being taken is 3 old to the step after it: such turns are not trained on, even those of one-turn "
+         "episodes. max_age = 3 trains them, and leaves out only turns of episodes played across more than one step"),
+    ]  # fmt: skip
+    assert refused("objective", found) == []
+    assert noted("objective", findings({**LOCAL_LORA, "max_lag": 2, "max_age": 3})) == []
+    assert noted("objective", findings({**LOCAL_LORA, "max_age": None})) == []  # (none, by default: any age)
+    assert "max_age is at least 0, not -1" in refused("settings", findings({"max_age": -1}))
+
+
 @pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_a_reference_the_trainer_cannot_give_is_refused() -> None:
     assert refused("objective", findings({"objective.preset": "dpo"})) == [

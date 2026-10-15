@@ -13,8 +13,11 @@ groups. When a group's last episode ends its result is written down at once, and
 algorithm finds to train on in it joins a queue. A step is taken over every group queued once there are at least
 `groups_per_step` (so that no step leans toward one task), while play goes on; at the end of the run, over whatever is
 left. Tokens sampled under an older checkpoint than the one a step starts from are corrected for by the trainer's
-objective. One step is taken at a time, each from the checkpoint the one before made; the first from the checkpoint the
-run starts from (`start`: any checkpoint, of this run or another; the base model if none).
+objective; a run with a `max_age` trains on none sampled more than that many checkpoints before it (they stay as
+context: `rollout_train.trainer.aged`), its step's note saying how many spans and tokens were left out so
+(`too_old_spans`, `too_old_tokens`), and a step left with nothing to train on is written down as failed, its weights as
+they were. One step is taken at a time, each from the checkpoint the one before made; the first from the checkpoint
+the run starts from (`start`: any checkpoint, of this run or another; the base model if none).
 
 **It can die at any moment and be started again.** It keeps nothing it cannot read back: what it decides and what
 happens are appended to the run's tables in the ledger (`rollout_train.record`), and every action is one that can be
@@ -125,6 +128,7 @@ from rollout_train.settings import (
     EVALS_SUITE,
     GROUPS_AHEAD,
     GROUPS_PER_STEP,
+    MAX_AGE,
     MAX_LAG,
     PAUSED,
     applied,
@@ -143,6 +147,7 @@ from rollout_train.trainer import (
     Remote,
     StepFailed,
     Trainer,
+    aged,
     marked_at_start,
     objective_of,
     weight_of,
@@ -174,6 +179,7 @@ async def train(
     groups_per_step: int = 4,
     groups_ahead: int | None = None,
     max_lag: int = MAX_LAG_DEFAULT,
+    max_age: int | None = None,
     episodes_at_once: int = 6,
     seed: int = 0,
     binding: RunBinding | None = None,
@@ -195,25 +201,27 @@ async def train(
     is left). `directory` is where checkpoints' files are kept on this machine while they are in use: the one being
     served and the one before it (a turn in progress finishes under the weights it began with); every checkpoint's files
     are in the blob store; `publish` serves a checkpoint on `channel`. `algorithm` is the one the family of the
-    trainer's objective takes, unless given (`rollout_train.algorithm.algorithm_for`).
-    `episodes_at_once` is how many episodes the run keeps work waiting for, whatever groups they are of (runners play
-    them, as many at once as each has places). `binding` says how the program's model slots and imports are served (by
-    default: every slot from `channel`, each import from the tool set of its own name). `curriculum` is one that has
-    recorded nothing (by default the environment's own, else the generic one: `curriculum_of`): the run's results are
-    folded into it. Each group's start is drawn with `train_start`, never one of the environment's eval starts.
-    `retention` says which of the checkpoints the run made keep their files (weights and trainer state) once a newer one
-    is served (`Retention()` unless given); besides those, what is served, what any run starts from, and whatever `kept`
-    says (the bookmarked checkpoints, say) keep theirs. `started` is what the run's `starts` record says beside what the
-    loop knows (where it starts from, this host, the time): where the run's directory is, where the monitor on its
-    machine serves (`address`), and its settings, say. `hooks` are told of each result and step; `made` is
+    trainer's objective takes, unless given (`rollout_train.algorithm.algorithm_for`). `max_lag` is how many
+    checkpoints behind the newest a turn may begin, and `max_age` how many before the one a step starts from what it
+    trains on may have been sampled (none: any; `rollout_train.settings.MAX_AGE`). `episodes_at_once` is how many
+    episodes the run keeps work waiting for, whatever groups they are of (runners play them, as many at once as each
+    has places). `binding` says how the program's model slots and imports are served (by default: every slot from
+    `channel`, each import from the tool set of its own name). `curriculum` is one that has recorded nothing (by default
+    the environment's own, else the generic one: `curriculum_of`): the run's results are folded into it. Each group's
+    start is drawn with `train_start`, never one of the environment's eval starts. `retention` says which of the
+    checkpoints the run made keep their files (weights and trainer state) once a newer one is served (`Retention()`
+    unless given); besides those, what is served, what any run starts from, and whatever `kept` says (the bookmarked
+    checkpoints, say) keep theirs. `started` is what the run's `starts` record says beside what the loop knows (where it
+    starts from, this host, the time): where the run's directory is, where the monitor on its machine serves
+    (`address`), and its settings, say. `hooks` are told of each result and step; `made` is
     called with each checkpoint made, once it is served (to move a bookmark, say). `reshard` gives the files the engines
     load for a checkpoint (made by a bridge: `rollout_train.bridges`), told the run's fence to note it under; without
     it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
     and the next. `desired` reads what is wanted of the run's changeable settings (`rollout_train.settings`:
-    `groups_per_step`, `evals.…`, `trainer.…`), as it starts and each time a step is about to be decided; `scheduled`
-    makes the schedule of evals they name (a suite by name or a version by id, every, episodes; None for a suite the
-    run cannot play), without which only `evals`' suite can be played. A suite named by its name is played in the
-    version its name points to when each step is decided: the step's record says which (`suite_version`)."""
+    `groups_per_step`, `max_age`, `evals.…`, `trainer.…`), as it starts and each time a step is about to be decided;
+    `scheduled` makes the schedule of evals they name (a suite by name or a version by id, every, episodes; None for a
+    suite the run cannot play), without which only `evals`' suite can be played. A suite named by its name is played in
+    the version its name points to when each step is decided: the step's record says which (`suite_version`)."""
     algorithm = algorithm if algorithm is not None else algorithm_for(objective_of(trainer))
     retention = retention if retention is not None else Retention()
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
@@ -249,6 +257,7 @@ async def train(
         GROUPS_PER_STEP: groups_per_step,
         GROUPS_AHEAD: groups_ahead,
         MAX_LAG: max_lag,
+        MAX_AGE: max_age,
         EVALS_SUITE: (evals.named or evals.suite.name) if evals else None,
         EVALS_EVERY: evals.every if evals else 1,
         EVALS_EPISODES: evals.episodes if evals else None,
@@ -540,10 +549,19 @@ async def train(
     async def take(key: int, numbers: list[int]) -> None:
         """A step over `numbers`: decided (unless it was), made once, served."""
         nonlocal failed_updates, watching
-        given = within([item for number in numbers for item in segments[number]], trainer.budget.segments,
-                       random.Random(f"{seed}-step-{key}"))  # fmt: skip
-        if key not in steps:
+        intent = steps.get(key)
+        if intent is None:
             parent = await current()
+        else:  # (taken again: from the parent it was decided with, with the settings it was decided with)
+            parent = await checkpoints.checkpoint(str(intent["parent"])) if intent["parent"] else None
+        used: JsonValue = intent.get("settings") if intent is not None else dict(settings)
+        age = _age(used)
+        depth = parent.depth if parent is not None else 0
+        fresh = aged([item for number in numbers for item in segments[number]], depth, age)
+        given = within(fresh.items, trainer.budget.segments, random.Random(f"{seed}-step-{key}"))
+        too_old: dict[str, JsonValue] = {"too_old_spans": fresh.spans, "too_old_tokens": fresh.tokens}
+        too_old = too_old if age is not None else {}
+        if intent is None:
             trained: list[JsonValue] = [[item.source, weight_of(item)] for item in given]
             manifest = await blobs.put(json.dumps(trained).encode(), "application/json")
             decision: dict[str, JsonValue] = {
@@ -554,25 +572,33 @@ async def train(
                 "decided": round(time.time(), 1),
                 "batch": manifest.model_dump(mode="json"),
                 "seed": key,
-                "settings": dict(settings),
+                "settings": used,
                 "suite_version": await pinned(),
             }
             await ledger.append(table(run, STEPS), str(key), decision, fence)  # before the trainer is called
-            steps[key] = decision
-        intent = steps[key]
+            steps[key] = intent = decision
         makes = str(intent["makes"])
         try:
             checkpoint = await checkpoints.checkpoint(makes)  # made before this loop died: not made again
         except KeyError:
-            parent_id = str(intent["parent"]) if intent["parent"] else None
-            parent = await checkpoints.checkpoint(parent_id) if parent_id else None
+            if not given and age is not None:  # (every span its groups sampled is too old: nothing is trained)
+                said: dict[str, JsonValue] = {
+                    "error": f"nothing to train on: every span was sampled more than {age} checkpoints before the "
+                    "step's start (max_age)",
+                    "at": round(time.time(), 1),
+                }
+                await ledger.append(table(run, FAILURES), str(key), said, fence)
+                failures.add(key)
+                note("step", {"step": key, "groups": list[JsonValue](numbers), **said, "metrics": too_old})
+                done_with(numbers)
+                return
             # An adapter's first step over full weights begins a new adapter: the model it trains over is those weights.
             going_on = parent if parent is not None and parent.kind == trainer.weights else None
             into = directory / "making" / str(fence.number) / makes  # (its own: one it replaced may write its own)
-            if isinstance(used := intent.get("settings"), dict):  # (the settings it was decided with, taken again too)
+            if isinstance(used, dict):  # (the settings it was decided with, taken again too)
                 trained_with(_trainers(used))
             seed_of = int(str(intent["seed"]))
-            given = marked_at_start(given, parent.depth if parent is not None else 0)
+            given = marked_at_start(given, depth)
             watching = key
             if isinstance(trainer, Progressing):
                 trainer.watch(watched(key))
@@ -591,7 +617,7 @@ async def train(
                     metrics_of = step.metrics
             except StepFailed as error:  # the weights stay as they were, and the run goes on
                 failed_updates += 1
-                said: dict[str, JsonValue] = {
+                said = {
                     "error": str(error).strip().splitlines()[-1][:300],
                     "at": round(time.time(), 1),
                 }
@@ -617,7 +643,7 @@ async def train(
                 step=key,
                 state=state,
                 state_complete=complete,
-                parents=[parent_id] if parent_id else [],
+                parents=[parent.id] if parent is not None else [],
                 batch=BlobReference.model_validate(intent["batch"]),
                 metrics=metrics_of,
             )
@@ -637,6 +663,7 @@ async def train(
         await checkpoints.thin(fence, run, retention, await keeping())
         metrics: dict[str, JsonValue] = {name: round(value, 5) for name, value in checkpoint.metrics.items()}
         metrics["publish_seconds"] = round(publishing, 3)
+        metrics |= too_old
         note("step", {"step": key, "groups": list[JsonValue](numbers), "checkpoint": checkpoint.id, "metrics": metrics,
                       "state_complete": checkpoint.state_complete})  # fmt: skip
         done_with(numbers)
@@ -752,6 +779,12 @@ def _trainers(settings: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     """The trainer's own of a run's settings (`trainer.…`, and its objective's `objective.…`), by its names for
     them."""
     return {name: value for key, value in settings.items() if (name := trainer_key(key)) is not None}
+
+
+def _age(used: JsonValue) -> int | None:
+    """The `max_age` a step was decided with, from the settings its record says (none: spans of any age)."""
+    said = used.get(MAX_AGE) if isinstance(used, dict) else None
+    return said if isinstance(said, int) and not isinstance(said, bool) else None
 
 
 def _groups(step: dict[str, JsonValue]) -> list[int]:

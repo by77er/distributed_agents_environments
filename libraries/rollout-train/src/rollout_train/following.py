@@ -23,10 +23,16 @@ its run, channel, checkpoint and depth. Where an engine can say what it holds (a
 follower holds its view to that before each look: an adapter the server lost (it started again) is loaded again, and
 one the follower does not know of (loaded before the follower started again) is removed, unless a channel should serve
 it.
+
+Where the windows its channels keep on an engine add up to more adapters than the engine holds at once (its
+`max_loras`, where it says: `rollout_train.inference.channel.lora_slots`), vLLM swaps them in and out of its batches,
+which slows every turn: the follower says so in its log once, naming the runs and the numbers, and in its beats
+(`crowded`) for as long as it lasts.
 """
 
 import asyncio
 import contextlib
+import logging
 import shutil
 import time
 from collections.abc import Awaitable, Callable, Collection, Mapping
@@ -37,11 +43,13 @@ from pydantic import JsonValue
 
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.inference import Channel
-from rollout_train.inference.channel import MAX_LAG
+from rollout_train.inference.channel import MAX_LAG, lora_slots
 from rollout_train.inference.remote import ENGINES
 from rollout_train.presence import Presence, alive
 from rollout_train.serving import Serving, qualified, wanted
 from rollout_train.trainer import WEIGHTS
+
+logger = logging.getLogger(__name__)
 
 Binding = tuple[str, str]
 """A run's channel a follower serves: the run's id, and the channel's name within the run."""
@@ -94,6 +102,9 @@ class Follower:
         why what it serves could not be asked)."""
         self.loaded: dict[Binding, dict[str, JsonValue]] = {}
         """The checkpoint each channel loaded last, and how long reading its files and loading them took."""
+        self.crowded: str | None = None
+        """Where the windows its channels keep on an engine are more adapters than the engine holds at once, what it
+        says of them; none where they are not, or its engines do not say how many they hold."""
 
     @property
     def channels(self) -> dict[str, Channel]:
@@ -120,20 +131,45 @@ class Follower:
         except Exception as error:  # (it serves what it served, and looks again at the next look)
             self.errors[BINDINGS] = f"{type(error).__name__}: {error}"
         changed = False
+        windows: dict[Binding, int] = {}
         for (run, name), channel in list(self.bound.items()):
             key = qualified(run, name)
             try:
                 said = await wanted(self.checkpoints.ledger, run, name)
                 if said is not None:
                     await channel.keeping((MAX_LAG if said.max_lag is None else said.max_lag) + 1)
+                    if said.kind != "full":  # (full weights take no adapter's slot)
+                        windows[(run, name)] = channel.keep
                     if await self._served(run, name, channel, said):
                         changed = True
                 self.errors.pop(key, None)
             except Exception as error:  # (tried again at the next look; the beat says why)
                 self.errors[key] = f"{type(error).__name__}: {error}"
+        self._crowding(windows)
         if changed:
             await self._tidied()
         return changed
+
+    def _crowding(self, windows: Mapping[Binding, int]) -> None:
+        """Say where the windows its channels keep on an engine (`windows`, adapters by channel: each run's
+        `max_lag + 1`) are more than the engine holds at once (`lora_slots`): in its log, once each time what it says
+        changes, and as `crowded`."""
+        engines = {id(engine): engine for channel in self.bound.values() for engine in channel.engines}
+        said: list[str] = []
+        for key, engine in engines.items():
+            slots = lora_slots(engine)
+            sharing = {each: window for each, window in windows.items()
+                       if any(id(held) == key for held in self.bound[each].engines)}  # fmt: skip
+            kept = sum(sharing.values())
+            if slots is None or kept <= slots:
+                continue
+            named = ", ".join(f"{qualified(*each)} {window}" for each, window in sorted(sharing.items()))
+            said.append(f"its channels keep {kept} adapters on an engine that holds {slots} at once (max_loras), so "
+                        f"vLLM swaps them in and out of its batches: {named} (each run's max_lag + 1)")  # fmt: skip
+        crowded = "; ".join(dict.fromkeys(said)) or None
+        if crowded is not None and crowded != self.crowded:
+            logger.warning("%s: %s", self.name, crowded)
+        self.crowded = crowded
 
     async def beat(self) -> None:
         assert self.presence is not None
@@ -144,6 +180,8 @@ class Follower:
         about: dict[str, JsonValue] = {"kind": ENGINES, "follows": follows, "runs": listed, "replica": self.replica[0]}
         if BINDINGS in self.errors:
             about["error"] = self.errors[BINDINGS]
+        if self.crowded is not None:
+            about["crowded"] = self.crowded
         await self.presence.beat(self.name, {**said, **about, "channels": self.served()})
 
     def served(self) -> list[JsonValue]:

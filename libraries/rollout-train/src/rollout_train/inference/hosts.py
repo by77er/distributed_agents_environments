@@ -39,7 +39,7 @@ from rollout_train.bridges import NoBridge, path, rank_factor
 from rollout_train.checkpoints import Checkpoints
 from rollout_train.cluster import SCRATCH, Cluster
 from rollout_train.following import Binding, Follower
-from rollout_train.inference.channel import Channel, Engine, Generation, NotLoaded, Scores
+from rollout_train.inference.channel import LORA_SLOTS, Channel, Engine, Generation, NotLoaded, Scores
 from rollout_train.inference.remote import Unreachable
 from rollout_train.presence import presence_of
 from rollout_train.providers import INFERENCE_KINDS
@@ -242,7 +242,8 @@ def host_spec(cluster: Cluster, provider: str, model: str, *, settings: "RunSett
     context as `max_model_len`, unless they say one) with the provider's `max_logprobs` (what it declares as its top-k
     logprobs, and so what its engines allow), a replica's GPUs, and `[placement.engines]`. A run whose trainer shares
     the provider's card (`colocate_with`, by its `settings`) has its host ask for half of the replica's GPUs, and its
-    trainer for the other half."""
+    trainer for the other half. A training run's host holds its channel's window of adapters at once (`max_loras`, at
+    least its `max_lag + 1`, unless the options say more), so that vLLM need not swap them in and out."""
     offered = cluster.inference[provider]
     engine = INFERENCE_KINDS[offered.kind].implementation
     if engine is None or offered.kind != "vllm":
@@ -259,7 +260,21 @@ def host_spec(cluster: Cluster, provider: str, model: str, *, settings: "RunSett
     options = {"max_model_len": offer.context, **offer.options, "max_logprobs": offered.capabilities.top_logprobs}
     if (needed := _adapter_rank(trainer, settings, offered.capabilities.loads, model)) is not None:
         options["max_lora_rank"] = needed  # (room for the run's own adapters only: a larger rank costs cache)
+    said = options.get("max_loras")
+    slots = said if isinstance(said, int) else LORA_SLOTS
+    if (window := _window(trainer, settings)) is not None and window > slots:
+        options["max_loras"] = window  # (each adapter a turn may still sample from, at once)
     return HostSpec(engine, model, options, gpus, resources)
+
+
+def _window(trainer: "TrainerProvider | None", settings: "RunSettings | None") -> int | None:
+    """The adapters a training run's channel keeps loaded, its `max_lag + 1` (none: not a run whose trainer makes
+    adapters, or one whose `max_lag` it does not say). Its host serves that run alone: a pool's host is started with
+    none, and holds what its options say."""
+    if trainer is None or settings is None or settings.kind != "train" or trainer.capabilities.produces != "lora":
+        return None
+    lag = settings["max_lag"]
+    return lag + 1 if isinstance(lag, int) and not isinstance(lag, bool) else None
 
 
 def _adapter_rank(
