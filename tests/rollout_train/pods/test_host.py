@@ -1,8 +1,10 @@
 """A host pod (`runpod-host`): one pod leased for a run's trainer and its trained channel, given the store's writing
-key, vLLM's share of the GPU's memory, and the cluster's root pinned; ready once vLLM serves what the run says and the
-training service beside it holds the run's trainer; and the checkpoints the service makes loaded from the pod's disk."""
+key, vLLM's share of the GPU's memory, and the cluster's root pinned (its trainer and the writing key in every role, an
+eval's pod's too); ready once vLLM serves what the run says and the training service beside it holds the run's trainer
+(saying why it does not, where the service says); and the checkpoints the service makes loaded from the pod's disk."""
 
 import json
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -111,9 +113,45 @@ async def test_a_host_pod_is_one_pod_for_trainer_and_channel_with_the_stores_wri
             task.cancel()
 
 
+def entrypoint_requires() -> list[str]:
+    """The variables the host image's entrypoint exits without (deploy/images/host/entrypoint.sh)."""
+    script = (Path(__file__).resolve().parents[3] / "deploy" / "images" / "host" / "entrypoint.sh").read_text()
+    listed = re.search(r"for name in (.*?); do", script, re.DOTALL)
+    assert listed is not None
+    return listed.group(1).replace("\\", " ").split()
+
+
+async def test_a_host_pod_a_run_takes_no_steps_on_is_still_asked_for_with_its_trainer_and_the_writing_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUNPOD_API_KEY", KEY)
+    root = Authority(tmp_path / "ca").root
+    ledger = DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")
+    stand_ins = StandIns(ledger)
+    fake = FakeRunPod(key=KEY, created=stand_ins.created, deleted=stand_ins.deleted)
+    cluster = cluster_of(tmp_path, root)
+    settings = RunSettings({"kind": "eval", "channels.policy.provider": "h100", "channels.policy.model": MODEL,
+                            "channels.policy.renderer": "r:r"})  # fmt: skip
+    pods = Pods("run_1", cluster, ledger, api=lambda provider: fake.client(), ca=lambda table: Authority1(),  # type: ignore[arg-type,return-value]
+                environ={**ENVIRON, **KEYS}, look=0.05)  # fmt: skip
+    try:
+        (lease,) = await pods.claim(needs_of(settings, cluster))
+        assert lease.role == "inference"  # (an eval: its pod serves, and takes no steps)
+        (body,) = fake.created_bodies()
+        env = body["env"]
+        required = entrypoint_requires()
+        assert "ROLLOUT_TRAINER" in required and [name for name in required if not env.get(name)] == []
+        assert (env["ROLLOUT_TRAINER"], env["ROLLOUT_TRAINER_MODEL"]) == ("rollout_lora:LoraTrainer", MODEL)
+        assert env["R2_WRITER_ACCESS_KEY_ID"] == "writer"  # (its training service runs: a run that trains may take it)
+    finally:
+        await pods.release()
+        for task in stand_ins.tasks.values():
+            task.cancel()
+
+
 def trainer_service(holds: dict[str, Any]) -> Starlette:
     async def trainer(request: Request) -> JSONResponse:
-        return JSONResponse({"run": holds["run"]})
+        return JSONResponse({"run": holds["run"], "why": holds.get("why")})
 
     return Starlette(routes=[Route("/v1/trainer", trainer)])
 
@@ -132,6 +170,9 @@ async def test_a_host_pod_is_ready_once_its_training_service_holds_the_runs_trai
                            tmp_path / "pod", vllm=vllm, trainer=trainer, role="host")  # fmt: skip
         await pod.follow()
         assert not pod.ready and "holds the trainer of no run" in pod.why
+        holds["why"] = "ModuleNotFoundError: No module named 'rollout_lora'"  # (it could not make the run's)
+        await pod.follow()
+        assert not pod.ready and pod.why.endswith(": ModuleNotFoundError: No module named 'rollout_lora'")
         holds["run"] = "run_1"
         await pod.follow()
         assert pod.ready and pod.about_pod()["pod"]["role"] == "host"  # type: ignore[index]

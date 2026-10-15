@@ -9,8 +9,9 @@ through `PodPools`, which the runner holds as it holds any pool (docs/research/r
   asked of every pod at once and never while another acquire chooses, less the acquires on their way to it or sent
   since, which only orders the pods); a pod that answers full (or does not answer) passes it to the next; when every pod
   is full, to the cluster's own pool of the kind (`fallback`, the section's `url`), where there is one; else
-  `NoCapacity`. A pod that does not answer an acquire passes it on too, once it is asked to release what it may have
-  made, and so does one that refuses the key (another run took it since the look). The driver's own refusal of a key
+  `NoCapacity`. A pod that does not answer an acquire passes it on too, once it has released what it may have made
+  (where it does not answer that either, the acquire fails, and the key stays placed on it until a sweep releases it
+  there), and so does one that refuses the key (another run took it since the look). The driver's own refusal of a key
   whose claim lapsed (`admits`) is the acquire's. A key with a lease goes to where its lease is, and only there: its
   sandbox is never made again elsewhere.
 - **Where each lease is** is kept (`placements`, in the run's directory) before the pod is asked, as `acquiring`, and
@@ -294,7 +295,7 @@ class PodPools:
         self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None
     ) -> tuple[str, Pool, Lease]:
         """A new lease of `key` (hold its lock): on a live pod with room, the most first, the next while each answers
-        full or does not answer, then the fallback."""
+        full or does not answer (and has released what it may have made), then the fallback."""
         live = {where: each.pool for where, each in (await self._reached()).items() if each.live}
         before = dict(self._sent)  # (what was sent to each pod before its room was asked: its answer counts those)
         asked = await asyncio.gather(*(pool.capacity() for pool in live.values()), return_exceptions=True)
@@ -320,6 +321,8 @@ class PodPools:
                 log.info("%s refused %s: %s; trying the next pod", where, key, error)
                 continue
             except httpx.TransportError as error:  # (the pod did not answer: released there, as far as it can be)
+                if (kept := self._held.get(key)) is not None and kept.where == where:
+                    raise  # (nor did its release: the placement stays there, for a sweep; no other pod takes the key)
                 log.warning("acquiring %s on %s failed: %s; trying the next pod", key, where, error)
                 continue
             finally:

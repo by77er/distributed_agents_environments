@@ -18,23 +18,29 @@ it, or when RunPod is next asked about the pod while the run waits for it; so ar
 gave the pod (`PodLease.vcpus`, `memory_gb`). The pod is ready for the run once its lease has that address and it beats
 that it is ready (its beat names the run). A pod not ready within its provider's `start_timeout` is deleted, and the
 run fails saying which and why (`PodsDidNotStart`). A pod is asked of RunPod with its provider's least vCPUs and
-memory per GPU, where it says them. A host pod whose provider lists kinds of sandboxes is given, in its lease's
-settings, the sources of those its run needs (`with_sandboxes`), which its sandbox host serves.
+memory per GPU, where it says them. A `runpod-host` pod is asked for as one that takes steps, whatever its role (its
+training service runs in either, and a warm one may be taken by a run that trains): with its trainer and the store's
+own key. A host pod whose provider lists kinds of sandboxes is given, in its lease's settings, the sources of those its
+run needs (`with_sandboxes`), which its sandbox host serves.
 
 **Renewing** (`Pods.renewing`). Every `RENEW` seconds the run stamps each lease (`renewed`, writing where RunPod says
 its pod is reached into a lease that does not say it, or says another place: a pod started again, or given another
 image in place, may be mapped to another public port) and its time on each pod; a lease another took (a reaper that
-found it stale) ends the run (`LeaseLost`). A lease that changed between the run's read and its compare-and-set is
-read again and renewed at its version then while it is still the run's, up to `TRIES` times, each said in the run's
-log. What the pods cost the run since the last renewal is told to `spent`, so a run's `limits.spend` counts its pods.
+found it stale) ends the run (`LeaseLost`). RunPod is asked about every pod at once, for `DESCRIBE` seconds at most,
+before any lease is stamped, and each lease is stamped whether or not RunPod answered: a slow API never lets a live
+run's leases go stale. A lease that changed between the run's read and its compare-and-set is read again and renewed at
+its version then while it is still the run's, up to `TRIES` times, each said in the run's log. What the pods cost the
+run since the last renewal is told to `spent` (with the next renewal's, where telling it failed), so a run's
+`limits.spend` counts its pods.
 
 **Releasing** (`Pods.release`). When the run ends, however it ends, each lease becomes idle: no run, no token. The pod
 stays up, warm, for its provider's `idle_stop` seconds (default 600), charged to the run that last held it.
 
 **Reaping** (`reap`). Run by `rollout pods reap` (a CronJob of the chart, every minute): it deletes the pod of each
 lease not renewed for `STALE` seconds (the run's driver died, or its cluster went away), of each idle lease past its
-`idle_stop`, and every pod RunPod lists with the cluster's tag (`rollout-CLUSTER-`) that no lease names. Deleting a pod
-(`delete`) deletes its lease first, by compare-and-set, then the pod, revokes its certificate (the serial its beats
+`idle_stop`, and every pod RunPod lists with the cluster's tag (`tag_of`: `rollout-CLUSTER-DIGEST-`) that no lease
+names, the leases read after RunPod's list (a run writes a pod's lease before it asks RunPod for the pod). Deleting a
+pod (`delete`) deletes its lease first, by compare-and-set, then the pod, revokes its certificate (the serial its beats
 said) and closes its time. A lease that changed since the reaper read it is read again and deleted at its version then
 while it is the same lease and still stale or idle (the same run, the same pod at RunPod); one renewed or taken
 meanwhile is left, with its pod. A lease the reaper could not delete (it changed each time it was read, or deleting it
@@ -50,6 +56,7 @@ Pod time is charged at the pod's hourly price: RunPod's `costPerHr` for it, else
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import re
@@ -78,6 +85,7 @@ if TYPE_CHECKING:
     from rollout_train.run_settings import RunSettings
 
 __all__ = [
+    "DESCRIBE",
     "LOOK",
     "RENEW",
     "STALE",
@@ -102,6 +110,8 @@ STALE = 300.0
 """Seconds after its newest renewal that a lease is stale: its run is taken to be gone, and its pod is deleted."""
 LOOK = 2.0
 """Seconds between looks at whether a run's pods are ready."""
+DESCRIBE = 10.0
+"""Seconds RunPod's API is given to say where a pod is reached, each time it is asked: a renewal waits no longer."""
 TRIES = 5
 """Times a compare-and-set of a lease is tried: where the lease changed since it was read, it is read again and written
 (or deleted) at its version now while it is still the one meant."""
@@ -176,8 +186,12 @@ def pods_store(settings: "RunSettings", cluster: "Cluster") -> str | None:
 
 
 def tag_of(cluster: "Cluster") -> str:
-    """What every pod a cluster rents is named beginning with: `rollout-CLUSTER-`."""
-    return f"rollout-{cluster.name}-"
+    """What every pod a cluster rents is named beginning with: `rollout-CLUSTER-DIGEST-`, CLUSTER its name (its first 24
+    characters) and DIGEST the first 6 hex digits of its name's SHA-256, so the tag of a cluster whose name begins
+    another's (`prod`, `prod-eu`) begins none of the other's pods' names, and its reaper leaves them on an account
+    both rent with. (Pods named before, `rollout-CLUSTER-`, are reaped by their leases.)"""
+    digest = hashlib.sha256(cluster.name.encode()).hexdigest()[:6]
+    return f"rollout-{cluster.name[:24].rstrip('-')}-{digest}-"
 
 
 def pod_name(cluster: "Cluster", provider: str, slot: int) -> str:
@@ -433,13 +447,15 @@ class Pods:
         )
         if public is None:
             raise ValueError("pods reach the ledger service at [ledger] public, which the cluster config does not say")
-        location, keys = for_pods(self.cluster, table.store, writes=lease.role != INFERENCE, environ=self.environ)
+        provider = _provider(self.cluster, need.provider)
+        host = provider is not None and provider.kind == "runpod-host"  # (its training service runs in either role)
+        location, keys = for_pods(self.cluster, table.store, writes=host or lease.role != INFERENCE,
+                                  environ=self.environ)  # fmt: skip
         ledger = {"kind": "rollout_train.ledger_service:HttpLedger", "url": public, "token_env": "ROLLOUT_LEDGER_TOKEN"}
         env = {
             "ROLLOUT_POD_NAME": lease.pod, "ROLLOUT_ROLE": lease.role, "ROLLOUT_MODEL": lease.model,
             "ROLLOUT_LEDGER": json.dumps(ledger), "ROLLOUT_BLOBS": json.dumps(location),
         }  # fmt: skip
-        provider = _provider(self.cluster, need.provider)
         if lease.role in (INFERENCE, HOST) and isinstance(provider, InferenceProvider):
             offer = provider.models.get(lease.model)
             args = str(offer.options.get("args") or "") if offer is not None else ""
@@ -455,9 +471,9 @@ class Pods:
                 env["VLLM_REASONING_CONFIG"] = json.dumps(
                     {"reasoning_start_str": reasoning["open"], "reasoning_end_str": reasoning["close"]}
                 )
-            if lease.role == HOST and table.sleep:
+            if host and table.sleep:
                 env["ROLLOUT_SLEEP_VLLM"] = "1"
-        if lease.role in (TRAINER, HOST):
+        if host or lease.role in (TRAINER, HOST):
             env["ROLLOUT_TRAINER"] = str(need.settings.get("implementation") or "rollout_lora:LoraTrainer")
             env["ROLLOUT_TRAINER_MODEL"] = str(need.settings.get("model") or lease.model)
             env["ROLLOUT_TRAINER_GPUS"] = str(table.gpu_count)  # (more than one: a process per GPU, sharded)
@@ -490,11 +506,12 @@ class Pods:
             beats = await presence.beats()
             waiting: list[str] = []
             now = await self.store.now()
+            unaddressed = [each for each in self.leases.values() if each.pod not in self.ready and each.address is None]
+            for addressed in await asyncio.gather(*(self._addressed(each) for each in unaddressed)):
+                self.leases[addressed.pod] = addressed
             for lease in list(self.leases.values()):
                 if lease.pod in self.ready:
                     continue
-                if lease.address is None:
-                    lease = self.leases[lease.pod] = await self._addressed(lease)
                 said = _beat_of(beats, lease.pod)
                 ready = said is not None and said.get("ready") is True and said.get("run") == self.run
                 if ready and lease.address is not None:
@@ -540,11 +557,13 @@ class Pods:
 
     async def _described(self, lease: PodLease) -> tuple[str | None, Pod | None]:
         """Where RunPod's API says a lease's pod is reached now (`https://IP:PORT`), and the pod as it says; none
-        while it says none, where it cannot be asked (asked again next time), or the pod has no id."""
+        while it says none, where it cannot be asked or does not answer within `DESCRIBE` seconds (asked again next
+        time), or the pod has no id."""
         if lease.id is None:
             return None, None
         try:
-            pod = await self.api(lease.provider).pod(lease.id)
+            async with asyncio.timeout(DESCRIBE):
+                pod = await self.api(lease.provider).pod(lease.id)
         except Exception as error:
             log.info("RunPod did not say where pod %s is: %s", lease.pod, error)
             return None, None
@@ -578,14 +597,19 @@ class Pods:
 
     async def renewed(self) -> float:
         """Stamp each lease it holds, and its time on each pod; the dollars that time cost since the last renewal.
-        Raises `LeaseLost` where a lease is no longer the run's."""
+        RunPod is asked about every pod at once first (`_described`, `DESCRIBE` seconds at most), and a lease is
+        stamped whether or not it answered. Raises `LeaseLost` where a lease is no longer the run's."""
         now = await self.store.now()
         added = 0.0
+        held: list[PodLease] = []
         for pod in list(self.leases):
             there = await self.store.get(pod)
             if there is None or there.run != self.run:
                 raise LeaseLost(f"pod {pod} is no longer held by run {self.run} (its lease went stale and was reaped)")
-            address, given = await self._described(there)  # (none yet, or another public port since)
+            held.append(there)
+        described = await asyncio.gather(*(self._described(there) for there in held))  # (none yet, or another port)
+        for there, (address, given) in zip(held, described, strict=True):
+            pod = there.pod
 
             def stamped(each: PodLease, address: str | None = address, given: Pod | None = given) -> PodLease:
                 return _gave(replace(each, renewed=now, address=address or each.address), given)
@@ -614,8 +638,9 @@ class Pods:
             try:
                 await self.renewed()
                 if spent is not None and self.spent > told:
-                    added, told = self.spent - told, self.spent
-                    await spent(added)
+                    counted = self.spent
+                    await spent(counted - told)
+                    told = counted  # (only once told: where telling fails, the next renewal tells it with its own)
             except LeaseLost:
                 raise
             except Exception as error:  # (tried again at the next renewal: a lease goes stale only after STALE)
@@ -788,24 +813,29 @@ async def reap(
             log.error("did not free slot %d of %s, which the lease of %s holds (%s): %s", lease.slot, lease.provider,
                       lease.pod, why, error, exc_info=True)  # fmt: skip
             done.append(f"did not delete {lease.pod} of {lease.provider} ({why}): {error}")
-    named = {each.pod for each in await store.all()}
     providers = [name for name, each in [*cluster.inference.items(), *cluster.trainers.items()]
                  if each.kind in RUNPOD and _table(cluster, name) is not None]  # fmt: skip
     seen: set[str] = set()
+    listed: list[tuple[str, Pod]] = []
     for provider in providers:
         key = _provider(cluster, provider)
         account = key.secrets.get("api_key") if key is not None else None
         if (said := str(account)) in seen:
             continue
         seen.add(said)
-        for pod in await client(provider).pods():
-            if pod.name.startswith(tag_of(cluster)) and pod.name not in named:
-                try:
-                    await client(provider).terminate(pod.id)
-                    done.append(f"deleted {pod.name} ({pod.id}): no lease names it")
-                except Exception as error:
-                    log.error("did not delete pod %s (%s), which no lease names: %s", pod.name, pod.id, error)
-                    done.append(f"did not delete {pod.name} ({pod.id}), which no lease names: {error}")
+        listed += [(provider, pod) for pod in await client(provider).pods() if pod.name.startswith(tag_of(cluster))]
+    named = {each.pod for each in await store.all()}  # (after RunPod's list: a run writes a lease before its pod)
+    for provider, pod in listed:
+        if pod.name in named:
+            continue
+        try:
+            await client(provider).terminate(pod.id)
+            done.append(f"deleted {pod.name} ({pod.id}): no lease names it")
+        except Exception as error:
+            if getattr(error, "status", None) in (400, 404):  # (deleted meanwhile, its lease first)
+                continue
+            log.error("did not delete pod %s (%s), which no lease names: %s", pod.name, pod.id, error)
+            done.append(f"did not delete {pod.name} ({pod.id}), which no lease names: {error}")
     for each in clients.values():
         with contextlib.suppress(Exception):
             await each.aclose()

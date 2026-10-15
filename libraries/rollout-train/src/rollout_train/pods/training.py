@@ -30,7 +30,8 @@ closed, which ends its processes and frees the GPUs.
 - `GET /v1/steps/INTO`: the step's state (`StepState`: `running`, with how far it has got where its trainer says
   (`progress`, `rollout_train.trainer.Progress`), `made` with what it made, or `failed` with why); 404 for a step it
   never heard of.
-- `GET /v1/trainer`: what the trainer is: its kind, model, `weights`, `budget`, and the settings it takes between steps.
+- `GET /v1/trainer`: what the trainer is: its kind, model, `weights`, `budget`, and the settings it takes between steps;
+  and why it holds no trainer of the run that holds the pod, where following its lease failed (`why`).
 - `GET /healthz`, `GET /readyz`: 200 while the service answers (for the pod's own checks: the proxy passes neither on).
 
     python -m rollout_train.pods.training
@@ -51,7 +52,9 @@ the run it takes steps for, whether it is ready for that run, whether a step is 
 
 Which run it takes steps for is its lease's (`rollout_train.pods.leases`): when a run takes the pod, the service makes
 its trainer anew with the run's settings (the trainer's implementation, model and settings the lease says), and reads
-the ledger with the token the lease gives for that run, once no step runs. It is then ready for that run.
+the ledger with the token the lease gives for that run, once no step runs. It is then ready for that run. Where it
+cannot be (its trainer is not made: its implementation does not import, its settings are wrong), it says why in its log
+and its beats (on a host pod, the follower's, which ask it), and tries again at each look.
 """
 
 import asyncio
@@ -207,6 +210,8 @@ class TrainerService:
         """The run whose trainer it holds (as its lease said), if it follows a lease."""
         self.progress: Progress | None = None
         """How far the step running has got, as its trainer last said (none between steps)."""
+        self.why: str | None = None
+        """Why it does not hold the trainer of the run its lease names, where following the lease failed."""
 
     @property
     def running(self) -> str | None:
@@ -265,6 +270,7 @@ class TrainerService:
             "changeable": changeable,
             "running": self.running,
             "run": self.run,
+            "why": self.why,
         }
 
     async def _step(self, asked: StepAsked) -> None:
@@ -468,14 +474,15 @@ async def following(
     every: float = 2.0,
 ) -> None:
     """Keep `service`'s trainer the one the run that holds pod `name` asks for (its lease's settings, made by `make`),
-    and its ledger token that run's, from when no step runs; until cancelled."""
+    and its ledger token that run's, from when no step runs; until cancelled. A look that fails (the lease cannot be
+    read, the trainer cannot be made) is logged when its reason is new, and said in `service.why`."""
     from rollout_train.pods.leases import IDLE, pod_leases_of
 
     leases = pod_leases_of(service.checkpoints.ledger)
     if leases is None:
         raise ValueError("this ledger keeps no pods' leases")
     while True:
-        with contextlib.suppress(Exception):  # (looked at again at the next look)
+        try:
             lease = await leases.get(name)
             run = lease.run if lease is not None and lease.state != IDLE else None
             if lease is not None and run is not None and run != service.run and service.running is None:
@@ -488,6 +495,12 @@ async def following(
                 if service.run is not None:  # (released: what the trainer holds is freed)
                     await asyncio.to_thread(closed, service.trainer)
                 service.run = None
+            service.why = None
+        except Exception as error:  # (looked at again at the next look)
+            why = f"{type(error).__name__}: {error}"[:500]
+            if why != service.why:
+                logger.exception("pod %s did not follow its lease: %s; trying again every %g s", name, why, every)
+            service.why = why
         await asyncio.sleep(every)
 
 
@@ -536,7 +549,7 @@ async def main(environ: Mapping[str, str]) -> None:
     def about() -> Mapping[str, JsonValue]:
         pod: dict[str, JsonValue] = {"name": name, "identity": identity, "role": TRAINER,
                                      "ready": service.run is not None, "run": service.run, "running": service.running,
-                                     "serial": serial(serials), "steps": True}  # fmt: skip
+                                     "serial": serial(serials), "steps": True, "why": service.why}  # fmt: skip
         if (progress := service.progress) is not None and service.running is not None:
             pod["progress"] = progress.to_json()
         return {"host": socket.gethostname(), "kind": TRAINER, POD: pod}

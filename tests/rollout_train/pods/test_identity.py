@@ -41,3 +41,5 @@ def test_only_pods_alive_with_their_own_identity_are_reached() -> None:
     ]
     assert not hasattr(live(beats)[0], "address")
     assert [pod.name for pod in live(beats, "trainer")] == ["trainer-1"]
+    (ready,) = live([beat("inference-1", run="run_1")])
+    assert ready.run == "run_1"  # (the run it is ready for)

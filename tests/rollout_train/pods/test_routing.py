@@ -2,8 +2,8 @@
 inference image: a fake vLLM behind a TLS server that takes only the gateway's certificate, and the real follower,
 reading the ledger through the ledger service with the pod's own token); RunPod says where the pod is reached, which
 its lease keeps; the pod beats ready; the run's channel finds it by its lease and beat and samples it at its lease's
-address over mutual TLS, checking its identity; once released, it is no server. Where a pod's beat says it is reached
-is never read, and a pod is never reached over plain HTTP."""
+address over mutual TLS, checking its identity; once released, it is no server, nor is a pod whose beat is ready for
+another run. Where a pod's beat says it is reached is never read, and a pod is never reached over plain HTTP."""
 
 import asyncio
 import contextlib
@@ -173,6 +173,25 @@ async def test_a_pod_is_reached_where_runpod_says_never_where_its_beat_says(
     servers.close()
     for task in stand_ins.tasks.values():
         task.cancel()
+
+
+async def test_a_warm_pod_the_run_took_is_no_server_while_its_beat_is_ready_for_the_run_before(tmp_path: Path) -> None:
+    from rollout_train.pods.identity import POD
+    from rollout_train.pods.leases import HELD, PodLease
+
+    ledger = DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")
+    store, presence = pod_leases_of(ledger), presence_of(ledger)
+    assert store is not None and presence is not None
+    name = "rollout-test-pods-0-abcdef"
+    await store.put(PodLease(name, "pods", 0, "inference", "image", "m", "gpu", 1.0, run="run_2", channel="policy",
+                             state=HELD, address="https://198.51.100.4:41000"), expect=None)  # fmt: skip
+    servers = LeasedServers(ledger, "run_2", "policy", ["pods"], "m", Auth("mtls", identity=LEASED),
+                            gateway_tls(Authority(tmp_path / "ca")))  # fmt: skip
+    for run, found in (("run_1", 0), ("run_2", 1)):  # (its follower has not read its lease yet; then it has)
+        await presence.beat(name, {POD: {"name": name, "identity": pod_identity(name), "role": "inference",
+                                         "ready": True, "run": run}})  # fmt: skip
+        assert len(await servers()) == found
+    servers.close()
 
 
 async def test_a_connection_that_checks_an_identity_never_sends_over_plain_http() -> None:

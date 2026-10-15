@@ -121,14 +121,30 @@ async def test_an_acquire_whose_answer_is_lost_leaves_no_sandbox_behind(tmp_path
     with pytest.raises(NoCapacity):  # (passed on to the next pod: there is none)
         await pool.acquire(BOX, "r/1/1/1/box")
     assert pods.sandboxes["a"].sandboxes == {} and await pool.held() == []  # (released on its pod at once)
-    losing.failing = True  # (and where that release fails too, the next sweep releases it)
-    with pytest.raises(NoCapacity):
+    losing.failing = True  # (and where that release fails too, the acquire fails, and the next sweep releases it)
+    with pytest.raises(httpx.ReadTimeout):
         await pool.acquire(BOX, "r/1/2/1/box")
     (kept,) = await FilePlacements(tmp_path / "pods" / "fake.json").all()
     assert (kept.key, kept.state) == ("r/1/2/1/box", ACQUIRING) and len(pods.sandboxes["a"].sandboxes) == 1
     losing.failing = False
     assert await pool.sweep() == ["r/1/2/1/box"]
     assert pods.sandboxes["a"].sandboxes == {} and await pool.held() == []
+
+
+async def test_an_acquire_lost_on_a_pod_that_cannot_release_it_either_is_not_passed_on_and_is_swept(
+    tmp_path: Path,
+) -> None:
+    pods = Pods(a=4, b=1)  # (a has the most room: asked first)
+    losing = Losing(pods.pools["a"])
+    losing.failing = True
+    pods.pools["a"] = cast(Any, losing)
+    pool = pod_pools(pods, tmp_path)
+    with pytest.raises(httpx.ReadTimeout):  # (b never asked: its placement would hide the sandbox left on a)
+        await pool.acquire(BOX, "r/1/1/1/box")
+    (kept,) = await FilePlacements(tmp_path / "pods" / "fake.json").all()
+    assert (kept.where, kept.state) == ("a", ACQUIRING) and pods.sandboxes["b"].sandboxes == {}
+    losing.failing = False
+    assert await pool.sweep() == ["r/1/1/1/box"] and pods.sandboxes["a"].sandboxes == {}
 
 
 async def test_a_release_that_fails_is_kept_and_tried_again(tmp_path: Path) -> None:

@@ -3,8 +3,8 @@
 Every certificate of the cluster carries one URI SAN in the trust domain `rollout`: the gateway's is
 `spiffe://rollout/gateway`; a pod's is `spiffe://rollout/pod/NAME`, where NAME is the name its starter gave it when it
 asked for it (before the pod existed, so before any id the provider gives it). A pod beats beside the ledger with its
-name, the identity its certificate carries, whether it is ready, and its certificate's serial. A beat never says where
-the pod is reached: that is its lease's `address`, which the platform read from RunPod's API
+name, the identity its certificate carries, whether it is ready and for which run, and its certificate's serial. A beat
+never says where the pod is reached: that is its lease's `address`, which the platform read from RunPod's API
 (`rollout_train.pods.leases.PodLease.address`). Whoever reaches pods (the gateway, a run's trainer) reaches only those
 whose beat is fresh and whose identity is the one named for the pod, at the address its lease says, over `https`, and
 checks that identity in the TLS handshake (`rollout_train.inference.Connection.identity`).
@@ -36,14 +36,16 @@ def pod_identity(name: str) -> str:
 @dataclass(frozen=True)
 class LivePod:
     """A pod that is alive, as its newest beat says: its name, the identity its certificate must carry, its role
-    (`inference` or `trainer`), whether it is ready, and its certificate's serial (for whoever started the pod, which
-    has the certificate of a pod it no longer counts as its own revoked). Where it is reached is its lease's."""
+    (`inference` or `trainer`), whether it is ready, its certificate's serial (for whoever started the pod, which
+    has the certificate of a pod it no longer counts as its own revoked), and the run it is ready for (a warm pod
+    another run took says the run before until it follows the new one). Where it is reached is its lease's."""
 
     name: str
     identity: str
     role: str
     ready: bool
     serial: str | None = None
+    run: str | None = None
 
 
 def live(beats: Iterable[Beat], role: str | None = None) -> list[LivePod]:
@@ -63,7 +65,8 @@ def live(beats: Iterable[Beat], role: str | None = None) -> list[LivePod]:
             continue
         if role is not None and said.get("role") != role:
             continue
-        serial = said.get("serial")
+        serial, run = said.get("serial"), said.get("run")
         found.append(LivePod(name, identity, str(said.get("role")), said.get("ready") is True,
-                             serial if isinstance(serial, str) else None))  # fmt: skip
+                             serial if isinstance(serial, str) else None,
+                             run if isinstance(run, str) else None))  # fmt: skip
     return sorted(found, key=lambda pod: pod.name)

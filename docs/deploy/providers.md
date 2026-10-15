@@ -72,10 +72,11 @@ has the public image pulls only the platform's layers. `deploy/images/README.md`
   between steps), and the pod, once there, must say the same. The claim runs while groups play, and the step waits for
   it. A claim that fails (no GPU free, a pod not ready in time) fails that step; the next step claims again, and a run
   fails after three failed steps. A trainer on a `runpod-host`'s pod is claimed with the host.
-- **Renewed while it runs.** Every 30 seconds the run renews each lease and the time it is charged for each pod. A lease
-  that changed between the run's read and its write is read again and renewed at its version then, while it is still
-  the run's; the run's log says so. A lease not renewed for 5 minutes is stale: its run is taken to be gone (its driver
-  died, or its cluster went away).
+- **Renewed while it runs.** Every 30 seconds the run renews each lease and the time it is charged for each pod. It
+  asks RunPod about its pods at once, for 10 seconds at most, and renews each lease whether or not RunPod answered. A
+  lease that changed between the run's read and its write is read again and renewed at its version then, while it is
+  still the run's; the run's log says so. A lease not renewed for 5 minutes is stale: its run is taken to be gone (its
+  driver died, or its cluster went away).
 - **Released when it ends,** whether it finished, was stopped, failed or reached a limit. The pod stays up, warm, for
   the provider's `idle_stop` (600 seconds unless said). The next run with the same image and model takes it with no cold
   start, and the pod is reset to that run: its lease names the new run and channel and holds a ledger token for it, the
@@ -83,12 +84,13 @@ has the public image pulls only the platform's layers. `deploy/images/README.md`
   with the new run's settings.
 - **Reaped.** `rollout pods reap` (the chart's CronJob with `runpod.reaper: true`, every minute) deletes the pods of
   idle leases past their `idle_stop`, of stale leases, and every pod RunPod lists with the cluster's tag
-  (`rollout-CLUSTER-`) that no lease names. It deletes a lease first, by compare-and-set, then its pod, and revokes
-  the pod's certificate. A lease that changed since the reaper read it is read again and deleted at its version then,
-  while it is the same lease (the same run and pod) and still stale or idle; one renewed or taken meanwhile is left with
-  its pod. A lease it could not delete is logged as an error and printed with what it did. A pod RunPod did not delete
-  is deleted by the next reap, as one no lease names. `rollout pods list` shows every lease: who holds it, since when,
-  at what price.
+  (`rollout-CLUSTER-DIGEST-`, DIGEST six hex digits of the cluster name's SHA-256, so clusters named `prod` and
+  `prod-eu` sharing a RunPod account never reap each other's pods) that no lease names, reading the leases after
+  RunPod's list. It deletes a lease first, by compare-and-set, then its pod, and revokes the pod's certificate. A lease
+  that changed since the reaper read it is read again and deleted at its version then, while it is the same lease (the
+  same run and pod) and still stale or idle; one renewed or taken meanwhile is left with its pod. A lease it could not
+  delete is logged as an error and printed with what it did. A pod RunPod did not delete is deleted by the next reap,
+  as one no lease names. `rollout pods list` shows every lease: who holds it, since when, at what price.
 
 A lease's row in the database keeps its version in the `version` column alone, the one its compare-and-set compares;
 the `lease` column holds the rest.
@@ -350,7 +352,8 @@ with a few cents of a cheap GPU.
 - **Scoped credentials.** A pod's ledger token reads its run's serving records, starts and checkpoints, writes the
   pod's own beat and reads its own lease, nothing else, and only while its lease names that run
   ([the ledger over HTTP](../libraries/rollout-train/checkpoints.md#the-ledger-over-http)). An inference pod gets the
-  bucket's read-only key; a trainer or host pod the key that writes.
+  bucket's read-only key; a trainer or host pod the key that writes (a `runpod-host` pod in every role: an eval's too,
+  since its training service runs and a run that trains may take it warm).
 
 Pods read only the bucket their provider's `store` names. A checkpoint made in the cluster's own store (a run that
 starts from a local checkpoint, an eval of one on pods) is not in it: run such a run where its checkpoints are, or

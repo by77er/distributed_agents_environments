@@ -73,8 +73,9 @@ How it is tested, with no network, Docker, RunPod or step-ca (`tests/rollout_tra
 
 **Identities.** Every certificate of the cluster carries one URI SAN in the trust domain `rollout`. A pod's is
 `spiffe://rollout/pod/NAME`, where NAME is the pod's name, chosen when its lease is written (before RunPod is asked for
-it: the token must be in the pod's environment when it is created): `rollout-CLUSTER-PROVIDER-SLOT-RANDOM`. A pod keeps
-its name, and its certificate, across the runs that hold it. The gateway's is `spiffe://rollout/gateway`.
+it: the token must be in the pod's environment when it is created): `rollout-CLUSTER-DIGEST-PROVIDER-SLOT-RANDOM`
+(DIGEST: six hex digits of the cluster name's SHA-256). A pod keeps its name, and its certificate, across the runs that
+hold it. The gateway's is `spiffe://rollout/gateway`.
 
 **Who talks to whom.**
 

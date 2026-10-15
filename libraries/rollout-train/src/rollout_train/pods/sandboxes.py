@@ -28,15 +28,17 @@ kind's state in a log line whenever one changes.
 
 **What a kind's process may touch.** Its environment is made, not inherited: `PATH`, `HOME` and `TMPDIR` in its own
 directory (`ROLLOUT_SANDBOX_DIRECTORY/kinds/KIND`, its own and no other user's: its leases, logs and caches, kept across
-restarts), a locale. It cannot read the pod's secrets: the host, the follower, the training service and the container's
-first process run as root, so their environments (`/proc/PID/environ`: the ledger token, the store's keys, the
-certificate's token) are not its to read, and the certificates' directory is root's alone. The environments and zips it
-runs from are root's, and read-only to it. It cannot reach the host (which serves on a Unix socket root's alone,
-`ROLLOUT_SANDBOX_SOCKET`, for Envoy) nor through it another kind's pool, nor Envoy's admin interface (a Unix socket
-root's alone too). What it can still reach is what any process of the pod can: vLLM (`127.0.0.1:8000`) and the
-training service (`127.0.0.1:8001`) on the loopback interface, which take requests without a key, and Envoy's public
-port, which takes only the gateway's certificate; the code a run gives a pod must be code the cluster trusts to run
-beside its trainer.
+restarts), a locale. The host runs as root and follows no symbolic link there: what the kind's user put in place of its
+home, its temporary directory or its process's settings (`worker.json`) is removed, not written through, and its
+directory is given to it (and back to root) by open directories, never by paths. It cannot read the pod's secrets: the
+host, the follower, the training service and the container's first process run as root, so their environments
+(`/proc/PID/environ`: the ledger token, the store's keys, the certificate's token) are not its to read, and the
+certificates' directory is root's alone. The environments and zips it runs from are root's, and read-only to it. It
+cannot reach the host (which serves on a Unix socket root's alone, `ROLLOUT_SANDBOX_SOCKET`, for Envoy) nor through it
+another kind's pool, nor Envoy's admin interface (a Unix socket root's alone too). What it can still reach is what any
+process of the pod can: vLLM (`127.0.0.1:8000`) and the training service (`127.0.0.1:8001`) on the loopback interface,
+which take requests without a key, and Envoy's public port, which takes only the gateway's certificate; the code a run
+gives a pod must be code the cluster trusts to run beside its trainer.
 
 **Routing.** The pod's proxy sends `/v1/sandboxes/KIND/...` here, over the host's socket, as `/KIND/...`; the host
 passes `GET operations` and `capacity` and `POST acquire`, `release` and `call` on to the kind's process, and answers
@@ -80,6 +82,7 @@ import pwd
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import time
 import zipfile
@@ -404,6 +407,54 @@ def _dying_with_parent() -> None:
         PRCTL(PR_SET_PDEATHSIG, signal.SIGTERM)
 
 
+def _owned_directory(name: str, at: int, account: Account | None) -> int:
+    """Directory `name` in the directory open as `at`, made where it is not, its user's alone (none: the host's), and
+    open: what is there in its place (a symbolic link, or a file, its user put there) is removed first, and nothing is
+    followed."""
+    with contextlib.suppress(FileNotFoundError):
+        if not stat.S_ISDIR(os.lstat(name, dir_fd=at).st_mode):
+            os.unlink(name, dir_fd=at)
+    with contextlib.suppress(FileExistsError):
+        os.mkdir(name, 0o700, dir_fd=at)
+    opened = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=at)
+    try:
+        os.fchmod(opened, 0o700)
+        if account is not None:
+            os.fchown(opened, account.uid, account.gid)
+    except BaseException:
+        os.close(opened)
+        raise
+    return opened
+
+
+def _written_anew(path: Path, text: str, account: Account | None) -> None:
+    """`text` in a new file at `path`, its user's alone: what was there removed first (a symbolic link its user put
+    there, say), and nothing followed."""
+    at = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(path.name, dir_fd=at)
+        file = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=at)
+    finally:
+        os.close(at)
+    with open(file, "w") as written:
+        written.write(text)
+        if account is not None:
+            os.fchown(file, account.uid, account.gid)
+
+
+def _given(directory: Path, uid: int, gid: int) -> None:
+    """`directory` and all in it given to `uid` and `gid`, walked by open directories and no symbolic link followed:
+    its user may have made links in it, and may be changing them while it is walked. None there: nothing given."""
+    with contextlib.suppress(FileNotFoundError):
+        for _, directories, files, at in os.fwalk(directory):
+            with contextlib.suppress(OSError):
+                os.chown(at, uid, gid)
+            for name in [*directories, *files]:
+                with contextlib.suppress(OSError):
+                    os.chown(name, uid, gid, dir_fd=at, follow_symlinks=False)
+
+
 def _listening(path: Path) -> socket.socket:
     """A Unix socket listening at `path`, readable and writable by its owner alone."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -492,29 +543,33 @@ class Worker:
             self.state = "starting"
 
     def _own(self) -> tuple[Path, Path]:
-        """Its directory, home and temporary directory: made, and its user's alone."""
-        home, temporary = self.directory / "home", self.directory / "tmp"
-        for each in (self.directory, home, temporary):
-            each.mkdir(parents=True, exist_ok=True)
-            each.chmod(0o700)
-            if self.account is not None:
-                os.chown(each, self.account.uid, self.account.gid)
-        return home, temporary
+        """Its directory, home and temporary directory: made, and its user's alone. Its user may have put a symbolic
+        link (or a file) in place of its home or temporary directory: removed, never followed (`_owned_directory`)."""
+        self.directory.parent.mkdir(parents=True, exist_ok=True)
+        kinds = os.open(self.directory.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            directory = _owned_directory(self.directory.name, kinds, self.account)
+        finally:
+            os.close(kinds)
+        try:
+            for name in ("home", "tmp"):
+                os.close(_owned_directory(name, directory, self.account))
+        finally:
+            os.close(directory)
+        return self.directory / "home", self.directory / "tmp"
 
     async def _started(self, python: Path) -> None:
         home, temporary = self._own()
         listener = self._listener = _listening(self.socket_path)
         config = self.directory / "worker.json"
         written = self.run
-        config.write_text(json.dumps({
+        _written_anew(config, json.dumps({
             "kind": self.kind, "provider": self.source.provider, "settings": dict(self.source.settings),
             "size": self.size, "directory": str(self.directory), "name": self.name, "fd": listener.fileno(),
             "run": written,
-        }))  # fmt: skip
-        config.chmod(0o600)
+        }), self.account)  # fmt: skip
         options: dict[str, Any] = {}
         if self.account is not None:
-            os.chown(config, self.account.uid, self.account.gid)
             options = {"user": self.account.uid, "group": self.account.gid}
             if os.geteuid() == 0:  # (none of root's groups either)
                 options["extra_groups"] = []
@@ -721,11 +776,7 @@ class SandboxHost:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(assigned))
         path.chmod(0o600)
-        directory = self.root / "kinds" / kind
-        if directory.exists():  # (a kind's directory another user held: given to its own)
-            for each in [directory, *directory.rglob("*")]:
-                with contextlib.suppress(OSError):
-                    os.lchown(each, free[0].uid, free[0].gid)
+        _given(self.root / "kinds" / kind, free[0].uid, free[0].gid)  # (a kind's directory another user held)
         return free[0]
 
     def _given_back(self, kept: set[str]) -> list[str]:
@@ -737,10 +788,7 @@ class SandboxHost:
         assigned: dict[str, int] = json.loads(path.read_text())
         gone = sorted(kind for kind in assigned if kind not in kept)
         for kind in gone:
-            directory = self.root / "kinds" / kind
-            for each in [directory, *directory.rglob("*")] if directory.exists() else []:
-                with contextlib.suppress(OSError):
-                    os.lchown(each, 0, 0)
+            _given(self.root / "kinds" / kind, 0, 0)
             del assigned[kind]
         if gone:
             path.write_text(json.dumps(assigned))

@@ -153,21 +153,25 @@ class InferencePod(Follower):
             self.ready = serves in has and (serves == self.model or serves == channel.serving)
             error = self.errors.get(qualified(run, name))
             self.why = "" if self.ready else error or f"{serves} is not served yet"
-            if self.ready and self.trainer is not None and (held := await self._trained()) != run:
-                self.ready, self.why = False, f"the training service holds the trainer of {held or 'no run'} yet"
+            if self.ready and self.trainer is not None and (trained := await self._trained())[0] != run:
+                held, why = trained
+                said = f"the training service holds the trainer of {held or 'no run'} yet"
+                self.ready, self.why = False, f"{said}: {why}" if why else said
         self.looked = time.monotonic()
 
-    async def _trained(self) -> str | None:
-        """The run whose trainer the training service beside the server holds (none: none, or it does not answer)."""
+    async def _trained(self) -> tuple[str | None, str | None]:
+        """The run whose trainer the training service beside the server holds (none: none, or it does not answer), and
+        why it holds none of the run its lease names, where it says."""
         import httpx
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 said: Any = (await client.get(f"{self.trainer}/v1/trainer")).json()
         except (httpx.HTTPError, ValueError):
-            return None
-        run: Any = cast(dict[str, Any], said).get("run") if isinstance(said, dict) else None
-        return str(run) if run else None
+            return None, None
+        found = cast(dict[str, Any], said) if isinstance(said, dict) else {}
+        run, why = found.get("run"), found.get("why")
+        return (str(run) if run else None), (str(why) if why else None)
 
     def healthy(self, stale: float = STALE) -> bool:
         """Whether it looked within `stale` seconds (or started within them)."""

@@ -4,7 +4,9 @@ reset to that run; the reaper deletes idle pods past their idle stop, stale leas
 not ready in time is deleted and the run told why; and what each run held is charged at the pod's price. A lease
 changed under its run (by hand, or between a read and a compare-and-set) is still renewed, and still reaped where it is
 stale; a resumed run frees a slot its earlier start held whose pod is gone; the reaper never deletes a lease renewed
-meanwhile."""
+meanwhile, a pod a run starts while it lists RunPod's, nor the pods of a cluster whose name begins with its own's; a
+renewal asks RunPod about its pods at once, a bounded while, and stamps them all whether or not it answers; and what
+pods cost that could not be told is told with the next renewal."""
 
 import asyncio
 import json
@@ -12,7 +14,7 @@ import tomllib
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import JsonValue
@@ -21,7 +23,7 @@ from rollout_train.cluster import Cluster, ClusterError, parsed
 from rollout_train.database import DatabaseLedger
 from rollout_train.pods.identity import POD, pod_identity
 from rollout_train.pods.leases import HELD, IDLE, DatabasePodLeases, PodLease, pod_leases_of
-from rollout_train.pods.leasing import LeaseLost, PodNeed, Pods, PodsDidNotStart, needs_of, reap, tag_of
+from rollout_train.pods.leasing import LeaseLost, PodNeed, Pods, PodsDidNotStart, needs_of, pod_name, reap, tag_of
 from rollout_train.presence import presence_of
 from rollout_train.providers import pod_table
 from rollout_train.run_settings import RunSettings
@@ -220,6 +222,70 @@ async def test_what_pods_cost_while_the_run_waited_for_them_is_told_with_the_fir
     await pods.release()
 
 
+async def test_what_pods_cost_that_could_not_be_told_is_told_with_the_next_renewal(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    ledger, fake, _ = world
+    pods = pods_of("run_1", cluster_of(tmp_path), ledger, fake, renew=0.05)
+    await pods.claim([NEED])
+    told: list[float] = []
+    failing = [RuntimeError("the ledger service did not answer")]
+
+    async def spent(dollars: float) -> None:
+        if failing:
+            raise failing.pop()
+        told.append(dollars)
+
+    renewing = asyncio.create_task(pods.renewing(spent))
+    await asyncio.sleep(0.3)
+    renewing.cancel()
+    await asyncio.gather(renewing, return_exceptions=True)
+    assert not failing and told and sum(told) == pytest.approx(pods.spent)  # (none of it lost)
+    await pods.release()
+
+
+async def test_a_renewal_waits_on_runpod_for_its_pods_at_once_and_a_bounded_while_and_stamps_them_all(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rollout_train.pods import leasing
+
+    ledger, fake, _ = world
+    hanging = asyncio.Event()
+
+    class Hanging:
+        """RunPod's API, asked about a pod once `hanging` is set: it never answers (its own timeout is a minute)."""
+
+        def __init__(self) -> None:
+            self.client = fake.client()
+
+        async def pod(self, id: str) -> Any:
+            if hanging.is_set():
+                await asyncio.Event().wait()
+            return await self.client.pod(id)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.client, name)
+
+    slow: Any = Hanging()
+    pods = Pods("run_1", cluster_of(tmp_path, max_pods=5), ledger, api=lambda provider: slow, ca=lambda table: None,
+                environ=ENVIRON, look=0.05)  # fmt: skip
+    leases = await pods.claim([PodNeed("pods", "inference", 5, "m", "policy")])
+    monkeypatch.setattr(leasing, "DESCRIBE", 0.2)
+    hanging.set()
+    await asyncio.sleep(0.05)
+    began = asyncio.get_running_loop().time()
+    await asyncio.wait_for(pods.renewed(), 5)
+    assert asyncio.get_running_loop().time() - began < 0.2 * 5 / 2  # (asked at once, not one after another)
+    store = pod_leases_of(ledger)
+    assert store is not None
+    for lease in leases:
+        there = await store.get(lease.pod)
+        assert there is not None and there.renewed is not None and lease.renewed is not None
+        assert there.renewed > lease.renewed and there.address == lease.address  # (stamped all the same)
+    hanging.clear()
+    await pods.release()
+
+
 async def test_a_pod_claimed_while_the_run_renews_its_others_is_renewed_by_them_alone(
     tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
 ) -> None:
@@ -341,6 +407,56 @@ async def test_the_reaper_deletes_idle_pods_past_their_idle_stop_and_stale_lease
     stranger = await client.create(PodSpec("someone-elses-pod", "image", ["NVIDIA GeForce RTX 4090"]))
     (said,) = await reap(cluster, ledger, api=lambda provider: fake.client(), ca=lambda table: None)
     assert "no lease names it" in said and orphan.id not in fake.pods and stranger.id in fake.pods
+
+
+async def test_a_clusters_reaper_leaves_the_pods_of_a_cluster_whose_name_begins_with_its_own(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    from rollout_train.pods.client import PodSpec
+
+    ledger, fake, _ = world
+    prod, prod_eu = replace(cluster_of(tmp_path), name="prod"), replace(cluster_of(tmp_path), name="prod-eu")
+    held = pods_of("run_1", prod_eu, ledger, fake)
+    (lease,) = await held.claim([NEED])
+    orphan = await fake.client().create(PodSpec(tag_of(prod) + "pods-5-abcdef", "image", ["NVIDIA GeForce RTX 4090"]))
+    own = DatabaseLedger(f"sqlite:///{tmp_path / 'prod.db'}")  # (prod's: no lease of prod-eu's, on one RunPod account)
+    (said,) = await reap(prod, own, api=lambda provider: fake.client(), ca=lambda table: None)
+    assert orphan.id in said and orphan.id not in fake.pods and lease.id in fake.pods
+    assert not lease.pod.startswith(tag_of(prod)) and lease.pod.startswith(tag_of(prod_eu))
+    long = replace(prod, name="a-cluster-whose-name-is-as-long-as-anyone-would-ever-want-it-to-be")
+    named = pod_name(long, "a-provider-with-a-long-name-too", 123)
+    assert len(named) <= 63 and pod_identity(named) and named.startswith(tag_of(long))
+    await held.release()
+
+
+async def test_the_reaper_leaves_a_pod_a_run_starts_while_it_lists_runpods(
+    tmp_path: Path, world: tuple[DatabaseLedger, FakeRunPod, StandIns]
+) -> None:
+    ledger, fake, _ = world
+    cluster = cluster_of(tmp_path)
+    run = pods_of("run_1", cluster, ledger, fake)
+    started: list[PodLease] = []
+
+    class Starting:
+        """RunPod's API, asked for its pods just as a run starts one (its lease written first, then the pod)."""
+
+        def __init__(self) -> None:
+            self.client = fake.client()
+
+        async def pods(self) -> Any:
+            if not started:
+                lease = await run._started(NEED)  # pyright: ignore[reportPrivateUsage]
+                assert lease is not None
+                started.append(lease)
+            return await self.client.pods()
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.client, name)
+
+    assert await reap(cluster, ledger, api=lambda provider: cast(Any, Starting()), ca=lambda table: None) == []
+    (lease,) = started
+    store = pod_leases_of(ledger)
+    assert store is not None and lease.id in fake.pods and await store.get(lease.pod) is not None
 
 
 async def test_a_pod_not_ready_in_time_is_deleted_and_the_run_told_why(

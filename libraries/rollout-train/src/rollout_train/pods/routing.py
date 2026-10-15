@@ -80,7 +80,7 @@ class LeasedServers:
         found: list[CheckpointServer] = []
         for pod in live(await presence.beats()):
             address = addresses.get(pod.name)
-            if address is None or not pod.ready:
+            if address is None or not pod.ready or pod.run != self.run:
                 continue
             identity = pod_identity(pod.name)
             key = (address, identity)

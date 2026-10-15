@@ -3,10 +3,10 @@ each kind's pool in a process, a Python environment and a user of its own, on a 
 from the pod's spare vCPUs and memory (the lesser of its lease's and its container's), sharing them among kinds, and
 resizes them in place; makes each environment once per digest with uv (for real, offline, where uv and its cache are
 here), finds it again, and deletes what is long unused; gives the processes a made environment and nothing of its own;
-keeps the other kinds served when one does not import, and tries a failed one again; waits out a Python it could not
-make; takes no new sandbox while its lease goes unrenewed, and loses them once its run's driver is gone; ends what a
-host before it left; and, when another run takes the pod or the host is started again, a lease's key gets
-`SandboxLost`, never a fresh sandbox."""
+follows no symbolic link a kind's user puts in its directory; keeps the other kinds served when one does not import,
+and tries a failed one again; waits out a Python it could not make; takes no new sandbox while its lease goes
+unrenewed, and loses them once its run's driver is gone; ends what a host before it left; and, when another run takes
+the pod or the host is started again, a lease's key gets `SandboxLost`, never a fresh sandbox."""
 
 import asyncio
 import io
@@ -41,6 +41,7 @@ from rollout_train.pods.sandboxes import (
     Machine,
     SandboxHost,
     Venvs,
+    Worker,
     machine_of,
     sized,
     worker_environment,
@@ -405,6 +406,64 @@ async def test_a_kind_no_longer_asked_for_gives_its_user_back(
         assert json.loads((root / "accounts.json").read_text()) == {"two": os.getuid()}
     finally:
         await host.stop()
+
+
+async def test_what_a_kinds_user_puts_in_its_directory_in_place_of_its_own_is_removed_not_followed(
+    tmp_path: Path,
+) -> None:
+    victim = tmp_path / "victim"  # (stands for /etc, or the certificates' directory: root's)
+    victim.mkdir(mode=0o755)
+    (victim / "secret").write_text("root's")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o755)
+    directory = tmp_path / "kinds" / "fake"
+    directory.mkdir(parents=True)
+    (directory / "home").symlink_to(victim)  # (what the kind's process can do in a directory it owns)
+    (directory / "tmp").symlink_to(elsewhere)
+    (directory / "worker.json").symlink_to(victim / "secret")
+    mine = Account(os.getuid(), os.getgid())
+    worker = Worker("fake", SandboxSource("fake", f"{KINDS}:boxes"), 1, directory, tmp_path / "fake.sock",
+                    tmp_path / "fake.pid", f"fake@{POD}", "run_a", account=mine)  # fmt: skip
+    with pytest.raises(FileNotFoundError):  # (no Python there: what matters is what the host did before)
+        await worker._started(tmp_path / "no-python")  # pyright: ignore[reportPrivateUsage]
+    await worker._ended()  # pyright: ignore[reportPrivateUsage]
+    for each in ("home", "tmp"):
+        assert not (directory / each).is_symlink() and stat.S_IMODE((directory / each).stat().st_mode) == 0o700
+    assert stat.S_IMODE(victim.stat().st_mode) == stat.S_IMODE(elsewhere.stat().st_mode) == 0o755  # (left as they were)
+    assert (victim / "secret").read_text() == "root's"
+    config = directory / "worker.json"
+    assert not config.is_symlink() and stat.S_IMODE(config.stat().st_mode) == 0o600
+    assert json.loads(config.read_text())["kind"] == "fake"
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="gives files to another user: root alone may")
+def test_a_kinds_directory_is_given_by_open_directories_not_through_a_link_its_user_swaps_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "secret").write_text("root's")
+    root = tmp_path / "sandboxes"
+    directory = root / "kinds" / "fake"
+    (directory / "cache").mkdir(parents=True)
+    (directory / "cache" / "secret").write_text("the kind's")
+    real: dict[str, Callable[..., None]] = {"chown": os.chown, "lchown": os.lchown}
+
+    def racing(name: str) -> Callable[..., None]:
+        def changed(path: int | str | os.PathLike[str], *arguments: Any, **options: Any) -> None:
+            if not isinstance(path, int) and str(path).endswith("secret") and not (tmp_path / "moved").exists():
+                (directory / "cache").rename(tmp_path / "moved")  # (the kind's process, between the walk and the chown)
+                (directory / "cache").symlink_to(victim)
+            real[name](path, *arguments, **options)
+
+        return changed
+
+    monkeypatch.setattr(os, "chown", racing("chown"))
+    monkeypatch.setattr(os, "lchown", racing("lchown"))
+    host = SandboxHost(POD, None, Here(root, None), root, accounts=[Account(4242, 4242)])
+    assert host._account("fake") == Account(4242, 4242)  # pyright: ignore[reportPrivateUsage]
+    assert (tmp_path / "moved").exists() and (victim / "secret").stat().st_uid == 0  # (root's still)
+    assert (tmp_path / "moved" / "secret").stat().st_uid == 4242  # (the kind's own file, given to its user)
 
 
 async def test_the_host_serves_on_a_socket_its_own_and_a_dead_kinds_socket_refuses(
