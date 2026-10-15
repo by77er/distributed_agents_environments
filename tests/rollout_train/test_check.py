@@ -39,6 +39,23 @@ class Careless(Words):
 careless = Careless()
 
 
+class Unstartable(Words):
+    """Words whose say-maybe has no start to draw, and whose eval data is written down rather than drawn."""
+
+    def start(self, row: Row, rng: random.Random) -> JsonValue:
+        if row.key == "say-maybe":
+            raise KeyError("no such board")
+        return super().start(row, rng)
+
+    def evals(self) -> Mapping[str, Sequence[Start]]:
+        return {"words-held-out": [Start("say-yes", "say yes", 1, {"word": "yes", "seed": 1001})]}
+
+
+class Unmeasured(Words):
+    def evals(self) -> Mapping[str, Sequence[Start]]:
+        raise RuntimeError("eval data missing")
+
+
 class Unsaid(Words):
     """Words whose description says its results report no duration, and rewards of 2 or more."""
 
@@ -66,6 +83,18 @@ def test_what_an_environment_gets_wrong_is_said() -> None:
     found = {each.check: each for each in checked(Wandering())}
     assert not found["starts"].passed and "drew two different starts" in found["starts"].said
     assert not found["train and eval"].passed and "no eval data" in found["train and eval"].said
+
+
+async def test_what_an_environment_raises_is_said_as_a_failed_check() -> None:
+    found = {each.check: each for each in checked(Unstartable())}
+    assert not found["starts"].passed and "say-maybe with seed 0: start() raised KeyError" in found["starts"].said
+    assert found["train and eval"].said == "say-maybe: start() raised KeyError: 'no such board'"
+    found = {each.check: each for each in checked(Unmeasured())}
+    assert found["train and eval"].said == "evals() raised RuntimeError: eval data missing"
+    assert not found["starts"].passed and not found["train and eval"].passed
+    for environment, row in ((Unstartable(), "say-maybe"), (Unmeasured(), "say-yes")):
+        episode = await scripted(environment, row=row, reply="yes")
+        assert not episode.passed and episode.said.startswith(f"{row}'s start could not be drawn: ")
 
 
 async def test_one_episode_plays_with_a_scripted_model_and_its_result_is_held_to_the_description() -> None:

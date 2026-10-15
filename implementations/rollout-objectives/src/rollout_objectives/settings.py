@@ -1,6 +1,7 @@
 """A policy step's settings, which the LoRA, full-weight and Tinker trainers take alike: the one place their defaults
 are written. Importing this does not load torch (`rollout_train.providers.settings_of` reads it)."""
 
+import math
 from collections.abc import Mapping
 from dataclasses import InitVar, dataclass, replace
 from typing import Any, Self, cast
@@ -18,6 +19,16 @@ OBJECTIVE = "objective."
 """The start of a changeable setting that is a component of the objective, as the run's settings name it."""
 OLD_LOGPROBS = ("sampler", "trainer")
 """Where a step takes the logprobs it starts from (`StepSettings.old_logprobs`)."""
+_WHOLE = {
+    "rank": 1, "tokens_per_step": 1, "passes": 1, "warmup_updates": 0, "segment_tokens": 1, "segments_per_step": 1,
+    "pack_tokens": 1,
+}  # fmt: skip
+"""The settings that are whole numbers, with the least each takes."""
+_NUMBERS = {"learning_rate": False, "max_gradient_norm": True, "max_kl": True}
+"""The settings that are finite numbers, 0 at least, and whether 0 itself is refused (a learning rate of 0 learns
+nothing, as a test of a step may want)."""
+_UNBOUNDED = ("segment_tokens", "segments_per_step", "pack_tokens", "max_kl")
+"""The settings among them that may be none."""
 _UNSAID: Any = object()
 
 
@@ -55,9 +66,10 @@ class StepSettings:
     makes more optimizer updates (a supervised step on a small dataset, say)."""
     old_logprobs: str = "sampler"
     """Where the logprobs a step starts from (`old`: what its ratios are of, and its distance from the start) come from
-    for a segment sampled wholly on the weights the step starts from (`sampled_at_start`, `rollout_train.trainer`):
-    `sampler`, the behaviour logprobs the engine recorded as it sampled it, which the step then does not compute (a
-    pass over the segment without a gradient, or the first minibatch's own); `trainer`, computed by the trainer.
+    for a segment sampled wholly on the weights the step starts from (`sampled_at_start`, `rollout_train.trainer`),
+    after the first minibatch (whose own pass computes them at no cost): `sampler`, the behaviour logprobs the engine
+    recorded as it sampled it, which the step then does not compute (a pass over the segment without a gradient);
+    `trainer`, computed by the trainer.
     They differ by how the engine and the trainer compute (a step's `mean_mismatch` measures it on those it computed):
     about 0.01 nats a token between vLLM's 4-bit kernels and the LoRA trainer's. A segment sampled on older weights,
     or with a token the engine gave no logprob, is computed either way."""
@@ -88,8 +100,7 @@ class StepSettings:
         segment_clip_high: float,
         truncate: float | None,
     ) -> None:
-        if self.passes < 1 or self.warmup_updates < 0:
-            raise ValueError("passes is at least 1, and warmup_updates is not negative")
+        self._check_numbers()
         if self.old_logprobs not in OLD_LOGPROBS:
             raise ValueError(f"old_logprobs is one of {', '.join(OLD_LOGPROBS)}, not {self.old_logprobs!r}")
         named = {
@@ -98,6 +109,23 @@ class StepSettings:
         }  # fmt: skip
         legacy = {key: value for key, value in named.items() if value is not _UNSAID}
         object.__setattr__(self, "objective", objective_of(self.objective, legacy))
+
+    def _check_numbers(self) -> None:
+        """Raises `ValueError` for a number a step would fail on or diverge with (a rank of 0, an infinite learning
+        rate, true for a count), as made or as changed between steps."""
+        for name, least in _WHOLE.items():
+            value = getattr(self, name)
+            if value is None and name in _UNBOUNDED:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or value < least:
+                raise ValueError(f"{name} is a whole number, {least} at least (not {value!r})")
+        for name, above in _NUMBERS.items():
+            value = getattr(self, name)
+            if value is None and name in _UNBOUNDED:
+                continue
+            number = value if isinstance(value, int | float) and not isinstance(value, bool) else math.nan
+            if not math.isfinite(number) or number < 0 or (above and number == 0):
+                raise ValueError(f"{name} is a finite number, {'above 0' if above else '0 at least'} (not {value!r})")
 
     @property
     def loss(self) -> Objective:

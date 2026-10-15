@@ -153,6 +153,24 @@ def test_a_ledger_url_with_a_password_is_refused() -> None:
     assert SECRET not in str(raised.value)
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        f'\n[ray]\njobs = "https://admin:{SECRET}@ray.example.com"\n',
+        f'\n[gateway]\nurl = "https://gateway:{SECRET}@gateway.example.com"\n',
+        f'\n[inference.servers]\nkind = "vllm-servers"\naddresses = ["https://10.0.0.4:8000", "https://u:{SECRET}@10.0.0.5"]\n',
+        f'\n[tools.search]\nurl = "https://u:{SECRET}@tools.example.com"\n',
+        f'\n[blobs]\nkind = "rollout_s3:S3BlobStore"\nendpoint_url = "https://AKIA:{SECRET}@s3.example.com"\n',
+    ],
+    ids=["ray", "gateway", "servers", "tools", "blobs"],
+)
+def test_a_url_with_a_password_is_refused_wherever_it_is(change: str) -> None:
+    with pytest.raises(ClusterError, match="is a URL that holds a password") as raised:
+        cluster_of(SMALL + change)  # (else it would be handed on to every job, ROLLOUT_CLUSTER_JSON)
+    assert SECRET not in str(raised.value)
+    assert cluster_of(SMALL + '\n[gateway]\nurl = "https://gateway@gateway.example.com"\n')  # (a user, no password)
+
+
 def test_the_ledger_service_is_reached_with_the_platforms_token_named() -> None:
     service = SMALL.replace('url = "sqlite:///~/ledger.db"', 'url = "https://ledger.example.com"')
     with pytest.raises(ClusterError, match="token_env or token_file"):
@@ -163,6 +181,8 @@ def test_the_ledger_service_is_reached_with_the_platforms_token_named() -> None:
     )
     public = SMALL.replace("[inference.local]", 'public = "https://ledger.example.com"\n[inference.local]')
     assert cluster_of(public).ledger.public == "https://ledger.example.com"
+    for role in ("run", "gateway", "monitor", "ledger", "pool", "reaper"):  # (each reaches the ledger through it)
+        assert "ledger.token" in cluster.secrets_of(role), role
     with pytest.raises(ClusterError, match="public is the ledger service's address"):
         cluster_of(public.replace("https://ledger.example.com", "ledger.example.com"))
     with pytest.raises(ClusterError, match="looks like a secret"):

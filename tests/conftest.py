@@ -6,6 +6,7 @@ and ROLLOUT_TEST_S3 (an endpoint URL; credentials from AWS_ACCESS_KEY_ID and AWS
 fresh local instance of the session's own (`local_ray`), never a cluster that is running already.
 """
 
+import importlib.util
 import os
 import uuid
 from collections.abc import Iterator
@@ -18,6 +19,15 @@ from rollout_train.sql import create_database, temporary_postgres
 from tests.local_ray import LocalRay, free_port, isolated, started
 
 isolated()  # (before anything imports Ray)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """A test marked `extras(MODULE, …)` is skipped where a module it names is not installed (without the extras)."""
+    for item in items:
+        for marker in item.iter_markers("extras"):
+            if missing := [each for each in marker.args if importlib.util.find_spec(each) is None]:
+                reason = f"needs {', '.join(missing)}, which the workspace's extras install"
+                item.add_marker(pytest.mark.skip(reason=reason))
 
 
 @pytest.fixture(scope="session")

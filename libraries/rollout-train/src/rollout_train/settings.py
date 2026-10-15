@@ -25,6 +25,7 @@ engines. Paused false, it goes on.
 
 import asyncio
 import json
+import math
 import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
@@ -120,9 +121,11 @@ async def paused(ledger: Ledger, run: str, store: DesiredSettings | None = None)
 
 def checked(key: str, value: JsonValue) -> JsonValue:
     """A changeable setting's value, as a run takes it; raises `ValueError` for one it cannot take (`evals.every`
-    below 1, say). A trainer's own settings are checked by the trainer."""
+    below 1, say, or a number that is not finite). A trainer's own settings are checked by the trainer beyond that."""
     if key in (EVALS_EPISODES, GROUPS_AHEAD) and value is None:  # (the suite's own; from groups_per_step and max_lag)
         return None
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(f"{key} is a finite number (not {value!r})")
     if key in (GROUPS_PER_STEP, GROUPS_AHEAD, EVALS_EVERY, EVALS_EPISODES):
         if isinstance(value, bool) or not isinstance(value, int | float) or int(value) != value or value < 1:
             raise ValueError(f"{key} is a whole number, 1 at least (not {value!r})")

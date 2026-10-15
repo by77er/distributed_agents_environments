@@ -84,6 +84,10 @@ async def test_a_preset_holds_run_settings_and_never_a_name(presets: Presets) ->
         await presets.save("a/b", {"groups": 1})
     saved = await presets.save("with-trainer", {"trainer.segments_per_step": 384, "channels.judge.model": "gpt-5"})
     assert saved.version == 1
+    for name in (".", "..", ".hidden"):  # (a directory of `FilePresets`: `..` is the ledger's own)
+        with pytest.raises(ValueError, match=r"starts with '\.'"):
+            await presets.save(name, {"groups": 1})
+        assert await presets.get(name) is None and await presets.versions(name) == []
 
 
 def test_a_version_is_named_name_at_number() -> None:
@@ -190,3 +194,16 @@ async def test_a_runs_settings_layer_over_a_preset_which_gives_only_what_its_kin
     assert not any(key.startswith("trainer.") or key == "groups_per_step" for key in evaluated.values)
     with pytest.raises(KeyError, match="no preset 'slower'"):
         await settled("train", "slow", {}, preset="slower", presets=kept)
+
+
+async def test_a_name_given_among_the_settings_is_kept_unless_one_is_given_apart() -> None:
+    from rollout_train.launching import settled
+    from rollout_train.run_settings import from_flags
+
+    given = from_flags(["name=my-run", "groups=3"])
+    settings, _ = await settled("train", None, given)
+    assert (settings["name"], settings["groups"]) == ("my-run", 3)
+    settings, _ = await settled("train", "--name's", given)
+    assert settings["name"] == "--name's"
+    settings, _ = await settled("train", None, {"groups": 3})
+    assert settings["name"] is None  # (one is chosen later: `free_name`)

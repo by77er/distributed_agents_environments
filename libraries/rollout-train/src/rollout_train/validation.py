@@ -16,6 +16,7 @@ What a model's files say of its size (`rollout_train.memory.ModelFacts`) is a fa
 `memory` rule can use it: a trainer that is not metered and whose GPUs' memory is known.
 """
 
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 
@@ -27,7 +28,7 @@ from rollout_train.cluster import Cluster, auth_problem
 from rollout_train.demand import HEADROOM, Demand, Resources, demand, played_channel, requested
 from rollout_train.distillation import routes_of
 from rollout_train.memory import ModelFacts, TrainerMemory, gpu_memory_gib, trainer_memory
-from rollout_train.objectives import DEFAULT, POLICY_GRADIENT, Objective, composed
+from rollout_train.objectives import DEFAULT, LIKELIHOOD, POLICY_GRADIENT, PREFERENCE, Objective, composed
 from rollout_train.providers import InferenceProvider, SettingSpec, TrainerProvider, settings_of
 from rollout_train.published import is_published
 from rollout_train.registry import Taken, valid
@@ -99,7 +100,10 @@ RULES: tuple[Rule, ...] = (
         "a renderer said that says it renders other models",
     ),
     Rule("rank", "the adapter's rank, as the provider sees it, above its highest"),
-    Rule("segment", "segments longer than the trainer or the context takes"),
+    Rule(
+        "segment",
+        "segments longer than the trainer or the context takes, or an answer budget that leaves no room for a prompt",
+    ),
     Rule(
         "memory",
         "a trainer whose estimate of what each of its GPUs holds (weights, gradients, optimizer state and activations, "
@@ -109,7 +113,8 @@ RULES: tuple[Rule, ...] = (
     Rule(
         "objective",
         "a component its family does not accept, a combination that means nothing, a family the trainer or the kind of "
-        "run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give",
+        "run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give, "
+        "groups of one episode where it compares a group's",
     ),
     Rule("evals", "a suite that does not exist, or whose environment is not offered"),
     Rule(
@@ -321,6 +326,8 @@ def _settings(run: _Run) -> None:
         if is_trainers(key):
             if kind not in TRAINING:
                 run.refuse("settings", key, f"{key} is a trainer's setting, and a {kind} run trains nothing")
+            elif isinstance(value, float) and not math.isfinite(value):  # (whatever the trainer's dataclass says)
+                run.refuse("settings", key, f"{key} is a finite number, not {value}")
             elif run.trainer is not None and run.specs is not None:
                 spec = next((each for each in run.specs if each.key == key), None)
                 field_name = key.removeprefix("trainer.")
@@ -338,6 +345,7 @@ def _settings(run: _Run) -> None:
             run.refuse("settings", key, f"{key} is not a setting a {kind} run takes")
         elif (problem := found.problem(value)) is not None:
             run.refuse("settings", key, f"{key} {problem}")
+    _trainers_settings(run)
     required = {
         "train": ["environment", "trainer.provider"],
         "eval": ["environment", "eval.suite"],
@@ -370,6 +378,33 @@ def _settings(run: _Run) -> None:
             run.refuse("settings", key, reason)
 
 
+def _trainers_settings(run: _Run) -> None:
+    """The trainer's settings dataclass made with the run's `trainer.*` values of the types it takes, as the trainer
+    makes it: what it refuses (a rank of 0, a learning rate below 0) is refused here, by the key it is about, rather
+    than when the run's first step is taken."""
+    from rollout.names import named
+
+    if run.kind not in TRAINING or run.trainer is None or run.specs is None:
+        return
+    specs = {each.key: each for each in run.specs}
+    given = {key.removeprefix("trainer."): value for key, value in run.settings.values.items()
+             if is_trainers(key) and key in specs and specs[key].accepts(value)}  # fmt: skip
+    made, name = named(run.trainer.runs.settings), run.trainer.name
+    refused = False
+    for field_name, value in given.items():
+        try:
+            made(**{field_name: value})
+        except (TypeError, ValueError) as error:
+            refused = True
+            run.refuse("settings", f"trainer.{field_name}", f"the {name} trainer takes no trainer.{field_name} = "
+                       f"{value!r}: {error}")  # fmt: skip
+    try:
+        made(**given)
+    except (TypeError, ValueError) as error:
+        if not refused:
+            run.refuse("settings", "trainer.provider", f"the {name} trainer's settings do not hold together: {error}")
+
+
 def _channel(run: _Run, channel: str) -> None:
     settings, prefix = run.settings, f"channels.{channel}."
     several = settings[prefix + "providers"]
@@ -388,7 +423,8 @@ def _channel(run: _Run, channel: str) -> None:
             not isinstance(weights, dict)
             or set(weights) != set(providers)
             or not all(
-                isinstance(each, int | float) and not isinstance(each, bool) and each > 0 for each in weights.values()
+                isinstance(each, int | float) and not isinstance(each, bool) and 0 < each < math.inf
+                for each in weights.values()
             )
         ):
             run.refuse(
@@ -745,6 +781,7 @@ def _rank(run: _Run) -> None:
 
 
 def _segment(run: _Run) -> None:
+    _answers(run)
     trainer = run.trainer
     if trainer is None:
         return
@@ -762,6 +799,28 @@ def _segment(run: _Run) -> None:
         if offer is not None and longest > offer.context:
             run.refuse("segment", "trainer.segment_tokens", f"segments of up to {longest} tokens are longer than "
                        f"{model}'s context on provider {name} ({offer.context})")  # fmt: skip
+
+
+def _answers(run: _Run) -> None:
+    """A channel whose answer budget leaves no room for a prompt in its model's context, or, the trained channel's, in
+    the longest turn it takes (the longest segment its trainer trains on): every turn would overflow."""
+    trainer, trained, said = run.trainer, run.settings.trained, run.setting("trainer.segment_tokens")
+    longest = (said if isinstance(said, int) else trainer.segment_tokens) if trainer is not None else None
+    for channel in run.settings.channels:
+        answer, key = run.settings[f"channels.{channel}.answer_tokens"], f"channels.{channel}.answer_tokens"
+        if not isinstance(answer, int) or isinstance(answer, bool):
+            continue
+        model = run.settings.get(f"channels.{channel}.model")
+        for name, provider in run.providers(channel):
+            offer = provider.models.get(str(model))
+            if offer is not None and answer >= offer.context:
+                run.refuse("segment", key, f"answers of up to {answer} tokens leave no room for a prompt in "
+                           f"{model}'s context on provider {name} ({offer.context}): every turn of {channel} would "
+                           "overflow it")  # fmt: skip
+        if channel == trained and longest is not None and answer >= longest:
+            run.refuse("segment", key, f"answers of up to {answer} tokens leave no room for a prompt in a turn of "
+                       f"the trained channel, which is {longest} tokens at most (the longest segment its trainer "
+                       "trains on): every turn would overflow it")  # fmt: skip
 
 
 def trainer_gpus(trainer: TrainerProvider, cluster: Cluster) -> tuple[int, float | None]:
@@ -883,6 +942,7 @@ def _objective(run: _Run) -> None:
     if run.kind == "imitate" and objective.family == POLICY_GRADIENT and preset != DEFAULT.preset:
         run.refuse("objective", "objective.preset", "an imitate run trains on a dataset's examples, which have no "
                    f"advantages: a likelihood or preference preset, not {preset}")  # fmt: skip
+    _grouped(run, objective)
     _uncorrected(run, objective)
     trainer = run.trainer
     if trainer is None:
@@ -910,6 +970,25 @@ def _objective(run: _Run) -> None:
         run.refuse("objective", "objective.distillation.form", f"the {trainer.name} trainer gives the logprobs of the "
                    "sampled tokens only, and the top_k form reads the student's logprobs of the teacher's top-k "
                    "tokens: distillation.form = policy_gradient")  # fmt: skip
+
+
+def _grouped(run: _Run, objective: Objective) -> None:
+    """A training run whose groups are of one episode, and whose objective compares a group's episodes: a preference
+    loss's pair, or an advantage measured against the others' scores, scaled by them or filtered on them. No group
+    would train."""
+    size = run.settings["group_size"]
+    if run.kind != "train" or isinstance(size, bool) or size != 1:  # (below 1: the settings rule says so)
+        return
+    advantage = objective.advantage
+    compares = [f"advantage.{name} {getattr(advantage, name)}" for name in ("baseline", "scale", "filter")
+                if getattr(advantage, name) != "none"]  # fmt: skip
+    if objective.family == PREFERENCE:
+        run.refuse("objective", "group_size", "a preference loss compares a group's episodes, and a group of one has "
+                   "none to compare: group_size 2 at least")  # fmt: skip
+    elif objective.family in (POLICY_GRADIENT, LIKELIHOOD) and compares:
+        run.refuse("objective", "group_size", f"the objective compares a group's scores ({', '.join(compares)}), and "
+                   "a group of one has none to compare, so no group would train: group_size 2 at least, or an "
+                   "advantage that compares nothing (baseline, scale and filter none)")  # fmt: skip
 
 
 def _uncorrected(run: _Run, objective: Objective) -> None:

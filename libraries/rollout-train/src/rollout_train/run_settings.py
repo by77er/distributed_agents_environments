@@ -26,7 +26,9 @@ holds the result and answers with defaults; `diff` says what changed between two
 """
 
 import contextlib
+import datetime
 import json
+import math
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -92,6 +94,8 @@ class Key:
         """What is wrong with `value` for this key, in words; none when nothing is."""
         if not _typed(value, self.types):
             return f"is {_spoken(self.types)}, not {json.dumps(value)}"
+        if isinstance(value, float) and not math.isfinite(value):
+            return f"is a finite number, not {value}"
         if isinstance(value, int | float) and not isinstance(value, bool) and self.least is not None:
             if value < self.least or (self.above and value == self.least):
                 return f"is {'above' if self.above else 'at least'} {_number(self.least)}, not {_number(value)}"
@@ -267,12 +271,13 @@ def is_trainers(key: str) -> bool:
 @dataclass(frozen=True)
 class RunSettings:
     """A run's settings, as given (`values`), answering with the schema's defaults for what was not. Trainer settings
-    that name the objective are held as the `objective.*` keys they say (`current`)."""
+    that name the objective are held as the `objective.*` keys they say (`current`), and a whole number given as a
+    float (`8.0`, `1e2`) as the whole number it is, for a key of the schema that takes no other float."""
 
     values: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "values", current(self.values))
+        object.__setattr__(self, "values", _whole(current(self.values)))
 
     def __getitem__(self, key: str) -> JsonValue:
         if key in self.values:
@@ -374,6 +379,15 @@ def current(values: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     return kept
 
 
+def _whole(values: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    for key, value in values.items():
+        found = key_of(key)
+        whole = found is not None and "int" in found.types and "float" not in found.types
+        if whole and isinstance(value, float) and value.is_integer():
+            values[key] = int(value)  # (what reads it takes an int: `int(str(8.0))` fails)
+    return values
+
+
 def objective_in(settings: RunSettings) -> Objective:
     """The objective a run's settings ask for: their preset with each component they give. Raises `ValueError` for one
     that is wrong (`rollout_train.objectives.resolved`)."""
@@ -420,7 +434,8 @@ def layered(*layers: Mapping[str, JsonValue] | None) -> RunSettings:
 
 def from_flags(given: Sequence[str]) -> dict[str, JsonValue]:
     """`--set KEY=VALUE` flags, in order (a later one wins). A value is read as JSON (`null`, `3e-5`, `true`,
-    `["a", "b"]`, `"text"`), else as TOML (`{ a = 1 }`), else as the text it is (`rollout_qwen:qwen35`)."""
+    `["a", "b"]`, `"text"`), else as TOML (`{ a = 1 }`), else as the text it is (`rollout_qwen:qwen35`, and a TOML
+    date or time, `2026-10-15`, which no setting takes)."""
     values: dict[str, JsonValue] = {}
     for each in given:
         key, equals, value = each.partition("=")
@@ -436,19 +451,33 @@ def _value(text: str) -> JsonValue:
     except ValueError:
         pass
     try:
-        return tomllib.loads(f"value = {text}")["value"]
+        value = tomllib.loads(f"value = {text}")["value"]
     except tomllib.TOMLDecodeError:
         return text
+    return text if _dated(value) else value
+
+
+def _dated(value: Any) -> bool:
+    """Whether a TOML value is or holds a date or a time, which JSON has no type for."""
+    if isinstance(value, dict):
+        return any(_dated(each) for each in cast(dict[str, Any], value).values())
+    if isinstance(value, list):
+        return any(_dated(each) for each in cast(list[Any], value))
+    return isinstance(value, datetime.date | datetime.time)
 
 
 def from_file(path: Path) -> dict[str, JsonValue]:
     """Settings from a file: JSON (`.json`, where `null` unsets a key) or TOML, of dotted keys (`"trainer.rank" =
-    16`) or tables (`[trainer] rank = 16`), or both."""
+    16`) or tables (`[trainer] rank = 16`), or both. Raises `ValueError` for a TOML date or time, which no setting
+    takes (quoted, it is text)."""
     text = path.read_text()
     loaded: Any = json.loads(text) if path.suffix == ".json" else tomllib.loads(text)
     if not isinstance(loaded, dict):
         raise ValueError(f"{path}: settings are a table of keys")
-    return flattened(cast(dict[str, Any], loaded))
+    flat = flattened(cast(dict[str, Any], loaded))
+    if dated := sorted(key for key, value in flat.items() if _dated(value)):
+        raise ValueError(f"{path}: {', '.join(dated)} is a date or a time, which no setting takes: quote it for text")
+    return flat
 
 
 def flattened(table: Mapping[str, Any], prefix: str = "") -> dict[str, JsonValue]:

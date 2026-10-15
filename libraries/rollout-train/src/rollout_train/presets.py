@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import JsonValue
 
-from rollout_train.registry import valid
+from rollout_train.registry import Taken, valid
 from rollout_train.run_settings import is_trainers, key_of
 
 if TYPE_CHECKING:
@@ -87,9 +87,12 @@ def parsed(reference: str) -> tuple[str, int | None]:
 
 
 def checked(name: str, settings: Mapping[str, JsonValue]) -> tuple[str, dict[str, JsonValue]]:
-    """The name and settings of a preset about to be saved: a valid name, and only keys a run takes (a trainer's own
-    settings among them), never `name`."""
+    """The name and settings of a preset about to be saved: a valid name, not starting with `.` (`FilePresets` keeps
+    each preset in a directory of its name), and only keys a run takes (a trainer's own settings among them), never
+    `name`."""
     name = valid(name)
+    if name.startswith("."):
+        raise Taken(f"{name!r} cannot be a preset's name: it starts with '.'")
     if "name" in settings:
         raise ValueError("a preset holds no run's name: it is given at each launch")
     for key in settings:
@@ -145,7 +148,7 @@ class FilePresets:
 
     def _versions(self, name: str) -> list[Preset]:
         place = self.directory / name
-        if not place.is_dir():
+        if name.startswith(".") or "/" in name or not place.is_dir():  # (no preset is called so: not one's directory)
             return []
         return sorted(
             (Preset(**json.loads(each.read_text())) for each in place.glob("*.json")), key=lambda each: each.version

@@ -352,7 +352,8 @@ class Cluster:
         the monitor's token; the gateway the ledger's, its keys and those of the providers it samples (a hosted API's
         key, a server's token); a monitor the ledger's, the blob stores' (but their read-only keys, which only pods
         read) and its own token; the ledger service the ledger's and the platform's token; a sandbox pool the ledger's;
-        the reaper the ledger's and RunPod's keys. What each role is given on Kubernetes is this
+        the reaper the ledger's and RunPod's keys. Where the ledger's URL is the ledger service's, every role reads the
+        platform's token too, which it reaches the service with. What each role is given on Kubernetes is this
         (docs/deploy/helm.md)."""
         if role not in SECRET_ROLES:
             raise ValueError(f"a role is one of {', '.join(SECRET_ROLES)}, not {role!r}")
@@ -367,8 +368,10 @@ class Cluster:
                 return self.inference.get(name)
             return self.trainers.get(name) if kind == "trainers" else None
 
+        served = (self.ledger.url or "").startswith(("http://", "https://"))  # (the ledger service's)
+
         def wanted(where: str) -> bool:
-            if where == "ledger.url":
+            if where == "ledger.url" or (where == "ledger.token" and served):
                 return True
             if role == "ledger":
                 return where == "ledger.token"
@@ -448,8 +451,6 @@ def parsed(described: Mapping[str, Any], *, relative_to: Path | None = None) -> 
     url, url_secret = ledger.text("url", None), ledger.secret("url")
     if (url is None) == (url_secret is None):
         raise ClusterError("[ledger] has url or url_env (or url_file): one of them")
-    if url is not None and urlsplit(str(url)).password:
-        raise ClusterError("[ledger] url holds a password: put the URL in an environment variable and name it url_env")
     ledger_token, public = ledger.secret("token"), ledger.text("public", None)
     if url is not None and str(url).startswith(("http://", "https://")) and ledger_token is None:
         raise ClusterError("[ledger] url is the ledger service's: name the platform's token, token_env or token_file")
@@ -962,6 +963,25 @@ def _refuse_secret_values(table: Mapping[str, Any], where: str) -> None:
                 f"{here} looks like a secret written down: name it instead, {key}_env (an environment variable) or "
                 f"{key}_file (a file)"
             )
+        listed = cast(list[Any], value) if isinstance(value, list) else [value]
+        if any(isinstance(each, str) and _holds_password(each) for each in listed):
+            if here == "ledger.url":
+                raise ClusterError(
+                    "[ledger] url holds a password: put the URL in an environment variable and name it url_env"
+                )
+            raise ClusterError(f"{here} is a URL that holds a password: the config, handed on to every job, holds no "
+                               "secret, so reach it with a token or a key named apart")  # fmt: skip
+        for each in listed:
+            if isinstance(each, dict):
+                _refuse_secret_values(cast(dict[str, Any], each), here)
+
+
+def _holds_password(text: str) -> bool:
+    """Whether `text` is a URL with a password in it (`https://user:password@host`)."""
+    try:
+        return "://" in text and bool(urlsplit(text).password)
+    except ValueError:  # (not a URL that can be read: none of its parts is a password)
+        return False
 
 
 def _handed_on(

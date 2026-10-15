@@ -3,6 +3,7 @@ place; and a running loop that reads them each time it is about to decide a step
 that step on, and says in each step's record which settings it used."""
 
 import asyncio
+import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from rollout_train.settings import (
     EVALS_SUITE,
     GROUPS_AHEAD,
     GROUPS_PER_STEP,
+    MAX_LAG,
     applied,
     checked,
     desired_settings_of,
@@ -100,6 +102,40 @@ def test_only_a_changeable_setting_is_taken_and_only_with_a_value_it_can_have() 
             checked(key, value)
 
 
+def test_a_number_that_is_not_finite_is_never_taken() -> None:
+    current: dict[str, JsonValue] = {GROUPS_PER_STEP: 4, MAX_LAG: 1, "trainer.learning_rate": 1e-4}
+    current["objective.clip.low"] = 0.2
+    for value in (math.inf, -math.inf, math.nan):
+        wanted = dict.fromkeys(current, value)
+        assert applied(current, wanted) == current  # (left as they were, not an OverflowError from int(inf))
+        for key in wanted:
+            with pytest.raises(ValueError, match="finite"):
+                checked(key, value)
+
+
+def test_a_steps_settings_refuse_a_number_it_would_fail_on_as_made_and_as_changed() -> None:
+    settings: Any = pytest.importorskip("rollout_objectives.settings")  # (no torch: the GPU extras' package)
+    made = settings.StepSettings
+    wrong: list[dict[str, Any]] = [
+        {"rank": 0}, {"rank": -4}, {"rank": 8.0}, {"tokens_per_step": True}, {"tokens_per_step": 0},
+        {"segment_tokens": 0}, {"segments_per_step": -1}, {"pack_tokens": 0}, {"passes": 0}, {"warmup_updates": -1},
+        {"learning_rate": -1.0}, {"learning_rate": math.inf}, {"learning_rate": math.nan}, {"learning_rate": "fast"},
+        {"max_gradient_norm": -1.0}, {"max_gradient_norm": 0.0}, {"max_kl": 0.0}, {"max_kl": math.nan},
+    ]  # fmt: skip
+    for each in wrong:
+        with pytest.raises(ValueError):
+            made(**each)
+    step = made()
+    for each in ({"learning_rate": math.inf}, {"max_gradient_norm": -1}, {"tokens_per_step": True}, {"max_kl": 0}):
+        with pytest.raises(ValueError):  # (what a loop's refresh catches: the trainer keeps what it had)
+            step.changed(each)
+    assert (
+        made(learning_rate=0.0, segment_tokens=None, max_kl=None).learning_rate == 0.0
+    )  # (a step that learns nothing)
+    assert step.changed({"learning_rate": 1, "tokens_per_step": 512}).tokens_per_step == 512
+
+
+@pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_a_runs_settings_split_into_fixed_and_changeable_and_a_colocated_trainer_takes_its_own(tmp_path: Path) -> None:
     given = RunSettings({"kind": "train", "trainer.learning_rate": 3e-5, "trainer.rank": 16, "groups": 40})
     fixed, changeable = given.split(settings_of(TRAINER_KINDS["lora"]))

@@ -129,5 +129,6 @@ asyncio_mode = "auto"
 addopts = ["--import-mode=importlib", "-m", "not live"]
 markers = [
     "live: needs what a test cannot start alone, a Paper server (Java, and the network once) or the GPU; run with `-m live`",
+    "extras(*modules): needs modules the workspace's extras install (`uv sync --all-extras`); skipped without them",
 ]
 pythonpath = ["."]  # (so that `tests.…` imports the shared test helpers, however the tests are collected)

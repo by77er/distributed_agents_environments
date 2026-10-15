@@ -107,8 +107,9 @@ async def settled(
     presets: Presets | None = None,
 ) -> tuple[RunSettings, str | None]:
     """A run's settings: the preset's (`NAME` or `NAME@N`: those a run of its kind takes, so that a training run's
-    preset serves an eval of the same channels), then `settings`, then its kind and name; and the preset's version
-    (`NAME@N`). Raises `KeyError` for a preset there is none of."""
+    preset serves an eval of the same channels), then `settings`, then its kind, and its name where one is given (else
+    the one `settings` give, if any); and the preset's version (`NAME@N`). Raises `KeyError` for a preset there is
+    none of."""
     from rollout_train.run_settings import TRAINING, is_trainers, key_of
 
     def taken(key: str) -> bool:
@@ -121,7 +122,7 @@ async def settled(
         if chosen is None:
             raise KeyError(f"there is no preset {preset!r}")
     kept = {key: value for key, value in chosen.settings.items() if taken(key)} if chosen else None
-    said = layered(kept, settings, {"kind": kind, "name": name})
+    said = layered(kept, settings, {"kind": kind}, {"name": name} if name is not None else None)
     return said, chosen.id if chosen else None
 
 

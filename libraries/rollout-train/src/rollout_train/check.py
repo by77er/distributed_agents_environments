@@ -152,7 +152,10 @@ def _starts(environment: Environment, seeds: Sequence[int]) -> Finding:
 
 
 def _held_out(environment: Environment, draws: int) -> Finding:
-    evals = environment.evals()
+    try:
+        evals = environment.evals()
+    except Exception as error:  # (whatever the environment raises is what the check reports)
+        return Finding("train and eval", False, f"evals() raised {type(error).__name__}: {error}")
     if not evals:
         return Finding(
             "train and eval", False, "it has no eval data: say what it is measured on (`drawn` derives some)"
@@ -171,11 +174,14 @@ def _held_out(environment: Environment, draws: int) -> Finding:
     hits = 0
     for row in rows:
         for draw in range(draws):
-            hits += start_key(environment.start(row, random.Random(f"check-{row.key}-{draw}"))) in held
             try:
+                hits += start_key(environment.start(row, random.Random(f"check-{row.key}-{draw}"))) in held
                 drawn = train_start(environment, row, random.Random(f"check-{row.key}-{draw}"), held)
-            except ValueError as error:
+            except ValueError as error:  # (every start drawn was an eval start)
                 problems.append(str(error))
+                break
+            except Exception as error:  # (whatever the environment raises is what the check reports)
+                problems.append(f"{row.key}: start() raised {type(error).__name__}: {error}")
                 break
             if start_key(drawn) in held:
                 problems.append(f"training drew an eval start of {row.key}")
@@ -210,7 +216,10 @@ async def scripted(
     chosen = next((each for each in rows if each.key == row), None) if row else rows[0]
     if chosen is None:
         return Finding("episode", False, f"it has no row {row}")
-    start = train_start(environment, chosen, random.Random("check-episode"), held_out(environment))
+    try:
+        start = train_start(environment, chosen, random.Random("check-episode"), held_out(environment))
+    except Exception as error:  # (whatever the environment raises is what the check reports)
+        return Finding("episode", False, f"{chosen.key}'s start could not be drawn: {type(error).__name__}: {error}")
     reference = with_row(environment.program, start)
     program = instantiate(reference)
     tool_sets, tools = dict(tool_sets or {}), dict(tools or {})

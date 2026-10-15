@@ -1,6 +1,8 @@
 """Providers' declarations: what each kind can do, the trainers' settings read from their dataclasses, and how each
 way of reaching a provider becomes a client's connection settings."""
 
+import math
+
 import pytest
 
 from rollout_train.providers import (
@@ -62,6 +64,7 @@ def test_the_trainers_table() -> None:
     assert all(each.capabilities.scores for each in TRAINER_KINDS.values())
 
 
+@pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_a_trainers_settings_are_read_from_its_dataclass() -> None:
     lora = {each.key: each for each in settings_of(TRAINER_KINDS["lora"])}
     assert lora["trainer.rank"] == SettingSpec("trainer.rank", ("int",), 32, False)
@@ -80,6 +83,7 @@ def test_a_setting_says_what_it_accepts() -> None:
     assert spec.accepts(1) and spec.accepts(1.5) and spec.accepts(None)
     assert not spec.accepts(True) and not spec.accepts("2")
     assert not SettingSpec("trainer.rank", ("int",), 32, False).accepts(1.5)
+    assert not spec.accepts(math.nan) and not spec.accepts(math.inf) and not spec.accepts(-math.inf)
 
 
 def test_mutual_tls_with_the_clusters_ca_a_client_certificate_and_the_pods_identity() -> None:
@@ -138,3 +142,6 @@ def test_what_is_on_this_machine() -> None:
     assert is_local("http://127.0.0.1:8000") and is_local("localhost") and is_local("http://[::1]:80")
     assert is_local("127.0.0.1")
     assert not is_local("http://gpu-1:8000") and not is_local("0.0.0.0") and not is_local("https://10.0.0.2")
+    assert is_local("http://127.1.2.3:8000") and is_local("[::1]:8000") and is_local("localhost:8000")
+    assert not is_local("http://127.evil.example:8000") and not is_local("127.example.com")  # (names, not addresses)
+    assert not is_local("http://[::1") and not is_local("http://localhost.example.com")

@@ -2,6 +2,7 @@
 what `--set` and a settings file say, a full copy split into fixed and changeable, and what changed between two."""
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -62,6 +63,9 @@ def test_keys_that_kept_their_meaning_kept_their_names() -> None:
         ("channels.policy.thinking_tokens", True, "is a whole number or null, not true"),
         ("objective.clip.dual", 1, "is above 1, not 1"),
         ("limits.spend", -2, "is at least 0, not -2"),
+        ("limits.spend", math.nan, "is a finite number, not nan"),  # (`nan < 0` is false: it would bound nothing)
+        ("objective.clip.low", math.inf, "is a finite number, not inf"),
+        ("groups", math.inf, "is a whole number, not Infinity"),
     ],
 )
 def test_a_key_says_what_is_wrong_with_a_value(key: str, value: object, problem: str) -> None:
@@ -116,6 +120,26 @@ def test_a_settings_file_of_dotted_keys_or_tables(tmp_path: Path) -> None:
     assert from_file(document) == {"evals.suite": None, "limits.spend": 2}
 
 
+def test_a_whole_number_given_as_a_float_is_held_as_the_whole_number() -> None:
+    settings = layered(
+        {"group_size": 8.0, "channels.policy.replicas": 2.0, "limits.spend": 2.0}, from_flags(["groups=1e2"])
+    )
+    assert settings.values == {"group_size": 8, "channels.policy.replicas": 2, "limits.spend": 2.0, "groups": 100}
+    assert [type(settings[key]) for key in ("group_size", "channels.policy.replicas", "groups")] == [int] * 3
+    assert int(str(settings["group_size"])) == 8  # (as the loop reads it)
+    assert RunSettings({"groups": 2.5})["groups"] == 2.5  # (not a whole number: validation says so)
+
+
+def test_a_date_is_text_on_the_command_line_and_refused_in_a_file(tmp_path: Path) -> None:
+    said = from_flags(["name=2026-10-15", "bookmark=07:30:00", "start=2026-10-15T07:30:00Z"])
+    assert said == {"name": "2026-10-15", "bookmark": "07:30:00", "start": "2026-10-15T07:30:00Z"}
+    json.dumps(said)  # (what validation and a run's start record take)
+    dated = tmp_path / "run.toml"
+    dated.write_text('name = 2026-10-15\nbookmark = "07:30:00"\n')
+    with pytest.raises(ValueError, match="name is a date or a time"):
+        from_file(dated)
+
+
 def test_layers_go_defaults_then_preset_then_file_then_flags() -> None:
     preset = {"trainer.rank": 32, "groups": 30, "trainer.learning_rate": 5e-5}
     file = {"groups": 12, "seed": 3}
@@ -151,6 +175,7 @@ def test_settings_answer_what_a_run_is() -> None:
     assert RunSettings({"kind": "eval"}).trained is None
 
 
+@pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_a_run_records_a_full_copy_of_its_settings_and_the_preset_version() -> None:
     settings = layered(
         {"environment": "e:e", "trainer.provider": "local-lora", "trainer.learning_rate": 1e-4},

@@ -3,6 +3,7 @@ environment and the ledger. The acceptance run's settings pass every rule; each 
 reason a person can act on; what only makes a run wait is a note, not a refusal."""
 
 import dataclasses
+import math
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -149,6 +150,7 @@ def test_the_acceptance_runs_settings_pass_every_rule() -> None:
     assert all(each.rule == "settings" and "could not be read here" in each.reason for each in found)
 
 
+@pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_the_acceptance_run_trained_here_passes_too() -> None:
     assert findings(LOCAL_LORA) == []
 
@@ -168,9 +170,21 @@ def test_the_rules_are_reported_in_their_order() -> None:
         ({"groups": 0}, "groups is at least 1, not 0"),
         ({"eval.suite": "math"}, "eval.suite is not a setting a train run takes"),
         ({"colour": "red"}, "colour is not a run setting"),
-        ({**LOCAL_LORA, "trainer.rank": "big"}, "trainer.rank is int, not 'big'"),
-        ({**LOCAL_LORA, "trainer.wings": 2}, "the local-lora trainer takes no trainer.wings"),
-        ({**FULL, "trainer.rank": 8}, "takes no trainer.rank: a full-weight trainer has no adapter"),
+        pytest.param(
+            {**LOCAL_LORA, "trainer.rank": "big"},
+            "trainer.rank is int, not 'big'",
+            marks=pytest.mark.extras("rollout_lora", "rollout_qwen"),
+        ),
+        pytest.param(
+            {**LOCAL_LORA, "trainer.wings": 2},
+            "the local-lora trainer takes no trainer.wings",
+            marks=pytest.mark.extras("rollout_lora", "rollout_qwen"),
+        ),
+        pytest.param(
+            {**FULL, "trainer.rank": 8},
+            "takes no trainer.rank: a full-weight trainer has no adapter",
+            marks=pytest.mark.extras("rollout_lora", "rollout_qwen"),
+        ),
         ({"channels.policy.providers": ["local-vllm"]}, "names its providers once: provider or providers"),
         ({"channels.policy.routing": "weighted"}, "shares turns by weight: give each of its providers"),
         ({"channels.policy.weights": {"local-vllm": 1}}, "weights are for routing = weighted"),
@@ -179,10 +193,35 @@ def test_the_rules_are_reported_in_their_order() -> None:
         ({"channels.rival.provider": "local-vllm", "channels.rival.lag": 2}, "follows and lag are for mode = follows"),
         ({"slots.agent-1": "nobody"}, "slot agent-1 samples channel nobody, which the settings do not describe"),
         ({"kind": "deploy"}, "kind is one of train, eval, imitate, check"),
+        ({"limits.spend": math.nan}, "limits.spend is a finite number, not nan"),
+        ({"objective.clip.low": math.nan}, "objective.clip.low is a finite number, not nan"),
+        ({"trainer.learning_rate": math.inf}, "trainer.learning_rate is a finite number, not inf"),
+        (
+            {"channels.policy.routing": "weighted", "channels.policy.weights": {"local-vllm": math.inf}},
+            "shares turns by weight: give each of its providers",
+        ),
     ],
 )
 def test_settings_refuse(changes: dict[str, JsonValue], reason: str) -> None:
     assert any(reason in each for each in refused("settings", findings(changes))), findings(changes)
+
+
+def test_the_trainers_own_settings_are_refused_where_its_settings_dataclass_refuses_them() -> None:
+    pytest.importorskip("rollout_lora.settings")  # (the trainer's settings dataclass: the GPU extras' package)
+    found = findings({
+        **LOCAL_LORA, "trainer.rank": 0, "trainer.segment_tokens": 0, "trainer.max_gradient_norm": -1.0,
+        "trainer.tokens_per_step": True, "trainer.passes": 2,
+    })  # fmt: skip
+    assert [(each.key, each.reason) for each in found if each.rule == "settings"] == [
+        ("trainer.tokens_per_step", "trainer.tokens_per_step is int, not True"),  # (its type: the dataclass not asked)
+        ("trainer.rank", "the local-lora trainer takes no trainer.rank = 0: rank is a whole number, 1 at least (not "
+         "0)"),
+        ("trainer.segment_tokens", "the local-lora trainer takes no trainer.segment_tokens = 0: segment_tokens is a "
+         "whole number, 1 at least (not 0)"),
+        ("trainer.max_gradient_norm", "the local-lora trainer takes no trainer.max_gradient_norm = -1.0: "
+         "max_gradient_norm is a finite number, above 0 (not -1.0)"),
+    ]  # fmt: skip
+    assert refusals(findings({**LOCAL_LORA, "trainer.learning_rate": 0, "trainer.max_kl": None})) == []
 
 
 def test_settings_refuse_what_a_kind_needs_and_lacks() -> None:
@@ -191,6 +230,7 @@ def test_settings_refuse_what_a_kind_needs_and_lacks() -> None:
     assert "the trained channel policy needs a model" in without_model
 
 
+@pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_settings_pass_channels_that_follow_and_attach_to_slots() -> None:
     changes: dict[str, JsonValue] = {
         "channels.rival.provider": "local-vllm", "channels.rival.model": "Qwen/Qwen3.5-4B",
@@ -215,6 +255,7 @@ JUDGE: dict[str, JsonValue] = {
 }  # fmt: skip
 
 
+@pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_a_judge_bound_to_a_fixed_channel_passes() -> None:
     assert refusals(findings(JUDGE, environment=JUDGED)) == []
     following = {
@@ -245,10 +286,10 @@ def test_a_judges_channel_needs_a_provider_that_offers_its_model() -> None:
     "changes",
     [
         {"slots.judge": "policy"},
-        {
+        pytest.param({
             "channels.rival.provider": "local-vllm", "channels.rival.model": "Qwen/Qwen3.5-4B",
             "channels.rival.mode": "follows", "channels.rival.follows": "policy", "slots.judge": "rival",
-        },
+        }, marks=pytest.mark.extras("rollout_qwen")),
     ],
     ids=["the trained channel", "a channel following it"],
 )  # fmt: skip
@@ -343,6 +384,7 @@ def test_a_bridge_must_exist_for_the_pair() -> None:
     assert refused("bridge", findings({**FULL, "channels.policy.provider": "local-vllm"})) == []
 
 
+@pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_a_bridge_for_an_evals_subject() -> None:
     evaluation: dict[str, JsonValue] = {
         "kind": "eval", "environment": GSM8K, "eval.suite": "math", "start": "lora-run:5",
@@ -481,6 +523,21 @@ def test_segments_must_fit_the_trainer_and_the_context() -> None:
     assert refused("segment", findings()) == []  # (unsaid: the trainer takes the longest the context leaves)
 
 
+def test_an_answer_budget_must_leave_room_for_a_prompt() -> None:
+    assert refused("segment", findings({"channels.policy.answer_tokens": 8192})) == [
+        "answers of up to 8192 tokens leave no room for a prompt in Qwen/Qwen3.5-4B's context on provider local-vllm "
+        "(8192): every turn of policy would overflow it"
+    ]
+    assert refused("segment", findings({"channels.policy.answer_tokens": 600, "trainer.segment_tokens": 600})) == [
+        "answers of up to 600 tokens leave no room for a prompt in a turn of the trained channel, which is 600 tokens "
+        "at most (the longest segment its trainer trains on): every turn would overflow it"
+    ]
+    judged = {**JUDGE, "channels.judge.provider": "local-vllm", "channels.judge.model": "Qwen/Qwen3-0.6B"}
+    assert [each.key for each in findings({**judged, "channels.judge.answer_tokens": 4096}, environment=JUDGED)
+            if each.rule == "segment"] == ["channels.judge.answer_tokens"]  # fmt: skip
+    assert refused("segment", findings({"channels.policy.answer_tokens": 8191})) == []
+
+
 # start
 
 
@@ -570,6 +627,20 @@ def test_a_k1_kl_penalty_in_the_loss_is_refused_and_one_in_the_reward_is_not() -
     assert refused("objective", findings({**k1, "objective.kl.placement": "reward"})) == []
 
 
+def test_groups_of_one_episode_are_refused_where_the_objective_compares_a_groups() -> None:
+    assert [(each.key, each.reason) for each in findings({"group_size": 1}) if each.rule == "objective"] == [
+        ("group_size", "the objective compares a group's scores (advantage.baseline group_mean, advantage.filter "
+         "equal_scores), and a group of one has none to compare, so no group would train: group_size 2 at least, or "
+         "an advantage that compares nothing (baseline, scale and filter none)"),
+    ]  # fmt: skip
+    assert refused("objective", findings({**LOCAL_LORA, "group_size": 1, "objective.preset": "dpo"})) == [
+        "a preference loss compares a group's episodes, and a group of one has none to compare: group_size 2 at least"
+    ]
+    assert refused("objective", findings({"group_size": 1, "objective.preset": "reinforce"})) == []
+    assert refused("objective", findings({"group_size": 1, "objective.preset": "mopd"})) == []  # (compares nothing)
+    assert refused("objective", findings({"group_size": 2})) == []
+
+
 def test_an_objective_without_an_importance_correction_is_noted_while_turns_may_lag() -> None:
     exact: dict[str, JsonValue] = {**LOCAL_LORA, "objective.preset": "dapo", "objective.importance.paper_exact": True}
     found = findings(exact)
@@ -590,6 +661,7 @@ def test_an_objective_without_an_importance_correction_is_noted_while_turns_may_
         assert noted("objective", findings({**LOCAL_LORA, "objective.preset": preset})) == [], preset
 
 
+@pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_a_reference_the_trainer_cannot_give_is_refused() -> None:
     assert refused("objective", findings({"objective.preset": "dpo"})) == [
         "the tinker-lora trainer gives no reference logprobs (Tinker's SDK offers prompt logprobs from a sampler of "
@@ -865,6 +937,7 @@ def test_only_scheduled_parts_ask_for_the_clusters_gpus() -> None:
 # renderer
 
 
+@pytest.mark.extras("rollout_lora", "rollout_qwen")
 def test_a_channels_renderer_follows_from_its_model_and_must_render_it() -> None:
     unsaid = RunSettings({**ACCEPTANCE, "channels.policy.renderer": None})
     assert completed(unsaid, CLUSTER)["channels.policy.renderer"] == "rollout_qwen:qwen35"

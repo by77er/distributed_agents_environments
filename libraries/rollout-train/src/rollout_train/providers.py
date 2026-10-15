@@ -48,6 +48,8 @@ Everything here is a declaration: nothing is imported, started or reached.
 """
 
 import dataclasses
+import ipaddress
+import math
 import types
 import typing
 from collections.abc import Collection, Mapping
@@ -210,9 +212,18 @@ class Auth:
 
 
 def is_local(address: str) -> bool:
-    """Whether an address (a URL, or a host) is on this machine: `localhost` or a loopback address."""
-    host = urlsplit(address).hostname if "://" in address else address.rsplit(":", 1)[0].strip("[]")
-    return host is not None and (host == "localhost" or host == "::1" or host.startswith("127."))
+    """Whether an address (a URL, or a host) is on this machine: `localhost` or a loopback address (`127.0.0.1`,
+    `::1`; a name that only starts like one, `127.example.com`, is not)."""
+    try:
+        host = urlsplit(address).hostname if "://" in address else address.rsplit(":", 1)[0].strip("[]")
+    except ValueError:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return host is not None and ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -642,7 +653,8 @@ class SettingSpec:
     """Whether a running run takes it from its next step on."""
 
     def accepts(self, value: JsonValue) -> bool:
-        """Whether `value` is of a type it takes (a whole number is a float too; a bool is neither)."""
+        """Whether `value` is of a type it takes (a whole number is a float too; a bool is neither; a float is finite).
+        What range it takes is its settings dataclass's to say."""
         if value is None:
             return "null" in self.types
         if isinstance(value, bool):
@@ -650,7 +662,7 @@ class SettingSpec:
         if isinstance(value, int):
             return "int" in self.types or "float" in self.types
         if isinstance(value, float):
-            return "float" in self.types
+            return "float" in self.types and math.isfinite(value)
         if isinstance(value, str):
             return "str" in self.types
         return False
