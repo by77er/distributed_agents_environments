@@ -26,8 +26,8 @@ Two rows, one for each kind of request:
 
 | Row | The policy is asked to | Rubric |
 |---|---|---|
-| `explain` | `Explain CONCEPT to a ten-year-old in under 80 words.` | `explain-1` |
-| `summarize` | `Summarize this passage in at most two sentences and under 50 words.`, then the passage | `summarize-1` |
+| `explain` | `Explain CONCEPT to a ten-year-old in under 80 words.` | `explain-2` |
+| `summarize` | `Summarize this passage in at most two sentences and under 50 words.`, then the passage | `summarize-2` |
 
 A start of a row is one request, drawn with its seed from the row's training list in `judging.data`: 16 concepts and
 10 passages of about 70 words. The eval data, `judging-eval`, is every request of the eval lists: 6 concepts and 4
@@ -37,7 +37,9 @@ passage's title), the request as the policy sees it, and how many times the judg
 ## The episode
 
 1. The policy is given a short system prompt and the request, and answers once.
-2. The judge is given the rubric's instructions as its system prompt, and the request and the answer.
+2. The judge is given the rubric's instructions as its system prompt, and the request and the answer, each between
+   its tags (`<request>`, `<answer>`); a tag inside either is broken up, so an answer cannot speak as the judge's
+   instructions.
 3. It must reply with the rubric's verdict: one JSON object and nothing else. A reply that cannot be read is answered
    with what was wrong (`Your verdict could not be read: …`), and the judge replies again. A second reply that cannot
    be read ends the episode with reward 0, and the result says why.
@@ -53,8 +55,8 @@ scores each criterion and the answer as a whole from 1 (fails it entirely) to 10
 
 | Rubric | Criteria |
 |---|---|
-| `explain-1` | `accuracy` (nothing wrong or misleading), `clarity` (a ten-year-old follows it), `completeness` (it explains how or why), `length` (under 80 words; 1 if not) |
-| `summarize-1` | `faithfulness` (nothing invented or changed), `coverage` (the main events and the ending), `concision` (two sentences, under 50 words; 1 if longer), `fluency` |
+| `explain-2` | `accuracy` (nothing wrong or misleading), `clarity` (a ten-year-old follows it), `completeness` (it explains how or why), `length` (under 80 words; 1 if not) |
+| `summarize-2` | `faithfulness` (nothing invented or changed), `coverage` (the main events and the ending), `concision` (two sentences, under 50 words; 1 if longer), `fluency` |
 
 ```json
 {"criteria": {"accuracy": 8, "clarity": 9, "completeness": 7, "length": 10}, "score": 8, "reason": "Clear and true, but it only names chlorophyll."}

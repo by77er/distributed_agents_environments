@@ -58,7 +58,7 @@ async def play(
 async def test_a_well_formed_verdict_is_the_reward_and_the_result_records_it() -> None:
     result, rewards, policy, judge = await play([verdict(10)])
     assert rewards == {"policy": 1.0}  # (the judge, not trained, is not rewarded)
-    assert result["rubric"] == "explain-1" and result["verdicts"] == [verdict(10)] and result["score"] == 10
+    assert result["rubric"] == "explain-2" and result["verdicts"] == [verdict(10)] and result["score"] == 10
     assert result["judged"] is True and result["words"] == len(ANSWER.split()) and "why" not in result
     (asked,) = policy.requests
     assert asked.context.append[0].text == SYSTEM
