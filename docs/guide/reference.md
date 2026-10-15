@@ -27,7 +27,7 @@ do not edit by hand.
 - **[`rollout_train.demand`](#rollout_traindemand)** — What a run's scheduled parts need, and the placement group that reserves them together. [`BRIDGE`](#bridge), [`bridge_asks`](#bridge_asks), [`Bundle`](#bundle), [`colocating`](#colocating), [`Demand`](#demand), [`demand`](#demand), [`HEADROOM`](#headroom), [`Part`](#part), [`placed`](#placed), [`played_channel`](#played_channel), [`Pod`](#pod), [`pods`](#pods), [`requested`](#requested), [`reserve`](#reserve), [`Resources`](#resources), [`SUBMITTER`](#submitter), [`TRAINER`](#trainer)
 - **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`checkpoints_at`](#checkpoints_at), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`POD_SECURITY`](#pod_security), [`pod_security`](#pod_security), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
-- **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
+- **[`rollout_train.launches`](#rollout_trainlaunches)** — Runs asked for, the jobs they became, and how each goes. [`as_launch`](#as_launch), [`Asked`](#asked), [`changed`](#changed), [`FileLaunches`](#filelaunches), [`Launch`](#launch), [`launch_of`](#launch_of), [`Launches`](#launches), [`launches_of`](#launches_of), [`MOVES`](#moves), [`new_launch`](#new_launch), [`new_launch_id`](#new_launch_id), [`OPEN`](#open), [`stored`](#rollout_trainlaunchesstored)
 - **[`rollout_train.monitor`](#rollout_trainmonitor)** — A live web page over every run of a ledger. [`FeedReader`](#feedreader), [`plain`](#plain), [`RunFeed`](#runfeed), [`System`](#system)
 - **[`rollout_train.pods`](#rollout_trainpods)** — GPU pods elsewhere: identities, leases, a run's pods, the reaper, the trainer's client. [`GATEWAY_IDENTITY`](#gateway_identity), [`HELD`](#held), [`IDLE`](#idle), [`LeasedTrainer`](#leasedtrainer), [`LeaseLost`](#leaselost), [`live`](#live), [`LivePod`](#livepod), [`needs_of`](#needs_of), [`pod_identity`](#pod_identity), [`pod_leases_of`](#pod_leases_of), [`PodLease`](#podlease), [`PodLeases`](#podleases), [`PodNeed`](#podneed), [`Pods`](#pods), [`PodsDidNotStart`](#podsdidnotstart), [`PodTime`](#podtime), [`reap`](#reap), [`RemoteTrainer`](#remotetrainer), [`STARTING`](#starting), [`TrainerBusy`](#trainerbusy), [`TrainerRefused`](#trainerrefused), [`TrainerUnreachable`](#trainerunreachable)
 - **[`rollout_train.pki`](#rollout_trainpki)** — The certificates the platform holds, from the cluster's step-ca, published as Secrets. [`provisioner_key`](#provisioner_key), [`publish`](#rollout_trainpkipublish)
@@ -40,7 +40,7 @@ do not edit by hand.
 - **[`rollout_train.ledger_service`](#rollout_trainledger_service)** — The ledger over HTTP: the service, the client every role can use, pods' tokens. [`app`](#app), [`Conflict`](#rollout_trainledger_serviceconflict), [`Forbidden`](#forbidden), [`HttpLedger`](#httpledger), [`LedgerUnreachable`](#ledgerunreachable), [`PLATFORM`](#platform), [`pod_token`](#pod_token), [`Scope`](#scope), [`scope_of`](#scope_of)
 - **[`rollout_train.presets`](#rollout_trainpresets)** — Named, versioned run settings beside the ledger. [`DatabasePresets`](#databasepresets), [`FilePresets`](#filepresets), [`parsed`](#rollout_trainpresetsparsed), [`Preset`](#rollout_trainpresetspreset), [`Presets`](#presets), [`presets_of`](#presets_of)
 - **[`rollout_train.published`](#rollout_trainpublished)** — Versions of environments imported from their source, beside the ledger. [`DatabaseEnvironmentVersions`](#databaseenvironmentversions), [`environment_versions_of`](#environment_versions_of), [`EnvironmentVersion`](#environmentversion), [`EnvironmentVersions`](#environmentversions), [`FileEnvironmentVersions`](#fileenvironmentversions), [`is_published`](#is_published), [`loaded`](#rollout_trainpublishedloaded), [`parsed`](#rollout_trainpublishedparsed), [`provenance`](#provenance), [`short`](#short)
-- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`checked_with`](#checked_with), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#rollout_trainpublishingpacked), [`Project`](#project), [`project_of`](#project_of), [`publish`](#rollout_trainpublishingpublish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored)
+- **[`rollout_train.publishing`](#rollout_trainpublishing)** — Importing an environment from git: fetched, stored, checked on Ray, recorded. [`checked_on_ray`](#checked_on_ray), [`checked_with`](#checked_with), [`entry_point_of`](#entry_point_of), [`EXCLUDED`](#excluded), [`fetched`](#fetched), [`GROUP`](#group), [`Importer`](#importer), [`MARK`](#mark), [`missing`](#missing), [`packed`](#rollout_trainpublishingpacked), [`Project`](#project), [`project_of`](#project_of), [`publish`](#rollout_trainpublishingpublish), [`Published`](#published), [`Refused`](#rollout_trainpublishingrefused), [`report`](#report), [`runtime_env_of`](#rollout_trainpublishingruntime_env_of), [`Source`](#source), [`stored`](#rollout_trainpublishingstored), [`version_id`](#version_id)
 - **[`rollout_train.validation`](#rollout_trainvalidation)** — One pure check of a run's settings against a cluster, with its rule table. [`check`](#check), [`CheckpointFacts`](#checkpointfacts), [`completed`](#completed), [`EnvironmentFacts`](#environmentfacts), [`estimated_spend`](#estimated_spend), [`Finding`](#finding), [`LedgerFacts`](#ledgerfacts), [`refusals`](#refusals), [`renderers_of`](#renderers_of), [`Rule`](#rule), [`RULES`](#rules), [`serves`](#serves), [`Spend`](#spend), [`spend_of`](#spend_of), [`SuiteEntryFacts`](#suiteentryfacts), [`SuiteFacts`](#suitefacts), [`weights_of`](#weights_of), [`with_renderers`](#with_renderers), [`with_weights`](#with_weights)
 - **[`rollout_train.memory`](#rollout_trainmemory)** — What a trainer needs of each GPU's memory, from the model's files and its GPUs. [`ALLOWANCE_GIB`](#allowance_gib), [`GPU_MEMORY_GIB`](#gpu_memory_gib), [`gpu_memory_gib`](#gpu_memory_gib), [`holds_whole_base`](#holds_whole_base), [`model_facts`](#model_facts), [`ModelFacts`](#modelfacts), [`SEGMENT_TOKENS`](#segment_tokens), [`trainer_memory`](#trainer_memory), [`TrainerMemory`](#trainermemory)
 - **[`rollout_train.slots`](#rollout_trainslots)** — A program's model slots bound to a run's channels, and the bindings a run may not make. [`bound`](#bound), [`Declared`](#declared), [`problems`](#rollout_trainslotsproblems), [`serving`](#serving), [`subject`](#subject)
@@ -386,10 +386,10 @@ A sandbox held under a key: what a pool hands out, and what its `Leases` table k
 | `pool` | `str` | required | The pool that holds it. |
 | `handle` | `str` | required | The pool's name for the sandbox. |
 | `addresses` | `Mapping[str, str]` | `Field(default_factory=dict[str, str])` |  |
-| `environment` | `Mapping[str, str]` | `Field(default_factory=dict[str, str])` |  |
+| `environment` | `Mapping[str, str]` | `Field(default_factory=dict[str, str])` | For what runs inside the sandbox: what the runner gave it (its slots' model addresses) and the pool's own. Its `Leases` table keeps it without the slots' keys (`KEYS`), which an acquire that finds the lease there is given again. |
 | `at` | `float` | `0.0` | When it was made, in seconds since the epoch. |
 | `seconds` | `float \| None` | `None` | How long it may last from when it was made (`SandboxLimits.seconds`). |
-| `lost` | `bool` | `False` | Its sandbox is gone (it ended with the pool's process, say): the key cannot have it back. |
+| `lost` | `bool` | `False` | Its sandbox is gone (it ended with the pool's process, say): the key gets `SandboxLost` until the lease is released, never another sandbox. |
 
 ### `LeaseRefused`
 
@@ -617,7 +617,7 @@ acquire and release; programs perform operations through `run.sandbox(name)`.
 - `def operations(self) -> Sequence[ToolSpecification]`
 - `async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease` — The lease of `key`: the one there is, or a new sandbox. Raises `NoCapacity` when the pool is full,
   `LeaseRefused` for a key that may hold no lease now (its claim lapsed), and `SandboxLost` for a key whose
-  sandbox is gone.
+  sandbox is gone, until its run releases it.
 - `async def release(self, key: str) -> None` — End the lease of `key` and delete its sandbox; nothing if there is no such lease.
 - `async def capacity(self) -> Capacity`
 - `async def call(self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str) -> ToolResult` — Perform an operation on the sandbox leased under `key`.
@@ -837,7 +837,8 @@ Everything task and agent code can reach during a run. Passed to every hook as `
 - `def now(self) -> datetime` — The current time, in UTC: the time the run's events carry.
 - `def reward(self, value: float, *, slot: str = 'policy', key: str = 'default') -> None` — Assign a reward to a model slot outside an observation (e.g. to an opponent, or several keyed rewards).
 - `def exclude_from_training(self, reason: str) -> None` — Mark the run as unsuitable for training, e.g. after an infrastructure fault that is not the policy's.
-- `async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]` — Await concurrently, in order. Equivalent to `asyncio.gather`.
+- `async def gather[T](self, *awaitables: Awaitable[T]) -> list[T]` — Await concurrently; the results in order, as `asyncio.gather` gives them. When one raises (or the run is
+  cancelled), the others are cancelled and awaited before it is raised: nothing a run began goes on after it.
 - `async def emit(self, kind: str, payload: JsonValue) -> None` — Output of the run, such as its result: recorded as an `output.emit` effect and an `output.emitted` event.
 - `def record(self, observation: Observation, *, reply: Message | None = None) -> None` — Append a turn to the history.
 
@@ -1014,7 +1015,8 @@ A `Pool` over a `Provider`: at most `provider.size` leases at once, kept in `lea
 - `@property def deduplicates(self) -> bool`
 - `def operations(self) -> Sequence[ToolSpecification]`
 - `async def acquire(self, spec: SandboxSpec, key: str, environment: Mapping[str, str] | None = None) -> Lease` — The lease of `key`, or a new sandbox. Raises `LeaseRefused` for a key `admits` refuses (releasing a lease
-  it has), `SandboxLost` for a key whose sandbox is gone, and `NoCapacity` when the pool is full.
+  it has), `SandboxLost` for a key whose sandbox is gone (its lease is kept, marked lost, until it is released),
+  and `NoCapacity` when the pool is full.
 - `async def release(self, key: str) -> None`
 - `async def capacity(self) -> Capacity`
 - `async def call(self, key: str, name: str, arguments: Mapping[str, JsonValue], *, effect_id: str, arguments_digest: str) -> ToolResult` — Perform an operation on the sandbox of `key`. Raises `SandboxLost` for a key with no live lease here (its
@@ -1094,7 +1096,8 @@ Subclass it and implement `start`; override the other hooks as needed. Declarati
 - `async def score(self, run: RunContext) -> float | None` — Episode-level reward, attached to the end of the trajectory.
 - `async def teardown(self, run: RunContext) -> None` — Always runs if `setup` began; must be idempotent.
 - `def tools_for_turn(self, run: RunContext) -> list[ToolSpecification]` — The tools offered this turn. Default: every `@tool` method and every imported tool.
-- `async def run_tools(self, run: RunContext, reply: Message) -> Observation` — Execute every tool call in `reply` concurrently; one TOOL message answers them all.
+- `async def run_tools(self, run: RunContext, reply: Message) -> Observation` — Execute every tool call in `reply` concurrently (`run.gather`); one TOOL message answers them all. A call
+  whose sandbox is lost (`SandboxLost`) ends the others and the run.
 
 ### `tool`
 
@@ -2241,7 +2244,8 @@ Implements `RunContext` and `Effects` in process.
 - `async def emit(self, kind: str, payload: JsonValue) -> None` — Output of the run, such as its result. Recorded as an `output.emit` effect.
 - `def record(self, observation: Observation, *, reply: Message | None = None) -> None`
 - `async def acquire_sandboxes(self, specs: Mapping[str, SandboxSpec], pools: Mapping[str, Pool], lease: str) -> None` — Acquire each declared sandbox from the pool of its kind, under `lease` and its name, giving a harness
-  inside it its slots' model addresses; then record them.
+  inside it its slots' model addresses; then record them, without their environments (which carry the slots'
+  keys).
 - `async def release_sandboxes(self) -> None` — Release every sandbox the run acquired, or began to: when the program has ended.
 - `async def perform[T](self, kind: EffectKind, arguments: JsonValue, execute: Callable[[str, str], Awaitable[T]], *, completion: Callable[[T], JsonValue]) -> T`
 - `def record_event(self, event_type: RunEventType, payload: JsonValue) -> RunEvent`
@@ -2526,7 +2530,8 @@ to be resumed, and starting again adopts them (`prepare`).
   before launching the runner, so that the runs it recovers find their claims holding. `serve` calls it if it
   has not been.
 - `async def serve(self) -> None` — Claim and play episodes until cancelled; what is playing then is cut short and noted (over a runner whose
-  runs survive it, left to be resumed).
+  runs survive it, left to be resumed). A look for work that fails (the ledger could not be read, say) is logged,
+  and it looks again in a while; once another took its fence under its name (`Fenced`), it serves no more.
 - `async def beat(self) -> None` — Beat now, beside the beats every `beating` seconds: after what it says of itself changed (a channel serves
   a new checkpoint, say), so that whoever reads the beats does not wait for the next.
 - `async def open(self) -> list[Open]` — The episodes nobody plays now, of the runs this runner serves that are not paused, oldest group first. Which
@@ -2966,9 +2971,10 @@ Every checkpoint, in a ledger, and their files in a blob store.
   added at the same moment, which found the blob stored and has not appended itself yet, names it next. A blob
   spared so is deleted by a later thinning, of this run or any other.
 - `async def files(self, manifest: Manifest, directory: Path) -> Path` — A manifest's files under `directory`, read from the blob store if they are not there. The directory
-  appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint. A file this
-  store lacks is read from the store of any run that has it (a checkpoint made by a run that kept its blobs
-  elsewhere, or a merge of one), as each run's start says where its store is.
+  appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint (two fetches into
+  it at once each return it whole: the one that finished second leaves the first's). A file this store lacks is
+  read from the store of any run that has it (a checkpoint made by a run that kept its blobs elsewhere, or a
+  merge of one), as each run's start says where its store is.
 
 ### `Colocated`
 
@@ -3240,8 +3246,8 @@ a distillation term).
 **Methods**
 
 - `def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Weighted | Distilled]` — The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
-  its episode's advantage; none, if one of them cannot be weighed (`unweighable`) or, with `distills`, has no
-  teacher's scores (`unscored`).
+  its episode's advantage; none, if fewer than two are fit where the advantage compares them (`compares`), if one
+  of them cannot be weighed (`unweighable`) or, with `distills`, has no teacher's scores (`unscored`).
 
 ### `Keeps`
 
@@ -3805,10 +3811,10 @@ called with each checkpoint made, once it is served (to move a bookmark, say). `
 load for a checkpoint (made by a bridge: `rollout_train.bridges`), told the run's fence to note it under; without
 it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
 and the next. `desired` reads what is wanted of the run's changeable settings (`rollout_train.settings`:
-`groups_per_step`, `evals.…`, `trainer.…`), each time a step is about to be decided; `scheduled` makes the schedule
-of evals they name (a suite by name or a version by id, every, episodes; None for a suite the run cannot play),
-without which only `evals`' suite can be played. A suite named by its name is played in the version its name points
-to when each step is decided: the step's record says which (`suite_version`).
+`groups_per_step`, `evals.…`, `trainer.…`), as it starts and each time a step is about to be decided; `scheduled`
+makes the schedule of evals they name (a suite by name or a version by id, every, episodes; None for a suite the
+run cannot play), without which only `evals`' suite can be played. A suite named by its name is played in the
+version its name points to when each step is decided: the step's record says which (`suite_version`).
 
 ### `Trained`
 
@@ -3916,8 +3922,9 @@ class Channel
 - `@property def context_limit(self) -> int` — The longest turn the channel takes, and what it tells programs.
 - `@property def bounds_thinking(self) -> bool` — Whether every one of its engines bounds thinking itself.
 - `async def generate(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], adapter: str | None, session: str = '', version: int | None = None, request: str | None = None, thinking_budget: int | None = None, top: int = 0) -> Generation` — Sample from one of the engines: the same one for a session every time, where its prompts' shared
-  beginnings are cached. `version` and `request` (the version the caller stamps the tokens with, and a name for
-  the request) are for samplers elsewhere: this process's own callers read what it publishes.
+  beginnings are cached. `NotLoaded` where what the turn began with (`adapter`, at `version`: what `weights` said)
+  is no longer served once the gate is open: the adapter was dropped, or the full weights were replaced. `request`
+  (a name for the request) is for samplers elsewhere.
 - `async def sample(self, prompt: Sequence[int], *, max_tokens: int, temperature: float, top_p: float, stop_token_ids: Sequence[int], name: str | None, session: str = '', thinking_budget: int | None = None, top: int = 0) -> Generation` — Sample what is served under `name` (a checkpoint's id, or the model's name; None: the model), as a server
   elsewhere is asked (`rollout_train.inference.remote.CheckpointServer`): `NotLoaded` where it is not served here
   once a load in progress has ended (a turn caught by a full checkpoint's load is sampled again). The answer
@@ -3988,7 +3995,8 @@ class Connection
 
 How servers are reached: a bearer token read from an environment variable (`token_env`) or a file
 (`token_file`), never written down; TLS verified against a CA bundle (`ca`), and a client certificate and its key
-(`certificate`, `key`) for servers that ask for one. Nothing: plain HTTP, no token.
+(`certificate`, `key`) for servers that ask for one, read again when their files change (a renewed certificate is
+presented from the next connection on). Nothing: plain HTTP, no token.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -4108,7 +4116,8 @@ go: `rollout_train.pods.routing.LeasedServers`), beside those given.
 
 - `def __init__(self, name: str, renderer: 'Renderer', limits: Limits, *, model: str, servers: Sequence['str | CheckpointServer'], wanted: Callable[[], Awaitable[Sequence[Serving]]], max_lag: int = MAX_LAG, connection: Connection | None = None, every: float | None = None, patience: float = 300.0, discover: Callable[[], Awaitable[Sequence['CheckpointServer']]] | None = None, bounds_thinking: bool = False) -> None`
 - `@property def limits(self) -> Limits` — The limits it was given; the longest turn the trainer can train on, as the run says, unless they say one.
-- `@property def context_limit(self) -> int`
+- `@property def context_limit(self) -> int` — The longest turn it takes: the least of what its servers last said they accept (whether or not they answered
+  the last look) and the longest the trainer trains on; 0 while neither is known.
 - `@property def bound(self) -> int` — How many checkpoints behind what the channel should serve a sample may be.
 - `def name_of(self, said: Serving) -> str` — The model a server serves a checkpoint as: its id; the base model's name for none.
 - `def choices(self) -> list[Serving]` — The checkpoints a turn may sample from now, newest first: what the channel should serve, and those before it
@@ -4646,7 +4655,8 @@ def segments_of(turns: Sequence[Turn], *, untrained: Collection[str] = ()) -> li
 ```
 
 The segments of a session's turns, oldest first, each with at least one sampled span. What the turns named in
-`untrained` (by effect id) sampled is kept as context, with no span: it is not trained on.
+`untrained` (by effect id) sampled is kept as context, with no span: it is not trained on. Each span is trained
+once, in the first segment that holds it.
 
 ### `Span`
 
@@ -4794,15 +4804,17 @@ Every run's channels, built from its start when the run is first asked for (`loa
 providers in `providers`, rendered with the renderer each channel names (`renderers`, given its `module:name` and
 the model; by default the renderer itself, called with the model), and over the hosted APIs in `hosted`. What each
 channel should serve and what its servers have are asked again every `every` seconds; a turn waits up to
-`patience` seconds for a server with a checkpoint close enough.
+`patience` seconds for a server with a checkpoint close enough. A run not asked for in `idle` seconds is
+forgotten.
 
 **Methods**
 
-- `def __init__(self, ledger: Ledger, providers: Mapping[str, Provided], *, hosted: Mapping[str, Hosted] | None = None, pods: Mapping[str, 'Auth'] | None = None, tls: 'Tls | None' = None, renderers: Callable[[str, str], 'Renderer'] = _renderer, every: float | None = None, patience: float = 300.0) -> None`
+- `def __init__(self, ledger: Ledger, providers: Mapping[str, Provided], *, hosted: Mapping[str, Hosted] | None = None, pods: Mapping[str, 'Auth'] | None = None, tls: 'Tls | None' = None, renderers: Callable[[str, str], 'Renderer'] = _renderer, every: float | None = None, patience: float = 300.0, idle: float = IDLE) -> None`
 - `@classmethod def of(cls, cluster: 'Cluster', ledger: Ledger, **options: Any) -> 'ChannelDirectory'` — A directory over the cluster config's providers whose servers answer vLLM's API at their endpoints
   (`SERVED_AT_ENDPOINTS`), each reached as its auth says, and its `api` providers.
 - `async def load(self, run: str) -> dict[str, Built]` — A run's channels, by name, built from its newest start the first time (a run whose start names no
-  provider this directory knows has none; one with no start yet is asked again next time).
+  provider this directory knows has none; one with no start yet is asked again next time). Runs not asked for
+  in `idle` seconds are forgotten, their channels closed.
 - `def channel(self, run: str, name: str) -> Built | None` — A run's channel, once the run is loaded.
 - `def channels(self) -> dict[str, Built]` — Every channel built so far, by its name within its run (`RUN/NAME`).
 - `def close(self) -> None`
@@ -4920,7 +4932,9 @@ without one, a run cannot give a harness an address.
 - `def forget(self, run_id: str) -> None`
 - `def endpoint(self, binding: RecordedModel) -> 'GatewayEndpoint'`
 - `def attempt(self, run_id: str) -> Attempt` — The attempt an admitted run plays.
-- `def key(self, session_id: str, binding: RecordedModel) -> str` — A key for a session of an admitted run.
+- `def key(self, session_id: str, binding: RecordedModel) -> str` — A key for a session of an admitted run. `ValueError` for a trained binding that samples at a temperature or
+  top-p other than 1: a turn records neither, and the trainer scores its tokens at 1 (a slot sampled otherwise is
+  bound untrained).
 - `def contract(self, session_id: str, binding: RecordedModel) -> CapabilityContract` — What a binding's channel guarantees a session, with the thinking and answer room the binding gives in place
   of the channel's: a routed channel, as its run's servers say (the run is admitted).
 - `async def reaches(self, run: str, binding: RunBinding) -> bool` — Whether every recorded model of a run's binding can be sampled now: a channel the gateway in this process
@@ -5284,7 +5298,7 @@ A run being built from its settings, and what it started: everything the loop of
 | `asked_at` | `float \| None` | `None` | When it asked Ray for its placement group. |
 | `reserved_at` | `float \| None` | `None` | When Ray had reserved all of it (or, for a demand with no bundle, when the driver had its own). |
 | `pods` | `Any` | `None` |  |
-| `failing` | `'asyncio.Future[BaseException] \| None'` | `None` | Done, with the error, once something the run runs beside its loop fails it: its pods' leases lost to it (`LeaseLost`), or no pod of its serving a kind of sandbox it needs for `UNSERVED` seconds (`SandboxesUnserved`). |
+| `failing` | `'asyncio.Future[BaseException] \| None'` | `None` | Done, with the error, once something the run runs beside its loop fails it: its pods' leases lost to it (`LeaseLost`), no pod of its serving a kind of sandbox it needs for `UNSERVED` seconds (`SandboxesUnserved`), or a part it runs in the background (its runner, its gateway's server, a pool's keeper) ending with an error. |
 | `trainer_need` | `Any` | `None` | The pod its trainer's steps need of its own (`rollout_train.pods.leasing.PodNeed`), leased once a step is coming (`rollout_train.pods.LeasedTrainer`), not with the rest. |
 | `began` | `float` | `field(default_factory=time.time)` | When this start of it began: what `limits.hours` counts from. |
 
@@ -5811,8 +5825,9 @@ async def settled(kind: str, name: str | None, settings: Mapping[str, JsonValue]
 ```
 
 A run's settings: the preset's (`NAME` or `NAME@N`: those a run of its kind takes, so that a training run's
-preset serves an eval of the same channels), then `settings`, then its kind and name; and the preset's version
-(`NAME@N`). Raises `KeyError` for a preset there is none of.
+preset serves an eval of the same channels), then `settings`, then its kind, and its name where one is given (else
+the one `settings` give, if any); and the preset's version (`NAME@N`). Raises `KeyError` for a preset there is
+none of.
 
 ## `rollout_train.submitting`
 
@@ -5917,6 +5932,7 @@ How a job goes, in a launch's states (`submitted`, `running`, `ended`, `failed`,
 |---|---|---|---|
 | `state` | `str` | required |  |
 | `detail` | `str \| None` | `None` |  |
+| `gone` | `bool` | `False` | Whether the job is no more (its RayJob deleted, or its Ray job unknown to the job server): failed, unless it was asked to stop. |
 
 ### `KubernetesApi`
 
@@ -6035,9 +6051,9 @@ Everything else is the template's.
 async def runtime_env_of(launch: Launch, cluster: Cluster, ledger: Ledger) -> dict[str, JsonValue]
 ```
 
-The Ray runtime environment of a launch's job: the cluster config as JSON (`ROLLOUT_CLUSTER_JSON`), in the
-runtime environment of the published version it plays, if it plays one. Raises `KeyError` for a published version
-the ledger does not keep.
+The Ray runtime environment of a launch's job: the cluster config as JSON (`ROLLOUT_CLUSTER_JSON`) and the time
+its driver is given to stop (`STOP_GRACE`), in the runtime environment of the published version it plays, if it
+plays one. Raises `KeyError` for a published version the ledger does not keep.
 
 ### `sized`
 
@@ -6061,7 +6077,9 @@ is a worker pod of a worker group made from the head's template. Ray starts each
 async def start(launch: Launch, cluster: Cluster, ledger: Ledger, backend: Backend | None = None) -> Launch
 ```
 
-Start a recorded launch's job; the launch, submitted (or failed, saying why the job could not be made).
+Start a recorded launch's job; the launch, submitted (or failed, saying why the job could not be made). The
+job's name is noted on the launch before the job is made, so a stop reaches a job made by a start that was cut
+short; a launch stopped before then makes none.
 
 ### `stopped`
 
@@ -6071,8 +6089,9 @@ Start a recorded launch's job; the launch, submitted (or failed, saying why the 
 async def stopped(launch: Launch, launches: Launches, cluster: Cluster | None = None, *, backends: Mapping[str, Backend] | None = None) -> Launch
 ```
 
-Ask a launch to stop: one whose job was not made yet is stopped at once; a job going is asked to stop, and its
-driver notes its run stopped. Raises `KeyError` for a launch that is not going.
+Ask a launch to stop: one whose job was not made yet is stopped at once (and the job it names, if a start that
+was cut short made it); a job going is asked to stop, and its driver notes its run stopped. Raises `KeyError` for a
+launch that is not going.
 
 ### `submit`
 
@@ -6146,7 +6165,7 @@ class FileLaunches
 **Methods**
 
 - `def __init__(self, directory: Path) -> None`
-- `async def ask(self, asked: Asked, run: str | None = None) -> Launch`
+- `async def ask(self, asked: Asked, run: str | None = None, id: str | None = None) -> Launch`
 - `async def all(self) -> list[Launch]`
 - `async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch`
 
@@ -6190,7 +6209,9 @@ class Launches(Protocol)
 
 **Methods**
 
-- `async def ask(self, asked: Asked, run: str | None = None) -> Launch` — Record a launch, as asked, of the run `run` (by id); the launch.
+- `async def ask(self, asked: Asked, run: str | None = None, id: str | None = None) -> Launch` — Record a launch, as asked, of the run `run` (by id), under `id` (a new one by default); the launch. A launch
+  asked for again under an id that is recorded is not recorded again: the launch of that id is returned (an
+  asker whose answer was lost asks again).
 - `async def all(self) -> list[Launch]` — Every launch, newest first.
 - `async def note(self, id: str, *, expect: Collection[str] | None = None, **changes: Any) -> Launch` — Note how a launch goes (its state, job, detail), in one step that compares and sets: the changes are written
   only if the launch is in a state of `expect` (any, if None) and may go to the state they name (`MOVES`).
@@ -6225,8 +6246,18 @@ stopped. A driver may start before its submitter has noted its job (asked to run
 *function* · `libraries/rollout-train/src/rollout_train/launches.py`
 
 ```python
-def new_launch(asked: Asked, run: str | None = None) -> Launch
+def new_launch(asked: Asked, run: str | None = None, id: str | None = None) -> Launch
 ```
+
+### `new_launch_id`
+
+*function* · `libraries/rollout-train/src/rollout_train/launches.py`
+
+```python
+def new_launch_id() -> str
+```
+
+A new launch's id: `launch_` and a ULID.
 
 ### `OPEN`
 
@@ -6517,8 +6548,9 @@ class LivePod
 ```
 
 A pod that is alive, as its newest beat says: its name, the identity its certificate must carry, its role
-(`inference` or `trainer`), whether it is ready, and its certificate's serial (for whoever started the pod, which
-has the certificate of a pod it no longer counts as its own revoked). Where it is reached is its lease's.
+(`inference` or `trainer`), whether it is ready, its certificate's serial (for whoever started the pod, which
+has the certificate of a pod it no longer counts as its own revoked), and the run it is ready for (a warm pod
+another run took says the run before until it follows the new one). Where it is reached is its lease's.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -6527,6 +6559,7 @@ has the certificate of a pod it no longer counts as its own revoked). Where it i
 | `role` | `str` | required |  |
 | `ready` | `bool` | required |  |
 | `serial` | `str \| None` | `None` |  |
+| `run` | `str \| None` | `None` |  |
 
 ### `needs_of`
 
@@ -6664,7 +6697,8 @@ for.
   them to reach).
 - `def of(self, role: str | None = None, *, channel: str | None = None, provider: str | None = None) -> list[PodLease]` — The leases it holds, of `role` (`trainer` counts a host), `channel` and `provider` where said.
 - `async def renewed(self) -> float` — Stamp each lease it holds, and its time on each pod; the dollars that time cost since the last renewal.
-  Raises `LeaseLost` where a lease is no longer the run's.
+  RunPod is asked about every pod at once first (`_described`, `DESCRIBE` seconds at most), and a lease is
+  stamped whether or not it answered. Raises `LeaseLost` where a lease is no longer the run's.
 - `async def renewing(self, spent: Callable[[float], Awaitable[None]] | None = None) -> None` — Renew every `renew` seconds until cancelled, telling `spent` the dollars its pods cost that it has not told
   yet: first what they cost while the run waited for them to be ready (renewed then too), then each renewal's. A
   renewal that fails (the store or RunPod not answering) is said and tried again at the next; a lease no longer
@@ -6930,7 +6964,8 @@ A cluster, as its config describes it. It holds no secret, only references to se
   the monitor's token; the gateway the ledger's, its keys and those of the providers it samples (a hosted API's
   key, a server's token); a monitor the ledger's, the blob stores' (but their read-only keys, which only pods
   read) and its own token; the ledger service the ledger's and the platform's token; a sandbox pool the ledger's;
-  the reaper the ledger's and RunPod's keys. What each role is given on Kubernetes is this
+  the reaper the ledger's and RunPod's keys. Where the ledger's URL is the ledger service's, every role reads the
+  platform's token too, which it reaches the service with. What each role is given on Kubernetes is this
   (docs/deploy/helm.md).
 
 ### `ClusterError`
@@ -7341,7 +7376,8 @@ An inference provider as a cluster deploys it (`[inference.NAME]`).
 def is_local(address: str) -> bool
 ```
 
-Whether an address (a URL, or a host) is on this machine: `localhost` or a loopback address.
+Whether an address (a URL, or a host) is on this machine: `localhost` or a loopback address (`127.0.0.1`,
+`::1`; a name that only starts like one, `127.example.com`, is not).
 
 ### `ModelOffer`
 
@@ -7514,7 +7550,8 @@ One setting a trainer takes, read from its settings dataclass.
 
 **Methods**
 
-- `def accepts(self, value: JsonValue) -> bool` — Whether `value` is of a type it takes (a whole number is a float too; a bool is neither).
+- `def accepts(self, value: JsonValue) -> bool` — Whether `value` is of a type it takes (a whole number is a float too; a bool is neither; a float is finite).
+  What range it takes is its settings dataclass's to say.
 
 ### `Tls`
 
@@ -8256,7 +8293,8 @@ def from_file(path: Path) -> dict[str, JsonValue]
 ```
 
 Settings from a file: JSON (`.json`, where `null` unsets a key) or TOML, of dotted keys (`"trainer.rank" =
-16`) or tables (`[trainer] rank = 16`), or both.
+16`) or tables (`[trainer] rank = 16`), or both. Raises `ValueError` for a TOML date or time, which no setting
+takes (quoted, it is text).
 
 ### `from_flags`
 
@@ -8267,7 +8305,8 @@ def from_flags(given: Sequence[str]) -> dict[str, JsonValue]
 ```
 
 `--set KEY=VALUE` flags, in order (a later one wins). A value is read as JSON (`null`, `3e-5`, `true`,
-`["a", "b"]`, `"text"`), else as TOML (`{ a = 1 }`), else as the text it is (`rollout_qwen:qwen35`).
+`["a", "b"]`, `"text"`), else as TOML (`{ a = 1 }`), else as the text it is (`rollout_qwen:qwen35`, and a TOML
+date or time, `2026-10-15`, which no setting takes).
 
 ### `is_trainers`
 
@@ -8380,7 +8419,8 @@ class RunSettings
 ```
 
 A run's settings, as given (`values`), answering with the schema's defaults for what was not. Trainer settings
-that name the objective are held as the `objective.*` keys they say (`current`).
+that name the objective are held as the `objective.*` keys they say (`current`), and a whole number given as a
+float (`8.0`, `1e2`) as the whole number it is, for a key of the schema that takes no other float.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -8628,6 +8668,10 @@ class Conflict(Exception)
 
 A compare-and-set that found the row changed since it was read.
 
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `retried` |  | `False` | Whether it answered an operation sent again after an attempt whose answer was lost (an attempt that may have made the change itself). |
+
 ### `Forbidden`
 
 *class* · `libraries/rollout-train/src/rollout_train/ledger_service/scopes.py`
@@ -8655,7 +8699,7 @@ variable `token_env` or the file `token_file`, or given as `token`.
 - `def use(self, token: str) -> None` — Send `token` from now on (a pod given a token for the run that took it).
 - `def token(self) -> str | None`
 - `async def call(self, operation: str, args: Mapping[str, Any] | None = None) -> tuple[Any, bool]` — Do `operation` (`STORE/OPERATION`) with `args`: its result, and whether an attempt before the one answered
-  may have been done (its answer lost).
+  may have been done (its answer lost). A `Conflict` answered after such an attempt says so (`retried`).
 - `async def result(self, operation: str, args: Mapping[str, Any] | None = None) -> Any`
 - `async def take(self, scope: str) -> Fence`
 - `async def append(self, table: str, key: str, record: JsonValue, fence: Fence) -> bool`
@@ -8888,7 +8932,7 @@ class EnvironmentVersion
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | `str` | required | The environment's name: its entry point's name in the project's `rollout.environments` group, else the project's name. |
-| `version` | `str` | required | The SHA-256 of its source's zip. |
+| `version` | `str` | required | The SHA-256 of its source's zip and its entry point (`rollout_train.publishing.version_id`). |
 | `source` | `str` | required | The git URL it was fetched from. |
 | `ref` | `str \| None` | required | The branch, tag or commit asked for; none: the default branch. |
 | `commit` | `str` | required | The commit the ref was when it was fetched. |
@@ -9246,6 +9290,16 @@ names copies of its blobs (`with_extension`: in S3, `s3://BUCKET/KEY.zip`), that
 beside its blobs (`packages/VERSION.zip`), which whoever submits the job uploads. Raises `Refused` for a store Ray
 cannot be handed a blob of.
 
+### `version_id`
+
+*function* · `libraries/rollout-train/src/rollout_train/publishing.py`
+
+```python
+def version_id(data: bytes, entry_point: str) -> str
+```
+
+A version's id: the SHA-256 of its project's zip and its entry point (the zip alone is its blob's).
+
 ## `rollout_train.validation`
 
 One pure check of a run's settings against a cluster, with its rule table.
@@ -9402,7 +9456,7 @@ class Rule
 *constant* · `libraries/rollout-train/src/rollout_train/validation.py`
 
 ```python
-RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered, or a hosted API shares a channel"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is a hosted API (no exact tokens or behaviour logprobs, whatever the objective), is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('renderer', 'a channel sampling tokens whose model no renderer renders, that several do with none said, or a renderer said that says it renders other models'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes'), Rule('memory', "a trainer whose estimate of what each of its GPUs holds (weights, gradients, optimizer state and activations, sharded over its GPUs) is more than a GPU's memory"), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', 'a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give'), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, needs sandboxes or tool sets the cluster lacks, or, on Kubernetes, sandboxes whose pool is not served from pods of its own'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a training run's spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
+RULES: tuple[Rule, ...] = (Rule('settings', 'a key the kind does not take, a wrong type or range, a required key missing, contradictions'), Rule('providers', "the trainer or a channel's provider is not offered, or a hosted API shares a channel"), Rule('auth', 'a provider reached with no auth away from this machine'), Rule('capabilities', "the trained channel's provider is a hosted API (no exact tokens or behaviour logprobs, whatever the objective), is not token-exact (a policy gradient), or lacks sampled logprobs and honoured sampling (an importance correction)"), Rule('bridge', "no bridge from the checkpoint's format to what the provider loads"), Rule('weights', 'a trainer that makes the other kind of weights than the run trains; a LoRA on a provider without adapters, full weights on one without full reload'), Rule('models', 'a model not offered, or not the one trained'), Rule('renderer', 'a channel sampling tokens whose model no renderer renders, that several do with none said, or a renderer said that says it renders other models'), Rule('rank', "the adapter's rank, as the provider sees it, above its highest"), Rule('segment', 'segments longer than the trainer or the context takes, or an answer budget that leaves no room for a prompt'), Rule('memory', "a trainer whose estimate of what each of its GPUs holds (weights, gradients, optimizer state and activations, sharded over its GPUs) is more than a GPU's memory"), Rule('start', 'the start does not exist, was released, or is in a format the trainer cannot start from'), Rule('objective', "a component its family does not accept, a combination that means nothing, a family the trainer or the kind of run does not take, a reference, an entropy or logprobs of tokens not sampled that the trainer cannot give, groups of one episode where it compares a group's"), Rule('evals', 'a suite that does not exist, or whose environment is not offered'), Rule('distillation', 'no teacher for a route or for the environment played, a teacher without the logprobs distillation reads or whose logprobs are unchecked, or of another renderer family'), Rule('environment', 'not offered, does not load, needs sandboxes or tool sets the cluster lacks, or, on Kubernetes, sandboxes whose pool is not served from pods of its own'), Rule('capacity', "more than the cluster schedules for one run ([capacity]), or more GPUs than it has, counting the run's scheduled parts"), Rule('spend', "a training run's spend limit below one step's estimated cost"), Rule('name', 'not a name, or taken'))
 ```
 
 Every rule `check` applies, in the order it reports them.
@@ -10115,7 +10169,7 @@ A policy step's settings (`rollout_objectives.step`), whichever trainer takes it
 | `pack_tokens` | `int \| None` | `None` | The most tokens one forward and backward pass runs: a step packs its segments into rows of up to this many (`rollout_objectives.packing`). None: `segment_tokens`, so that a pack takes about the memory the longest segment would alone (a pack's activations are those of a segment as long as its row, whatever prefixes its segments share), or 8,192 where that is none (what the trainer's memory estimate allows for, `rollout_train.memory.SEGMENT_TOKENS`). A segment longer than it has a pack of its own. |
 | `share_prefixes` | `bool` | `True` | Whether segments of a pack that start with the same tokens share them: the prefix is run once, and each segment's rest after it. |
 | `passes` | `int` | `1` | Passes a step takes over its segments, each shuffled anew and cut into minibatches of its own: a small batch makes more optimizer updates (a supervised step on a small dataset, say). |
-| `old_logprobs` | `str` | `'sampler'` | Where the logprobs a step starts from (`old`: what its ratios are of, and its distance from the start) come from for a segment sampled wholly on the weights the step starts from (`sampled_at_start`, `rollout_train.trainer`): `sampler`, the behaviour logprobs the engine recorded as it sampled it, which the step then does not compute (a pass over the segment without a gradient, or the first minibatch's own); `trainer`, computed by the trainer. They differ by how the engine and the trainer compute (a step's `mean_mismatch` measures it on those it computed): about 0.01 nats a token between vLLM's 4-bit kernels and the LoRA trainer's. A segment sampled on older weights, or with a token the engine gave no logprob, is computed either way. |
+| `old_logprobs` | `str` | `'sampler'` | Where the logprobs a step starts from (`old`: what its ratios are of, and its distance from the start) come from for a segment sampled wholly on the weights the step starts from (`sampled_at_start`, `rollout_train.trainer`), after the first minibatch (whose own pass computes them at no cost): `sampler`, the behaviour logprobs the engine recorded as it sampled it, which the step then does not compute (a pass over the segment without a gradient); `trainer`, computed by the trainer. They differ by how the engine and the trainer compute (a step's `mean_mismatch` measures it on those it computed): about 0.01 nats a token between vLLM's 4-bit kernels and the LoRA trainer's. A segment sampled on older weights, or with a token the engine gave no logprob, is computed either way. |
 | `warmup_updates` | `int` | `0` | When a step's optimizer starts afresh (no state to go on from), its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` to `learning_rate`: a fresh Adam's first update moves every weight by about the full rate. A step that goes on from an optimizer's state is not warmed up. |
 | `objective` | `Objective \| str \| Mapping[str, Any]` | `DEFAULT` | The objective (`rollout_train.objectives`): an `Objective`, a preset's name, or a table of `preset` and component overrides (`rollout_train.objectives.objective_of`). The run's `objective.*` settings say it; `loss` is it, resolved. |
 | `ratio` | `InitVar[str]` | `_UNSAID` |  |
@@ -10351,7 +10405,7 @@ def from_sampler(item: Item, settings: StepSettings) -> bool
 
 Whether a step takes the logprobs the engine recorded as it sampled an item's segment as where it starts
 (`StepSettings.old_logprobs`): a weighted or distilled segment sampled wholly on the weights the step starts from,
-every sampled token of which has one.
+every sampled token of which has one; but not in the first minibatch, whose own pass computes them at no cost.
 
 ### `GRADIENT_WORK`
 
