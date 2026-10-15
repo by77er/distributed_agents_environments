@@ -22,7 +22,6 @@ A name says neither `/`, `@` nor `:` (they are what a reference to a checkpoint 
 
 import asyncio
 import json
-import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -31,7 +30,7 @@ from typing import Any, Protocol
 from rollout.contracts import new_ulid
 from rollout_train.checkpoints import SHORTEST, checkpoints_in
 from rollout_train.layout import RUN
-from rollout_train.ledger import FileLedger, Ledger, locked
+from rollout_train.ledger import FileLedger, Ledger, _replaced, locked  # pyright: ignore[reportPrivateUsage]
 from rollout_train.record import STEPS, table
 
 BASE = "base"
@@ -280,7 +279,6 @@ class FileRegistry:
         *,
         suites: list[SuiteName] | None = None,
     ) -> None:
-        staged = self.path.with_suffix(".staged")
         datasets = self._named() if named is None else named
         pointers = self._suite_names() if suites is None else suites
         kept: dict[str, Any] = {"runs": [asdict(each) for each in runs], "bookmarks": [asdict(each) for each in marks]}
@@ -288,8 +286,7 @@ class FileRegistry:
             kept["datasets"] = [asdict(each) for each in datasets]
         if pointers:
             kept["suites"] = [asdict(each) for each in pointers]
-        staged.write_text(json.dumps(kept, indent=1))
-        staged.replace(self.path)
+        _replaced(self.path, json.dumps(kept, indent=1).encode())
 
 
 async def run_of(directory: Path, ledger: Ledger, registry: Registry | None, name: str | None = None) -> Entry:
@@ -306,9 +303,7 @@ async def run_of(directory: Path, ledger: Ledger, registry: Registry | None, nam
 
     def noted() -> None:
         directory.mkdir(parents=True, exist_ok=True)
-        staged = path.with_suffix(".staged")
-        staged.write_text(json.dumps({"id": entry.id}))
-        os.replace(staged, path)
+        _replaced(path, json.dumps({"id": entry.id}).encode())
 
     await asyncio.to_thread(noted)
     return entry

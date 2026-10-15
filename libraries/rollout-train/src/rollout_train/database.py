@@ -431,15 +431,18 @@ class DatabaseLaunches:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    async def ask(self, asked: Asked, run: str | None = None) -> Launch:
-        made = new_launch(asked, run)
+    async def ask(self, asked: Asked, run: str | None = None, id: str | None = None) -> Launch:
+        made = new_launch(asked, run, id)
 
-        def added(connection: Connection) -> None:
+        def added(connection: Connection) -> Launch:
+            if id is not None and (row := fetch_one(connection, "SELECT launch FROM launches WHERE id = :id",
+                                                    {"id": id})) is not None:  # fmt: skip
+                return as_launch(json.loads(row[0]))  # (asked again: the launch its first asking recorded)
             sql(connection, "INSERT INTO launches (id, at, state, launch) VALUES (:id, :at, :state, :launch)",
                 {"id": made.id, "at": made.at, "state": made.state, "launch": stored(made)})  # fmt: skip
+            return made
 
-        await asyncio.to_thread(self.database.write, added, exclusive="launches")
-        return made
+        return await asyncio.to_thread(self.database.write, added, exclusive="launches")
 
     async def all(self) -> list[Launch]:
         def rows(connection: Connection) -> list[tuple[Any, ...]]:

@@ -1,5 +1,6 @@
 """Checkpoints: nodes of a graph that are only added, each saying where it came from, with their files kept unpacked."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,18 @@ async def test_adding_a_version_again_changes_nothing_and_a_replaced_run_adds_no
     assert await checkpoints.head("fork") == forked and await checkpoints.head("miner") == first
     learned = await checkpoints.add(other, new_id(), weights=tmp_path / "a", run="fork", parents=[forked.id, first.id])
     assert learned.parents == (forked.id, first.id) and learned.depth == 3  # depth follows the first parent
+
+
+async def test_two_fetches_of_one_checkpoints_files_into_one_directory_at_once_both_find_it_whole(
+    tmp_path: Path,
+) -> None:
+    blobs = FileBlobStore(tmp_path / "blobs")
+    files = {f"model-{index}.safetensors": await blobs.put(bytes([index]) * 1000, "x") for index in range(8)}
+    checkpoints = Checkpoints(FileLedger(tmp_path / "ledger"), blobs)
+    directory = tmp_path / "bases" / "abc"
+    fetched = await asyncio.gather(*(checkpoints.files(Manifest(files), directory) for _ in range(2)))
+    assert fetched == [directory, directory] and sorted(path.name for path in directory.iterdir()) == sorted(files)
+    assert [path.name for path in directory.parent.iterdir()] == ["abc"]  # (neither left its staging behind)
 
 
 async def test_a_version_is_shown_by_the_shortest_start_of_its_id_that_no_other_shares(tmp_path: Path) -> None:

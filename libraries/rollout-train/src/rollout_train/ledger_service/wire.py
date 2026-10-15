@@ -1,6 +1,7 @@
 """How the ledger service and `HttpLedger` say things to each other: each operation is `POST /v1/STORE/OPERATION` with
 `{"args": {...}, "request": ID}`, answered with `{"result": ...}`, or an error `{"error": CODE, "message": ...}` whose
-code is one of `ERRORS`. Records are JSON as the stores beside a ledger keep them."""
+code is one of `ERRORS`, or `unavailable` (503: the database could not do it for a moment, and the client asks again).
+Records are JSON as the stores beside a ledger keep them (`body_of`: a metric's NaN or infinity goes as it is kept)."""
 
 import json
 from dataclasses import asdict
@@ -18,11 +19,15 @@ from rollout_train.published import EnvironmentVersion, as_version
 from rollout_train.registry import Bookmark, Entry, Named, SuiteName, Taken
 from rollout_train.settings import Desired
 
-__all__ = ["ERRORS", "Conflict", "code_of", "decoded", "encoded"]
+__all__ = ["ERRORS", "Conflict", "body_of", "code_of", "decoded", "encoded"]
 
 
 class Conflict(Exception):
     """A compare-and-set that found the row changed since it was read."""
+
+    retried = False
+    """Whether it answered an operation sent again after an attempt whose answer was lost (an attempt that may have
+    made the change itself)."""
 
 
 ERRORS: dict[str, type[Exception]] = {
@@ -34,7 +39,15 @@ ERRORS: dict[str, type[Exception]] = {
     "conflict": Conflict,
 }
 """Each error code, and the error the client raises for it."""
-STATUS = {"fenced": 409, "taken": 409, "missing": 404, "invalid": 400, "forbidden": 403, "conflict": 409}
+STATUS = {
+    "fenced": 409,
+    "taken": 409,
+    "missing": 404,
+    "invalid": 400,
+    "forbidden": 403,
+    "conflict": 409,
+    "unavailable": 503,
+}
 
 
 def code_of(error: BaseException) -> str | None:
@@ -45,6 +58,12 @@ def code_of(error: BaseException) -> str | None:
 def message_of(error: BaseException) -> str:
     """What an error says (a `KeyError`'s message without the quotes `str` puts around it)."""
     return str(error.args[0]) if isinstance(error, KeyError) and error.args else str(error)
+
+
+def body_of(said: Any) -> bytes:
+    """What is sent, as the stores write JSON (`json.dumps`, which writes NaN and infinity as `NaN` and `Infinity`, and
+    `json.loads` reads back)."""
+    return json.dumps(said, separators=(",", ":")).encode()
 
 
 def encoded(value: Any) -> JsonValue:

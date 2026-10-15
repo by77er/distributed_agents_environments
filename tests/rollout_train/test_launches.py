@@ -3,6 +3,7 @@ allow and its writer expects; a launch stored when launches named profiles reads
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,33 @@ async def test_a_launch_records_what_was_asked_and_the_job_it_became(tmp_path: P
     assert await launch_of(launches, first.id) == submitted
     with pytest.raises(KeyError):
         await launch_of(launches, "launch_none")
+
+
+@pytest.mark.parametrize("kind", [0, 1], ids=["files", "database"])
+async def test_a_launch_asked_for_again_under_its_id_is_recorded_once(tmp_path: Path, kind: int) -> None:
+    launches = launches_of(ledgers(tmp_path)[kind])
+    assert launches is not None
+    first = await launches.ask(Asked(TRAIN, "once"), "run_1", "launch_1")
+    assert first.id == "launch_1" and await launches.ask(Asked(TRAIN, "once"), "run_1", "launch_1") == first
+    other = await launches.ask(Asked(TRAIN, "twice"), "run_1")
+    assert [each.id for each in await launches.all()] == [other.id, "launch_1"]
+
+
+async def test_launches_are_on_disk_before_they_replace_the_file_that_held_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    synced: list[int] = []
+    sync = os.fsync
+
+    def synced_too(handle: int) -> None:
+        synced.append(handle)
+        sync(handle)
+
+    monkeypatch.setattr(os, "fsync", synced_too)
+    launches = launches_of(FileLedger(tmp_path / "files"))
+    assert launches is not None
+    await launches.ask(Asked(TRAIN, "run"), "r")
+    assert synced and sorted(path.name for path in (tmp_path / "files").iterdir()) == [".lock", "launches.json"]
 
 
 @pytest.mark.parametrize("kind", [0, 1], ids=["files", "database"])

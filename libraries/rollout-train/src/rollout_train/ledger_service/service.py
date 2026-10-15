@@ -7,11 +7,19 @@ transaction each, the fence is checked when the append is applied, a beat is sta
 What HTTP adds is answered here:
 
 - **Retries.** A take that comes with a request id is answered with the number its first attempt took, kept in the
-  same transaction (`DatabaseLedger.take`); so is any operation retried with the same id while this replica holds its
-  answer (the newest `KEPT` answers). An append's answer says what the table holds under the key, so a client whose
-  first attempt's answer was lost tells its own record from another's (`HttpLedger.append`).
+  same transaction (`DatabaseLedger.take`); so is any operation that changes something retried with the same id
+  while this replica holds its answer (the newest `KEPT` answers; a read's is not kept, as it is read again), and one
+  retried while its first attempt is still being done waits for that attempt's answer. An append's answer says what
+  the table holds under the key, so a client whose first attempt's answer was lost tells its own record from
+  another's (`HttpLedger.append`); a run created and a launch asked for come with the id their client chose, so one
+  created again is found as its own.
 - **Errors.** `Fenced` is its own error (409, `fenced`), never retried; so are a name taken, a row missing, a request
-  that cannot be read, a token that may not, and a compare-and-set that lost (`wire.ERRORS`).
+  that cannot be read, a token that may not, and a compare-and-set that lost (`wire.ERRORS`). A database that could
+  not do an operation for a moment is `unavailable` (503), which the client asks again: a transaction it rolled back
+  (a deadlock, a serialization failure, a lock or a connection not to be had: `ROLLED_BACK`), and a connection lost
+  while a transaction may have committed, for an operation that may be done again (`repeatable`). Anything else is
+  the service's own failure (500, `failed`).
+- **JSON.** Answers are written as the stores write records (`wire.body_of`): a NaN a record holds goes as it is.
 - **Tokens.** The platform's token may do everything; a pod's may do what `rollout_train.ledger_service.scopes` says,
   which `allowed` checks before the store is asked, and `_read` and `_tables` narrow what it reads.
 
@@ -21,6 +29,7 @@ serves the cluster config's ledger (`[ledger] url`, a database) with its token (
 """
 
 import asyncio
+import functools
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
@@ -33,7 +42,7 @@ from rollout_train.checkpoints import CHECKPOINTS, COMPLETED, RELEASED
 from rollout_train.launches import Asked, launches_of
 from rollout_train.ledger import Fence, Ledger
 from rollout_train.ledger_service.scopes import Forbidden, Scope, scope_of
-from rollout_train.ledger_service.wire import STATUS, code_of, decoded, encoded, message_of
+from rollout_train.ledger_service.wire import STATUS, body_of, code_of, decoded, encoded, message_of
 from rollout_train.presence import presence_of
 from rollout_train.presets import presets_of
 from rollout_train.published import EnvironmentVersion, environment_versions_of
@@ -48,10 +57,41 @@ if TYPE_CHECKING:
 
     from rollout_train.cluster import Cluster
 
-__all__ = ["KEPT", "Handler", "app", "for_cluster", "held_by_run", "operations"]
+__all__ = [
+    "KEPT",
+    "READ_ONLY",
+    "REPEATED",
+    "ROLLED_BACK",
+    "Handler",
+    "app",
+    "for_cluster",
+    "held_by_run",
+    "operations",
+    "repeatable",
+    "unavailable",
+]
 
 KEPT = 4096
 """Answers kept for operations retried with the same request id, newest first."""
+READ_ONLY = frozenset({
+    "ledger/read", "ledger/tables", "ledger/read_all", "ledger/fences", "clock/now", "registry/runs",
+    "registry/bookmarks", "registry/datasets", "registry/suites", "launches/all", "presence/beats", "settings/desired",
+    "sandboxes/get", "sandboxes/all", "presets/all", "presets/versions", "presets/get", "environments/all",
+    "environments/get", "pods/all", "pods/get", "pods/times",
+})  # fmt: skip
+"""The operations that change nothing: their answers are not kept (a retry reads again), however large."""
+REPEATED = READ_ONLY | frozenset({
+    "ledger/append", "launches/note", "presence/beat", "settings/want", "sandboxes/put", "sandboxes/delete",
+    "registry/bookmark", "registry/name_dataset", "registry/point_suite", "environments/record", "pods/put",
+    "pods/delete", "pods/charge",
+})  # fmt: skip
+"""The operations that may be done again after an attempt that may have been done: reads; an append (its client
+tells its own record from another's); a launch's change, which compares and sets; writes that come to the same done
+twice; and pods' leases, whose client reads one back where its compare-and-set lost to an attempt of its own
+(`HttpPodLeases`)."""
+ROLLED_BACK = frozenset({"40001", "40P01", "55P03", "53300", "57P03", "57014"})
+"""Postgres's errors (SQLSTATE) that say nothing was done: a serialization failure, a deadlock, a lock not to be had,
+too many connections, a server that cannot take one now, a statement cancelled (its transaction rolled back)."""
 
 READS = ("ledger/read", "ledger/tables")
 """What a pod's token is honoured for only while its pod is held by its run."""
@@ -157,7 +197,8 @@ async def _point_suite(ledger: Ledger, args: Mapping[str, Any], scope: Scope) ->
 
 async def _ask(ledger: Ledger, args: Mapping[str, Any], scope: Scope) -> Any:
     store = _store(launches_of(ledger), "launches")
-    return await store.ask(Asked(**args["asked"]), args.get("run"))
+    id = args.get("id")
+    return await store.ask(Asked(**args["asked"]), args.get("run"), str(id) if id is not None else None)
 
 
 async def _launches(ledger: Ledger, args: Mapping[str, Any], scope: Scope) -> Any:
@@ -275,6 +316,42 @@ async def _any(ledger: Ledger, args: Mapping[str, Any], scope: Scope) -> None:
     return None
 
 
+def repeatable(name: str, args: Mapping[str, Any]) -> bool:
+    """Whether the operation `name` with `args` may be done again where an attempt at it may have been done: those of
+    `REPEATED`, a take with a request id (answered with the number its first attempt took), and a run created or a
+    launch asked for with the id its client chose (found as its own)."""
+    if name == "ledger/take":
+        return args.get("request") is not None
+    if name in ("registry/create", "launches/ask"):
+        return args.get("id") is not None
+    return name in REPEATED
+
+
+def unavailable(error: BaseException, *, repeated: bool) -> bool:
+    """Whether `error` is a database's that could not do an operation for a moment, which is asked again: a
+    transaction it rolled back (`ROLLED_BACK`), a connection its pool did not give in time, SQLite's lock not had in
+    time; and, where `repeated` (the operation may be done again), a connection lost, which may have committed what
+    it was doing."""
+    import sqlite3
+
+    import sqlalchemy.exc  # (here: a service that serves no database needs none)
+
+    if isinstance(error, sqlalchemy.exc.TimeoutError):
+        return True
+    if not isinstance(error, sqlalchemy.exc.DBAPIError):
+        return False
+    cause = error.orig
+    if isinstance(cause, sqlite3.Error):  # (one machine's file: busy or locked, the transaction was rolled back)
+        return getattr(cause, "sqlite_errorname", "").startswith(("SQLITE_BUSY", "SQLITE_LOCKED")) or (
+            "database is locked" in str(cause)
+        )
+    state = str(getattr(cause, "sqlstate", None) or getattr(cause, "pgcode", None) or "")
+    if state in ROLLED_BACK:
+        return True
+    lost = error.connection_invalidated or state.startswith("08") or state in ("57P01", "57P02")
+    return repeated and (lost or (isinstance(error, sqlalchemy.exc.OperationalError) and not state))
+
+
 def operations() -> dict[str, tuple[Handler, Handler | None]]:
     """Every operation, by `STORE/OPERATION`: what does it, and what a pod's token is checked by before it is done
     (none: a pod's token may not)."""
@@ -336,25 +413,59 @@ def app(
     pod's token is honoured now (whether the pod's lease names its run)."""
     from starlette.applications import Starlette
     from starlette.requests import Request
-    from starlette.responses import JSONResponse
+    from starlette.responses import Response
     from starlette.routing import Route
 
     table_of = {**operations(), **(more or {})}
-    answers: OrderedDict[tuple[str, str, str], JSONResponse] = OrderedDict()
+    answers: OrderedDict[tuple[str, str, str], Response] = OrderedDict()
+    doing: dict[tuple[str, str, str], asyncio.Task[Response]] = {}
 
-    def refused(code: str, message: str) -> JSONResponse:
-        return JSONResponse({"error": code, "message": message[:2000]}, status_code=STATUS.get(code, 500))
+    def answer(said: Mapping[str, Any], status: int = 200) -> Response:
+        return Response(body_of(said), status_code=status, media_type="application/json")
 
-    async def call(request: Request) -> JSONResponse:
+    def refused(code: str, message: str) -> Response:
+        return answer({"error": code, "message": message[:2000]}, STATUS.get(code, 500))
+
+    async def done(name: str, arguments: Mapping[str, Any], scope: Scope) -> Response:
+        """`name` done with `arguments` for `scope`, as its answer."""
+        handler, check = table_of[name]
+        try:
+            if not scope.platform:
+                if check is None:
+                    raise Forbidden(f"a pod's token may not {name}")
+                await check(ledger, arguments, scope)
+                if name in READS and honoured is not None and not await honoured(ledger, scope):
+                    raise Forbidden(f"pod {scope.pod} is not held by run {scope.run}")
+            result = await handler(ledger, arguments, scope)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            if (code := code_of(error)) is not None:
+                return refused(code, message_of(error))
+            failure = f"{type(error).__name__}: {error}"
+            if unavailable(error, repeated=repeatable(name, arguments)):
+                return refused("unavailable", failure)
+            return answer({"error": "failed", "message": failure[:2000]}, 500)
+        return answer({"result": encoded(result)})
+
+    def kept(remembered: tuple[str, str, str], finished: asyncio.Task[Response]) -> None:
+        """Keep the answer of an operation done (an error's is not: asked again, it is done again)."""
+        del doing[remembered]
+        if finished.cancelled() or finished.exception() is not None or finished.result().status_code != 200:
+            return
+        answers[remembered] = finished.result()
+        while len(answers) > KEPT:
+            answers.popitem(last=False)
+
+    async def call(request: Request) -> Response:
         said = request.headers.get("authorization", "")
         token = said.removeprefix("Bearer ").strip() if said.startswith("Bearer ") else None
         known = secret()
         if not known:
-            return JSONResponse({"error": "unconfigured", "message": "the service has no token"}, status_code=503)
+            return answer({"error": "unconfigured", "message": "the service has no token"}, 503)
         scope = scope_of(token, known)
         if scope is None:
-            return JSONResponse({"error": "unauthorized", "message": "no token, or one not of this ledger"},
-                                status_code=401)  # fmt: skip
+            return answer({"error": "unauthorized", "message": "no token, or one not of this ledger"}, 401)
         name = f"{request.path_params['store']}/{request.path_params['operation']}"
         if name not in table_of:
             return refused("missing", f"there is no operation {name}")
@@ -367,38 +478,21 @@ def app(
         request_id: Any = given.get("request")
         if not isinstance(args, dict):
             return refused("invalid", "the request has no args")
-        remembered = (scope.key, name, str(request_id)) if isinstance(request_id, str) else None
-        if remembered is not None and remembered in answers:
-            return answers[remembered]
-        handler, check = table_of[name]
         arguments = cast(dict[str, Any], args)
-        if name == "ledger/take" and remembered is not None:
-            arguments = {**arguments, "request": request_id}
-        try:
-            if not scope.platform:
-                if check is None:
-                    raise Forbidden(f"a pod's token may not {name}")
-                await check(ledger, arguments, scope)
-                if name in READS and honoured is not None and not await honoured(ledger, scope):
-                    raise Forbidden(f"pod {scope.pod} is not held by run {scope.run}")
-            result = await handler(ledger, arguments, scope)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            code = code_of(error)
-            if code is None:
-                return JSONResponse({"error": "failed", "message": f"{type(error).__name__}: {error}"[:2000]},
-                                    status_code=500)  # fmt: skip
-            return refused(code, message_of(error))
-        answer = JSONResponse({"result": encoded(result)})
-        if remembered is not None:
-            answers[remembered] = answer
-            while len(answers) > KEPT:
-                answers.popitem(last=False)
-        return answer
+        if name in READ_ONLY or not isinstance(request_id, str):
+            return await done(name, arguments, scope)
+        remembered = (scope.key, name, request_id)
+        if remembered in answers:
+            return answers[remembered]
+        if remembered not in doing:  # (one retried while its first attempt is being done waits for that one's answer)
+            if name == "ledger/take":
+                arguments = {**arguments, "request": request_id}
+            doing[remembered] = asyncio.ensure_future(done(name, arguments, scope))
+            doing[remembered].add_done_callback(functools.partial(kept, remembered))
+        return await asyncio.shield(doing[remembered])
 
-    async def healthz(request: Request) -> JSONResponse:
-        return JSONResponse({"healthy": True})
+    async def healthz(request: Request) -> Response:
+        return answer({"healthy": True})
 
     return Starlette(
         routes=[

@@ -148,9 +148,9 @@ checkpoint, by their paths within it, to blobs.
 - **`layout`** says how the weights are divided among the files, where they are divided. A reader with the same
   division reads its own files and no others.
 - **`files(manifest, directory)`** puts a manifest's files under a directory, from the blob store, if they are not
-  there. The directory appears whole or not at all. A file the store lacks is read from the store of any run that
-  has it, as each run's start says where its store is: a run can start from a checkpoint another run kept in its own
-  blob store, or from a merge of one.
+  there. The directory appears whole or not at all (two fetches into it at once each return it whole). A file the
+  store lacks is read from the store of any run that has it, as each run's start says where its store is: a run can
+  start from a checkpoint another run kept in its own blob store, or from a merge of one.
 
 ## Bridges
 
@@ -218,7 +218,8 @@ Two ledgers are provided:
   waits. An append is on disk (`fsync`) before it is acknowledged. A last line left unfinished, by a writer that died
   mid-record or a full disk, was never acknowledged: the next append removes it first (or ends it, if it holds a whole
   record), so nothing is glued to it. `fences.json` is replaced whole: written beside it, put on disk, and renamed over
-  it, so a crash while taking a fence leaves the fences as they were. Each process keeps which keys a table has, and
+  it, so a crash while taking a fence leaves the fences as they were (so are `registry.json`, `launches.json` and
+  `presence.json` beside it, and a run directory's `run.json`). Each process keeps which keys a table has, and
   reads a table's file again only as far as it grew since (or whole, if the file was replaced).
 - **`DatabaseLedger`** takes a fence and appends in transactions that hold the scope's lock. An append on Postgres
   holds its table's lock too, while it numbers its record after the table's last: records are numbered in the order
@@ -258,8 +259,9 @@ each a client of the service. Every role can use it by its URL: a cluster config
 | | |
 |---|---|
 | Tokens | The service holds one secret, the platform's token (`[ledger] token_env`). A request with it may do everything: the platform's own roles hold it. A pod's token (`pod_token`) is signed with it and names the pod and the run it serves. It may read the run's serving records, its starts, and the checkpoints the run made, serves, is fixed on, and those they were trained over; write the pod's own beat; and read the pod's own lease. While a lease names the pod, the token reads only if the lease names its run. Anything else is refused (403) |
-| Retries | Each operation goes with a request id, sent again with the same id while the service does not answer, for 30 seconds at most. A take that comes again is answered with the number the first took (kept in the take's transaction). An append that comes again and finds its own record wrote it. A timeout is never read as a refusal |
-| Errors | `Fenced` comes back as itself (409), never retried; a name taken, a row missing, a request it cannot read, a token that may not and a compare-and-set that lost each have a code of their own |
+| Retries | Each operation goes with a request id, sent again with the same id while the service does not answer or answers that it is unavailable, for 30 seconds at most. A take that comes again is answered with the number the first took (kept in the take's transaction). An append that comes again and finds its own record wrote it. A run created and a launch asked for go with the id their client chose, so one created again is found as its own. One that comes again while its first attempt is being done waits for that attempt's answer. A timeout is never read as a refusal |
+| Errors | `Fenced` comes back as itself (409), never retried; a name taken, a row missing, a request it cannot read, a token that may not and a compare-and-set that lost each have a code of their own. A database that could not do an operation for a moment (a deadlock, a serialization failure, a lock or a connection not to be had; a connection lost, for an operation that may be done again) is unavailable (503), and asked again |
+| Records | Sent and answered as the stores write JSON: a record holding NaN (a metric) reads as it was appended |
 
 The chart serves it as the Deployment `ledger`. Its Service is reachable from outside the cluster through an Ingress
 or a Service of another type, when the values ask for one; `ledger.public` is then where pods reach it

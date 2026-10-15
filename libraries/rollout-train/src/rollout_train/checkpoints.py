@@ -287,9 +287,10 @@ class Checkpoints:
 
     async def files(self, manifest: Manifest, directory: Path) -> Path:
         """A manifest's files under `directory`, read from the blob store if they are not there. The directory
-        appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint. A file this
-        store lacks is read from the store of any run that has it (a checkpoint made by a run that kept its blobs
-        elsewhere, or a merge of one), as each run's start says where its store is."""
+        appears whole or not at all, so whatever looks for a file in it never finds half a checkpoint (two fetches into
+        it at once each return it whole: the one that finished second leaves the first's). A file this store lacks is
+        read from the store of any run that has it (a checkpoint made by a run that kept its blobs elsewhere, or a
+        merge of one), as each run's start says where its store is."""
         if await asyncio.to_thread(directory.exists):
             return directory
         await asyncio.to_thread(directory.parent.mkdir, parents=True, exist_ok=True)
@@ -297,7 +298,11 @@ class Checkpoints:
         try:
             for relative, reference in manifest.files.items():
                 await self._fetched(reference, staging / relative)
-            await asyncio.to_thread(os.replace, staging, directory)
+            try:
+                await asyncio.to_thread(os.replace, staging, directory)
+            except OSError:  # (another fetch of the same files put its directory there first: whole, as each does)
+                if not await asyncio.to_thread(directory.exists):
+                    raise
         finally:
             await asyncio.to_thread(shutil.rmtree, staging, ignore_errors=True)
         return directory

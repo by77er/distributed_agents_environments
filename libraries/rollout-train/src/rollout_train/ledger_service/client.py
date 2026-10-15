@@ -8,12 +8,15 @@ and a token: in a cluster config, `[ledger] url = "https://…"` with `token_env
 What the client does, as the service's guarantees ask (docs/research/ledger-guarantees.md#10-the-http-ledger-service):
 
 - every operation is sent with a request id of its own, and sent again with the same id while the service does not
-  answer or answers that it is unavailable (502, 503, 504), for `deadline` seconds at most (well under the
-  heartbeats' `STALE`), each attempt for `attempt` seconds; then `LedgerUnreachable`. A timeout is never read as a
-  refusal;
+  answer or answers that it is unavailable (502, 503, 504: its database could not do it for a moment, among them),
+  for `deadline` seconds at most (well under the heartbeats' `STALE`), each attempt for `attempt` seconds; then
+  `LedgerUnreachable`. A timeout is never read as a refusal;
 - `Fenced` is raised as itself, never retried; so are a name taken, a row missing (`KeyError`), a request refused
   (`ValueError`), a token that may not (`Forbidden`) and a compare-and-set that lost (`Conflict`);
-- an append retried after a lost answer, which finds the key holding the very record it sent, wrote it.
+- an append retried after a lost answer, which finds the key holding the very record it sent, wrote it;
+- a run created and a launch asked for are sent with the id the client chose for them, so one created again after a
+  lost answer is found as its own (`HttpRegistry.create`, `HttpLaunches.ask`);
+- records are sent and read as the stores write JSON (`wire.body_of`): a NaN in a record goes through as it is kept.
 """
 
 import asyncio
@@ -29,13 +32,13 @@ import httpx
 from pydantic import JsonValue
 
 from rollout.harness.sandboxes import Lease
-from rollout_train.launches import Asked, Launch
+from rollout_train.launches import Asked, Launch, new_launch_id
 from rollout_train.ledger import Appended, Fence
-from rollout_train.ledger_service.wire import ERRORS, decoded, encoded
+from rollout_train.ledger_service.wire import ERRORS, Conflict, body_of, decoded, encoded
 from rollout_train.presence import Beat
 from rollout_train.presets import Preset
 from rollout_train.published import EnvironmentVersion
-from rollout_train.registry import Bookmark, Entry, Named, SuiteName
+from rollout_train.registry import Bookmark, Entry, Named, SuiteName, Taken, new_run_id
 from rollout_train.settings import Desired
 
 if TYPE_CHECKING:
@@ -96,21 +99,21 @@ class HttpLedger:
 
     async def call(self, operation: str, args: Mapping[str, Any] | None = None) -> tuple[Any, bool]:
         """Do `operation` (`STORE/OPERATION`) with `args`: its result, and whether an attempt before the one answered
-        may have been done (its answer lost)."""
-        body = {"args": json.loads(json.dumps(args or {})), "request": uuid.uuid4().hex}
+        may have been done (its answer lost). A `Conflict` answered after such an attempt says so (`retried`)."""
+        body = body_of({"args": json.loads(json.dumps(args or {})), "request": uuid.uuid4().hex})
         token = self.token()
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})}
         given_up = time.monotonic() + self.deadline
         retried = False
         while True:
             try:
-                response = await self._http.post(f"{self.url}/v1/{operation}", json=body, headers=headers,
+                response = await self._http.post(f"{self.url}/v1/{operation}", content=body, headers=headers,
                                                  timeout=self.attempt)  # fmt: skip
             except httpx.TransportError as error:
                 why = f"{type(error).__name__}"
             else:
                 if response.status_code not in RETRIED:
-                    return _answered(operation, response), retried
+                    return _answered(operation, response, retried), retried
                 why = f"{response.status_code}"
             if time.monotonic() >= given_up:
                 raise LedgerUnreachable(f"the ledger service at {self.url} did not answer {operation} ({why})")
@@ -130,7 +133,7 @@ class HttpLedger:
         sent = json.loads(json.dumps(record))
         args = {"table": table, "key": key, "record": sent, "fence": {"scope": fence.scope, "number": fence.number}}
         said, retried = await self.call("ledger/append", args)
-        wrote = bool(said["wrote"]) or (retried and said["record"] == sent)  # (its own, whose answer was lost)
+        wrote = bool(said["wrote"]) or (retried and _same(said["record"], sent))  # (its own, whose answer was lost)
         return Appended(wrote, said["record"])
 
     async def read(self, table: str) -> dict[str, JsonValue]:
@@ -194,9 +197,9 @@ class HttpLedger:
             _closing(self._http)
 
 
-def _answered(operation: str, response: httpx.Response) -> Any:
+def _answered(operation: str, response: httpx.Response, retried: bool) -> Any:
     try:
-        said: Any = response.json()
+        said: Any = json.loads(response.content)
     except ValueError:
         said = {}
     if response.status_code < 400 and isinstance(said, dict) and "result" in said:
@@ -205,8 +208,16 @@ def _answered(operation: str, response: httpx.Response) -> Any:
     message = str(found.get("message") or response.text[:300] or response.reason_phrase)
     kind = ERRORS.get(str(found.get("error")))
     if kind is not None:
-        raise kind(message)
+        error = kind(message)
+        if isinstance(error, Conflict):
+            error.retried = retried
+        raise error
     raise RuntimeError(f"the ledger service refused {operation}: {response.status_code} {message}")
+
+
+def _same(said: JsonValue, sent: JsonValue) -> bool:
+    """Whether a record the service holds is the one sent (as JSON: a NaN in it is the same NaN)."""
+    return json.dumps(said, sort_keys=True) == json.dumps(sent, sort_keys=True)
 
 
 class HttpRegistry:
@@ -219,7 +230,17 @@ class HttpRegistry:
         return [decoded(Entry, each) for each in await self._ledger.result("registry/runs")]
 
     async def create(self, name: str, id: str | None = None) -> Entry:
-        return decoded(Entry, await self._ledger.result("registry/create", {"name": name, "id": id}))
+        """Register a run under `name`, with `id` (by default a new one, chosen here). Sent again after its first answer
+        was lost, it finds its own run there (`Taken`: the id is had): the run of the id chosen here, or of `id` under
+        `name`."""
+        made = id or new_run_id()
+        try:
+            return decoded(Entry, await self._ledger.result("registry/create", {"name": name, "id": made}))
+        except Taken:
+            there = next((each for each in await self.runs() if each.id == made), None)
+            if there is None or (id is not None and there.name != name.strip()):
+                raise
+            return there
 
     async def rename(self, who: str, name: str) -> Entry:
         return decoded(Entry, await self._ledger.result("registry/rename", {"who": who, "name": name}))
@@ -254,8 +275,11 @@ class HttpLaunches:
     def __init__(self, ledger: HttpLedger) -> None:
         self._ledger = ledger
 
-    async def ask(self, asked: Asked, run: str | None = None) -> Launch:
-        return decoded(Launch, await self._ledger.result("launches/ask", {"asked": encoded(asked), "run": run}))
+    async def ask(self, asked: Asked, run: str | None = None, id: str | None = None) -> Launch:
+        """Record a launch, under `id` (a new one, chosen here, by default): asked again after a lost answer, the
+        launch its first asking recorded."""
+        args = {"asked": encoded(asked), "run": run, "id": id or new_launch_id()}
+        return decoded(Launch, await self._ledger.result("launches/ask", args))
 
     async def all(self) -> list[Launch]:
         return [decoded(Launch, each) for each in await self._ledger.result("launches/all")]

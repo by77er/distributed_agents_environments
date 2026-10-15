@@ -639,11 +639,16 @@ stores, one transaction each. HTTP adds:
 
 Below is what each operation must keep. The service keeps, today: a take's request id, stored with the number it took
 in the take's transaction (a retry gets the same number); an append's answer with the record the table holds, which the
-client compares with its own on a retry; the answers of other operations retried with the same id, kept by the replica
-that gave them; `Fenced` (and a name taken, a row missing, a request refused, a token that may not, a compare-and-set
-that lost) as an error of its own, never retried; client deadlines of 30 seconds, well under `STALE`; and two scopes of
-token, the platform's (everything) and a pod's (its run's serving records, starts and checkpoints, its own beat and
-lease, while its lease names the run). The scopes of the other roles, synchronous claims, streams and presigned uploads
+client compares with its own on a retry; a run created and a launch asked for under the id their client chose, so a
+retry finds its own, and a pod's lease read back where a retry's compare-and-set lost to its first attempt; the
+answers of other operations that change something retried with the same id, kept by the replica that gave them (a
+read's is not kept: it is read again), and a retry that comes while its first attempt is being done waits for that
+attempt's answer; a database that could not do an operation for a moment (a transaction it rolled back; a connection
+lost, for an operation that may be done again) answered as unavailable (503), which the client retries; `Fenced` (and a
+name taken, a row missing, a request refused, a token that may not, a compare-and-set that lost) as an error of its
+own, never retried; client deadlines of 30 seconds, well under `STALE`; and two scopes of token, the platform's
+(everything) and a pod's (its run's serving records, starts and checkpoints, its own beat and lease, while its lease
+names the run). The scopes of the other roles, synchronous claims, streams and presigned uploads
 are what it must keep as more roles use it.
 
 ### Operations and what each needs

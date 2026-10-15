@@ -408,7 +408,9 @@ class DatabasePodLeases:
 
 
 class HttpPodLeases:
-    """`PodLeases` through the ledger service."""
+    """`PodLeases` through the ledger service. A write sent again after an attempt whose answer was lost may find
+    that attempt's change (`Conflict`): it reads the lease back, and a lease that is the one it wrote, or gone where
+    it deleted one, is its own change."""
 
     def __init__(self, ledger: "HttpLedger") -> None:
         self._ledger = ledger
@@ -424,11 +426,21 @@ class HttpPodLeases:
         return PodLease.from_json(said) if said is not None else None
 
     async def put(self, lease: PodLease, *, expect: int | None) -> PodLease:
-        said = await self._ledger.result("pods/put", {"lease": lease.to_json(), "expect": expect})
+        try:
+            said = await self._ledger.result("pods/put", {"lease": lease.to_json(), "expect": expect})
+        except Conflict as error:
+            written = replace(lease, version=1 if expect is None else expect + 1).to_json()
+            if not error.retried or (there := await self.get(lease.pod)) is None or there.to_json() != written:
+                raise
+            return there
         return PodLease.from_json(said)
 
     async def delete(self, pod: str, *, expect: int) -> None:
-        await self._ledger.result("pods/delete", {"pod": pod, "expect": expect})
+        try:
+            await self._ledger.result("pods/delete", {"pod": pod, "expect": expect})
+        except Conflict as error:
+            if not error.retried or await self.get(pod) is not None:
+                raise
 
     async def times(self, run: str | None = None) -> list[PodTime]:
         return [PodTime.from_json(each) for each in await self._ledger.result("pods/times", {"run": run})]

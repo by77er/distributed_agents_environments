@@ -1,6 +1,7 @@
 """Heartbeats beside the ledger, where a run's blobs are, and how a machine is doing."""
 
 import asyncio
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -36,6 +37,23 @@ async def test_a_runner_beats_and_its_newest_beat_is_kept_with_its_recent_measur
     assert [point["playing"] for point in here.history] == [2, 3, 4]  # (the newest KEPT, oldest first)
     assert set(here.history[-1]) == {"at", "machine", "playing"}  # (what is measured, not who it is)
     assert alive(here) and there.history == [{"at": there.at}]
+
+
+async def test_beats_are_on_disk_before_they_replace_the_file_that_held_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    synced: list[int] = []
+    sync = os.fsync
+
+    def synced_too(handle: int) -> None:
+        synced.append(handle)
+        sync(handle)
+
+    monkeypatch.setattr(os, "fsync", synced_too)
+    found = presence_of(FileLedger(tmp_path / "files"))
+    assert found is not None
+    await found.beat("here", {"run": "train"})
+    assert synced and sorted(path.name for path in (tmp_path / "files").iterdir()) == [".lock", "presence.json"]
 
 
 def test_a_runner_is_alive_while_it_beat_within_the_last_stale_seconds() -> None:

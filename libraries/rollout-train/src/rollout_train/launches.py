@@ -28,7 +28,7 @@ from typing import Any, Protocol, cast
 from pydantic import JsonValue
 
 from rollout.contracts import new_ulid
-from rollout_train.ledger import FileLedger, Ledger, locked
+from rollout_train.ledger import FileLedger, Ledger, _replaced, locked  # pyright: ignore[reportPrivateUsage]
 
 __all__ = [
     "MOVES",
@@ -42,6 +42,7 @@ __all__ = [
     "launch_of",
     "launches_of",
     "new_launch",
+    "new_launch_id",
     "stored",
 ]
 
@@ -137,8 +138,10 @@ def _settled(asked: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class Launches(Protocol):
-    async def ask(self, asked: Asked, run: str | None = None) -> Launch:
-        """Record a launch, as asked, of the run `run` (by id); the launch."""
+    async def ask(self, asked: Asked, run: str | None = None, id: str | None = None) -> Launch:
+        """Record a launch, as asked, of the run `run` (by id), under `id` (a new one by default); the launch. A launch
+        asked for again under an id that is recorded is not recorded again: the launch of that id is returned (an
+        asker whose answer was lost asks again)."""
         ...
 
     async def all(self) -> list[Launch]:
@@ -178,9 +181,14 @@ def launches_of(ledger: Ledger) -> Launches | None:
     return getattr(ledger, "launches", None)
 
 
-def new_launch(asked: Asked, run: str | None = None) -> Launch:
+def new_launch_id() -> str:
+    """A new launch's id: `launch_` and a ULID."""
+    return f"launch_{new_ulid()}"
+
+
+def new_launch(asked: Asked, run: str | None = None, id: str | None = None) -> Launch:
     at = time.time()  # (unrounded: launches asked for at once still list newest first)
-    return Launch(f"launch_{new_ulid()}", asked, at, run=run, updated=round(at, 1))
+    return Launch(id or new_launch_id(), asked, at, run=run, updated=round(at, 1))
 
 
 def stored(launch: Launch) -> str:
@@ -195,14 +203,16 @@ class FileLaunches:
         self.directory = directory
         self.path = directory / "launches.json"
 
-    async def ask(self, asked: Asked, run: str | None = None) -> Launch:
-        made = new_launch(asked, run)
+    async def ask(self, asked: Asked, run: str | None = None, id: str | None = None) -> Launch:
+        made = new_launch(asked, run, id)
+        recorded: list[Launch] = []
 
         def change(launches: dict[str, Launch]) -> dict[str, Launch]:
-            return {**launches, made.id: made}
+            recorded.append(launches.get(made.id, made))
+            return {**launches, made.id: recorded[0]}
 
         await asyncio.to_thread(self._change, change)
-        return made
+        return recorded[0]
 
     async def all(self) -> list[Launch]:
         return await asyncio.to_thread(lambda: sorted(self._read().values(), key=lambda each: -each.at))
@@ -223,9 +233,7 @@ class FileLaunches:
     def _change(self, change: Callable[[dict[str, Launch]], dict[str, Launch]]) -> None:
         with locked(self.directory):
             launches = change(self._read())
-            staged = self.path.with_suffix(".staged")
-            staged.write_text(json.dumps([asdict(each) for each in launches.values()]))
-            staged.replace(self.path)
+            _replaced(self.path, json.dumps([asdict(each) for each in launches.values()]).encode())
 
     def _read(self) -> dict[str, Launch]:
         if not self.path.exists():

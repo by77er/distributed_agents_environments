@@ -27,7 +27,7 @@ from typing import Any, Protocol
 
 from pydantic import JsonValue
 
-from rollout_train.ledger import FileLedger, Ledger, locked
+from rollout_train.ledger import FileLedger, Ledger, _replaced, locked  # pyright: ignore[reportPrivateUsage]
 
 STALE = 90.0
 """Seconds after its newest beat that a process is taken to be gone."""
@@ -104,9 +104,7 @@ class FilePresence:
                 at = round(time.time(), 1)
                 was = beats.get(runner)
                 beats[runner] = Beat(runner, at, dict(about), kept(was.history if was else [], at, about))
-                staged = self.path.with_suffix(".staged")
-                staged.write_text(json.dumps([_stored(each) for each in beats.values()]))
-                staged.replace(self.path)
+                _replaced(self.path, json.dumps([_stored(each) for each in beats.values()]).encode())
 
         await asyncio.to_thread(noted)
 

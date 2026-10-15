@@ -2,6 +2,7 @@
 reference to a checkpoint finds one by a bookmark, by the run and step that made it, or by its id."""
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -44,6 +45,26 @@ async def test_a_runs_name_is_chosen_changed_and_unique_while_its_id_stays(tmp_p
     with pytest.raises(Taken):
         await registry.create("anything", first.id)  # an id is had once
     assert [each.name for each in await registry.runs()] == ["diamonds, unguided", "diamonds"]
+
+
+async def test_the_registry_and_a_runs_directory_are_on_disk_before_they_replace_what_was_there(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    synced: list[int] = []
+    sync = os.fsync
+
+    def synced_too(handle: int) -> None:
+        synced.append(handle)
+        sync(handle)
+
+    monkeypatch.setattr(os, "fsync", synced_too)
+    await registered(FileLedger(tmp_path / "files")).create("first")
+    assert synced and sorted(path.name for path in (tmp_path / "files").iterdir()) == [".lock", "registry.json"]
+    synced.clear()
+    database = DatabaseLedger(f"sqlite:///{tmp_path / 'ledger.db'}")  # (whose writes are SQLite's own)
+    entry = await run_of(tmp_path / "run", database, database.registry)
+    assert synced and [path.name for path in (tmp_path / "run").iterdir()] == ["run.json"]
+    assert json.loads((tmp_path / "run" / "run.json").read_text()) == {"id": entry.id}
 
 
 @pytest.mark.parametrize("kind", ["files", "database"])
