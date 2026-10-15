@@ -15,7 +15,7 @@ services:
       POSTGRES_PASSWORD: rollout
       POSTGRES_DB: rollout
     command: ["postgres", "-c", "max_connections=400"]  # each runner holds a pool of connections
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]  # (this machine alone: the credentials are well known)
     volumes: ["postgres:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "rollout"]
@@ -28,7 +28,7 @@ services:
       ROOT_ACCESS_KEY_ID: rollout
       ROOT_SECRET_ACCESS_KEY: rollout-secret
     command: ["--port", ":7070", "posix", "/data"]
-    ports: ["7070:7070"]
+    ports: ["127.0.0.1:7070:7070"]
     volumes: ["s3:/data"]
 
   buckets:  # creates the blob bucket once the gateway answers, then exits
