@@ -174,6 +174,7 @@ async def test_refused_pairs_run_nothing_and_a_failed_bridge_makes_no_files(
     refused = path("full", {"peft"})
     assert isinstance(refused, NoBridge) and "not an adapter" in refused.reason
     assert isinstance(path("full", {"tinker"}), NoBridge)
+    pytest.importorskip("rollout_tinker", reason="the failing bridge is Tinker's, which the workspace's extras install")
     ledger_at, blobs_at = locations(tmp_path)
     tinker = by_name("peft-from-tinker")  # (full weights are no Tinker checkpoint: its task fails)
     with pytest.raises(RayTaskError, match="name no sampler checkpoint"):
