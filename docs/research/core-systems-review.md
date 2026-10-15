@@ -47,18 +47,18 @@ answer is lost, when a value is out of range, or when imported code is hostile.
 
 | System | Findings | Fixed here | Proposed |
 |---|---|---|---|
-| [Episode runners and the driver](#1-episode-runners-and-the-driver) | 13 | 9 | 4 |
+| [Episode runners and the driver](#1-episode-runners-and-the-driver) | 14 | 9 | 5 |
 | [The ledger and its service](#2-the-ledger-and-its-service) | 9 | 6 | 3 |
 | [Launching and job status](#3-launching-and-job-status) | 11 | 9 | 2 |
-| [The gateway and inference](#4-the-gateway-and-inference) | 11 | 10 (one in part) | 1, and the rest of one |
+| [The gateway and inference](#4-the-gateway-and-inference) | 12 | 10 (one in part) | 2, and the rest of one |
 | [The harness and sandboxes](#5-the-harness-and-sandboxes) | 7 | 7 | |
 | [Pods](#6-pods) | 10 | 9 | 1 |
 | [Run settings and validation](#7-run-settings-and-validation) | 12 | 11 | 1 |
-| [The trainers](#8-the-trainers) | 6 | 3 | 3 |
+| [The trainers](#8-the-trainers) | 7 | 3 | 4 |
 | [The monitor](#9-the-monitor) | 10 | 7 | 3 |
 | [The deployment](#10-the-deployment) | 10 | 2 (one in part) | 8, and the rest of one |
 | [Environments and the process](#11-environments-and-the-process) | 7 | 4 | 1 (and two observations) |
-| **All** | **106** | **77** | **27** |
+| **All** | **109** | **77** | **30** |
 
 Every change to code has a test that fails without it. With them, on Linux without the GPU extras (a plain `uv sync`),
 ruff and its formatter pass, `helm lint` passes, the monitor page's checks pass (`tsc`, eslint, 117 vitest tests), and
@@ -130,6 +130,11 @@ failures is right, and dropping overlong samples matches DAPO's overlong filteri
 (a context overflow, a task error from its own output) then carries no gradient at all. *Proposed:* an optional floor
 score (`advantage.failed`) given to failed, not excluded episodes that have trained segments, never to a lost sandbox
 or a start that failed.
+
+**T13 · medium · proposed.** `RT/loop.py`, `OBJ/terms.py`: `max_lag` bounds the checkpoint a turn begins on, not
+how many steps it waits before it trains, so a long episode's early turns can be many checkpoints old by the step that
+trains them, with truncated importance weights as the only guard (from the second earlier review). *Proposed:* mask a
+token sampled more than `importance.max_age` checkpoints before the step's start, or mask (`icepop`) by default.
 
 **T12 · scale · proposed.** Each runner's look, at least every 0.5 s, reads every fence ever taken (one per episode),
 every beat, `SELECT DISTINCT name` over all records, every run's plans and pause state, and six whole tables of each
@@ -285,6 +290,11 @@ the temperature in the trainers (R4).
 **G9 · low · fixed.** Errors outside the model-endpoint contract (an engine's 400, a `KeyError`) left the OpenAI and
 Anthropic handlers as plain-text 500s the official clients cannot read.
 
+**G11 · low · proposed.** A channel keeps `max_lag + 1` adapters loaded, and an engine's LoRA slots
+(`VLLM_MAX_LORAS`, `VllmEngine(max_loras=2)`) are set apart from it, with nothing checking that they cover the windows
+of the runs it serves; raising `max_lag` past them makes vLLM swap adapters in and out. Size a local engine's slots from
+its runs' windows, and have an engine host say in its beat when its windows exceed them.
+
 **G10 · low · proposed.** The spending cap is checked before a turn and counted after, so turns in flight overshoot
 it; reserve an estimate under a lock. A spending cap reached is a 503, which the client retries six times; it should
 be a refusal that is not retried.
@@ -435,6 +445,11 @@ trainer's own, which its gradient pass computes anyway, in both; they now agree 
 *Proposed:* record both on turns and segments; scale logits by the temperature in the LoRA trainer; refuse top-p
 below 1, and Tinker at any temperature but 1. (Refused at the gateway for now: G7.)
 
+**R7 · low · proposed.** With `old_logprobs = "sampler"` (the default), a segment of a later minibatch sampled on the
+step's weights still starts from the engine's logprobs, so its clipped ratio holds the engine's disagreement (about
+0.016 nats a token, with a long tail) and its importance weight is 1. Measure what `trainer` costs (a pass without a
+gradient) against what it buys, and make it the default if the pass is cheap enough.
+
 **R5 · low · proposed.** Warmup counts updates from each step's start, so it stops at the first step's end.
 
 **R6 · low · proposed.** The out-of-memory recovery uses FSDP2 internals that `torch>=2.5` does not guarantee (they
@@ -556,6 +571,18 @@ can only run where they are installed; a CI job for it needs `uv sync --all-extr
 | CI runs no tests | Confirmed; fixed (X1) |
 | The README's quick start fails | Confirmed; fixed (X2) |
 
+## The second earlier review's claims
+
+A second review (of Rollout, Iso and Inframe, taken at the same commit) made five claims about Rollout:
+
+| Claim | Verdict |
+|---|---|
+| Engine logprobs stand in for the trainer's at a step's start (`old_logprobs = "sampler"`), the clip spending its range on the engine's disagreement, `mean_mismatch` leaving those segments out, and the docstring saying first-minibatch ratios are 1 | Confirmed; fixed for the first minibatch (R1): its segments take the trainer's own logprobs, so their ratios are exactly 1 again, as the docstring says, and they count in `mean_mismatch`. A later minibatch's segment sampled on the step's weights still takes the engine's, by the setting's design (it saves a pass without a gradient); whether `trainer` should be the default is proposed, to be measured (R7) |
+| No staleness cap when a turn is trained | Confirmed (T13): `max_lag` bounds the checkpoint a turn begins on, not how many steps it waits before it trains, so a long episode's early turns can be many checkpoints old; truncated importance weights are the only guard. The README said `max_lag` bounds how stale a turn can be; it now says what it bounds. *Proposed:* a training-time bound (`importance.max_age`: mask a token sampled more than N checkpoints before the step's start), or masking (`icepop`) by default |
+| The ledger can record work twice in narrow windows | Known and documented (`ledger-guarantees.md`), each window pinned by a strict-xfail test; not counted here |
+| Temperature and top-p are not tied to the trainer | Confirmed, latent; refused at the gateway now (G7), proposed in full (R4) |
+| Adapters kept can exceed the engine's LoRA slots | Confirmed (G11, low): a channel keeps `max_lag + 1` adapters and `VLLM_MAX_LORAS` (or `VllmEngine(max_loras=2)`) is set apart from it; the docs ask an operator to keep it at least the sum of the windows, and nothing checks it, so raising `max_lag` past it makes vLLM swap adapters (throughput, not correctness). *Proposed:* size a local engine's `max_loras` from its runs' windows, and have an engine host say in its beat when the windows it serves exceed its slots |
+
 ## What to do next
 
 In order of payoff over effort:
@@ -568,7 +595,8 @@ In order of payoff over effort:
    episodes.
 3. **Bound Postgres sessions** (L5): idle-in-transaction and lock timeouts, and keepalives.
 4. **Run pyright in CI**, on a runner with `uv sync --all-extras`, and the reference's check with it (X3).
-5. **Record the sampling distribution** (R4, G7): temperature and top-p on turns, scored by the trainers.
+5. **Record the sampling distribution, and bound a turn's age** (R4, G7, T13): temperature and top-p on turns,
+   scored by the trainers; a turn sampled too many checkpoints before its step masked.
 6. **Move the trainers' settings into `rollout-train`** (C5), so that validation is whole on any machine.
 7. **Migration tools** (L6): copy every table, checked against the schema.
 8. **A failure floor** (T11): an option to give failures the policy causes a score.

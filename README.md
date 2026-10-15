@@ -11,8 +11,9 @@ on a Kubernetes cluster.
   Responses and Anthropic Messages, and records every token and logprob. Claude Code, Codex or your own loop can
   produce training data unchanged.
 - **Asynchronous, off-policy training.** Episodes keep playing while the trainer steps. Each turn records the
-  checkpoint that sampled it, `max_lag` bounds how stale a turn can be (you can change it mid-run), and importance
-  weights correct for the rest. Whole multi-turn segments train together.
+  checkpoint that sampled it, `max_lag` bounds how many checkpoints behind the newest a turn may begin (you can change
+  it mid-run), and importance weights correct for the rest, including the steps a long episode's early turns wait
+  through before they train. Whole multi-turn segments train together.
 - **Training and inference backends.** Train with [Tinker](https://thinkingmachines.ai/tinker/), or with a LoRA or
   full-weight trainer on your own GPUs, and serve on [vLLM](https://github.com/vllm-project/vllm). Each checkpoint is
   converted for each inference backend.

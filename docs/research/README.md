@@ -28,7 +28,7 @@ pages are the reference; a design note never overrides them.
 - [Cleanup inventory](cleanup-inventory.md), **in progress**: what to remove and what to factor out, ranked, and the
   order of the removal commits.
 - [Core systems review](core-systems-review.md), **in progress**: every core system reviewed for what fails when an
-  operation raises, an answer is lost, a value is out of range or imported code is hostile; 106 findings, each traced
+  operation raises, an answer is lost, a value is out of range or imported code is hostile; 109 findings, each traced
   or reproduced, 77 fixed with a test, and the rest proposed in order.
 - [Scaling models and topologies](scaling-models-and-topologies.md), **trainer on several GPUs built, the rest
   proposed**: many more model families and sizes (MoE, hybrid attention, vision, up to a trillion parameters), tensor,
