@@ -56,6 +56,18 @@ MISSING = "missing"
 """The version of a topic that names nothing (a group that is not in the ledger)."""
 
 
+TOPICS = ("system", "machines", "queue", "launches", "offers", "presets", "evals", "environments",
+          "environment-versions", "imports", "feeds", "statistics", "checkpoints", "eval-subjects")  # fmt: skip
+"""The topics of one thing each; the others name what they are of after a slash (`PER`)."""
+PER = ("preset/", "environment/", "environment-version/", "checkpoint-evals/", "path/", "history/", "settings/",
+       "group/", "episode/")  # fmt: skip
+
+
+def is_topic(topic: str) -> bool:
+    """Whether the hub reads `topic` (`Hub.read`)."""
+    return topic in TOPICS or any(topic.startswith(each) and len(topic) > len(each) for each in PER)
+
+
 @dataclass(frozen=True)
 class Reading:
     body: bytes
@@ -105,13 +117,24 @@ class Hub:
             body = json.dumps(payload, separators=(",", ":"), default=str).encode()
             version = MISSING if payload is None else self._version(topic, payload)
             reading = Reading(body, version, time.monotonic())
+            self._prune(reading.at)
             self._readings[topic] = reading
             return reading
 
+    def _prune(self, now: float) -> None:
+        """Let go of the readings no longer answered from (a beat old), the locks no reader holds, and what is known of
+        the episodes nobody watches."""
+        watched = {topic for topics, _ in self._watchers for topic in topics}
+        for topic in [topic for topic, kept in self._readings.items() if now - kept.at >= self.beat]:
+            del self._readings[topic]
+        for topic in [topic for topic, lock in self._locks.items() if not lock.locked() and topic not in watched]:
+            del self._locks[topic]
+        for topic in set(self._episodes) - watched:
+            del self._episodes[topic]
+
     def _version(self, topic: str, payload: Any) -> str:
         if topic.startswith("episode/"):
-            known = self._episodes[topic]
-            return f"{known.source}:{known.count}:{known.state}"
+            return f"{payload['source']}:{payload['lines']}:{payload['state']}"
         return version_of(payload)
 
     async def _payload(self, topic: str) -> Any:

@@ -9,6 +9,7 @@ import asyncio
 import io
 import json
 import statistics
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,11 @@ from rollout_train.registry import registry_of, run_of
 
 MAX_MESSAGE = 1900
 """Discord accepts 2,000 characters."""
+
+
+class NotPosted(RuntimeError):
+    """A post the webhook did not take: what it answered, or why it could not be reached (never its address, which is
+    a secret)."""
 
 
 def hours(lines: Sequence[Result]) -> list[float]:
@@ -215,7 +221,7 @@ def chart(
 
 
 async def post(webhook: str, text: str, image: bytes | None, *, client: httpx.AsyncClient | None = None) -> None:
-    """Send a message, with the chart attached, to a Discord webhook."""
+    """Send a message, with the chart attached, to a Discord webhook. Raises `NotPosted` where it is not taken."""
     owned = client is None
     client = client or httpx.AsyncClient(timeout=30)
     try:
@@ -225,10 +231,13 @@ async def post(webhook: str, text: str, image: bytes | None, *, client: httpx.As
             response = await client.post(webhook, json={"content": text})
         else:
             response = await client.post(webhook, data=payload, files=files)
-        response.raise_for_status()
+    except httpx.HTTPError as error:  # (its message may hold the webhook's address)
+        raise NotPosted(f"the webhook could not be reached ({type(error).__name__})") from None
     finally:
         if owned:
             await client.aclose()
+    if response.is_error:
+        raise NotPosted(f"the webhook refused the post ({response.status_code} {response.reason_phrase})".strip())
 
 
 async def report(
@@ -241,8 +250,10 @@ async def report(
     interval: float = 30.0,
 ) -> None:
     """Write `progress.png` and `progress.md` in the run's directory, and post them if a webhook is given; with
-    `watch`, again after every new group, until interrupted. The run's results, steps and checkpoints are read from
-    its ledger, wherever its directory says it is; the run is `run` (its id), by default the one in the directory."""
+    `watch`, again after every new group, until interrupted (a post the webhook does not take is said, and the next
+    one posted all the same). The run's results, steps and checkpoints are read from its ledger, wherever its
+    directory says it is; the run is `run` (its id), by default the one in the directory. Raises `NotPosted` for a post
+    not taken, without `watch`."""
     ledger = of_run(directory)
     entry = await run_of(directory, ledger, registry_of(ledger))
     run, title = run or entry.id, entry.name
@@ -262,7 +273,12 @@ async def report(
             if image is not None:
                 (directory / "progress.png").write_bytes(image)
             if webhook:
-                await post(webhook, text, image)
+                try:
+                    await post(webhook, text, image)
+                except NotPosted as error:
+                    if not watch:
+                        raise
+                    print(f"not posted: {error}", file=sys.stderr, flush=True)
             print(text, flush=True)
         if not watch:
             return

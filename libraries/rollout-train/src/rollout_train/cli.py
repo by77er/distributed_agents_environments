@@ -121,6 +121,7 @@ async def _asked(
     from rollout_train.run_settings import from_file, from_flags, layered, shortcuts
     from rollout_train.stores import Stores
     from rollout_train.submitting import ask, submit
+    from rollout_train.validation import completed
 
     cluster = _cluster_of(arguments.cluster)
     stores = Stores.open(cluster)
@@ -165,7 +166,7 @@ async def _asked(
 
         if not ray.is_initialized():
             await asyncio.to_thread(connect, cluster.ray.address)
-        launch = await ask(settings, stores.ledger, preset=preset)
+        launch = await ask(completed(settings, cluster), stores.ledger, preset=preset)  # (as `submit` records it)
         print(f"{settings['name']} ({launch.run}): launch {launch.id}, run here", flush=True)
         return await driven(launch.id, cluster, stores)
     launch = await submit(settings, cluster, stores.ledger, preset=preset)
@@ -656,6 +657,7 @@ async def _rename(who: str, name: str, where: "str | Stores") -> None:
 
 @_user_errors
 async def _pause_or_resume(command: str, who: str, where: "str | Stores", arguments: argparse.Namespace) -> None:
+    from rollout_train.launches import FAILED
     from rollout_train.launching import Refused
     from rollout_train.registry import registry_of, run_id
     from rollout_train.resuming import IN_PLACE, pause, resume
@@ -674,9 +676,11 @@ async def _pause_or_resume(command: str, who: str, where: "str | Stores", argume
     if resumed.how == IN_PLACE:
         print(f"{who} goes on")
     else:
-        assert resumed.launch is not None
-        print(f"{who} is launched again: launch {resumed.launch.id}, job {resumed.launch.job} "
-              f"({resumed.launch.state})")  # fmt: skip
+        launch = resumed.launch
+        assert launch is not None
+        print(f"{who} is launched again: launch {launch.id}, job {launch.job} ({launch.state})")
+        if launch.state == FAILED:
+            raise SystemExit(launch.detail or "its job could not be made")
 
 
 @_user_errors
@@ -1234,10 +1238,14 @@ def main() -> None:
         ))  # fmt: skip
         return
     if arguments.command == "report":
-        from rollout_train.report import report
+        from rollout_train.report import NotPosted, report
 
         webhook = arguments.webhook or os.environ.get("DISCORD_WEBHOOK_URL")
-        asyncio.run(report(arguments.directory, named(arguments.environment).rows(), webhook, watch=arguments.watch))
+        try:
+            asyncio.run(report(arguments.directory, named(arguments.environment).rows(), webhook,
+                               watch=arguments.watch))  # fmt: skip
+        except NotPosted as error:
+            raise SystemExit(str(error)) from None
     if arguments.command in ("monitor", "tools"):
         import uvicorn
 
@@ -1256,11 +1264,14 @@ def main() -> None:
             importer = Importer.of(cluster) if cluster is not None else None
             token = _monitor_token(cluster, arguments.host, arguments.port)
             app = create_app(where, importer=importer, cluster=cluster, token=token, hosts=arguments.allow_host)
+            # (the scheme a proxy in front says, from any address: it decides only whether the cookie is `Secure`)
+            proxied: dict[str, Any] = {"proxy_headers": True, "forwarded_allow_ips": "*"}
         else:
             from rollout.harness.remote import serve
 
             app = serve(named(arguments.factory)(arguments.directory))
-        uvicorn.run(app, host=arguments.host, port=arguments.port, log_level="warning")
+            proxied = {}
+        uvicorn.run(app, host=arguments.host, port=arguments.port, log_level="warning", **proxied)
 
 
 if __name__ == "__main__":

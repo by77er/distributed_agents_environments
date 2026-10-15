@@ -18,7 +18,8 @@ the Python environment it runs in, and recorded as a version beside the ledger (
    packages there.
 3. **Pack** (`packed`): the project's files in one zip, stored uncompressed, sorted, with fixed times and modes, so the
    same files are the same bytes wherever they are packed; without `.git`, `.venv`, `node_modules` and caches
-   (`EXCLUDED`) or symbolic links. The version's id is the zip's SHA-256.
+   (`EXCLUDED`) or symbolic links. The version's id is the SHA-256 of the zip and the entry point (`version_id`):
+   each environment a project declares is a version of its own.
 4. **Store** (`stored`): the zip as a blob, and where Ray fetches it as a runtime environment's `working_dir`. Ray
    tells an archive by its name, so a store in S3 hands Ray a copy of the blob's object named `KEY.zip`
    (`s3://BUCKET/KEY.zip`, which each node of a run's Ray cluster reads with the run's credentials), and a store of
@@ -89,6 +90,7 @@ __all__ = [
     "report",
     "runtime_env_of",
     "stored",
+    "version_id",
 ]
 
 GROUP = "rollout.environments"
@@ -207,7 +209,7 @@ async def publish(
         data = await asyncio.to_thread(packed, project.directory)
     finally:
         await asyncio.to_thread(shutil.rmtree, work, ignore_errors=True)
-    id = hashlib.sha256(data).hexdigest()
+    id = version_id(data, project.entry_point)
     found = await versions.get(id)
     if found is not None:
         return Published(found, existing=True)
@@ -227,6 +229,11 @@ async def publish(
     )  # fmt: skip
     kept = await versions.record(version)
     return Published(kept, existing=kept is not version)
+
+
+def version_id(data: bytes, entry_point: str) -> str:
+    """A version's id: the SHA-256 of its project's zip and its entry point (the zip alone is its blob's)."""
+    return hashlib.sha256(data + b"\0" + entry_point.encode()).hexdigest()
 
 
 async def fetched(url: str, ref: str | None, into: Path) -> tuple[Path, str]:

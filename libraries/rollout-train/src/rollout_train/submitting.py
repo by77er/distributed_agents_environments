@@ -80,6 +80,13 @@ __all__ = [
 
 TAIL = 2000
 """Characters of a failed job's output or message kept as why it failed."""
+ANSWER = 30.0
+"""Seconds Ray's job server is given to answer a call (its client waits as long as the server takes)."""
+STOP_GRACE = 120
+"""Seconds a stopped Ray job's driver is given to end its run (to cancel its episodes, release its pods and note that
+it stopped) before Ray kills it (`STOP_WAIT`, 3 by default)."""
+STOP_WAIT = "RAY_JOB_STOP_WAIT_TIME_S"
+"""The environment variable of a Ray job's runtime environment that says how long Ray waits for its stopped driver."""
 GROUP = "ray.io"
 VERSION = "v1"
 """The RayJob custom resource's API group and version (KubeRay 1.x)."""
@@ -98,6 +105,9 @@ class JobState:
 
     state: str
     detail: str | None = None
+    gone: bool = False
+    """Whether the job is no more (its RayJob deleted, or its Ray job unknown to the job server): failed, unless it
+    was asked to stop."""
 
 
 class Backend(Protocol):
@@ -146,26 +156,40 @@ class RayJobs:
             self._client = JobSubmissionClient(self.address)
         return self._client
 
+    async def _called(self, method: str, *arguments: Any, **given: Any) -> Any:
+        """What the job client's `method` answers, called in a thread (where the client is made too: making it asks
+        the server its version) and given `ANSWER` seconds. Raises `TimeoutError` where the server does not answer in
+        time, and what the client raises (`RuntimeError` for any answer but 200)."""
+
+        def called() -> Any:
+            return getattr(self.client(), method)(*arguments, **given)
+
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(called), ANSWER)
+        except TimeoutError:
+            raise TimeoutError(f"Ray's job server at {self.address} did not answer in {ANSWER:.0f} s") from None
+
     async def start(
         self, launch: Launch, entrypoint: str, runtime_env: Mapping[str, JsonValue], asked: Demand | None = None
     ) -> str:
         metadata = {"kind": launch.asked.kind, "launch": launch.id, "name": launch.asked.name}
         cpus = asked.driver.cpus if asked is not None else 1
         return str(
-            await asyncio.to_thread(
-                self.client().submit_job, entrypoint=entrypoint, submission_id=job_name(launch),
-                runtime_env=dict(runtime_env), entrypoint_num_cpus=cpus, metadata=metadata,
+            await self._called(
+                "submit_job", entrypoint=entrypoint, submission_id=job_name(launch), runtime_env=dict(runtime_env),
+                entrypoint_num_cpus=cpus, metadata=metadata,
             )
         )  # fmt: skip
 
     async def status(self, job: str) -> JobState:
         from ray.job_submission import JobStatus
 
-        client = self.client()
         try:
-            info = await asyncio.to_thread(client.get_job_info, job)
-        except RuntimeError as error:  # (a job the server does not know: its cluster was started again)
-            return JobState(FAILED, f"Ray job {job} is not known to the job server: {error}")
+            info = await self._called("get_job_info", job)
+        except RuntimeError as error:
+            if "status code 404" not in str(error):  # (the server, or a proxy before it, failing now: read again later)
+                raise
+            return JobState(FAILED, f"Ray job {job} is not known to the job server: {error}", gone=True)
         status = info.status
         message = str(getattr(info, "message", "") or "")
         if status == JobStatus.PENDING:
@@ -178,12 +202,12 @@ class RayJobs:
             return JobState(STOPPED, f"stopped (Ray job {job})")
         output = ""
         with contextlib.suppress(Exception):
-            output = str(await asyncio.to_thread(client.get_job_logs, job))
+            output = str(await self._called("get_job_logs", job))
         return JobState(FAILED, f"Ray job {job} failed: {(output or message)[-TAIL:].strip()}")
 
     async def stop(self, job: str) -> None:
-        with contextlib.suppress(Exception):  # (a job that ended already)
-            await asyncio.to_thread(self.client().stop_job, job)
+        with contextlib.suppress(Exception):  # (a job that ended already, or was never made)
+            await self._called("stop_job", job)
 
 
 class KubernetesApi:
@@ -490,11 +514,13 @@ class RayJobResources:
     async def status(self, job: str) -> JobState:
         found = await self.api.get(self.section.namespace, job)
         if found is None:
-            return JobState(FAILED, f"its RayJob {job} is gone")
+            return JobState(FAILED, f"its RayJob {job} is gone", gone=True)
         status = cast(dict[str, Any], found.get("status") or {})
         job_status = str(status.get("jobStatus") or "")
         deployment = str(status.get("jobDeploymentStatus") or "")
         message = str(status.get("message") or status.get("reason") or "")
+        if deployment == "Retrying":  # (its job failed, and KubeRay starts it again: its status says FAILED meanwhile)
+            return JobState(SUBMITTED, f"its job is started again: {message[-TAIL:]}".rstrip(": "))
         if job_status == "SUCCEEDED" or (deployment == "Complete" and job_status in ("", "SUCCEEDED")):
             return JobState(ENDED, "ended")
         if job_status == "STOPPED":
@@ -506,7 +532,7 @@ class RayJobResources:
         if dict(found.get("spec") or {}).get("suspend"):
             return JobState(SUBMITTED, await self._admission(found))
         waiting = {"": "its Ray cluster is being made", "Initializing": "its Ray cluster is starting",
-                   "Waiting": "waits for its Ray cluster", "Retrying": "its job is started again"}  # fmt: skip
+                   "Waiting": "waits for its Ray cluster"}  # fmt: skip
         return JobState(SUBMITTED, message or waiting.get(deployment, f"its RayJob is {deployment.lower()}"))
 
     async def _admission(self, found: Mapping[str, Any]) -> str:
@@ -560,20 +586,20 @@ def entrypoint_of(launch: Launch, cluster: Cluster) -> str:
 
 
 async def runtime_env_of(launch: Launch, cluster: Cluster, ledger: Ledger) -> dict[str, JsonValue]:
-    """The Ray runtime environment of a launch's job: the cluster config as JSON (`ROLLOUT_CLUSTER_JSON`), in the
-    runtime environment of the published version it plays, if it plays one. Raises `KeyError` for a published version
-    the ledger does not keep."""
-    handed: dict[str, JsonValue] = {"env_vars": {HANDED: json.dumps(dict(cluster.described))}}
+    """The Ray runtime environment of a launch's job: the cluster config as JSON (`ROLLOUT_CLUSTER_JSON`) and the time
+    its driver is given to stop (`STOP_GRACE`), in the runtime environment of the published version it plays, if it
+    plays one. Raises `KeyError` for a published version the ledger does not keep."""
+    handed: dict[str, JsonValue] = {HANDED: json.dumps(dict(cluster.described)), STOP_WAIT: str(STOP_GRACE)}
     environment = launch.asked.environment
     if environment is None or not is_published(environment):
-        return handed
+        return {"env_vars": handed}
     versions = environment_versions_of(ledger)
     version = await versions.get(environment) if versions is not None else None
     if version is None:
         raise KeyError(f"there is no published environment {environment}")
     found: dict[str, JsonValue] = dict(version.runtime_env)
     variables = dict(cast(Mapping[str, JsonValue], found.get("env_vars") or {}))
-    found["env_vars"] = {**variables, HANDED: json.dumps(dict(cluster.described))}
+    found["env_vars"] = {**variables, **handed}
     return found
 
 
@@ -608,10 +634,15 @@ def demand_of(launch: Launch, cluster: Cluster) -> Demand:
 
 
 async def start(launch: Launch, cluster: Cluster, ledger: Ledger, backend: Backend | None = None) -> Launch:
-    """Start a recorded launch's job; the launch, submitted (or failed, saying why the job could not be made)."""
+    """Start a recorded launch's job; the launch, submitted (or failed, saying why the job could not be made). The
+    job's name is noted on the launch before the job is made, so a stop reaches a job made by a start that was cut
+    short; a launch stopped before then makes none."""
     launches = launches_of(ledger)
     assert launches is not None
     backend = backend or backend_of(cluster)
+    named = await launches.note(launch.id, expect=(ASKED,), job=job_name(launch), backend=backend.name)
+    if named.state != ASKED:
+        return named
     try:
         runtime_env = await runtime_env_of(launch, cluster, ledger)
         asked = demand_of(launch, cluster)
@@ -682,7 +713,7 @@ async def followed(
         if launch.state == SUBMITTED:
             return await launches.note(launch.id, expect=(SUBMITTED,), state=RUNNING)
         return launch
-    if said.state == ENDED and launch.state == STOPPING:
+    if launch.state == STOPPING and (said.state == ENDED or said.gone):  # (a RayJob deleted to stop it is gone)
         return await launches.note(launch.id, expect=(STOPPING,), state=STOPPED, detail="stopped")
     return await launches.note(launch.id, expect=OPEN, state=said.state, detail=said.detail)
 
@@ -694,13 +725,18 @@ async def stopped(
     *,
     backends: Mapping[str, Backend] | None = None,
 ) -> Launch:
-    """Ask a launch to stop: one whose job was not made yet is stopped at once; a job going is asked to stop, and its
-    driver notes its run stopped. Raises `KeyError` for a launch that is not going."""
+    """Ask a launch to stop: one whose job was not made yet is stopped at once (and the job it names, if a start that
+    was cut short made it); a job going is asked to stop, and its driver notes its run stopped. Raises `KeyError` for a
+    launch that is not going."""
     if launch.state not in OPEN:
         raise KeyError(f"there is no launch {launch.id} going")
     if launch.state == ASKED:
         noted = await launches.note(launch.id, expect=(ASKED,), state=STOPPED, detail="stopped")
         if noted.state == STOPPED:
+            backend = _backend(noted, cluster, backends)
+            if backend is not None and noted.job is not None:
+                with contextlib.suppress(Exception):  # (its job may not be made yet: its start then stops it)
+                    await backend.stop(noted.job)
             return noted
         launch = noted
     noted = await launches.note(launch.id, expect=(SUBMITTED, RUNNING, STOPPING), state=STOPPING)

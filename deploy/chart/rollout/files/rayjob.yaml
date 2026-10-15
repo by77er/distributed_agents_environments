@@ -41,6 +41,7 @@ spec:
           {{- if .Values.rayjob.gpus }}
           runtimeClassName: nvidia
           {{- end }}
+          terminationGracePeriodSeconds: 150  # (the driver's way out: rollout_train.submitting.STOP_GRACE, and some)
           containers:
             - name: ray-head
               image: {{ include "rollout.image" . }}

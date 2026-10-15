@@ -20,7 +20,7 @@ from rollout_train.launching import Refused as LaunchRefused
 from rollout_train.layout import LEDGER
 from rollout_train.ledger import FENCES, LOCATION, FileLedger
 from rollout_train.monitor.access import guarded, hosts_of, new_token
-from rollout_train.monitor.stream import BEAT, MISSING, Hub, Reading
+from rollout_train.monitor.stream import BEAT, MISSING, Hub, Reading, is_topic
 from rollout_train.monitor.system import RELAYED, System
 from rollout_train.publishing import Importer, Refused
 from rollout_train.registry import Taken
@@ -129,7 +129,7 @@ def create_app(
     - `/api/statistics`: every run of the ledger in figures and the engines' throughput (`System.statistics`);
     - `/api/runs`: every episode in the runs' feeds, summarised;
     - `/api/stream?topic=...`: server-sent events, a `version` event (`{"topic", "version"}`) for each topic at once
-      and then each time it changes (`rollout_train.monitor.stream`);
+      and then each time it changes (`rollout_train.monitor.stream`; 400 for a topic there is none of);
     - `POST /api/rename` (`{"id", "name"}`): calls a run by a new name (`System.rename`);
     - `POST /api/bookmarks` (`{"name", "checkpoint"}`): makes a bookmark name a checkpoint, or moves it there
       (`System.bookmark`); `DELETE /api/bookmarks/{name}` takes it away (`System.unbookmark`). Each answers 200 with
@@ -190,7 +190,12 @@ def create_app(
         return answered(request, await hub.read(f"group/{run}/{number}"))
 
     async def episode(request: Request) -> Response:
-        after = int(request.query_params.get("after", "0"))
+        try:
+            after = int(request.query_params.get("after", "0"))
+        except ValueError:
+            after = -1
+        if after < 0:
+            return JSONResponse({"error": "after is a whole number, 0 or more"}, status_code=400)
         return JSONResponse(await system.episode(request.path_params["run_id"], after, RELAYED in request.headers))
 
     async def checkpoints(request: Request) -> Response:
@@ -229,6 +234,8 @@ def create_app(
 
     async def stream(request: Request) -> Response:
         topics = request.query_params.getlist("topic") or ["system"]
+        if unknown := [each for each in topics if not is_topic(each)]:
+            return JSONResponse({"error": f"no such topic: {', '.join(unknown)}"}, status_code=400)
 
         async def events() -> AsyncGenerator[str]:
             yield f"retry: 2000\nevent: hello\ndata: {json.dumps({'beat': hub.beat})}\n\n"

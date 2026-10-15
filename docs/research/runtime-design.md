@@ -799,10 +799,10 @@ later, behind the same published versions ([writing an environment others can im
   ref (a branch, a tag or a commit), the project's `pyproject.toml` and its entry point (`module:name`, declared in the
   entry-point group `rollout.environments`, or named), the project's directory packed into one zip (stored uncompressed,
   sorted, with fixed times and modes, without `.git`, `.venv` and caches) and kept as a blob. The version's id is the
-  zip's SHA-256, so the same source is the same version and importing it again returns it. Versions are kept beside the
-  ledger (`rollout_train.published`: the `environment_versions` table of a database ledger, a file per version beside a
-  ledger of files), each with its name, source URL, ref, commit, subdirectory, entry point, blob, runtime environment,
-  what it says of itself and its check's findings.
+  SHA-256 of the zip and the entry point, so the same source is the same version of an environment and importing it
+  again returns it. Versions are kept beside the ledger (`rollout_train.published`: the `environment_versions` table of
+  a database ledger, a file per version beside a ledger of files), each with its name, source URL, ref, commit,
+  subdirectory, entry point, blob, runtime environment, what it says of itself and its check's findings.
 - **Resolve**: a launch names a version as `NAME@VERSION`, and the run's start records it (`published`: name, id,
   source, ref, commit, subdirectory, entry point). Launchers on Ray offer every version the ledger keeps beside the
   environments they name, so the New run form lists them; the profile is picked at launch, as for any environment.

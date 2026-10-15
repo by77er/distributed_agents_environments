@@ -33,6 +33,7 @@ from rollout_train.publishing import (
     report,
     runtime_env_of,
     stored,
+    version_id,
 )
 from tests.rollout_train.sources import TINY, commit, git, repository, tiny
 
@@ -259,7 +260,7 @@ async def test_the_check_is_handed_the_zip_itself_so_the_cluster_checking_it_hol
         assert not await asyncio.to_thread(Path(local).exists)  # (removed once checked)
 
 
-async def test_an_import_records_a_version_whose_id_is_the_zip_and_the_same_source_is_that_version(
+async def test_an_import_records_a_version_of_its_zip_and_entry_point_and_the_same_source_is_that_version(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = repository(tmp_path / "source", tiny(src=True), under="envs/words")
@@ -275,8 +276,10 @@ async def test_an_import_records_a_version_whose_id_is_the_zip_and_the_same_sour
         "envs/words",
         "words:environment",
     )
-    assert version.blob["sha256"] == version.version and version.dependencies == ("rollout", "rollout-train")
-    package = tmp_path / "blobs" / "packages" / f"{version.version}.zip"
+    data = (tmp_path / "blobs" / "packages" / f"{version.blob['sha256']}.zip").read_bytes()
+    assert version.version == version_id(data, "words:environment") != version.blob["sha256"]  # (the zip's alone)
+    assert version.dependencies == ("rollout", "rollout-train")
+    package = tmp_path / "blobs" / "packages" / f"{version.blob['sha256']}.zip"
     assert version.runtime_env == {"working_dir": str(package), "env_vars": {"PYTHONPATH": "src"}}
     assert checks == [
         {"jobs": "http://ray:8265", "entry_point": "words:environment", "runtime_env": version.runtime_env}
@@ -288,6 +291,26 @@ async def test_an_import_records_a_version_whose_id_is_the_zip_and_the_same_sour
     changed = await published_with(tmp_path, asked, monkeypatch, checks)
     assert not changed.existing and changed.version.version != version.version
     assert not list((tmp_path / "scratch").iterdir())  # (clones are removed once read)
+
+
+async def test_each_environment_a_project_declares_is_a_version_of_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    files = tiny()
+    files["pyproject.toml"] = files["pyproject.toml"].replace(
+        'words = "words:environment"', 'words = "words:environment"\nagain = "words:again"'
+    )
+    files["words/__init__.py"] += "\nagain = Words()\n"
+    source = repository(tmp_path / "source", files)
+    checks: list[dict[str, Any]] = []
+    words = await published_with(tmp_path, Source(str(source), None, "", "words"), monkeypatch, checks)
+    again = await published_with(tmp_path, Source(str(source), None, "", "again"), monkeypatch, checks)
+    assert not again.existing and again.version.version != words.version.version  # (one zip, two environments)
+    assert (again.version.name, again.version.entry_point) == ("again", "words:again")
+    assert again.version.blob == words.version.blob and [each["entry_point"] for each in checks] == [
+        "words:environment",
+        "words:again",
+    ]
 
 
 async def test_an_import_is_refused_without_a_clone_a_pyproject_or_an_entry_point(

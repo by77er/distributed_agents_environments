@@ -1,10 +1,14 @@
 """Starting a run's job: `submit` records the launch and the run, and starts `python -m rollout_train.jobs LAUNCH` as a
-Ray job (handed the cluster config, in a published version's runtime environment where it plays one, asking for its
-driver's CPUs) or as a RayJob made from the cluster's template, sized from the run's demand and, with Kueue, suspended
-in its queue; `followed` notes what the job's status says (a RayJob Kueue holds waits for admission, saying why), and
-`stopped` stops it."""
+Ray job (handed the cluster config and the time its driver is given to stop, in a published version's runtime
+environment where it plays one, asking for its driver's CPUs) or as a RayJob made from the cluster's template, sized
+from the run's demand and, with Kueue, suspended in its queue, its name noted on the launch before it is made;
+`followed` notes what the job's status says (a RayJob Kueue holds waits for admission, saying why; one KubeRay starts
+again goes on; a job server that fails a moment says nothing), and `stopped` stops it (a job gone once it was asked to
+stop is stopped)."""
 
+import asyncio
 import json
+import threading
 import tomllib
 from pathlib import Path
 from typing import Any, cast
@@ -14,13 +18,28 @@ import pytest
 import yaml
 from pydantic import JsonValue
 
+from rollout.testing import until
+from rollout_train import submitting
 from rollout_train.cluster import HANDED, Cluster, load, parsed
 from rollout_train.demand import demand
-from rollout_train.launches import ENDED, FAILED, RUNNING, STOPPED, STOPPING, SUBMITTED, TRAIN, launch_of, launches_of
+from rollout_train.launches import (
+    ASKED,
+    ENDED,
+    FAILED,
+    RUNNING,
+    STOPPED,
+    STOPPING,
+    SUBMITTED,
+    TRAIN,
+    launch_of,
+    launches_of,
+)
 from rollout_train.published import environment_versions_of
 from rollout_train.run_settings import RunSettings
 from rollout_train.stores import Stores
 from rollout_train.submitting import (
+    STOP_GRACE,
+    STOP_WAIT,
     KubernetesApi,
     RayJobResources,
     RayJobs,
@@ -129,6 +148,7 @@ async def test_a_run_is_submitted_as_a_ray_job_handed_the_cluster_config(tmp_pat
     assert given["entrypoint"] == f"python -m rollout_train.jobs {launch.id}"
     assert given["entrypoint_num_cpus"] == 0.5  # (its driver's: its loop, gateway and runner)
     assert json.loads(given["runtime_env"]["env_vars"][HANDED]) == dict(cluster.described)
+    assert given["runtime_env"]["env_vars"][STOP_WAIT] == str(STOP_GRACE)  # (Ray gives a stopped driver 3 s else)
     assert given["submission_id"] == launch.job and given["metadata"]["launch"] == launch.id
     gsm8k = await submit(settings(environment="rollout_verifiers.environments:gsm8k", name="gsm8k"), cluster,
                          stores.ledger, backend=RayJobs("x", jobs))  # fmt: skip
@@ -149,6 +169,7 @@ async def test_a_run_on_a_published_environment_is_a_job_in_its_versions_runtime
     assert environment["working_dir"] == version.runtime_env["working_dir"]
     own = cast(dict[str, Any], version.runtime_env.get("env_vars") or {})
     assert environment["env_vars"][HANDED] and set(own) <= set(environment["env_vars"])
+    assert environment["env_vars"][STOP_WAIT] == str(STOP_GRACE)
     unknown = await submit(settings(environment=f"words@{'0' * 64}", name="other"), cluster, stores.ledger,
                            backend=RayJobs("x", jobs))  # fmt: skip
     assert unknown.state == FAILED and "no published environment" in str(unknown.detail) and launch.job
@@ -311,7 +332,11 @@ async def test_a_run_on_kubernetes_is_a_rayjob_made_read_and_deleted_through_the
     stopping = await stopped(other, launches, cluster, backends=backends)
     assert stopping.state == STOPPING and server.deleted == [other.job]
     gone = await followed(stopping, launches, cluster, backends=backends)
-    assert gone.state == FAILED and "is gone" in str(gone.detail)
+    assert gone.state == STOPPED  # (its RayJob is gone because it was asked to stop: before its driver said so)
+    third = await submit(settings(name="third"), cluster, stores.ledger, backend=backends["kubernetes"])
+    del server.jobs[str(third.job)]
+    lost = await followed(third, launches, cluster, backends=backends)
+    assert lost.state == FAILED and "is gone" in str(lost.detail)  # (gone without a stop: failed)
 
 
 async def test_the_namespaces_pod_security_labels_are_checked(tmp_path: Path) -> None:
@@ -366,3 +391,96 @@ async def test_a_rayjob_kueue_holds_waits_for_admission_and_says_why(tmp_path: P
     made["spec"]["suspend"] = False  # (admitted)
     made["status"] = {"jobDeploymentStatus": "Running", "jobStatus": "RUNNING"}
     assert (await followed(why, launches, cluster, backends=backends)).state == RUNNING
+
+
+async def test_a_job_server_that_fails_a_moment_leaves_a_launch_as_it_was_and_one_that_does_not_know_its_job_fails_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cluster, jobs = a_cluster(tmp_path), Jobs()
+    stores = Stores.open(cluster)
+    launches = launches_of(stores.ledger)
+    assert launches is not None
+    backends = {"ray": RayJobs("x", jobs)}
+    launch = await submit(settings(), cluster, stores.ledger, backend=backends["ray"])
+    jobs.status = "RUNNING"
+    running = await followed(launch, launches, cluster, backends=backends)
+    answers: list[str] = []
+
+    def info(job: str) -> Any:
+        raise RuntimeError(f"Request failed with status code {answers[-1]}.")  # (Ray's client, for any but 200)
+
+    jobs.get_job_info = info  # type: ignore[method-assign]
+    for answer in ("502: Bad Gateway", "503: upstream connect error", "500: Internal Server Error"):
+        answers.append(answer)
+        assert await followed(running, launches, cluster, backends=backends) == running  # (read again later)
+    release = threading.Event()
+    jobs.get_job_info = lambda job: release.wait(5)  # type: ignore[method-assign]
+    monkeypatch.setattr(submitting, "ANSWER", 0.05)
+    with pytest.raises(TimeoutError, match="did not answer in"):
+        await backends["ray"].status(str(launch.job))
+    assert await followed(running, launches, cluster, backends=backends) == running  # (a server that hangs)
+    release.set()
+    stopping = await stopped(running, launches, cluster, backends=backends)
+    assert stopping.state == STOPPING and jobs.stopped == [launch.job]  # (it can still be stopped)
+    answers.append("404: Job run-x does not exist.")
+    jobs.get_job_info = info  # type: ignore[method-assign]
+    unknown = await followed(await launch_of(launches, launch.id), launches, cluster, backends=backends)
+    assert unknown.state == STOPPED  # (asked to stop, and gone)
+    other = await submit(settings(name="other"), cluster, stores.ledger, backend=backends["ray"])
+    failed = await followed(other, launches, cluster, backends=backends)
+    assert failed.state == FAILED and "not known to the job server" in str(failed.detail)
+
+
+async def test_a_rayjob_kuberay_starts_again_goes_on(tmp_path: Path) -> None:
+    cluster = a_cluster(tmp_path, kubernetes=True)
+    assert cluster.kubernetes is not None
+    stores = Stores.open(cluster)
+    launches = launches_of(stores.ledger)
+    assert launches is not None
+    server = FakeKubernetes()
+    api = KubernetesApi(cluster.kubernetes.api, token="t", transport=httpx.MockTransport(server.handle))
+    backends = {"kubernetes": RayJobResources(cluster.kubernetes, api)}
+    launch = await submit(settings(), cluster, stores.ledger, backend=backends["kubernetes"])
+    made = server.jobs[str(launch.job)]
+    lost = "Job entrypoint command failed with exit code -9"  # (its driver was killed: KubeRay's backoffLimit)
+    made["status"] = {"jobStatus": "FAILED", "jobDeploymentStatus": "Retrying", "message": lost}
+    waiting = await followed(launch, launches, cluster, backends=backends)
+    assert waiting.state == SUBMITTED and waiting.detail == f"its job is started again: {lost}"
+    running = await launches.note(launch.id, expect=(SUBMITTED,), state=RUNNING)  # (its driver started, then died)
+    assert (await followed(running, launches, cluster, backends=backends)).state == RUNNING  # (so the next one runs)
+    made["status"] = {"jobStatus": "FAILED", "jobDeploymentStatus": "Failed", "message": lost}  # (out of retries)
+    assert (await followed(running, launches, cluster, backends=backends)).state == FAILED
+
+
+async def test_a_jobs_name_is_noted_before_it_is_made_so_a_start_cut_short_leaves_no_job_out_of_reach(
+    tmp_path: Path,
+) -> None:
+    cluster = a_cluster(tmp_path)
+    stores = Stores.open(cluster)
+    launches = launches_of(stores.ledger)
+    assert launches is not None
+    making, made = threading.Event(), threading.Event()
+
+    class Slow(Jobs):
+        def submit_job(self, **given: Any) -> str:
+            making.set()
+            made.wait(5)  # (the job server takes a moment: the job is made all the same)
+            return super().submit_job(**given)
+
+    jobs = Slow()
+    backends = {"ray": RayJobs("x", jobs)}
+    starting = asyncio.ensure_future(submit(settings(), cluster, stores.ledger, backend=backends["ray"]))
+    await asyncio.to_thread(making.wait, 5)
+    starting.cancel()  # (an interrupt: Ctrl-C on `rollout train`)
+    with pytest.raises(asyncio.CancelledError):
+        await starting
+    made.set()
+    await until(lambda: jobs.submitted)
+    (launch,) = await launches.all()
+    assert launch.state == ASKED and launch.job == job_name(launch) and launch.backend == "ray"
+    stopping = await stopped(launch, launches, cluster, backends=backends)
+    assert stopping.state == STOPPED and jobs.stopped == [launch.job]  # (the job its start made is stopped)
+    asked = await submitting.ask(settings(name="never"), stores.ledger)
+    await stopped(asked, launches, cluster, backends=backends)  # (stopped before its job is made)
+    never = await submitting.start(asked, cluster, stores.ledger, backends["ray"])
+    assert never.state == STOPPED and len(jobs.submitted) == 1  # (no job made for it)

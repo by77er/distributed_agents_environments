@@ -98,8 +98,9 @@ monitors:
 A monitor whose Ingress is on answers at its host to whoever holds its token. Whoever holds it can import code from
 git and start runs on the cluster, so where people beyond the token's holders reach the host, put an authenticating
 proxy in front of it too: the ingress controller's basic authentication, or a single sign-on proxy such as
-oauth2-proxy. Serve it over TLS ([above](#tls)); the monitor marks its cookie `Secure` only where it sees https itself,
-so it is TLS in front of it that keeps the cookie off plain HTTP.
+oauth2-proxy. Serve it over TLS ([above](#tls)); the monitor marks its cookie `Secure` where the page is served over
+https, as the proxy in front of it says (`X-Forwarded-Proto`, which it takes from any address: it decides nothing
+else), so it is TLS in front of it that keeps the cookie off plain HTTP.
 
 With Traefik's basic authentication:
 

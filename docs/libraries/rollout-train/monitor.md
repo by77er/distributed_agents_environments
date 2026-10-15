@@ -57,8 +57,9 @@ its token (`rollout_train.monitor.access`):
   http://localhost:8765/login?token=…`). On Kubernetes it is the Secret `monitor-token`, which the chart makes
   ([opening the monitor](../../deploy/access.md#opening-the-monitor)).
 - **A browser signs in once**, by opening `/login?token=TOKEN`: the monitor sets a cookie that holds the token
-  (`HttpOnly`, `SameSite=Strict`, and `Secure` when the monitor is served over https) and goes on to the page. A page
-  that is not signed in shows a form that asks for the token instead. The page's requests are all to the monitor that
+  (`HttpOnly`, `SameSite=Strict`, and `Secure` when the monitor is served over https, by itself or by a proxy that
+  says so with `X-Forwarded-Proto`) and goes on to the page. A page that is not signed in shows a form that asks for
+  the token instead (`POST /login`, whose body is read up to 4 KiB: 413 past that). The page's requests are all to the monitor that
   served it, and each carries the cookie.
 - **A program** sends the token as `Authorization: Bearer TOKEN`. A monitor asks another monitor for a run's episodes
   this way, with its own token, so monitors that ask each other share one.
@@ -88,7 +89,7 @@ page draws each view from what it has read, and reads again only what the monito
   each reading a **version**, a hash of what it says (leaving out when it was read). Each beat it reads the ledger once
   for every topic watched (`System.one_reading`; a database ledger in one query, `read_all`).
 - **The stream.** `/api/stream?topic=…` is a stream of server-sent events: the version of each topic asked for at
-  once, then a `version` event each time one changes. The page watches the topics of the place shown (always
+  once, then a `version` event each time one changes (400 for a topic there is none of). The page watches the topics of the place shown (always
   `system` and `feeds`; the launches on Runs and New run; the queue on Runs, Machines and a run's page; a group, an episode, the statistics, the machines, the
   environments (with the imports on their list) and an environment, or the graph, as they are shown), and opens a new
   stream

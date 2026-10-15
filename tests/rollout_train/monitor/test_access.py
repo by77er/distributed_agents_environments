@@ -1,9 +1,11 @@
 """Who may use a monitor: its `/api/` answers only a request with its token (a bearer token, or the cookie signing in
 sets); it answers only under its own names; what changes something must say JSON and, where it says its origin, come
 from the monitor's own page. A page of another site cannot import an environment or launch a run through a browser,
-whether it posts plain text, posts from its own origin, or reaches the monitor by a name of its own (DNS rebinding)."""
+whether it posts plain text, posts from its own origin, or reaches the monitor by a name of its own (DNS rebinding).
+Signing in reads no more than a token; behind a proxy that serves the page over https, the cookie is `Secure`."""
 
 from pathlib import Path
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -46,6 +48,44 @@ async def test_signing_in_sets_a_cookie_the_page_then_reaches_the_api_with(tmp_p
         assert posted.status_code == 200 and posted.json() == {"signed_in": True}
         assert (await form.get("/api/system")).status_code == 200
         assert (await form.post("/login", json={"token": "wrong"})).status_code == 401
+
+
+async def test_signing_in_reads_no_more_than_a_token(tmp_path: Path) -> None:
+    async with client(tmp_path) as anyone:
+        json = {"Content-Type": "application/json"}
+        big = await anyone.post("/login", content=b" " * (1 << 20), headers=json)
+        assert big.status_code == 413  # (refused once it holds more than a token could)
+        deep = await anyone.post("/login", content=b"[" * 4000, headers=json)
+        assert deep.status_code == 401  # (JSON nested past what it reads: no token)
+
+
+async def test_behind_a_proxy_that_serves_the_page_over_https_the_cookie_is_secure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import uvicorn
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    from rollout_train.cli import main
+
+    served: dict[str, Any] = {}
+
+    def run(app: Any, **options: Any) -> None:
+        served.update(options, app=app)
+
+    monkeypatch.setattr(uvicorn, "run", run)
+    monkeypatch.setenv("ROLLOUT_MONITOR_TOKEN", TOKEN)
+    monkeypatch.setattr("sys.argv", ["rollout", "monitor", str(tmp_path)])
+    main()
+    assert served["proxy_headers"] is True
+    proxied = ProxyHeadersMiddleware(served["app"], trusted_hosts=served["forwarded_allow_ips"])  # (as uvicorn serves)
+    transport = httpx.ASGITransport(app=cast(Any, proxied), client=("10.42.0.7", 41234))  # (Traefik's, the tunnel's)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8765") as browser:
+        https = {"X-Forwarded-Proto": "https", "X-Forwarded-For": "203.0.113.9"}
+        signed = await browser.get("/login", params={"token": TOKEN}, headers=https)
+        cookie = {part.strip() for part in signed.headers["set-cookie"].split(";")}
+        assert signed.status_code == 303 and "Secure" in cookie
+        plain = await browser.get("/login", params={"token": TOKEN})
+        assert "Secure" not in plain.headers["set-cookie"]  # (no proxy saying https: served over http)
 
 
 def test_two_monitors_on_one_machine_keep_two_cookies() -> None:

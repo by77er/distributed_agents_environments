@@ -115,6 +115,7 @@ async def launching(tmp_path: Path, jobs: Jobs) -> tuple[Stores, httpx.AsyncClie
 
 
 async def test_the_page_is_offered_what_the_cluster_config_and_the_ledger_hold(tmp_path: Path) -> None:
+    pytest.importorskip("rollout_lora", reason="a LoRA trainer's settings are checked: the gpu extra installs them")
     _, client = await launching(tmp_path, Jobs())
     async with client:
         offers = (await client.get("/api/offers")).json()
@@ -149,6 +150,7 @@ async def test_the_page_is_offered_what_the_cluster_config_and_the_ledger_hold(t
 
 
 async def test_a_run_is_checked_asked_for_from_the_page_and_stopped(tmp_path: Path) -> None:
+    pytest.importorskip("rollout_lora", reason="a LoRA trainer's settings are checked: the gpu extra installs them")
     jobs = Jobs()
     stores, client = await launching(tmp_path, jobs)
     asked: dict[str, Any] = {

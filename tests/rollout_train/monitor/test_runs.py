@@ -1,4 +1,5 @@
-"""Every run of a shared ledger: where each one's episodes are read, and whether it is running."""
+"""Every run of a shared ledger: where each one's episodes are read, and whether it is running; what a monitor
+elsewhere said is kept only while it may be answered from."""
 
 import os
 import time
@@ -12,7 +13,7 @@ from pydantic import JsonValue
 from rollout_train.layout import FEED
 from rollout_train.ledger import Ledger
 from rollout_train.monitor import RunFeed, System
-from rollout_train.monitor.system import GONE, RELAYED, RUNNING
+from rollout_train.monitor.system import GONE, RELAYED, RUNNING, _Remote  # pyright: ignore[reportPrivateUsage]
 from rollout_train.presence import presence_of
 from rollout_train.record import GROUPS, RESULTS, STARTS, scope, table
 from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
@@ -154,6 +155,22 @@ async def test_a_monitor_elsewhere_that_does_not_answer_leaves_what_the_ledger_h
     asked = len(elsewhere.asked)
     await system.snapshot()
     assert len(elsewhere.asked) == asked  # (it is left a while before it is asked again)
+
+
+def test_what_a_monitor_elsewhere_said_is_kept_only_while_it_may_be_answered_from() -> None:
+    asked: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.path)
+        if request.url.path == "/api/runs":
+            return httpx.Response(200, json=[])
+        return httpx.Response(200, json={"run_id": "e", "source": "feed", "lines": [{"kind": "sample"}]})
+
+    remote = _Remote("http://elsewhere:8765", httpx.Client(transport=httpx.MockTransport(answer)))
+    for after in range(100):  # (an episode watched as it grows: asked from its count each beat)
+        assert remote.episode("e", after) is not None
+    assert remote.feeds() == [] and remote.feeds() == [] and asked.count("/api/runs") == 1  # (kept a while)
+    assert list(remote._kept) == ["/api/runs"]  # pyright: ignore[reportPrivateUsage]
 
 
 def test_the_monitor_opens_a_database_a_ledgers_directory_or_a_runs_directory(tmp_path: Path) -> None:

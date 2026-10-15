@@ -4,8 +4,9 @@ A monitor has one token (`ROLLOUT_MONITOR_TOKEN`, or the cluster config's `[moni
 up when it starts where none is set, and printed with its sign-in link). Every request under `/api/` carries it, as a
 bearer token (`Authorization: Bearer TOKEN`: a program, another monitor) or as the cookie a browser is given when it
 signs in: `/login?token=TOKEN`, opened once, sets the cookie and goes on to the page; `POST /login` with
-`{"token": TOKEN}` does the same from the page's own sign-in form. The cookie is `HttpOnly` and `SameSite=Strict`, so
-the page's scripts never read it and no other site's page sends it; it is `Secure` when the page is served over https.
+`{"token": TOKEN}` (no more than `SIGN_IN` bytes) does the same from the page's own sign-in form. The cookie is
+`HttpOnly` and `SameSite=Strict`, so the page's scripts never read it and no other site's page sends it; it is `Secure`
+when the page is served over https (by the monitor, or by a proxy in front of it that says so: `X-Forwarded-Proto`).
 The page itself and its scripts (`/`, `/assets/…`) hold nothing and need no token.
 
 Besides the token (`guarded`):
@@ -47,6 +48,8 @@ SAFE = ("GET", "HEAD")
 """Methods that change nothing."""
 MONTH = 30 * 24 * 3600
 """Seconds a browser keeps the sign-in cookie."""
+SIGN_IN = 4096
+"""Bytes a sign-in's body may hold: a token, as JSON."""
 
 
 def new_token() -> str:
@@ -113,8 +116,12 @@ class _Guard:
             said = parse_qs(scope.get("query_string", b"").decode()).get("token", [None])[0]
         elif scope["method"] == "POST":
             body: Any = None
-            with contextlib.suppress(ValueError):
-                body = json.loads(await _body(receive) or b"null")
+            read = await _body(receive, SIGN_IN)
+            if read is None:
+                await _answer(send, 413, {"error": f'sign in with {{"token": TOKEN}}, no more than {SIGN_IN} bytes'})
+                return
+            with contextlib.suppress(ValueError, RecursionError):
+                body = json.loads(read or b"null")
             given: Any = cast(dict[str, Any], body).get("token") if isinstance(body, dict) else None
             said = str(given) if given else None
         else:
@@ -175,11 +182,16 @@ def _cookie_header(name: str, token: str, secure: bool) -> bytes:
     return "; ".join([*parts, *(["Secure"] if secure else [])]).encode("latin-1")
 
 
-async def _body(receive: Receive) -> bytes:
+async def _body(receive: Receive, limit: int) -> bytes | None:
+    """A request's body, if it holds no more than `limit` bytes (none, as soon as it holds more)."""
     chunks: list[bytes] = []
+    size = 0
     while True:
         message: Message = await receive()
         chunks.append(message.get("body", b""))
+        size += len(chunks[-1])
+        if size > limit:
+            return None
         if not message.get("more_body"):
             return b"".join(chunks)
 

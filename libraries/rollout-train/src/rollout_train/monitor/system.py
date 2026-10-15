@@ -78,7 +78,6 @@ from rollout_train.record import (
     mapping,
     named_runs,
     newest_record,
-    runs_in,
     table,
 )
 from rollout_train.record import scope as run_scope
@@ -262,7 +261,8 @@ class System:
         snapshot = await asyncio.to_thread(self._assembled, tables, fences, checkpoints, called, beats, relayed)
         store = desired_settings_of(self._ledger)
         for run in snapshot["runs"]:  # (whether it is wanted paused: its process notes it in its beats, `state`)
-            wanted = await store.desired(run["run"]) if store is not None and tables else None
+            live = run["state"] in (RUNNING, IDLE, PAUSED)
+            wanted = await store.desired(run["run"]) if store is not None and tables and live else None
             run["pause"] = wanted is not None and wanted.settings.get(PAUSE) is True
         return snapshot | {"names": called}
 
@@ -381,7 +381,11 @@ class System:
     async def preset(self, name: str) -> dict[str, Any] | None:
         """A preset's versions, oldest first; none where there is no such preset (or it was deleted)."""
         store = presets_of(self._ledger)
-        if store is None or await store.get(name) is None:
+        try:
+            found = await store.get(name) if store is not None else None
+        except ValueError:  # (a name no preset has: `NAME@N` with N no number)
+            found = None
+        if store is None or found is None:
             return None
         return {"name": name, "versions": [_preset(each) for each in await store.versions(name)]}
 
@@ -794,11 +798,11 @@ class System:
         beats = await self._beats()
         if not await asyncio.to_thread(present, self._ledger):
             return machines(beats, now=time.time())
-        fences = await self._ledger.fences()
-        claims = {run: await Claims.read(self._ledger, run) for run in await runs_in(self._ledger)}
+        fences, tables = await self._ledger.fences(), await self._tables()
+        claims = {run: _claims(tables, run) for run in named_runs(tables)}
         held = leases_of(self._ledger)
         followed = {str(beat.about.get("follows")) for beat in beats if kind_of(beat) == ENGINES}
-        serving = {run: await self._ledger.read(table(run, SERVING)) for run in followed}
+        serving = {run: tables.get(table(run, SERVING), {}) for run in followed}
         return machines(
             beats, now=time.time(), claims=claims, fences=fences, leases=await held.all() if held else [],
             serving=serving,
@@ -855,7 +859,7 @@ class System:
             return await read()
         if what not in self._reading:
             self._reading[what] = asyncio.ensure_future(read())
-        return await self._reading[what]
+        return await asyncio.shield(self._reading[what])  # (a reader that goes takes only itself, not the reading)
 
     async def _beats(self) -> list[Beat]:
         """Every runner's newest heartbeat (none where there is no ledger: reading makes none)."""
@@ -878,6 +882,17 @@ class System:
             return await self._ledger.read_all(leaving_out="/turns/")
 
         return cast(dict[str, dict[str, JsonValue]], await self._once("tables", read))
+
+    async def _ended_episodes(self) -> dict[str, dict[str, JsonValue]]:
+        """Every run's episodes table (the episodes that ended), by run: as the tables were read within a reading
+        (once a beat, for all), else read now, those tables alone."""
+        if self._reading is not None:
+            tables = await self._tables()
+        else:
+            named = [name for name in await self._ledger.tables() if name.endswith(f"/{EPISODES}")]
+            tables = {name: await self._ledger.read(name) for name in named}
+        found = {name: between(name, "runs/", f"/{EPISODES}") for name in tables}
+        return {run: tables[name] for name, run in found.items() if run is not None}
 
     async def _names(self) -> dict[str, Any]:
         """What the registry names (`rollout_train.registry.names`)."""
@@ -947,9 +962,8 @@ class System:
         per model slot) are drawn; what it reported when it ended; and where it sits: its run, its group and its
         labels. An episode of a run on another machine is asked of the monitor there."""
         if run_id not in self._ended_by_id and await asyncio.to_thread(present, self._ledger):
-            for name in await self._ledger.tables():
-                if (run := between(name, "runs/", f"/{EPISODES}")) is not None:
-                    _remembered(run, await self._ledger.read(name), self._records)
+            for run, lines in (await self._ended_episodes()).items():
+                _remembered(run, lines, self._records)
         known = self._ended_by_id.get(run_id)
         if known is not None and known[0] not in self._sources:  # (where its run's events are: found once)
             starts = await self._ledger.read(table(known[0], STARTS))
@@ -1233,7 +1247,10 @@ class _Remote:
             self.reached = True
         except (httpx.HTTPError, ValueError):
             found, self.reached = None, False
-        self._kept[path] = (time.time(), found)
+        now = time.time()  # (kept only while it may be answered from: `keep` seconds, or while there is no answer)
+        self._kept = {each: kept for each, kept in self._kept.items() if now - kept[0] < max(FRESH, UNANSWERED)}
+        if keep or found is None:
+            self._kept[path] = (now, found)
         return found
 
     def run(self, name: str) -> dict[str, Any] | None:
@@ -1629,6 +1646,13 @@ class _Played:
             "interrupted": self.interrupted,
             "sampled": self.sampled,
         }
+
+
+def _claims(tables: Mapping[str, Mapping[str, JsonValue]], run: str) -> Claims:
+    """A run's claims, from the tables as read (`Claims.read`'s, without reading them again)."""
+    made = {key: mapping(claim) for key, claim in tables.get(table(run, CLAIMS), {}).items()}
+    cut, done, adopted = (set(tables.get(table(run, name), {})) for name in (INTERRUPTED, EPISODES, ADOPTED))
+    return Claims(made, cut, done, adopted)
 
 
 def _remembered(

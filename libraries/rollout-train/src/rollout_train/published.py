@@ -2,11 +2,12 @@
 kept beside the ledger as ordinary state.
 
 A version (`EnvironmentVersion`) is a project's source, fetched at a commit and stored in the blob store as one zip,
-whose id is the zip's SHA-256: the same source is the same version, wherever it was fetched from. It says where the
-source came from (a git URL, the ref asked for, the commit that ref was, a subdirectory), the entry point
-(`module:name`) that makes the environment, the blob, the Ray runtime environment its code runs in (`runtime_env`), what
-the environment says of itself (`rollout_train.monitor.environments.described`) and what its check found. A version is
-recorded once and never changed: recording one that is there returns the one there.
+whose id is the SHA-256 of the zip and the entry point (`rollout_train.publishing.version_id`): the same environment of
+the same source is the same version, wherever it was fetched from. It says where the source came from (a git URL, the
+ref asked for, the commit that ref was, a subdirectory), the entry point (`module:name`) that makes the environment, the
+blob, the Ray runtime environment its code runs in (`runtime_env`), what the environment says of itself
+(`rollout_train.monitor.environments.described`) and what its check found. A version is recorded once and never changed:
+recording one that is there returns the one there.
 
 A published environment is named `NAME@VERSION` (`EnvironmentVersion.reference`) wherever a built-in one is named by
 `module:name`: in a launch, a run's start, a suite's entry (`is_published` tells the two apart).
@@ -45,7 +46,7 @@ __all__ = [
 ]
 
 VERSION = re.compile(r"[0-9a-f]{64}")
-"""A version's id: the SHA-256 of its source's zip, in lowercase hexadecimal."""
+"""A version's id: the SHA-256 of its source's zip and its entry point, in lowercase hexadecimal."""
 SHORT = 12
 """Characters of a version's id shown where a few are enough."""
 
@@ -56,7 +57,7 @@ class EnvironmentVersion:
     """The environment's name: its entry point's name in the project's `rollout.environments` group, else the
     project's name."""
     version: str
-    """The SHA-256 of its source's zip."""
+    """The SHA-256 of its source's zip and its entry point (`rollout_train.publishing.version_id`)."""
     source: str
     """The git URL it was fetched from."""
     ref: str | None

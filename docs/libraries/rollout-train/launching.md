@@ -44,9 +44,11 @@ python -m rollout_train.jobs LAUNCH
 in the interpreter its run starts in: its environment's own where the cluster config gives it one
 (`[environments."NAME"] interpreter`, or a project's `.venv`), else `[ray] python` (`platform`: the `python` on the
 job's `PATH`). Its runtime environment holds the cluster config as JSON (`ROLLOUT_CLUSTER_JSON`), so the job reads the
-config it was submitted with. A run on a published environment ([publishing](../../guide/publishing.md)) is a job in
-its version's Ray runtime environment, the config added to its environment variables: the driver imports the
-environment from the version's source.
+config it was submitted with, and the seconds Ray gives its driver to stop before it kills it
+(`RAY_JOB_STOP_WAIT_TIME_S`: `STOP_GRACE`, 120, where Ray's own is 3), time to cancel its episodes, release its pods and
+note that it stopped. A run on a published environment ([publishing](../../guide/publishing.md)) is a job in its
+version's Ray runtime environment, both added to its environment variables: the driver imports the environment from
+the version's source.
 
 ### A Ray job
 
@@ -94,7 +96,8 @@ on `workloads` in `kueue.x-k8s.io`.
 ## The launches table
 
 A launch is ordinary state beside the ledger, changed in place: `launches.json` beside a ledger of files, the
-`launches` table in a database ledger's database.
+`launches` table in a database ledger's database. A launch asked for again under the id it was recorded under (as a
+client of the ledger service does after a lost answer) is recorded once.
 
 | Field | Says |
 |---|---|
@@ -117,15 +120,21 @@ and may go where it is sent (`MOVES`):
 
 A launch is `asked` once recorded, `submitted` once its job is made, `running` once its driver starts (a driver may
 start before its submitter notes the job), `stopping` once a stop is asked for; it ends `ended`, `failed` or
-`stopped`. A finished launch goes nowhere, so a stop asked for while the job starts stays.
+`stopped`. A finished launch goes nowhere, so a stop asked for while the job starts stays. Its job's name is noted on
+it before the job is made (`asked` still), so a stop reaches a job whose submitter was interrupted while making it, and
+a launch stopped before then makes no job.
 
 The driver notes on its launch that it runs, what it waits for, and how it ended. `followed(launch, launches,
 cluster)` reads the job's status for a launch that is going and notes what the driver could not: a job that waits
-(with the job server's or KubeRay's reason), one that runs before its driver said so, one that ended, failed (with the
-end of its output or its RayJob's message) or was stopped, and a RayJob that is gone. The monitor reads every launch
-going so each time it reads the launches, and `rollout train` while it follows one. `stopped(launch, launches,
-cluster)` asks a launch to stop: one whose job is not made yet is `stopped` at once; a job going is asked to stop (a
-Ray job stopped, a RayJob deleted), and its driver notes its run stopped on the way out.
+(with the job server's or KubeRay's reason, and a RayJob KubeRay starts again, `Retrying`, as one that waits), one that
+runs before its driver said so, one that ended, failed (with the end of its output or its RayJob's message) or was
+stopped, and a job that is gone (a RayJob deleted, a Ray job its job server does not know: 404): `stopped` where a stop
+was asked for, else `failed`. A job server that fails a moment (any other answer, or none within `ANSWER`, 30 seconds)
+leaves the launch as it was, to be read again. The monitor reads every launch going so each time it reads the
+launches, and `rollout train` while it follows one. `stopped(launch, launches, cluster)` asks a launch to stop: one
+whose job is not made yet is `stopped` at once (and the job its name names stopped, should its interrupted submitter
+have made it); a job going is asked to stop (a Ray job stopped, a RayJob deleted), and its driver notes its run stopped
+on the way out.
 
 A launch record that names a profile is read as run settings (its environment, start, bookmark, groups,
 groups a step and seed, an eval's suite and episodes, and the settings it changed); `claimed` reads as `submitted`.
@@ -182,15 +191,18 @@ runs, which a test calls on a `Run` built directly:
    endpoint, with the key the driver's environment has (`ApiChannel`, [hosted APIs](gateway.md#hosted-apis)), its
    turns never trained on. The trained channel's longest turn is the trainer's longest segment
    (`trainer.segment_tokens`, else the trainer's in the config).
-5. **The runner.** An episode runner in the driver's process (`run/RUN`), with `episodes_at_once` places, over a
-   runner whose harnesses reach the gateway on this node (a free port on `127.0.0.1`); a pool of each kind of sandbox
-   the environment's programs declare, from the cluster's `[sandboxes.KIND]`: one with `on_pods` is the pools the run's
-   pods serve, as one (`PodPools`, named `KIND@RUN`, with a keeper; the pool at its `url`, if any, takes what they have
-   no room for), one with only a `url` is reached there, and any other is made here (its provider made with the run's
-   directory, `size` and its settings; named `KIND@RUN`; its leases beside the ledger, with a keeper); the tool sets of
-   the cluster's `[tools]`; the memory guards of `[guards]`; the monitor's feed in the run's directory. Where no pod of
-   the run's serves a kind and no `url` does, the run says so in its beat and on its launch, and once none has for 30
-   minutes it ends failed (`SandboxesUnserved`).
+5. **The runner.** An episode runner in the driver's process (`run/RUN`), with `episodes_at_once` places, over a runner
+   whose harnesses reach the gateway on this node (on `127.0.0.1`, a port the driver binds before the gateway serves on
+   it); a pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes.KIND]`: one
+   with `on_pods` is the pools the run's pods serve, as one (`PodPools`, named `KIND@RUN`, with a keeper; the pool at
+   its `url`, if any, takes what they have no room for), one with only a `url` is reached there, and any other is made
+   here (its provider made with the run's directory, `size` and its settings; named `KIND@RUN`; its leases beside the
+   ledger, with a keeper); the tool sets of the cluster's `[tools]`; the memory guards of `[guards]`; the monitor's feed
+   in the run's directory. Where no pod of the run's serves a kind and no `url` does, the run says so in its beat and on
+   its launch, and once none has for 30 minutes it ends failed (`SandboxesUnserved`). What runs beside the loop (the
+   runner, the gateway's server, a pool's keeper, the pods' renewals) ending with an error ends the run failed with it:
+   the runner itself looks again after a look that failed, and stops only once another took its fence under its name
+   (`Fenced`).
 6. **The loop of its kind**: `train`, `evaluate`, `imitate` or `check` ([training](training.md), [evals](evals.md),
    [datasets](datasets.md#a-step-on-a-dataset), [checking an environment](rollouts.md#checking-an-environment)), given
    what was built. The trained channel's files are made by the bridges from the trainer's format to what the channel's

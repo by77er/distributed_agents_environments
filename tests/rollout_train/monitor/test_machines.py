@@ -1,7 +1,8 @@
 """The Machines page's endpoint: every machine that beats and the roles on it, from fake heartbeats and the ledger: the
 runners and the episodes their claims hold, the pools and their leases, an engine host and how far behind its run's
 wanted checkpoint each engine is, a run's driver that waits for what it asked Ray for, a gateway; each alive or gone by
-the store's clock."""
+the store's clock. Within a reading, they are read from the tables the reading read, as where every run stands is
+(whether it is wanted paused asked only of the runs that go)."""
 
 import time
 from collections.abc import Mapping
@@ -22,6 +23,7 @@ from rollout_train.record import GROUPS, STARTS, scope, table
 from rollout_train.rollouts.scheduler import CLAIMS, runner_scope
 from rollout_train.sandboxes import POOL, FileLeases
 from rollout_train.serving import Serving, record_serving
+from rollout_train.settings import FileDesiredSettings
 
 pytest.importorskip("starlette")
 from tests.rollout_train.support import monitor_client
@@ -125,6 +127,39 @@ async def test_every_role_on_every_machine_with_what_it_holds(tmp_path: Path) ->
         ]
         again = await client.get("/api/machines", headers={"If-None-Match": answer.headers["ETag"]})
         assert again.status_code == 304  # (nothing changed: when it was read is not part of its version)
+
+
+async def test_within_a_reading_the_machines_and_the_runs_read_no_table_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = await scratch(tmp_path)
+    for number in range(20):  # (runs that ended long ago)
+        run = f"old-{number}"
+        fence = await ledger.take(scope(run))
+        await ledger.append(table(run, STARTS), "1", {"started": 1.0}, fence)
+        await ledger.append(table(run, CLAIMS), "1/1/1", {"runner": "gone", "at": 1.0, "fence": 1}, fence)
+    system = System(ledger=ledger)
+    reads: list[str] = []
+    asked: list[str] = []
+    read, desired = ledger.read, FileDesiredSettings.desired
+
+    async def counted(name: str) -> dict[str, JsonValue]:
+        reads.append(name)
+        return await read(name)
+
+    async def wanted(self: FileDesiredSettings, run: str) -> Any:
+        asked.append(run)
+        return await desired(self, run)
+
+    ledger.read = counted  # type: ignore[method-assign]
+    monkeypatch.setattr(FileDesiredSettings, "desired", wanted)
+    async with system.one_reading():
+        snapshot = await system.snapshot()
+        assert asked == [run["run"] for run in snapshot["runs"] if run["state"] in ("running", "idle", "paused")]
+        assert asked == ["train"]  # (the run that goes, not each that ended)
+        reads.clear()
+        shown = await system.machines()
+    assert reads == [] and [claim["run_id"] for claim in shown["runners"][0]["claims"]] == ["r_one", "r_two"]
 
 
 def beat(name: str, about: Mapping[str, JsonValue], *, age: float, at: float) -> Beat:

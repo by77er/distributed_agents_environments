@@ -1,17 +1,20 @@
 """The commands that ask for runs: `rollout train`, `eval`, `imitate` and `env check` build a run's settings in layers
 (`--preset`, `--settings`, `--set`, their flags), check them against the cluster config (`--check` stops there, saying
 each refusal with its setting), and submit the run's job (`--detach` returns once it is submitted) or run it in this
-process (`--here`); `rollout preset load` saves a directory of presets."""
+process (`--here`, its launch recorded as a submitted one is); `rollout preset load` saves a directory of presets;
+`rollout resume` fails, saying why, where the run's job cannot be made again."""
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from rollout_train import submitting
+from rollout_train import jobs as jobs_module
+from rollout_train import launching, resuming, submitting
 from rollout_train.cli import main
-from rollout_train.launches import SUBMITTED, launches_of
+from rollout_train.launches import FAILED, SUBMITTED, Asked, Launch, launches_of, new_launch
 from rollout_train.record import RESULTS, recorded_settings, table
 from rollout_train.stores import Stores
 from rollout_train.submitting import RayJobs
@@ -54,6 +57,7 @@ def a_preset(tmp_path: Path) -> Path:
 def test_a_run_is_checked_against_the_cluster_config_and_its_refusals_said(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    pytest.importorskip("rollout_lora", reason="a LoRA trainer's settings are checked: the gpu extra installs them")
     path = a_preset(tmp_path)
     assert command(monkeypatch, "train", WORDS, "--preset", "small", "--cluster", str(path), "--check") == 0
     said = capsys.readouterr().out
@@ -101,6 +105,64 @@ def test_a_run_asked_for_here_runs_its_job_in_this_process(
 
     results, settings = asyncio.run(recorded())
     assert len(results) == 2 and settings is not None and settings["trainer.provider"] == "steps"
+
+
+def test_a_run_asked_for_here_is_recorded_with_what_follows_from_its_settings_as_a_submitted_one_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ray
+
+    import rollout_train.recorder.renderers as renderers
+
+    cluster = a_cluster(tmp_path)
+
+    async def saved() -> None:  # (its renderer left to what its model says it is rendered by)
+        given = {key: value for key, value in POLICY.items() if key != "channels.policy.renderer"}
+        await Stores.open(cluster).presets.save("small", {**given, "environment": WORDS})
+
+    asyncio.run(saved())
+    monkeypatch.setattr(renderers, "known", lambda: {"plain": "rollout_train.testing:plain_renderer"})
+    monkeypatch.setattr(renderers, "rendered", lambda factory, name: name == "tiny")  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    driven: list[str] = []
+
+    async def drive(launch: str, cluster: Any, stores: Any) -> int:
+        driven.append(launch)
+        return 0
+
+    monkeypatch.setattr(jobs_module, "driven", drive)
+    monkeypatch.setattr(launching, "ray_free", lambda: None)
+    monkeypatch.setattr(ray, "is_initialized", lambda: True)
+    path = tmp_path / "cluster.toml"
+    assert command(monkeypatch, "train", WORDS, "--preset", "small", "--cluster", str(path), "--here") == 0
+
+    async def asked() -> list[Launch]:
+        launches = launches_of(Stores.open(cluster).ledger)
+        assert launches is not None
+        return await launches.all()
+
+    (launch,) = asyncio.run(asked())
+    assert driven == [launch.id]
+    said = launch.asked.settings
+    assert said["channels.policy.renderer"] == "rollout_train.testing:plain_renderer" and said["weights"] == "lora"
+
+
+def test_a_run_resumed_whose_job_cannot_be_made_again_fails_saying_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = a_preset(tmp_path)
+    stores = Stores.open(a_cluster(tmp_path))
+    run = asyncio.run(stores.registry.create("scout")).id
+    refused = "RuntimeError: the job server is not there"
+    failed = replace(new_launch(Asked(name="scout", resumes=run), run), state=FAILED, detail=refused)
+
+    async def relaunched(ledger: Any, who: str, **given: Any) -> resuming.Resumed:
+        return resuming.Resumed(who, resuming.LAUNCHED, failed)
+
+    monkeypatch.setattr(resuming, "resume", relaunched)
+    monkeypatch.setattr("sys.argv", ["rollout", "resume", "scout", "--cluster", str(path)])
+    with pytest.raises(SystemExit, match=refused):
+        main()
+    assert f"scout is launched again: launch {failed.id}" in capsys.readouterr().out
 
 
 def test_presets_are_loaded_from_a_directory_once_each(

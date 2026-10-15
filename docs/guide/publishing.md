@@ -108,13 +108,13 @@ PYTHONPATH=path/to/say-the-word uv run rollout env check words:environment
 
 ## Environment versions
 
-A version's id is the SHA-256 of the project's zip: the same files are the same version, from whatever URL or ref they
-were fetched, and importing them again returns the version recorded, without checking it again. A changed file is a new
-version. The [ledger](../libraries/rollout-train/checkpoints.md#the-ledger) keeps each version beside it
-(`rollout_train.published`): its name, source URL, the ref asked for and the commit it was, its subdirectory, entry
-point, the blob, its runtime environment, what it says of itself (its version, description, rows, eval data, curriculum
-and the kinds of sandbox its program declares, `sandboxes`, as its check found them) and the check's findings, and when
-it was imported.
+A version's id is the SHA-256 of the project's zip and the entry point: the same files are the same version of an
+environment, from whatever URL or ref they were fetched, and importing them again returns the version recorded, without
+checking it again. A changed file is a new version, and each environment a project declares is a version of its own. The
+[ledger](../libraries/rollout-train/checkpoints.md#the-ledger) keeps each version beside it (`rollout_train.published`):
+its name, source URL, the ref asked for and the commit it was, its subdirectory, entry point, the blob, its runtime
+environment, what it says of itself (its version, description, rows, eval data, curriculum and the kinds of sandbox its
+program declares, `sandboxes`, as its check found them) and the check's findings, and when it was imported.
 
 A cluster offers every version the ledger keeps, by `NAME@VERSION`, beside the environments its config names
 (`GET /api/offers`), and the New run form lists them; a run on one is asked for as on any environment, and is refused

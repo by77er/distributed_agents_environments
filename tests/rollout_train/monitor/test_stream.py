@@ -1,5 +1,6 @@
 """What changed, as it changes: the monitor's topics read at most once a beat, their versions, the answers that say
-nothing changed (304), the stream of versions, and a rename that every open page hears of."""
+nothing changed (304), the stream of versions (of the topics there are), and a rename that every open page hears of;
+a page that goes leaves the others hearing, and what nobody asks for any more is let go."""
 
 import asyncio
 import contextlib
@@ -20,6 +21,8 @@ from rollout_train.monitor.stream import MISSING, Hub, version_of
 from rollout_train.monitor.system import System
 from rollout_train.record import GROUPS, STARTS, scope, table
 from rollout_train.registry import registry_of
+from rollout_train.rollouts.episodes import Episode, Outcome, Record, Trajectory
+from rollout_train.rollouts.scheduler import EPISODES, runner_scope
 
 pytest.importorskip("starlette")
 from rollout_train.monitor.app import create_app
@@ -93,6 +96,88 @@ async def test_the_ledger_is_read_once_within_a_reading_whatever_topics_read_it(
     await system.snapshot()
     await system.snapshot()
     assert reads == 4  # (outside a reading, each read reads the ledger)
+
+
+async def test_a_watcher_that_goes_while_the_hub_reads_leaves_the_others_hearing(tmp_path: Path) -> None:
+    ledger = await a_run(tmp_path)
+    reading = asyncio.Event()
+    read_all = ledger.read_all
+
+    async def slow(*, leaving_out: str | None = None) -> dict[str, dict[str, JsonValue]]:  # (a big ledger)
+        reading.set()
+        await asyncio.sleep(0.2)
+        return await read_all(leaving_out=leaving_out)
+
+    ledger.read_all = slow  # type: ignore[method-assign]
+    hub = Hub(System(ledger=ledger), beat=0.01)
+    running = asyncio.create_task(hub.run())
+    page = hub.watch(["system"])
+    try:
+        await anext(page)
+        reading.clear()
+        await reading.wait()  # (the hub is inside its reading of the tables)
+        gone = asyncio.ensure_future(anext(hub.watch(["statistics"])))  # (a page that waits for the same reading)
+        await asyncio.sleep(0.05)
+        gone.cancel()  # (and goes)
+        with contextlib.suppress(asyncio.CancelledError):
+            await gone
+        await asyncio.sleep(0.3)
+        assert not running.done()
+        fence = await ledger.take(scope("train"))
+        await ledger.append(table("train", GROUPS), "2", {"task": "t004", "decided": 6.0, "episodes": 2}, fence)
+        assert (await asyncio.wait_for(anext(page), 5.0))[0] == "system"  # (the page that stayed hears on)
+    finally:
+        await page.aclose()
+        running.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await running
+
+
+async def test_the_hub_lets_go_of_what_nobody_asks_for(tmp_path: Path) -> None:
+    await a_run(tmp_path)
+    hub = Hub(System(tmp_path, FeedReader(tmp_path / FEED)), beat=0.0)
+    for number in range(50):
+        await hub.read(f"group/train/{number}")
+    assert len(hub._readings) <= 1 and len(hub._locks) <= 1  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_an_episode_playing_is_looked_for_in_the_tables_read_once_a_beat(tmp_path: Path) -> None:
+    ledger = FileLedger(tmp_path / LEDGER)
+    for run in ("one", "two", "three"):
+        fence = await ledger.take(scope(run))
+        await ledger.append(table(run, STARTS), "1", {"started": 1.0}, fence)
+        fence = await ledger.take(runner_scope(run))
+        trajectories = {"ada": Trajectory([], {"default": 1.0})}
+        episode = Episode(run, 1, 1, f"{run}-1", {"run": run}, Outcome.COMPLETED, trajectories=trajectories)
+        await ledger.append(table(run, EPISODES), "1/1", Record(episode).to_json(), fence)
+    system = System(ledger=ledger)
+    reads: list[str] = []
+    read = ledger.read
+
+    async def counted(name: str) -> dict[str, JsonValue]:
+        reads.append(name)
+        return await read(name)
+
+    ledger.read = counted  # type: ignore[method-assign]
+    async with system.one_reading():
+        await system.snapshot()
+        reads.clear()
+        assert (await system.episode("still-playing"))["source"] is None
+        assert reads == []  # (the tables the reading read, not each run's episodes again)
+    assert (await system.episode("still-playing"))["source"] is None
+    assert sorted(reads) == sorted(table(run, EPISODES) for run in ("one", "two", "three"))  # (those alone)
+
+
+async def test_a_topic_there_is_none_of_or_a_line_that_is_no_number_is_refused(tmp_path: Path) -> None:
+    await a_run(tmp_path)
+    async with monitor_client(tmp_path, beat=0.0) as client:
+        refused = await client.get("/api/stream", params={"topic": "nonsense"})
+        assert refused.status_code == 400 and "nonsense" in refused.json()["error"]
+        assert (await client.get("/api/stream", params={"topic": "group/"})).status_code == 400
+        for after in ("a", "-1", "²"):
+            assert (await client.get("/api/episodes/x", params={"after": after})).status_code == 400, after
+        assert (await client.get("/api/episodes/x", params={"after": "0"})).status_code == 200
+        assert (await client.get("/api/presets/x@abc")).status_code == 404
 
 
 async def test_a_watcher_hears_each_version_at_once_and_then_each_change(tmp_path: Path) -> None:
