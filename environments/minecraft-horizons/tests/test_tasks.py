@@ -60,6 +60,8 @@ def test_a_start_draws_training_worlds_and_evals_play_in_worlds_training_never_d
     assert len(starts) == len(rows)
     held_out = {start.parameters["world_seed"] for start in starts}  # type: ignore[index]
     assert held_out and not held_out & trained
+    worlds = {cast(dict[str, int], start.parameters)["world_seed"] for start in starts}
+    assert len(worlds) > 1 and len({start.seed for start in starts}) == len(starts)  # (each task a start of its own)
     for start in starts:
         names = cast(list[str], start.parameters["names"])  # type: ignore[index]
         assert 1 <= len(names) <= 4 and len(set(names)) == len(names)

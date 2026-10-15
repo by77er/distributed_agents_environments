@@ -3,7 +3,7 @@ gets."""
 
 import random
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -394,3 +394,14 @@ def test_the_curriculum_unlocks_by_solved_and_weighs_rows_by_differing_rewards_o
     assert curriculum.weight(second) == 1.0 + curriculum.floor and curriculum.record(second).success == 0.0
     played(third, [0.75, 0.25, 0.75, 0.125], [True, False, True, False])  # a mixed group: half solved
     assert len(curriculum.unlocked()) == 3 + 4 and curriculum.weight(third) == 1.0 + curriculum.floor
+
+
+def test_every_tasks_eval_start_is_drawn_with_a_seed_of_its_own_so_the_starts_differ() -> None:
+    teams = Teams()
+    starts = teams.evals()["teams-every-task"]
+    assert [start.task for start in starts] == [row.key for row in teams.rows()]
+    assert len({start.seed for start in starts}) == len(starts)
+    drawn = [cast(dict[str, Any], start.parameters) for start in starts]
+    assert len({(each["world_seed"], each["layout_seed"]) for each in drawn}) > len(starts) // 2
+    assert len({len(each["names"]) for each in drawn}) > 1  # (teams of several sizes, not all of one)
+    assert teams.evals() == {"teams-every-task": starts}  # (the same every time it is asked)

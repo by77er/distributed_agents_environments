@@ -2,9 +2,11 @@
 
 A row is a task; a start of it is a world, a layout and the names of a team of one to four, drawn at random: episodes
 given the same start begin identically. Its eval data is one start of every task (`teams-every-task`), which training
-never draws.
+never draws, each drawn with a seed of its row's own (`eval_seed`): the tasks are evaluated across worlds, layouts and
+teams, not all in one.
 """
 
+import hashlib
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -17,6 +19,12 @@ from rollout.environment import Description, Row, Start, drawn
 from rollout.harness import ProgramReference, register
 
 
+def eval_seed(row: Row) -> int:
+    """The seed a row's eval start is drawn with: its own, from its key, so that rows differ and a row added later
+    changes no other's."""
+    return int.from_bytes(hashlib.sha256(f"eval-{row.key}".encode()).digest()[:4]) >> 1
+
+
 @dataclass(frozen=True)
 class Teams:
     worlds: int = 12
@@ -25,7 +33,7 @@ class Teams:
     only: tuple[str, ...] = ()
     """Restrict the rows to these task ids (all tasks when empty)."""
     program: ProgramReference = field(default_factory=lambda: ProgramReference(program=register(TeamEpisode)))
-    version = "2"
+    version = "3"
     description = Description(rewards=(0.0, 1.0), saturated=True, duration="turns", observations="minecraft")
 
     def rows(self) -> Sequence[Row]:
@@ -45,7 +53,10 @@ class Teams:
         return {**row.parameters, "world_seed": world, "layout_seed": layout, "names": rng.sample(NAMES, players)}
 
     def evals(self) -> Mapping[str, Sequence[Start]]:
-        return {"teams-every-task": drawn(self, seeds=[1])}
+        rows = self.rows()
+        return {
+            "teams-every-task": [start for row in rows for start in drawn(self, seeds=[eval_seed(row)], rows=[row.key])]
+        }
 
 
 environment = Teams()

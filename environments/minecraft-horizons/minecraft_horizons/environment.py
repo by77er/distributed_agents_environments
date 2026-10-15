@@ -18,6 +18,7 @@ from pydantic import JsonValue
 
 from minecraft_horizons.episode import HorizonEpisode
 from minecraft_horizons.tasks import TASKS
+from minecraft_team.environment import eval_seed
 from minecraft_team.tasks import NAMES, TEAM
 from rollout.environment import Description, Row, Start
 from rollout.harness import ProgramReference, register
@@ -36,7 +37,7 @@ class Horizons:
     only: tuple[str, ...] = ()
     """Restrict the rows to these task ids (all tasks when empty)."""
     program: ProgramReference = field(default_factory=lambda: ProgramReference(program=register(HorizonEpisode)))
-    version = "1"
+    version = "2"
     description = Description(
         rewards=(0.0, None),
         saturated=False,
@@ -62,7 +63,9 @@ class Horizons:
         held_out = self._seeds("held-out-world", HELD_OUT_WORLDS)
         return {
             "horizons-held-out": [
-                Start(row.key, row.title, 1, self._start(row, random.Random(1), held_out)) for row in self.rows()
+                Start(row.key, row.title, seed, self._start(row, random.Random(seed), held_out))
+                for row in self.rows()
+                for seed in [eval_seed(row)]  # (a seed of the row's own: tasks are evaluated across worlds and teams)
             ]
         }
 
