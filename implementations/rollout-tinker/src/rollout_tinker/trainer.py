@@ -18,23 +18,26 @@ scale and the minibatch's units folded into the advantages, is one of them in va
 | no ratio (REINFORCE), no correction | any | `cross_entropy` | weights A·s/U |
 | no ratio, a weight | several | a forward pass for `old`, then `cross_entropy` | weights A·w·s/U |
 | token ratio, no correction | one | `cross_entropy` | weights A·s/U |
-| token ratio or none, a weight (truncated or not) | one | `cispo`, clipped to 0 .. the cap | behaviour; A·s/U |
+| token ratio or none, a token's weight (truncated or not) | one | `cispo`, clipped to 0 .. the cap | behaviour; A·s/U |
 | token ratio, clipped (PPO) | several | a forward pass for `old`, then `ppo` | old; A·w·s/U |
 | token ratio, weight clipped (CISPO) | several | a forward pass for `old`, then `cispo` | old; A·w·s/U |
 | token ratio, unclipped | several | a forward pass for `old`, then `importance_sampling` | old; A·w·s/U |
 | anything else | any | (a forward pass for `old` if several) then a custom loss | — |
 
-Anything else is a segment ratio, dual clipping, a mask, a KL penalty, a preference loss or a distillation (alone, or as
-a policy gradient's term: the teacher's scores are in the distilled items, and the student's logprobs are the sampled
-tokens'), and its custom loss is the objective itself. `ppo` and `cispo` are clipped to 1 - `clip.low` .. 1 +
-`clip.high`. `w` is the importance weight, `s` the aggregation's scale of each token (1 for a token mean or a sum, one
-over the segment's tokens for a segment mean, one over `constant_tokens` for `constant`) and `U` the minibatch's units.
-With one update `old` is the logprob now: a ratio is 1 and unclipped, so every clipped surrogate's gradient is the
-weighted advantage's, the forward-backward's own output is `old`, and no forward pass is needed. The custom loss (Tinker
-computes logprobs, the objective is computed here with its gradient, and Tinker takes a pass on a linear stand-in with
-that gradient) costs a forward pass more than a built-in loss. Tinker gives no reference logprobs, no entropies and no
-logprobs of tokens other than the sampled ones here, so an objective that reads any of them (the last: the top-k form
-of distillation) is refused (validation says so before a run starts).
+Anything else is a segment ratio, a segment's weight with one update, dual clipping, a mask, a KL penalty, a preference
+loss or a distillation (alone, or as a policy gradient's term: the teacher's scores are in the distilled items, and the
+student's logprobs are the sampled tokens'), and its custom loss is the objective itself. `ppo` and `cispo` are clipped
+to 1 - `clip.low` .. 1 + `clip.high`. `w` is the importance weight, `s` the aggregation's scale of each token (1 for a
+token mean or a sum, one over the segment's tokens for a segment mean, one over `constant_tokens` for `constant`) and
+`U` the minibatch's units. With one update `old` is the logprob now: a ratio is 1 and unclipped, so every clipped
+surrogate's gradient is the weighted advantage's, the forward-backward's own output is `old`, and no forward pass is
+needed. So it is for the first of several, which is sent as one update is (as the LoRA step's first minibatch takes its
+`old` from its own pass); the forward pass for `old` runs the later minibatches' segments, but those sampled on the
+weights the step starts from, whose `old` is the engine's (`old_logprobs`). The custom loss (Tinker computes logprobs,
+the objective is computed here with its gradient, and Tinker takes a pass on a linear stand-in with that gradient) costs
+a forward pass more than a built-in loss. Tinker gives no reference logprobs, no entropies and no logprobs of tokens
+other than the sampled ones here, so an objective that reads any of them (the last: the top-k form of distillation) is
+refused (validation says so before a run starts).
 
 Each minibatch's statistics are the objective's terms of the logprobs the forward-backward returns (the policy before
 that update), so a step's metrics are `PolicyStep`'s (`rollout_objectives.step.metrics`). It says how far a step has got
@@ -101,8 +104,9 @@ UNTRUNCATED = 1e9
 
 
 def route(objective: Objective, single: bool) -> str:
-    """How a minibatch of `objective` is sent to Tinker (`single`: the step makes one optimizer update): one of
-    Tinker's losses (`cross_entropy`, `importance_sampling`, `ppo`, `cispo`), `BEHAVIOUR_CISPO`, or `CUSTOM`."""
+    """How a minibatch of `objective` is sent to Tinker (`single`: it is the step's first update, on the weights the
+    step starts from, as the only update of a step that makes one is): one of Tinker's losses (`cross_entropy`,
+    `importance_sampling`, `ppo`, `cispo`), `BEHAVIOUR_CISPO`, or `CUSTOM`."""
     if objective.family == LIKELIHOOD:
         return "cross_entropy"
     if objective.family == PREFERENCE or objective.distills:
@@ -114,7 +118,7 @@ def route(objective: Objective, single: bool) -> str:
         return CUSTOM
     if objective.ratio == "none" or single:  # the gradient is the weighted advantage's: a ratio of 1 is not clipped
         if correction in ("truncate", "untruncated") and single:
-            return BEHAVIOUR_CISPO
+            return CUSTOM if objective.importance.level == "segment" else BEHAVIOUR_CISPO  # (cispo's is a token's)
         return "cross_entropy"
     return {"ratio": "ppo", "weight": "cispo", "none": "importance_sampling"}[objective.clip.kind]
 
@@ -228,18 +232,18 @@ class TinkerTrainer:
                 raise ValueError("a sampled token has no behavior logprob")
             segments[id(segment)] = _Segment(segment, rows(segment), behavior)
         updates = plan.minibatches(settings)
-        single = len(updates) == 1
-        way = route(objective, single)
         billed = 0.0
-        # Where the step starts, when more than one update needs it: a segment sampled on these weights at the
-        # logprobs the engine recorded (`old_logprobs`), and every other one's computed in a forward pass.
+        # Where the step starts, for the minibatches after the first (whose forward-backward, on these weights, finds
+        # its own segments'): a segment sampled on these weights at the logprobs the engine recorded (`old_logprobs`),
+        # and every other one's computed in a forward pass.
+        first = {id(each) for each in _segments(updates[0])} if updates else set()
         sampled: set[int] = set()
-        if objective.family != LIKELIHOOD and not single:
-            sampled = {id(segments_of(item)[0]) for item in plan.items if from_sampler(item, settings)}
+        if objective.family != LIKELIHOOD:
+            sampled = {id(segments_of(item)[0]) for item in plan.items if from_sampler(item, settings)} - first
             for key in sampled:
                 segments[key].old = segments[key].behavior
-        starting = [part for key, part in segments.items() if key not in sampled]
-        starts = objective.family != LIKELIHOOD and not single and bool(starting)
+        starting = [part for key, part in segments.items() if key not in sampled and key not in first]
+        starts = objective.family != LIKELIHOOD and bool(starting)
         stops = objective.family != LIKELIHOOD and settings.max_kl is not None
         tracked = StepProgress(self._told, max_kl=settings.max_kl if stops else None)
         sizes = [float(sum(len(each.tokens) for each in _segments(minibatch))) for minibatch in updates]
@@ -273,6 +277,7 @@ class TinkerTrainer:
                     if isinstance(item, Weighted | Distilled)
                 )
             rate = settings.rate(len(lines), fresh=fresh)
+            way = route(objective, update == 0)  # (the first: as a step of one update, on the weights it starts from)
             pending = await self._sent(client, minibatch, parts, count, way)
             billed += sum(len(part.segment.tokens) - 1 for part in parts) * (2 if way == CUSTOM else 1)
             if stops and update > 0:  # the distance, before the update
@@ -362,7 +367,7 @@ class TinkerTrainer:
 
     def _custom(self, minibatch: list[Item], parts: list[_Segment], count: float) -> Any:
         """The loss of a minibatch, as Tinker's custom loss takes it: the objective's terms of each datum's sampled
-        rows (the logprob at the step's start being, with one update, the logprob now)."""
+        rows (the logprob at the step's start being, in the first update, the logprob now)."""
         objective = self.settings.loss
 
         def loss(data: list[Datum], logprobs: list[torch.Tensor]) -> tuple[torch.Tensor, dict[str, float]]:
@@ -390,7 +395,7 @@ class TinkerTrainer:
         for part, found in zip(parts, out.loss_fn_outputs, strict=True):
             logprob = _logprobs(found)[part.rows]
             if part.old is None and objective.family != LIKELIHOOD:
-                part.old = logprob.clone()  # (one update: where the step starts is what the first pass found)
+                part.old = logprob.clone()  # (the first update: where the step starts is what its pass found)
             now[id(part.segment)] = logprob
         with torch.no_grad():
             if objective.family == PREFERENCE:

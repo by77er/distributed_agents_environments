@@ -265,7 +265,7 @@ def test_where_a_token_was_sampled_is_weighed_and_how_far_the_step_moves_it_is_c
     assert metrics["kl_floor"] == pytest.approx((0.05 - 0.05 - 3.0) / 3, rel=1e-4)
 
 
-def test_a_segment_sampled_on_the_weights_the_step_starts_from_starts_where_the_engine_said() -> None:
+def test_a_segment_sampled_on_the_weights_the_step_starts_from_starts_where_the_engine_said_after_the_first() -> None:
     policy = ToyPolicy()
     good = segment(policy, [1, 2, 3, 4], 1.0)
     # The engine computed the same weights a little differently from the trainer.
@@ -276,23 +276,55 @@ def test_a_segment_sampled_on_the_weights_the_step_starts_from_starts_where_the_
     stale = segment(policy, [1, 5, 6, 7], -1.0)  # (unmarked: sampled on older weights)
     again = Weighted(Segment(list(good.segment.tokens), good.segment.spans, shifted), 1.0, sampled_at_start=True)
     metrics = PolicyStep(policy, settings, progress=told.append).step([marked, again, stale], seed=0)  # type: ignore[arg-type]
-    # Only the stale segment is computed at the start, and only if the first minibatch is not its own.
-    assert metrics["old_from_sampler_fraction"] == pytest.approx(2 / 3)
-    assert max((each.packs for each in told if each.phase == START), default=0) <= 1
-    # Its ratios are of the engine's logprobs, so nothing is weighed for the difference.
+    # The seed takes `marked`, `stale`, then `again`: the first minibatch computes its own start, the second segment's
+    # is computed at the start, and only the third's is the engine's.
+    assert metrics["old_from_sampler_fraction"] == pytest.approx(1 / 3)
+    assert max((each.packs for each in told if each.phase == START), default=0) == 1
+    # Alone, it is the first minibatch's, which computes its start at no cost: its ratios start at 1, and the
+    # difference is weighed (as a step of one update on Tinker weighs it).
     policy = ToyPolicy()
     alone = PolicyStep(policy, StepSettings(learning_rate=0.05, tokens_per_step=100)).step([marked])  # type: ignore[arg-type]
-    assert alone["start_out_of_memory"] == 0 and alone["mean_weight"] == pytest.approx(1.0)
-    assert alone["truncated_fraction"] == 0.0 and alone["old_from_sampler_fraction"] == 1.0
-    assert alone["mean_ratio"] == pytest.approx((math.exp(-0.05) + math.exp(0.05) + math.exp(-0.1)) / 3, rel=1e-4)
-    # The trainer's own, where the settings ask for them: the ratios start at 1, and the difference is weighed.
+    assert alone["start_out_of_memory"] == 0 and alone["old_from_sampler_fraction"] == 0.0
+    assert alone["mean_ratio"] == pytest.approx(1.0) and alone["truncated_fraction"] == 0.0
+    assert alone["mean_weight"] == pytest.approx((math.exp(-0.05) + math.exp(0.05) + math.exp(-0.1)) / 3, rel=1e-4)
+    assert alone["mean_mismatch"] == pytest.approx((0.05 + 0.05 + 0.1) / 3, rel=1e-4)
+    # The trainer's own, where the settings ask for them, for every minibatch.
     policy = ToyPolicy()
-    trainer = StepSettings(learning_rate=0.05, tokens_per_step=100, old_logprobs="trainer")
-    computed = PolicyStep(policy, trainer).step([marked])  # type: ignore[arg-type]
-    assert computed["mean_ratio"] == pytest.approx(1.0) and computed["old_from_sampler_fraction"] == 0.0
-    assert computed["mean_mismatch"] == pytest.approx((0.05 + 0.05 + 0.1) / 3, rel=1e-4)
+    trainer = StepSettings(learning_rate=0.05, tokens_per_step=3, max_kl=5.0, old_logprobs="trainer")
+    computed = PolicyStep(policy, trainer).step([marked, again, stale], seed=0)  # type: ignore[arg-type]
+    assert computed["old_from_sampler_fraction"] == 0.0
     with pytest.raises(ValueError, match="old_logprobs"):
         StepSettings(old_logprobs="engine")
+
+
+class FirstPassUnfitting(ToyPolicy):
+    """A toy whose first pass with a gradient runs out of memory."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = False
+
+    def logprobs(self, tokens: Sequence[int], positions: Sequence[int]) -> torch.Tensor:
+        if torch.is_grad_enabled() and not self.failed:
+            self.failed = True
+            raise torch.OutOfMemoryError("out of memory")
+        return super().logprobs(tokens, positions)
+
+
+@pytest.mark.parametrize("unfitting", [False, True])
+def test_the_stop_reads_how_far_an_update_moved_the_policy_not_how_far_the_engine_was(unfitting: bool) -> None:
+    """Segments sampled on the weights the step starts from, by an engine 0.3 nats a token off the trainer: a
+    minibatch before any update whose start is the engine's (the second, where the first runs out of memory) finds the
+    policy that far from it, and the stop does not read it."""
+    policy = FirstPassUnfitting() if unfitting else ToyPolicy()
+    marked: list[Weighted] = []
+    for tokens in SAME_WAY:
+        sampled = segment(policy, tokens, 1.0).segment
+        engine = [value + 0.3 * (-1) ** place for place, value in enumerate(sampled.logprobs)]
+        marked.append(Weighted(Segment(tokens, sampled.spans, engine), 1.0, sampled_at_start=True))
+    settings = StepSettings(learning_rate=0.05, tokens_per_step=3, max_kl=0.02)
+    metrics = PolicyStep(policy, settings).step(marked)  # type: ignore[arg-type]
+    assert metrics["optimizer_steps"] >= 1 and metrics["minibatches_out_of_memory"] == float(unfitting)
 
 
 def test_a_marked_segment_without_a_behaviour_logprob_is_computed() -> None:

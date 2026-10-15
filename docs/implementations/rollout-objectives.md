@@ -32,7 +32,7 @@ libraries; it is installed with either the `gpu` or the `tinker` extra.
 | `rank` | The adapter's rank |
 | `learning_rate` | AdamW's learning rate. Adam moves a weight by at most this much per optimizer step |
 | `tokens_per_step` | Sampled tokens per optimizer step. How far a step moves the policy is set by how many optimizer steps its tokens make |
-| `max_kl` | The pass stops when the policy has moved this far from where the step began, in nats per token by the k3 estimate of KL(old ‖ now) on the sampled tokens (`None`: never). A likelihood step does not stop |
+| `max_kl` | The pass stops when the policy has moved this far from where the step began, in nats per token by the k3 estimate of KL(old ‖ now) on the sampled tokens (`None`: never), once the step has made an update. A likelihood step does not stop |
 | `max_gradient_norm` | Gradients are clipped to this norm before each optimizer step |
 | `passes` | Passes a step takes over its items, each shuffled anew and cut into minibatches of its own (1) |
 | `warmup_updates` | When a step's optimizer starts afresh, its rate rises linearly over its first this many updates, from `learning_rate / warmup_updates` (0: none) |
@@ -40,7 +40,7 @@ libraries; it is installed with either the `gpu` or the `tinker` extra.
 | `segments_per_step` | How many segments a step can afford (`None`: any number) |
 | `pack_tokens` | The most tokens one forward and backward pass runs: segments are packed into rows of up to this many (`None`: `segment_tokens`, or 8,192 where that is none, what the trainer's memory estimate allows for). A segment longer than it has a pack of its own |
 | `share_prefixes` | Whether segments of a pack that start with the same tokens share them (`True`) |
-| `old_logprobs` | Where old comes from for a segment sampled wholly on the weights the step starts from: `sampler` (the default), the behaviour logprobs the engine recorded, so the step does not compute them; `trainer`, computed by the trainer. A segment sampled on older weights, or with a token the engine gave no logprob, is computed either way |
+| `old_logprobs` | Where old comes from for a segment sampled wholly on the weights the step starts from, after the first minibatch: `sampler` (the default), the behaviour logprobs the engine recorded, so the step does not compute them; `trainer`, computed by the trainer. A segment of the first minibatch (whose own pass computes its old), sampled on older weights, or with a token the engine gave no logprob, is computed either way |
 | `objective` | The objective: an `Objective`, a preset's name, or a table of `preset` and component overrides. A run's `objective.*` settings give it |
 
 A trainer's own settings can also name the objective by `ratio`, `clip_low`, `clip_high`, `segment_clip_low`,
@@ -51,6 +51,12 @@ Between steps a trainer takes `learning_rate`, `tokens_per_step`, `max_kl`, `max
 numbers, by their run settings' keys (`objective.clip.low`, `objective.kl.coefficient`): `changeable` lists them for
 the objective's family.
 
+The numbers are checked when the settings are made and each time they change (`ValueError`, which leaves a running
+trainer's settings as they were): `rank`, `tokens_per_step`, `passes`, and `segment_tokens`, `segments_per_step` and
+`pack_tokens` where said, are whole numbers, 1 at least (`warmup_updates` 0 at least); `learning_rate` is a finite
+number, 0 at least; `max_gradient_norm`, and `max_kl` where said, finite numbers above 0. A run's validation makes the
+trainer's settings from its `trainer.*` keys, so that what they refuse refuses the run before it starts.
+
 ## The loss
 
 Four logprobs of each sampled token meet in it:
@@ -58,7 +64,7 @@ Four logprobs of each sampled token meet in it:
 | Logprob | Computed by | When |
 |---|---|---|
 | behavior | the engine | while sampling, under whichever [checkpoint](../libraries/rollout-train/checkpoints.md) was served then (recorded in the segment) |
-| old | the trainer, without a gradient; or the engine, where it sampled the segment on those weights (`old_logprobs`) | at the start of the step, on the weights the step starts from |
+| old | the trainer, without a gradient; or the engine, where it sampled the segment on those weights and the segment is not the first minibatch's (`old_logprobs`) | at the start of the step, on the weights the step starts from |
 | now | the trainer, with a gradient | in each minibatch, as the step updates the weights |
 | reference | the trainer, without a gradient | under the reference model: the base with the adapter switched off, or a frozen copy |
 
@@ -66,8 +72,10 @@ Behavior and old differ because the data came from elsewhere: an older checkpoin
 from the trainer. A segment sampled wholly on the weights the step starts from (the loop marks it, `sampled_at_start`)
 takes its behavior for its old unless `old_logprobs = "trainer"`: its ratios then start at the engine's numbers rather
 than exactly 1, about 0.01 nats a token off between vLLM's 4-bit kernels and the LoRA trainer's, and it needs no pass of
-its own. Old and now differ by how far the step has moved the policy. Now and reference differ by how far training has
-moved it from the base.
+its own. But not in the first minibatch, which runs on those weights: its pass computes its segments' old at no cost, so
+their ratios start at 1 and the engine's difference is the importance weight's (a step of one update reads the engine's
+logprobs for that weight only, as on Tinker). Old and now differ by how far the step has moved the policy. Now and
+reference differ by how far training has moved it from the base.
 
 ### A policy gradient
 
@@ -168,12 +176,12 @@ Which items, and with what advantages, is the [algorithm's](../libraries/rollout
    on the weights the step starts from (old), without a gradient, and the reference's where it is read; a weighted or
    distilled segment sampled wholly on those weights takes its behaviour logprobs instead (`old_logprobs`), and is
    computed in no pack here. The first minibatch of a policy gradient or a distillation runs on those weights, so its
-   segments' old is what it computes itself (with a gradient, detached) rather than a pass of their own; the result is
-   the same. Each other minibatch's start is computed in the packs that minibatch's own pass makes, so that on the
-   weights the step starts from its ratios are exactly 1 (in other packs bfloat16 rounds a segment's logprobs a little
-   differently). A behaviour logprob that is not finite fails the step only where an importance correction reads it. A
-   pack that does not fit the GPU here runs again a segment at a time, and a segment that does not fit alone is left out
-   and counted.
+   segments' old (one sampled on those weights too) is what it computes itself (with a gradient, detached) rather than
+   a pass of their own; the result is the same. Each other minibatch's start is computed in the packs that
+   minibatch's own pass makes, so that on the weights the step starts from its ratios are exactly 1 (in other packs
+   bfloat16 rounds a segment's logprobs a little differently). A behaviour logprob that is not finite fails the step
+   only where an importance correction reads it. A pack that does not fit the GPU here runs again a segment at a
+   time, and a segment that does not fit alone is left out and counted.
 3. **Each minibatch.** A weighted or distilled segment's loss is computed and its gradient accumulated a pack at a
    time (for the top-k form, with the policy's logprobs of the teacher's top-k tokens at each position). A
    preference loss is a function of each side's whole likelihood, so its gradient is taken in two parts that also
@@ -183,11 +191,13 @@ Which items, and with what advantages, is the [algorithm's](../libraries/rollout
    counted, and with it what its pass left of the gradient (a sharded policy's `recover`: the gradients of the weights
    it gathered and did not reduce, and the sharded model's state of the pass).
 4. **The stop.** Before a minibatch's optimizer step, its estimate of KL(old ‖ now) on the sampled tokens is compared
-   with `max_kl`; if it is more, the pass stops without that step. The estimate is the mean over its sampled tokens of
-   k3, `(r - 1) - log r` with `log r = now - old` (`moved_kl`): never below 0, and with the KL's mean on tokens sampled
-   where the step began. (The k1 estimate, `old - now`, has the same mean and either sign: a step that makes every
-   sampled token likelier, as REINFORCE without a baseline or a distillation whose teacher is surer than the student
-   does, reads near 0 or below by it however far the policy moved.)
+   with `max_kl`; if it is more, the pass stops without that step. Only once the step has made an update: before
+   any, the policy is where the step began, and the estimate would read only how the engine's logprobs (an old the
+   sampler gave) differ from the trainer's. The estimate is the mean over its sampled tokens of k3, `(r - 1) - log r`
+   with `log r = now - old` (`moved_kl`): never below 0, and with the KL's mean on tokens sampled where the step
+   began. (The k1 estimate, `old - now`, has the same mean and either sign: a step that makes every sampled token
+   likelier, as REINFORCE without a baseline or a distillation whose teacher is surer than the student does, reads
+   near 0 or below by it however far the policy moved.)
 5. **The update.** Gradients are clipped to `max_gradient_norm` and AdamW steps, with no weight decay, at the
    minibatch's (warmed-up) rate.
 
@@ -322,13 +332,14 @@ their placement, the entropy bonus, aggregation), the default preset against a w
 whole loss, the direction of DPO's, SimPO's and KTO's updates, the stop at `max_kl`). `test_step.py` covers the step on
 a toy policy: the direction of an update, minibatches, warmup, forced tokens, segments left out, the KL stop (also where
 every advantage pushes the same way, REINFORCE's and a policy-gradient distillation's, whose k1 estimate falls below 0
-as the policy moves), a missing logprob, the likelihood objective, the importance weight and its truncation, the token
-clip and the segment ratio. `test_distillation.py` covers distillation's terms against their definitions (each top-k
-divergence over the whole vocabulary equal to the full one: GKD's JSD as TRL writes it, Hinton's softened KL, the
-reverse KL), tokens the teacher did not score, a teacher that gave fewer than k tokens, the importance mask, a KL in the
-reward and in the loss, a policy gradient's distillation term, and the step on a toy policy, whose every distillation
-preset moves it toward its teacher on its own samples. `test_step.py` also covers how far a step says it has got: its
-phases, the start's share of the work, its packs against the step's metrics, and the fraction rising to 1.
+as the policy moves; and none before an update, where the engine's logprobs are off the trainer's), a missing logprob,
+the likelihood objective, the importance weight and its truncation, a start the engine gave after the first minibatch,
+the token clip and the segment ratio. `test_distillation.py` covers distillation's terms against their definitions
+(each top-k divergence over the whole vocabulary equal to the full one: GKD's JSD as TRL writes it, Hinton's softened
+KL, the reverse KL), tokens the teacher did not score, a teacher that gave fewer than k tokens, the importance mask, a
+KL in the reward and in the loss, a policy gradient's distillation term, and the step on a toy policy, whose every
+distillation preset moves it toward its teacher on its own samples. `test_step.py` also covers how far a step says it
+has got: its phases, the start's share of the work, its packs against the step's metrics, and the fraction rising to 1.
 `test_shared.py` takes each objective's case on two processes under torchrun, a toy model sharded with FSDP2 over gloo,
 one segment at a time and in packs, against one process, and checks how passes are shared out. `test_packing.py` covers
 packs' layout (first-fit-decreasing, a shared prefix once, each segment's tokens at its own positions), a segment

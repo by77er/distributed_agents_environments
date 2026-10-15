@@ -177,23 +177,24 @@ objective, in value and in gradient, where it is one (`rollout_tinker.trainer.ro
 | no ratio (REINFORCE), no correction | any | `cross_entropy` | weights A·s/U |
 | no ratio, a weight | several | a forward pass for `old`, then `cross_entropy` | weights A·w·s/U |
 | token ratio, no correction | one | `cross_entropy` | weights A·s/U |
-| token ratio or none, a weight (truncated or not) | one | `cispo`, clipped to 0 .. the cap | behaviour; A·s/U |
+| token ratio or none, a token's weight (truncated or not) | one | `cispo`, clipped to 0 .. the cap | behaviour; A·s/U |
 | token ratio, clipped (PPO) | several | a forward pass for `old`, then `ppo` | old; A·w·s/U |
 | token ratio, weight clipped (CISPO) | several | a forward pass for `old`, then `cispo` | old; A·w·s/U |
 | token ratio, unclipped | several | a forward pass for `old`, then `importance_sampling` | old; A·w·s/U |
 | anything else | any | (a forward pass for `old` if several) then a custom loss | |
 
-Anything else is a segment ratio, dual clipping, a mask, a KL penalty, a preference loss or a distillation in its
-policy-gradient form (alone, or as a policy gradient's term). `ppo` and `cispo` are clipped to 1 - `clip.low` .. 1 +
-`clip.high`; `s` is 1 for a token mean or a sum, one over the segment's tokens for a segment mean, one over
-`constant_tokens` for `constant`. With one update `old` is the logprob now, so a ratio is 1 and unclipped, every clipped
-surrogate's gradient is the weighted advantage's, and no forward pass is needed. With several, a segment sampled wholly
-on the weights the step starts from takes its behaviour logprobs for its `old` (`old_logprobs`), and the forward pass
-runs only the others: none, where every segment was. A custom loss is the objective itself (`rollout_objectives.terms`,
-or the preference loss of the minibatch's pairs or examples), computed here from the logprobs Tinker returns; Tinker
-then takes a pass on a linear stand-in with that loss's gradient: a forward pass more than a built-in loss. Each
-minibatch's statistics are the objective's terms of the logprobs its forward-backward returns (the policy before that
-update), so the metrics are the LoRA step's.
+Anything else is a segment ratio, a segment's weight with one update, dual clipping, a mask, a KL penalty, a preference
+loss or a distillation in its policy-gradient form (alone, or as a policy gradient's term). `ppo` and `cispo` are
+clipped to 1 - `clip.low` .. 1 + `clip.high`; `s` is 1 for a token mean or a sum, one over the segment's tokens for a
+segment mean, one over `constant_tokens` for `constant`. With one update `old` is the logprob now, so a ratio is 1 and
+unclipped, every clipped surrogate's gradient is the weighted advantage's, and no forward pass is needed. So it is for
+the first of several, which is sent as one update is, as the LoRA step takes its first minibatch's `old` from its own
+pass. The forward pass runs the later minibatches' segments, but those sampled wholly on the weights the step starts
+from, which take their behaviour logprobs for their `old` (`old_logprobs`): none, where every one of them was. A custom
+loss is the objective itself (`rollout_objectives.terms`, or the preference loss of the minibatch's pairs or examples),
+computed here from the logprobs Tinker returns; Tinker then takes a pass on a linear stand-in with that loss's
+gradient: a forward pass more than a built-in loss. Each minibatch's statistics are the objective's terms of the
+logprobs its forward-backward returns (the policy before that update), so the metrics are the LoRA step's.
 
 What crosses to Tinker is float32 (its `TensorData` takes no other float): the logprobs a built-in loss compares with,
 the advantages, and a custom loss's gradient. A built-in loss and the custom loss of the same objective agree to that

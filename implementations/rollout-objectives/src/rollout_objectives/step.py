@@ -10,11 +10,13 @@ says the trainer's (`from_sampler`). Then the batch's items (weighted segments, 
 segments) are taken in shuffled minibatches of about `tokens_per_step` sampled tokens, an optimizer step each. The first
 minibatch runs on the weights the step starts from, so its segments' `old` is what it computes (with a gradient,
 detached), not a pass of its own (but a preference loss's, which computes its logprobs without a gradient first either
-way). The pass stops early if a minibatch finds the policy further than `max_kl` from where the step began, by the k3
-estimate of KL(old || now) on its sampled tokens (`rollout_objectives.terms.moved_kl`; a likelihood step reads no `old`,
-and does not stop). A step takes `passes` passes, each shuffled anew; a fresh optimizer's rate is warmed up over its
-first `warmup_updates` updates. Only tokens the policy sampled are trained on. The numbers are `StepSettings`'; which
-items, and with what advantages, is the algorithm's business (`rollout_train.algorithm`).
+way), nor the engine's: it costs nothing. Once the step has made an update, the pass stops early if a minibatch finds
+the policy further than `max_kl` from where the step began, by the k3 estimate of KL(old || now) on its sampled tokens
+(`rollout_objectives.terms.moved_kl`; a likelihood step reads no `old`, and does not stop): before one, the policy is
+where the step began, whatever the engine's logprobs say. A step takes `passes` passes, each shuffled anew; a fresh
+optimizer's rate is warmed up over its first `warmup_updates` updates. Only tokens the policy sampled are trained on.
+The numbers are `StepSettings`'; which items, and with what advantages, is the algorithm's business
+(`rollout_train.algorithm`).
 
 Every pass over segments runs them in packs (`rollout_objectives.packing`): rows of up to `pack_tokens` tokens, each
 segment seeing only itself, segments that start alike sharing their prefix (`share_prefixes`). A minibatch's gradient
@@ -628,7 +630,7 @@ class PolicyStep:
             self._measured()
             if sums["tokens"] == 0:
                 continue
-            if objective.family != LIKELIHOOD and settings.max_kl is not None and distance > settings.max_kl:
+            if reads_old and gradient_norms and settings.max_kl is not None and distance > settings.max_kl:
                 self.optimizer.zero_grad(set_to_none=True)
                 stopped = True
                 break
@@ -710,11 +712,11 @@ class PolicyStep:
         rounds a segment's logprobs a little differently in different packs, and in the same packs a minibatch on the
         weights the step starts from finds its ratios exactly 1. An item a pack of which runs out of memory, and that
         runs out again a segment at a time, is left out of the plan; how many were. Shared, each process computes its
-        packs, and every process gathers every segment's. A segment whose `old` the sampler gives (`from_sampler`) is
-        given it here, and computed in no pack."""
+        packs, and every process gathers every segment's. A segment whose `old` the sampler gives (`from_sampler`), but
+        the first minibatch's, is given it here, and computed in no pack."""
         folded = {id(each) for item in _first_minibatch(plan, self.settings) for each in segments_of(item)}
         for item in plan.items:
-            if from_sampler(item, self.settings):
+            if from_sampler(item, self.settings) and id(segments_of(item)[0]) not in folded:
                 segment = segments_of(item)[0]
                 _started(segment, torch.tensor(segment.logprobs, device=self._device), old, behaviors)
                 self._sampled.add(id(segment))
@@ -866,7 +868,7 @@ class PolicyStep:
             tally(sums, each_terms, objective, segments=float(len(segments_of(item))))
         sums["moved"], sums["tokens"] = distance, tokens  # (each segment once, however many items hold it)
         distance /= max(tokens, 1.0)
-        if settings.max_kl is not None and distance > settings.max_kl:
+        if updated and settings.max_kl is not None and distance > settings.max_kl:
             return distance
         total = torch.stack([each.loss for _, each in found_terms]).sum()
         (total / units).backward()
@@ -918,7 +920,7 @@ def _first_minibatch(plan: Plan, settings: StepSettings) -> list[Item]:
 def from_sampler(item: Item, settings: StepSettings) -> bool:
     """Whether a step takes the logprobs the engine recorded as it sampled an item's segment as where it starts
     (`StepSettings.old_logprobs`): a weighted or distilled segment sampled wholly on the weights the step starts from,
-    every sampled token of which has one."""
+    every sampled token of which has one; but not in the first minibatch, whose own pass computes them at no cost."""
     return (
         settings.old_logprobs == "sampler"
         and isinstance(item, Weighted | Distilled)

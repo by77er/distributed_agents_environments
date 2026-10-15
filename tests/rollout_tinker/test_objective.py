@@ -36,20 +36,32 @@ SAME = ("loss", "clip_fraction", "mean_ratio", "kl_floor", "mean_mismatch", "mea
         "kl_moved", "tokens", "segments", "segments_too_long", "optimizer_steps", "stopped_at_max_kl", "gradient_norm",
         "warmup_updates")  # fmt: skip
 
+RTOL, ATOL = 1e-5, 1e-8
+"""How close two paths' weights are after several updates: Tinker takes what it is sent in float32 (the logprobs a
+built-in loss compares with, its advantages, a custom loss's gradient), and Adam moves a weight whose gradient is near
+zero by about the rate whatever its size, so a rounding there shows in the eighth decimal."""
+
 CASES = {
     # name: settings, and the Tinker calls a step makes
     "token, one update": ({"tokens_per_step": 10**6}, ["lora 32", "forward_backward cispo", "optim"]),
-    "token, several": ({"tokens_per_step": 40}, ["lora 32", "forward", "forward_backward ppo", "optim"]),
+    "token, several": (  # (the first update as one update is: against the behaviour)
+        {"tokens_per_step": 40},
+        ["lora 32", "forward", "forward_backward cispo", "forward_backward ppo", "optim"],
+    ),
     "segment, one update": ({"ratio": "segment", "tokens_per_step": 10**6}, ["lora 32", "custom", "optim"]),
     "segment, several": ({"ratio": "segment", "tokens_per_step": 40}, ["lora 32", "forward", "custom", "optim"]),
+    "segment-level weight, one update": (
+        {"objective": {"preset": "default", "importance.level": "segment"}, "tokens_per_step": 10**6},
+        ["lora 32", "custom", "optim"],
+    ),
     "likelihood": ({"objective": "likelihood", "tokens_per_step": 40}, ["lora 32", "forward_backward cross_entropy"]),
     "untruncated, two passes, warmed up": (
         {"truncate": None, "tokens_per_step": 60, "passes": 2, "warmup_updates": 3},
-        ["lora 32", "forward", "forward_backward ppo"],
+        ["lora 32", "forward", "forward_backward cispo", "forward_backward ppo"],
     ),
     "clipped hard": (
         {"clip_low": 0.01, "clip_high": 0.01, "tokens_per_step": 30, "learning_rate": 0.2},
-        ["lora 32", "forward", "forward_backward ppo"],
+        ["lora 32", "forward", "forward_backward cispo", "forward_backward ppo"],
     ),
 }
 
@@ -77,7 +89,7 @@ async def test_a_step_on_tinker_moves_the_model_as_the_lora_step_does(case: str,
     assert state is not None and pointer(into / STATE, "state") == state
     moved = service.table(state)
     assert float(moved.abs().max()) > 0.01  # (it trained)
-    torch.testing.assert_close(moved, policy.table.detach(), rtol=1e-6, atol=1e-9)
+    torch.testing.assert_close(moved, policy.table.detach(), rtol=RTOL, atol=ATOL)
     for key in SAME:
         assert taken.metrics[key] == pytest.approx(expected[key], rel=1e-6, abs=1e-7), key
     assert all(call in service.calls for call in calls), service.calls
@@ -107,15 +119,18 @@ async def test_one_update_needs_no_pass_for_where_the_step_starts(tmp_path: Path
     assert "forward" not in service.calls  # (cispo against the behaviour: the update's own pass says where it started)
 
 
+@pytest.mark.parametrize("tokens_per_step", [10**6, 40])
 async def test_segments_sampled_on_the_weights_the_step_starts_from_need_no_pass_and_move_it_as_the_lora_step(
-    tmp_path: Path,
+    tokens_per_step: int, tmp_path: Path
 ) -> None:
     service = FakeService(vocabulary=24, seed=3)
-    settings = ours({"tokens_per_step": 40})
+    settings = ours({"tokens_per_step": tokens_per_step})
     marked = [dataclasses.replace(each, sampled_at_start=True) for each in segments(service, 12)]
     trainer = TinkerTrainer("tiny", service=service, **settings)
     taken = await trainer.step(marked, seed=7, parent=None, into=tmp_path / "made")
-    assert "forward" not in service.calls and taken.metrics["old_from_sampler_fraction"] == 1.0
+    # The first minibatch's start is what its own pass finds, and every later one's the engine's: no forward pass.
+    fraction = taken.metrics["old_from_sampler_fraction"]
+    assert "forward" not in service.calls and (0 < fraction < 1 if tokens_per_step == 40 else fraction == 0)
     policy = Bigram(service)
     expected = PolicyStep(policy, StepSettings(**settings)).step(
         [dataclasses.replace(each, sampled_at_start=True) for each in segments(service, 12)], seed=7
@@ -123,7 +138,7 @@ async def test_segments_sampled_on_the_weights_the_step_starts_from_need_no_pass
     state = pointer(tmp_path / "made" / WEIGHTS, "state")
     assert state is not None
     torch.testing.assert_close(service.table(state), policy.table.detach(), rtol=1e-6, atol=1e-9)
-    for key in SAME:
+    for key in (*SAME, "old_from_sampler_fraction"):
         assert taken.metrics[key] == pytest.approx(expected[key], rel=1e-6, abs=1e-7), key
 
 
@@ -252,11 +267,6 @@ async def test_it_takes_some_settings_between_steps_and_goes_on_with_its_client(
     assert not any(call.startswith(("lora", "state")) for call in service.calls)  # (the live client went on)
     assert '"learning_rate": 0.01' in (second / STATE / "minibatches.jsonl").read_text()
 
-
-RTOL, ATOL = 1e-5, 1e-8
-"""How close two paths' weights are after several updates: Tinker takes what it is sent in float32 (the logprobs a
-built-in loss compares with, its advantages, a custom loss's gradient), and Adam moves a weight whose gradient is near
-zero by about the rate whatever its size, so a rounding there shows in the eighth decimal."""
 
 BUILT_IN = {
     # name: settings, and the built-in loss a step sends
