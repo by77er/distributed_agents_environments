@@ -5,9 +5,11 @@ that trains nothing: its engine hosts and its trainer are actors it asks Ray for
 trained channel's hosts; its gateway samples every channel its settings name; its start records them. A judging run
 launched by its settings binds its judge's slot to a channel of its own; settings the cluster refuses end the run with
 the reasons; a run that cannot have its GPUs yet waits, and says what for. A trainer in an actor says how far its step
-has got to the driver, which says it in a line and in its runner's beats."""
+has got to the driver, which says it in a line and in its runner's beats. A run whose runner ends with an error ends
+failed with it."""
 
 import asyncio
+import contextlib
 import dataclasses
 import inspect
 import time
@@ -16,9 +18,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import httpx
 import pytest
 from pydantic import JsonValue
 
+from rollout.testing import until
 from rollout_train import jobs
 from rollout_train.cluster import Cluster
 from rollout_train.jobs import Run, Stepping, TrainerActor, TrainerClient, driven, ran
@@ -280,6 +284,7 @@ def test_a_channels_servers_bound_thinking_where_every_provider_says_the_rendere
 
 
 async def test_a_trainer_pod_of_the_runs_own_is_answered_from_its_settings_and_leased_only_when_wanted() -> None:
+    pytest.importorskip("rollout_lora", reason="a LoRA trainer's settings are checked: the gpu extra installs them")
     import tomllib
 
     from rollout_train.cluster import parsed
@@ -331,3 +336,34 @@ models = ["m"]
     made.wanted()
     assert await asyncio.wait_for(made._leasing, 1) is remote and claimed == [[need]]  # pyright: ignore[reportPrivateUsage, reportArgumentType]
     assert noted == ["running"]  # (its launch no longer says what the claim waited for)
+
+
+async def test_a_run_whose_runner_ends_with_an_error_ends_failed_with_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rollout_train.jobs import _within_limits  # pyright: ignore[reportPrivateUsage]
+    from rollout_train.ledger import Fenced
+    from rollout_train.rollouts import EpisodeRunner
+
+    async def taken_over(self: EpisodeRunner) -> None:  # (another runner started under its name: it serves no more)
+        await asyncio.sleep(0.05)
+        raise Fenced(f"another took {self.name}'s fence")
+
+    monkeypatch.setattr(EpisodeRunner, "serve", taken_over)
+    cluster = a_cluster(tmp_path)
+    run = await a_run(cluster, {**POLICY, "kind": "train", "environment": WORDS}, "beside")
+    run.directory = tmp_path / "run"
+    async with contextlib.AsyncExitStack() as stack:
+        await run._played(stack)  # pyright: ignore[reportPrivateUsage]
+        assert run.recorder is not None
+        healthy = f"{run.recorder.url}/healthz"
+        async with httpx.AsyncClient(trust_env=False) as client:  # (served on the port the driver bound for it)
+            await until(lambda: _answers(client, healthy))
+        with pytest.raises(Fenced, match="another took run/"):
+            await _within_limits(run, asyncio.sleep(10))
+
+
+async def _answers(client: httpx.AsyncClient, url: str) -> bool:
+    with contextlib.suppress(httpx.TransportError):
+        return (await client.get(url)).status_code == 200
+    return False

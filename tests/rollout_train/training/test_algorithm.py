@@ -76,7 +76,8 @@ def test_a_step_trains_on_every_slots_sequences_of_the_episodes_that_differ_from
     assert [w.advantage for w in Grpo().batch([*group, failed], Budget(), random.Random(0)).items] == [
         weighted.advantage for weighted in batch.items
     ]  # an episode that did not complete is no part of the comparison
-    assert Grpo().batch([group[0], failed], Budget(), random.Random(0)).skipped == "1 of 2 episodes completed"
+    said = Grpo().batch([group[0], failed], Budget(), random.Random(0)).skipped
+    assert said == "fewer than two completed episodes to compare (1 of 2 episodes completed)"
 
 
 def test_an_update_takes_an_even_share_of_every_episodes_sequences() -> None:
@@ -113,6 +114,22 @@ def test_the_advantage_components() -> None:
     assert advantages_of([2.0, 2.0], Advantage(baseline="none", filter="none")) == [2.0, 2.0]  # (REINFORCE)
     assert advantages_of([2.0, 2.0]) is None  # (DAPO's dynamic sampling: the default)
     assert advantages_of([1.0, 0.0], PRESETS["rloo"].objective.advantage) == [1.0, -1.0]
+
+
+def test_reinforce_without_a_baseline_trains_on_one_episode_and_a_comparison_needs_two() -> None:
+    failed = Episode("train", 1, 2, "r2", {}, Outcome.FAILED, detail="it raised")
+    reinforce = algorithm_for(resolved("reinforce"), 1)
+    assert isinstance(reinforce, Grpo)
+    alone = reinforce.batch([episode(1.0)], Budget(), random.Random(0))
+    assert alone.skipped is None and [weighted.advantage for weighted in alone.items] == [1.0] * 4
+    rest = algorithm_for(resolved("reinforce"), 4).batch([episode(1.0), failed, failed], Budget(), random.Random(0))
+    assert len(rest.items) == 4  # (the one that completed)
+    assert reinforce.batch([failed], Budget(), random.Random(0)).skipped == "0 of 1 episodes completed"
+    rloo = algorithm_for(resolved("rloo"), 1).batch([episode(1.0)], Budget(), random.Random(0))
+    assert rloo.skipped == "fewer than two completed episodes to compare (1 of 1 episodes completed)"
+    assert advantages_of([1.0], Advantage(baseline="none", filter="none")) == [1.0]
+    assert advantages_of([1.0], Advantage(baseline="none", scale="group_std", filter="none")) is None
+    assert advantages_of([], Advantage(baseline="none", filter="none")) is None
 
 
 def test_the_algorithm_follows_the_objectives_family_and_what_it_reads() -> None:

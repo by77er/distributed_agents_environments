@@ -219,7 +219,7 @@ passed as `train(..., algorithm=...)`.
 | | |
 |---|---|
 | Advantages | An episode's score less a baseline: the group's mean (`group_mean`, Dr. GRPO), the mean of the others' (`leave_one_out`, RLOO), or none; then divided by the standard deviation of the group's scores (`group_std`, the sample's, as GRPO's implementations take it) or not. Every token the policy sampled in the episode gets it; with several model slots, every slot's, so a team is rewarded together. |
-| Dynamic sampling | A group whose scores are all equal has nothing to teach and is skipped (`equal_scores`, DAPO; the default). So is a group with fewer than two episodes fit to train on, and one whose every advantage is zero. |
+| Dynamic sampling | A group whose scores are all equal has nothing to teach and is skipped (`equal_scores`, DAPO; the default). So is a group with fewer than two episodes fit to train on (`fewer than two completed episodes to compare`), unless nothing compares them (no baseline, scale or filter: REINFORCE trains on one), and one whose every advantage is zero. |
 | Behaviour logprobs | A policy gradient does not train on a group with a segment whose turns were sampled without their exact tokens, nor, with an importance correction, without their behaviour logprobs; `skipped` says which channel's turns lacked what. A likelihood reads neither. |
 | Tiebreak | None by default: how long an episode took changes no score. With `advantage.tiebreak` above 0, in a group whose every episode reached everything its task has to give (and so scored the same), the shortest by `Episode.duration` scores that much more, and episodes that tie for shortest all do. A group in which an episode fell short, or one did not say its duration, gets nothing. The task says what saturated means and how long it took ([result conventions](episodes.md#result-conventions)); comparing across the group is done here. |
 | Untrained slots | A segment of a slot that is not trained (a judge's, a fixed opponent's: `Segment.trained` is false) is never trained on. |
@@ -380,18 +380,19 @@ changed in place and not appended: `settings.json` beside a ledger of files, the
 ledger's database (`DatabaseDesiredSettings`); `desired_settings_of(ledger)` finds them, `want(run, settings)` replaces
 the keys given and keeps the others. The monitor's run page writes them ([a run's settings](monitor.md#a-runs-settings)).
 
-The loop (`train(desired=…, scheduled=…)`) reads them each time it is about to decide a step. Each one it has, with a
-value it can take (`checked`: a whole number of 1 at least for `groups_per_step`, `groups_ahead`, `evals.every` and
-`evals.episodes`, of which `groups_ahead` and `evals.episodes` may also be none; 0 at least for `max_lag`), is taken in
-place of what it used (`applied`); its trainer is told its own (`change`), and one the trainer refuses leaves the
-trainer's as they were, noted to the hooks as a `settings` note with the error. A change is noted as a `settings` note
-with what changed. The step is decided with the settings then in effect, and its record in `steps` says them
-(`settings`), with the version of the suite they name as its name points then (`suite_version`); a step taken again
-after a stop is taken with those. Whether a step's checkpoint is evaluated is that step's evals, and the version played
-is the one its record names: `scheduled(suite, every, episodes)` gives the schedule of a suite by name (the version its
-name points to now) or of a version by id. A run's driver gives the ledger's version; for a name the ledger has no suite
-of (asking for one is refused: a name never becomes a suite by itself), or a suite whose environments do not all load
-where the run is, there is none, and nothing is evaluated. An edit of the suite (a new version,
+The loop (`train(desired=…, scheduled=…)`) reads them each time it is about to decide a step, and as it starts, before
+it says what its channel should serve (so a loop started again serves with a `max_lag` changed meanwhile). Each one it
+has, with a value it can take (`checked`: a whole number of 1 at least for `groups_per_step`, `groups_ahead`,
+`evals.every` and `evals.episodes`, of which `groups_ahead` and `evals.episodes` may also be none; 0 at least for
+`max_lag`), is taken in place of what it used (`applied`); its trainer is told its own (`change`), and one the trainer
+refuses leaves the trainer's as they were, noted to the hooks as a `settings` note with the error. A change is noted as
+a `settings` note with what changed. The step is decided with the settings then in effect, and its record in `steps`
+says them (`settings`), with the version of the suite they name as its name points then (`suite_version`); a step taken
+again after a stop is taken with those. Whether a step's checkpoint is evaluated is that step's evals, and the version
+played is the one its record names: `scheduled(suite, every, episodes)` gives the schedule of a suite by name (the
+version its name points to now) or of a version by id. A run's driver gives the ledger's version; for a name the ledger
+has no suite of (asking for one is refused: a name never becomes a suite by itself), or a suite whose environments do
+not all load where the run is, there is none, and nothing is evaluated. An edit of the suite (a new version,
 [versions](evals.md#versions)) is played from the next step decided. So a change made while a step is being taken
 applies from the next one, and a run that is stopped takes it when it is started again.
 

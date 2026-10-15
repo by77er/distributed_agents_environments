@@ -11,11 +11,13 @@ episodes from there once they have all ended.
 A claim holds while it is its episode's latest attempt and its runner is the one that made it and is alive: a runner
 started again takes its fence anew, and a runner beats every few seconds (`rollout_train.presence`), so one whose
 machine died stops beating; what either had claimed is claimed again by whoever has room. An episode its runner cut
-short by closing is noted (`runs/RUN/interrupted`) and claimed again too. A claim names the run that plays it. Over a
-runner whose runs survive it, a runner started again adopts the runs it finds of its claims that are
-still their episodes' latest attempts (`runs/RUN/adopted`, under its new fence), and they play on; one whose claim
-lapsed meanwhile is cut short. An adopted run's turns survived with it: the gateway kept them, and answers a sample
-asked for again with the turn it recorded, so the episode trains like any other.
+short by closing is noted (`runs/RUN/interrupted`) and claimed again too, as is one that an error outside its run cut
+short (the ledger, its recorder or the blob store failing it: `FAULT`), its third such attempt recorded failed. A
+runner's own claim holds for it only while it plays it: one it could not note cut short (the ledger failing still) it
+claims again itself. A claim names the run that plays it. Over a runner whose runs survive it, a runner started again
+adopts the runs it finds of its claims that are still their episodes' latest attempts (`runs/RUN/adopted`, under its new
+fence), and they play on; one whose claim lapsed meanwhile is cut short. An adopted run's turns survived with it: the
+gateway kept them, and answers a sample asked for again with the turn it recorded, so the episode trains like any other.
 
 Each episode has a fence of its own (`runs/RUN/episodes/GROUP/EPISODE`, `episode_scope`). The runner whose claim was
 appended takes it at once, and a runner started again takes it anew for each claim it adopts; the episode's record and
@@ -84,6 +86,12 @@ LOST = "its sandbox was lost"
 was playing in cannot be had back, so it is played again."""
 LOST_AT_MOST = 3
 """Attempts of an episode cut short because their sandbox was lost: the last is recorded failed, not played again."""
+FAULT = "an error outside its run cut it short"
+"""Why an attempt was cut short that something besides its run failed (the ledger, its recorder or the blob store
+could not be reached, say, as it started, followed or recorded it): it is played again."""
+FAULT_AT_MOST = 3
+"""Attempts of an episode cut short by an error outside their run (`FAULT`): the last is recorded failed, not played
+again."""
 SUPERSEDED = "another took its episode's fence: its record was refused"
 """Why an attempt that ended was not recorded (a newer attempt claimed its episode meanwhile, say)."""
 RELEASED = "its claim lapsed, and its pool released its sandboxes"
@@ -313,34 +321,25 @@ class EpisodeRunner:
 
     async def serve(self) -> None:
         """Claim and play episodes until cancelled; what is playing then is cut short and noted (over a runner whose
-        runs survive it, left to be resumed)."""
+        runs survive it, left to be resumed). A look for work that fails (the ledger could not be read, say) is logged,
+        and it looks again in a while; once another took its fence under its name (`Fenced`), it serves no more."""
         await self.prepare()
         beating: asyncio.Task[None] | None = None
         if self.presence is not None:
             beating = asyncio.create_task(self._beats())
         for each, key, handle, fence in self._adopting:
-            self._follow(key, self._watch(each, key, handle, fence))
+            self._follow(f"{each.run}/{key}", self._adopted(each, key, handle, fence))
         for run_id in self._lapsed:
             self._follow(f"lapsed/{run_id}", self._cut_short(run_id))
         self._adopting, self._lapsed = [], []
         try:
             while True:
-                room = self.places - len(self._playing)
-                claiming = room > 0 and self._fits()
-                found = await self._look(claiming)  # (looked at whatever its room: which runs are paused)
-                if claiming:
-                    free: dict[str, int] = {}  # each pool's room, asked once a look
-                    plans: dict[str, Plan] = {}  # each run's plan, read once a look
-                    for each in found:
-                        if room == 0:
-                            break
-                        needs = await self._needs(each, plans)
-                        if not await self._room(needs, free):
-                            continue
-                        if await self._claim(each):
-                            room -= 1
-                            for pool, count in needs.items():
-                                free[pool] -= count
+                try:
+                    await self._round()
+                except Fenced:  # (another runner took its fence under its name: it is the one that plays)
+                    raise
+                except Exception:  # (what it plays plays on; it looks again in a while)
+                    logger.exception("%s could not look for work: it looks again", self.name)
                 self._news.clear()
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._news.wait(), self.every)
@@ -349,6 +348,26 @@ class EpisodeRunner:
             for task in playing:
                 task.cancel()
             await asyncio.gather(*playing, return_exceptions=True)
+
+    async def _round(self) -> None:
+        """Look for work once, and claim what there is room for."""
+        room = self.places - len(self._playing)
+        claiming = room > 0 and self._fits()
+        found = await self._look(claiming)  # (looked at whatever its room: which runs are paused)
+        if not claiming:
+            return
+        free: dict[str, int] = {}  # each pool's room, asked once a look
+        plans: dict[str, Plan] = {}  # each run's plan, read once a look
+        for each in found:
+            if room == 0:
+                break
+            needs = await self._needs(each, plans)
+            if not await self._room(needs, free):
+                continue
+            if await self._claim(each):
+                room -= 1
+                for pool, count in needs.items():
+                    free[pool] -= count
 
     async def _beats(self) -> None:
         while True:
@@ -382,6 +401,11 @@ class EpisodeRunner:
         find the episodes nobody plays now of the others (`open`)."""
         fences = await self.ledger.fences() if claiming else {}
         beats = {beat.runner: beat for beat in await self.presence.beats()} if self.presence and claiming else None
+        mine = self._fence is not None and fences.get(runner_scope(self.name)) == self._fence.number
+        """Whether the claims under its name that hold are its own (not those of another started under its name)."""
+        playing = {*self._playing, *(f"{each.run}/{key}" for each, key, _, _ in self._adopting)}
+        """What it plays as it begins to look, or is to once it serves (adopted): one that ends as it looks is still
+        held, though its record was not there when its episodes were read."""
         desired = desired_settings_of(self.ledger)
         found: list[Open] = []
         halted: set[str] = set()
@@ -399,7 +423,11 @@ class EpisodeRunner:
             groups = await self.ledger.read(table(run, GROUPS))
             results = await self.ledger.read(table(run, RESULTS))
             claims = await Claims.read(self.ledger, run)
-            held = {key.rsplit("/", 1)[0] for key in claims.holding(fences, beats, self.name)}
+            held = {
+                key.rsplit("/", 1)[0]
+                for key in claims.holding(fences, beats, self.name)
+                if not mine or claims.made[key]["runner"] != self.name or f"{run}/{key}" in playing
+            }  # (its own claim, only while it plays it: one it could not note cut short is open to it again)
             for key, group in groups.items():
                 record = mapping(group)
                 count = record.get("episodes")
@@ -491,7 +519,7 @@ class EpisodeRunner:
                     if await appending:
                         await self._interrupt(each, key, CLOSED)
             raise
-        self._follow(key, self._play(each, key, run_id))
+        self._follow(f"{each.run}/{key}", self._play(each, key, run_id))
         return True
 
     def _follow(self, key: str, work: Coroutine[Any, Any, None]) -> None:
@@ -556,7 +584,8 @@ class EpisodeRunner:
     async def _play(self, each: Open, key: str, run_id: str) -> None:
         """Play a claimed attempt to its record. Cut short by the runner closing, anywhere until it is recorded, the
         attempt is noted and played again by someone; over a runner whose runs survive it, the run is left to be
-        adopted."""
+        adopted. Cut short by an error outside its run, it is noted and played again too, a few times (`_faulted`)."""
+        fence: Fence | None = None
         try:
             # Only the claim's winner takes its episode's fence: no attempt before this one can record the episode now.
             fence = await self.ledger.take(episode_scope(each.run, f"{each.group}/{each.number}"))
@@ -571,7 +600,7 @@ class EpisodeRunner:
                 handle = await self.runner.start(specification, run_id=run_id, labels=labels, lease=f"{each.run}/{key}")
             except SandboxLost as error:  # (what it would play in is gone: played again, a few times)
                 self.recorder.forget(run_id)
-                if not await self._lost_again(each, key):
+                if not await self._again(each, key, LOST, LOST_AT_MOST):
                     detail = f"{type(error).__name__}: {error}; {self._lost_said()}"
                     failed = Episode(each.run, each.group, each.number, "", labels, Outcome.FAILED, detail)
                     await self._ended(each, key, failed, [], fence)
@@ -591,6 +620,38 @@ class EpisodeRunner:
             self.recorder.forget(run_id)
             await self._interrupt(each, key, CLOSED)  # the attempt is noted, and played again by someone
             raise
+        except Exception as error:  # (the ledger, its recorder or the blob store failed it, not its run)
+            await self._faulted(each, key, run_id, error, fence)
+
+    async def _adopted(self, each: Open, key: str, handle: RunHandle, fence: Fence) -> None:
+        """Follow an adopted run to its record (`_watch`); one that an error outside it cuts short is noted and played
+        again, as in `_play`."""
+        try:
+            await self._watch(each, key, handle, fence)
+        except Exception as error:
+            await self._faulted(each, key, handle.run_id, error, fence)
+
+    async def _faulted(self, each: Open, key: str, run_id: str, error: Exception, fence: Fence | None) -> None:
+        """Cut short an attempt that an error outside its run failed: its run is cancelled and the attempt noted, to be
+        played again, where fewer than `FAULT_AT_MOST` attempts of its episode were; else it is recorded failed under
+        its episode's `fence` (if it took it), saying so. Where the ledger or the blob store fails that too, it is
+        noted cut short; where the ledger takes not even that, this runner, which plays it no more, takes its claim to
+        hold no more (`_look`), and claims the episode again once the ledger answers."""
+        logger.error("%s/%s was cut short by an error outside its run", each.run, key, exc_info=error)
+        with contextlib.suppress(Exception):
+            await self.runner.cancel(run_id, reason=FAULT)
+        self.recorder.forget(run_id)
+        with contextlib.suppress(Exception):
+            if await self._again(each, key, FAULT, FAULT_AT_MOST):
+                return
+            if fence is not None:
+                labels = {"run": each.run, "group": str(each.group), "episode": str(each.number)}
+                said = f"an error outside its run cut it short {FAULT_AT_MOST} times, so it is not played again"
+                detail = f"{type(error).__name__}: {error}; {said}"
+                failed = Episode(each.run, each.group, each.number, run_id, labels, Outcome.FAILED, detail)
+                await self._ended(each, key, failed, [], fence)
+                return
+        await self._interrupt(each, key, FAULT)
 
     async def _watch(self, each: Open, key: str, handle: RunHandle, fence: Fence) -> None:
         """Follow a run to its end, and record its episode under its episode's `fence`, with what the gateway recorded
@@ -606,20 +667,20 @@ class EpisodeRunner:
             self.recorder.forget(handle.run_id)
         episode = assemble(events, segments, run=each.run, group=each.group, number=each.number)
         if episode.outcome is Outcome.FAILED and SandboxLost.__name__ in str(episode.detail):
-            if await self._lost_again(each, key):
+            if await self._again(each, key, LOST, LOST_AT_MOST):
                 return
             episode = replace(episode, detail=f"{episode.detail}; {self._lost_said()}")
         await self._ended(each, key, episode, events, fence)
 
-    async def _lost_again(self, each: Open, key: str) -> bool:
-        """Cut an attempt short because its sandbox was lost, to be played again, where fewer than `LOST_AT_MOST`
-        attempts of its episode were; whether it was (else its caller records it failed)."""
+    async def _again(self, each: Open, key: str, why: str, at_most: int) -> bool:
+        """Cut an attempt short for `why` (its sandbox was lost, say), to be played again, where fewer than `at_most`
+        attempts of its episode were cut short for it; whether it was (else its caller records it failed)."""
         cut = await self.ledger.read(table(each.run, INTERRUPTED))
         prefix = f"{each.group}/{each.number}/"
-        before = sum(1 for at, note in cut.items() if at.startswith(prefix) and mapping(note).get("why") == LOST)
-        if before + 1 >= LOST_AT_MOST:
+        before = sum(1 for at, note in cut.items() if at.startswith(prefix) and mapping(note).get("why") == why)
+        if before + 1 >= at_most:
             return False
-        await self._interrupt(each, key, LOST)
+        await self._interrupt(each, key, why)
         return True
 
     @staticmethod

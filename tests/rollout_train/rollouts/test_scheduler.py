@@ -12,14 +12,14 @@ from rollout.contracts import RunEventType
 from rollout.harness import ModelBinding, RecordedModel, RunBinding, agent_program
 from rollout.testing import until
 from rollout_train import presence
-from rollout_train.ledger import FileLedger
+from rollout_train.ledger import Fenced, FileLedger
 from rollout_train.presence import Beat, FilePresence
 from rollout_train.record import GROUPS, scope, table
 from rollout_train.recorder import Segment
 from rollout_train.rollouts import Outcome, Plan, Record, episodes_of, events_of, plan
-from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, INTERRUPTED, ended
+from rollout_train.rollouts.scheduler import CLAIMS, EPISODES, FAULT, FAULT_AT_MOST, INTERRUPTED, ended, runner_scope
 from tests.rollout_train.rollouts.games import GATES, Gated, Guess
-from tests.rollout_train.support import ask, runner, served
+from tests.rollout_train.support import Running, ask, runner, served
 
 
 async def test_a_groups_episodes_are_claimed_played_and_recorded_in_the_ledger(tmp_path: Path) -> None:
@@ -235,3 +235,112 @@ async def test_a_claim_of_a_runner_that_stopped_beating_is_open_again_though_its
     assert [(each.number, each.attempt) for each in held] == [(2, 2)]  # (only a runner that beats holds its claim)
     monkeypatch.setattr(presence, "STALE", -1.0)  # its newest beat is now too old
     assert [(each.number, each.attempt) for each in await played.open()] == [(1, 2), (2, 2)]
+
+
+async def test_a_runner_looks_again_after_a_look_that_failed_and_serves_no_more_once_taken_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    played, _, _ = runner(tmp_path, "yes")
+    ledger = played.ledger
+    tables, failed = ledger.tables, [0]
+
+    async def blipping() -> list[str]:  # (a database failing over, a ledger service starting again)
+        if failed[0] < 2:
+            failed[0] += 1
+            raise ConnectionError("the ledger could not be reached")
+        return await tables()
+
+    monkeypatch.setattr(ledger, "tables", blipping)
+    serving = asyncio.create_task(played.serve())
+    await until(lambda: failed[0] == 2)
+    await ask(ledger, "train", {1: ({"word": "yes"}, 1)})
+    async with asyncio.timeout(10):
+        (episode,) = await episodes_of(ledger, played.blobs, "train", 1, 1, every=0.01)
+    assert episode.outcome is Outcome.COMPLETED and not serving.done()  # it looked again, and played
+    await ledger.take(runner_scope("here"))  # another runner started under its name
+    await ask(ledger, "train", {2: ({"word": "yes"}, 1)})
+    with pytest.raises(Fenced):  # its claim refused: it serves no more
+        await asyncio.wait_for(serving, 10)
+
+
+async def test_an_attempt_an_error_outside_its_run_cut_short_is_played_again_and_its_third_is_recorded_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    played, recorder, _ = runner(tmp_path, "yes")
+    ledger = played.ledger
+    sessions, failing = recorder.sessions, [1]  # reads of a run's turns that fail before one does not
+
+    async def blipping(run: str, run_id: str) -> dict[str, list[Segment]]:
+        if failing[0]:
+            failing[0] -= 1
+            raise ConnectionError("the gateway's turn store could not be reached")
+        return await sessions(run, run_id)
+
+    monkeypatch.setattr(recorder, "sessions", blipping)
+    await ask(ledger, "train", {1: ({"word": "yes"}, 1)})
+    async with served(played):
+        async with asyncio.timeout(10):
+            (episode,) = await episodes_of(ledger, played.blobs, "train", 1, 1, every=0.01)
+        assert episode.outcome is Outcome.COMPLETED  # played again, and recorded
+        failing[0] = 1000  # (gone for good)
+        await ask(ledger, "train", {2: ({"word": "yes"}, 1)})
+        async with asyncio.timeout(10):
+            (failed,) = await episodes_of(ledger, played.blobs, "train", 2, 1, every=0.01)
+    assert failed.outcome is Outcome.FAILED and str(failed.detail).startswith("ConnectionError: the gateway's")
+    assert f"cut it short {FAULT_AT_MOST} times, so it is not played again" in str(failed.detail)
+    assert sorted(await ledger.read(table("train", CLAIMS))) == ["1/1/1", "1/1/2", "2/1/1", "2/1/2", "2/1/3"]
+    cut = await ledger.read(table("train", INTERRUPTED))
+    assert sorted(cut) == ["1/1/1", "2/1/1", "2/1/2"] and all(note["why"] == FAULT for note in cut.values())  # type: ignore[index]
+
+
+async def test_a_claim_its_runner_could_not_note_cut_short_is_claimed_again_by_its_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    played, recorder, _ = runner(tmp_path, "yes")
+    ledger = played.ledger
+    sessions, append, failed = recorder.sessions, ledger.append, [False]
+
+    async def blipping(run: str, run_id: str) -> dict[str, list[Segment]]:
+        if not failed[0]:
+            failed[0] = True
+            raise ConnectionError("the gateway's turn store could not be reached")
+        return await sessions(run, run_id)
+
+    async def refusing(name: str, *rest: Any) -> bool:  # (the ledger takes no note of an interruption)
+        if name == table("train", INTERRUPTED):
+            raise ConnectionError("the ledger could not be reached")
+        return await append(name, *rest)
+
+    monkeypatch.setattr(recorder, "sessions", blipping)
+    monkeypatch.setattr(ledger, "append", refusing)
+    await ask(ledger, "train", {1: ({"word": "yes"}, 1)})
+    async with served(played):
+        async with asyncio.timeout(10):
+            (episode,) = await episodes_of(ledger, played.blobs, "train", 1, 1, every=0.01)
+    assert episode.outcome is Outcome.COMPLETED and failed[0]
+    assert sorted(await ledger.read(table("train", CLAIMS))) == ["1/1/1", "1/1/2"]  # its own claim, played no more
+    assert await ledger.read(table("train", INTERRUPTED)) == {}
+
+
+async def test_a_runner_plays_no_more_than_its_places_of_runs_whose_episodes_share_keys(tmp_path: Path) -> None:
+    played, _, _ = runner(tmp_path, "yes", places=2)
+    running = Running()
+    played.hooks = [running]
+    ledger = played.ledger
+    await ask(ledger, "train", {1: ({"word": "yes", "gate": "shared-keys"}, 1)}, Gated)
+    await ask(
+        ledger, "train-eval-1", {1: ({"word": "yes", "gate": "shared-keys"}, 3)}, Gated
+    )  # (its keys are 1/N/1 too)
+
+    async def claimed() -> list[str]:
+        return [key for run in ("train", "train-eval-1") for key in await ledger.read(table(run, CLAIMS))]
+
+    async with served(played):
+        await until(lambda: _count(claimed, 2))
+        await asyncio.sleep(0.1)
+        assert len(await claimed()) == 2 and len(running.running) == 2  # no more than its places
+        GATES.setdefault("shared-keys", asyncio.Event()).set()
+        async with asyncio.timeout(10):
+            await episodes_of(ledger, played.blobs, "train-eval-1", 1, 3, every=0.01)
+            await episodes_of(ledger, played.blobs, "train", 1, 1, every=0.01)
+    assert running.most == 2

@@ -41,7 +41,7 @@ nothing more.
 |---|---|---|
 | `runs/RUN/claims` | `GROUP/EPISODE/ATTEMPT` | the runner that plays that attempt, the number of its fence, when, and the run that plays it (`run_id`) |
 | `runs/RUN/episodes` | `GROUP/EPISODE` | the episode's [`Record`](../../guide/reference.md#record), once it has ended, appended under [the episode's fence](#each-episodes-fence) |
-| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt cut short, and why: its runner closed, the claim lapsed while its runner was stopped, a sandbox of its was lost (its pool ended it or was started again, or the pod that served it is no longer the run's), another took the episode's fence before it was recorded, or its pool released its sandboxes |
+| `runs/RUN/interrupted` | `GROUP/EPISODE/ATTEMPT` | an attempt cut short, and why: its runner closed, the claim lapsed while its runner was stopped, a sandbox of its was lost (its pool ended it or was started again, or the pod that served it is no longer the run's), an error outside its run cut it short (the ledger, the gateway or the blob store failing it), another took the episode's fence before it was recorded, or its pool released its sandboxes |
 | `runs/RUN/adopted` | `GROUP/EPISODE/ATTEMPT/FENCE` | an attempt whose run its runner, started again, took up under its new fence, appended under the episode's fence |
 
 - **First append wins.** A claim is an append to a key no one has written, so two runners never play one attempt:
@@ -55,7 +55,8 @@ nothing more.
   ([sandboxes](../rollout/sandboxes.md#in-training-a-lease-ends-with-its-claim)). An episode with no record and no
   claim that holds is open: the next claim is its next attempt. So at most one claim of an episode holds at a time,
   and a claim that lapsed never holds again beside a newer one. A runner does not wait on its own beat: its own claims
-  hold for it while its fence is its own.
+  hold for it while its fence is its own and it plays them (one it plays no more, whose attempt it could not note
+  interrupted, it claims again).
 - **Every attempt that ends is an episode**, whatever its outcome: completed, failed (the program raised, or the run
   could not start), cancelled. The first record of an episode is its record, and only the attempt that holds the
   episode's fence can append it.
@@ -116,6 +117,12 @@ slots sample through, the runner's too: the [gateway](gateway.md#a-runner-served
   turns under that fence, so an attempt taken over records nothing more. When it ends, the runner reads the run's
   segments from the gateway's turn store (`await sessions(run, run_id)`), assembles the [episode](episodes.md),
   stores it and appends its record under the episode's fence.
+- **Errors outside a run.** An attempt that an error outside its run cuts short (the ledger, the gateway's turn store
+  or the blob store failing as the runner starts, follows or records it; adopted or not) is noted in `interrupted`
+  (`FAULT`), its run cancelled, and the episode is played as a new attempt; its third such attempt is recorded failed,
+  saying so. Where the ledger takes no note either, the runner plays it no more, so its claim holds for it no more,
+  and it claims the episode again once the ledger answers. A look for work that fails is logged, and the runner looks
+  again in a while; it stops serving only once another runner took its fence under its name (`Fenced`, raised).
 - **Closing** cancels what it plays, in the runner too, and notes each attempt whose run had started in
   `interrupted`: the episode is open again, for any runner with room. An attempt cancelled before its run started
   is noted nowhere; its claim lapses once its runner's fence moves on or its beats stop. Over a runner whose runs

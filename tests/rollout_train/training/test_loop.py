@@ -460,3 +460,62 @@ async def test_a_trainer_leased_on_demand_is_told_a_step_is_coming_once_a_group_
         )  # fmt: skip
     assert isinstance(trainer, OnDemand) and trainer.batches
     assert trainer.told and trainer.told[0] == 0  # (before its first step: its machine is leased while groups play)
+
+
+class Lost(Counting):
+    """A trainer whose machine is lost in its first step: the loop dies with it, its step decided and not made."""
+
+    async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
+        raise RuntimeError("the machine was lost")
+
+
+async def test_a_loop_started_again_serves_with_the_max_lag_wanted_meanwhile(tmp_path: Path) -> None:
+    from rollout_train.serving import SERVING
+
+    recorder, checkpoints = answering(), checkpoints_in(tmp_path)
+
+    async def again(trainer: Counting, wanted: Mapping[str, JsonValue]) -> None:
+        async def desired() -> Mapping[str, JsonValue]:
+            return wanted
+
+        async with here(checkpoints.ledger, recorder, checkpoints.blobs):
+            await train(
+                Words(), trainer, checkpoints, base="words-base", channel="policy", directory=tmp_path / "v",
+                publish=recorder.publish, groups=4, groups_per_step=1, max_lag=1, seed=1, desired=desired,
+            )  # fmt: skip
+
+    with pytest.raises(RuntimeError, match="the machine was lost"):
+        await again(Lost(), {})
+    await again(Counting(), {"max_lag": 3})  # (changed while it was stopped)
+    first, *_ = await made_by(checkpoints)  # (the step it had decided, made now)
+    served: Any = await checkpoints.ledger.read(table("train", SERVING))
+    assert served["policy/base"]["max_lag"] == 1 and served[f"policy/{first.id}"]["max_lag"] == 3
+
+
+class Turns:
+    """A channel that takes turns with a trainer, noting what it is told; one that `refuses` cannot pause."""
+
+    def __init__(self, *, refuses: bool = False) -> None:
+        self.refuses = refuses
+        self.told: list[str] = []
+
+    async def pause(self) -> None:
+        self.told.append("pause")
+        if self.refuses:
+            raise RuntimeError("the engine host is gone")
+
+    def resume(self) -> None:
+        self.told.append("resume")
+
+    async def sleep(self) -> None:
+        self.told.append("sleep")
+
+    async def wake(self) -> None:
+        self.told.append("wake")
+
+
+async def test_a_colocated_trainer_resumes_every_channel_however_far_pausing_got(tmp_path: Path) -> None:
+    first, second, trainer = Turns(), Turns(refuses=True), Counting()
+    with pytest.raises(RuntimeError, match="the engine host is gone"):
+        await Colocated(trainer, [first, second]).step([], seed=0, parent=None, into=tmp_path / "step")
+    assert first.told == second.told == ["pause", "resume"] and trainer.batches == []  # (none is held back for ever)

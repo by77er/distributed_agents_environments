@@ -1,5 +1,7 @@
-"""Imitation: the guidance an episode's prompts carried is cut out of its segments, and what was sampled is kept."""
+"""Imitation: the guidance an episode's prompts carried is cut out of its segments, and what was sampled is kept; only
+the trained slots of episodes fit to train on are examples."""
 
+from dataclasses import replace
 from pathlib import Path
 
 from pydantic import JsonValue
@@ -73,3 +75,23 @@ async def test_the_solved_guided_episodes_are_examples_and_a_step_on_them_makes_
         checkpoints, trainer, taught, fence=run, run="train", start=None, directory=tmp_path / "checkpoints"
     )
     assert again.parents == (checkpoint.id,) and again.depth == 2 and await checkpoints.head("train") == again
+
+
+async def test_only_the_trained_slots_of_episodes_fit_to_train_on_are_examples(tmp_path: Path) -> None:
+    blobs, ledger = FileBlobStore(tmp_path / "blobs"), FileLedger(tmp_path / "ledger")
+    fence = await ledger.take("runners/here")
+    guided = segment(f"system: Goal.\n\n{WAY}\nassistant: ", "craft")
+    info: dict[str, JsonValue] = {"solved": True, GUIDANCE: {"way": WAY}}
+    played = [(Outcome.COMPLETED, None), (Outcome.COMPLETED, "the program left it out"), (Outcome.FAILED, None)]
+    for number, (outcome, excluded) in enumerate(played, start=1):
+        trajectories = {
+            "ada": Trajectory([guided], {"default": 1.0}),
+            "judge": Trajectory([replace(guided, trained=False)], {"default": 0.0}, trained=False),  # (never trained)
+        }
+        episode = Episode("train", 1, number, f"r{number}", {}, outcome, info=info, excluded=excluded,
+                          trajectories=trajectories)  # fmt: skip
+        record = (await stored(episode, [], blobs)).to_json()
+        await ledger.append(table("train", EPISODES), f"1/{number}", record, fence)
+
+    taught = await examples(ledger, "train", blobs, plain_renderer("plain"), kinds=["way"])
+    assert taught.episodes == 1 and [each.source for each in taught.segments] == ["train/1/1/ada/0"]

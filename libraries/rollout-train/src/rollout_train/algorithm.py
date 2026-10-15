@@ -5,7 +5,9 @@
 - **Advantages**, by the objective's advantage components (`rollout_train.objectives.Advantage`): an episode's score
   less a baseline, the group's mean (`group_mean`, Dr. GRPO), the mean of the others' (`leave_one_out`, RLOO) or none;
   then divided by the standard deviation of the group's scores (`group_std`, GRPO) or not. Every token the policy
-  sampled in the episode gets it: with several model slots, every slot's, so a team is rewarded together.
+  sampled in the episode gets it: with several model slots, every slot's, so a team is rewarded together. A group
+  needs two completed episodes to compare, unless nothing compares them (no baseline, scale or filter: REINFORCE,
+  which trains on one).
 - **Dynamic sampling** (DAPO, `equal_scores`): a group whose scores are all equal is skipped.
 - **A tiebreak** (`advantage.tiebreak`, none by default): in a group whose every episode reached everything its
   task has to give, the shortest (`Episode.duration`, in the task's own units) scores the tiebreak more. The task
@@ -108,10 +110,18 @@ DEFAULT_ADVANTAGE = Advantage()
 """The `default` preset's: each score less the group's mean, groups of equal scores skipped, no tiebreak."""
 
 
+def compares(advantage: Advantage) -> bool:
+    """Whether advantage components compare a group's scores with each other (a baseline, a scale or a filter), so
+    that a group needs two of them; REINFORCE without a baseline does not, and trains on one."""
+    return advantage.baseline != "none" or advantage.scale != "none" or advantage.filter != "none"
+
+
 def advantages_of(scores: Sequence[float], advantage: Advantage = DEFAULT_ADVANTAGE) -> list[float] | None:
     """The advantages of a group's scores by the objective's advantage components; None for a group the filter skips,
-    or of fewer than two scores (nothing to compare them with)."""
-    if len(scores) < 2 or (advantage.filter == "equal_scores" and equal_scores(scores)):
+    of no scores, or of one where the components compare (`compares`: nothing to compare it with)."""
+    if not scores or (len(scores) < 2 and compares(advantage)):
+        return None
+    if advantage.filter == "equal_scores" and equal_scores(scores):
         return None
     found = BASELINES[advantage.baseline](scores)
     return group_std(found, scores) if advantage.scale == "group_std" else found
@@ -120,6 +130,12 @@ def advantages_of(scores: Sequence[float], advantage: Advantage = DEFAULT_ADVANT
 def group_advantages(scores: Sequence[float]) -> list[float] | None:
     """Each score minus the group's mean; None when all are equal (no signal): the `default` preset's advantages."""
     return advantages_of(scores)
+
+
+def _too_few(good: Sequence[Episode], group: Sequence[Episode]) -> str:
+    """Why a group whose completed episodes are `good` has too few of them to train on."""
+    completed = f"{len(good)} of {len(group)} episodes completed"
+    return f"fewer than two completed episodes to compare ({completed})" if good else completed
 
 
 def tiebreak(group: Sequence[Episode], size: float) -> list[float]:
@@ -239,11 +255,11 @@ class Grpo:
 
     def batch(self, group: Sequence[Episode], budget: Budget, rng: random.Random) -> Batch[Weighted | Distilled]:
         """The segments of the group's episodes that are fit to train on (completed, and not excluded), each with
-        its episode's advantage; none, if one of them cannot be weighed (`unweighable`) or, with `distills`, has no
-        teacher's scores (`unscored`)."""
+        its episode's advantage; none, if fewer than two are fit where the advantage compares them (`compares`), if one
+        of them cannot be weighed (`unweighable`) or, with `distills`, has no teacher's scores (`unscored`)."""
         good = [episode for episode in group if episode.trainable]
-        if len(good) < 2:
-            return Batch(skipped=f"{len(good)} of {len(group)} episodes completed")
+        if not good or (len(good) < 2 and compares(self.advantage)):
+            return Batch(skipped=_too_few(good, group))
         scores, notes = scores_of(good, self.advantage.tiebreak)
         advantages = advantages_of(scores, self.advantage)
         if advantages is None and not self.distills:
@@ -306,7 +322,7 @@ class Preferences:
         completed episode not at the group's mean, labelled; none where every score is the same."""
         good = [episode for episode in group if episode.trainable]
         if len(good) < 2:
-            return Batch(skipped=f"{len(good)} of {len(group)} episodes completed")
+            return Batch(skipped=_too_few(good, group))
         scores, notes = scores_of(good)
         if equal_scores(scores):
             return Batch(skipped="every episode scored the same", notes=notes)

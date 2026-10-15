@@ -210,10 +210,10 @@ async def train(
     load for a checkpoint (made by a bridge: `rollout_train.bridges`), told the run's fence to note it under; without
     it, they load the trainer's. `evals` says which checkpoints the run evaluates as it makes them, between their step
     and the next. `desired` reads what is wanted of the run's changeable settings (`rollout_train.settings`:
-    `groups_per_step`, `evals.…`, `trainer.…`), each time a step is about to be decided; `scheduled` makes the schedule
-    of evals they name (a suite by name or a version by id, every, episodes; None for a suite the run cannot play),
-    without which only `evals`' suite can be played. A suite named by its name is played in the version its name points
-    to when each step is decided: the step's record says which (`suite_version`)."""
+    `groups_per_step`, `evals.…`, `trainer.…`), as it starts and each time a step is about to be decided; `scheduled`
+    makes the schedule of evals they name (a suite by name or a version by id, every, episodes; None for a suite the
+    run cannot play), without which only `evals`' suite can be played. A suite named by its name is played in the
+    version its name points to when each step is decided: the step's record says which (`suite_version`)."""
     algorithm = algorithm if algorithm is not None else algorithm_for(objective_of(trainer))
     retention = retention if retention is not None else Retention()
     ledger, blobs = checkpoints.ledger, checkpoints.blobs
@@ -460,11 +460,13 @@ async def train(
     for made_before in await checkpoints.all():  # (a state a loop that stopped was waiting for)
         if made_before.run == run and not made_before.state_complete and made_before.released is None:
             await completing(made_before)
+    await refresh()  # (a loop started again serves with what is wanted now: a max_lag changed meanwhile, say)
     if (now := await current()) is not None:
         await serve(now)  # (a loop that died between making a checkpoint and serving it serves it now)
         await evaluated_with(now)  # (and one that died while evaluating it finishes the eval)
     else:  # (the base model, until the first checkpoint)
-        first = Serving(channel, model=base, sequence=trainer.budget.segment_tokens, max_lag=max_lag)
+        lag = int(str(settings[MAX_LAG]))
+        first = Serving(channel, model=base, sequence=trainer.budget.segment_tokens, max_lag=lag)
         await record_serving(ledger, run, first, fence)
 
     outstanding: dict[asyncio.Task[list[Episode]], int] = {}

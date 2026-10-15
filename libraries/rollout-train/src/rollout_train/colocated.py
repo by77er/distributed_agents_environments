@@ -72,10 +72,10 @@ class Colocated:
 
     async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step:
         started = time.monotonic()
-        for channel in self._channels:
-            await channel.pause()  # no request may be in flight when an engine goes to sleep
-        waited = time.monotonic() - started
-        try:
+        try:  # (every channel is resumed, however far pausing got: resuming one not paused changes nothing)
+            for channel in self._channels:
+                await channel.pause()  # no request may be in flight when an engine goes to sleep
+            waited = time.monotonic() - started
             for channel in self._channels:
                 await channel.sleep()
             try:

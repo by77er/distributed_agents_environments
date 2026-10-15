@@ -169,8 +169,9 @@ class Examples:
 
 
 async def examples(ledger: Ledger, run: str, blobs: Blobs, renderer: Renderer, *, kinds: Sequence[str]) -> Examples:
-    """The segments of every episode of `run` whose prompts carried guidance of each of `kinds` and that solved its
-    task, with that guidance cut out."""
+    """The segments of every episode of `run` whose prompts carried guidance of each of `kinds`, that solved its task
+    and may be trained on (completed, not left out), with that guidance cut out: its trained slots' only (not a
+    judge's, say)."""
     found = Examples([])
     for line in (await ledger.read(table(run, EPISODES))).values():
         record = Record.from_json(cast(dict[str, Any], line))
@@ -178,13 +179,15 @@ async def examples(ledger: Ledger, run: str, blobs: Blobs, renderer: Renderer, *
         guidance = cast(dict[str, Any], said) if isinstance(said, dict) else {}
         if not all(kind in guidance for kind in kinds):
             continue
-        if not record.episode.solved:
+        if not record.episode.solved or not record.episode.trainable:  # (failed, or left out of training)
             continue
         episode: Episode = await loaded(record, blobs)
         cut = [str(guidance[kind]) for kind in kinds]
         found.episodes += 1
         for slot, trajectory in episode.trajectories.items():
             for index, segment in enumerate(trajectory.segments):
+                if not segment.trained:  # (a judge's, or a fixed opponent's)
+                    continue
                 shorter = without(segment, cut, renderer)
                 if shorter is None:
                     found.left_out += 1

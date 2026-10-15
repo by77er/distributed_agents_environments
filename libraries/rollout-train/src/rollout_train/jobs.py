@@ -417,7 +417,8 @@ class Run:
     pods: Any = None
     failing: "asyncio.Future[BaseException] | None" = None
     """Done, with the error, once something the run runs beside its loop fails it: its pods' leases lost to it
-    (`LeaseLost`), or no pod of its serving a kind of sandbox it needs for `UNSERVED` seconds (`SandboxesUnserved`)."""
+    (`LeaseLost`), no pod of its serving a kind of sandbox it needs for `UNSERVED` seconds (`SandboxesUnserved`), or a
+    part it runs in the background (its runner, its gateway's server, a pool's keeper) ending with an error."""
     """Its pods on RunPod (`rollout_train.pods.leasing.Pods`), where its providers give it any."""
     trainer_need: Any = None
     """The pod its trainer's steps need of its own (`rollout_train.pods.leasing.PodNeed`), leased once a step is coming
@@ -489,7 +490,7 @@ class Run:
         self.trainer_need = next((each for each in needs if each.role == TRAINING_POD), None)
         await pods.claim([each for each in needs if each is not self.trainer_need])
         await self._pods_spent(earlier)
-        _background(stack, self._renewing(pods))
+        _background(stack, self._renewing(pods), self.fail)
         if self.noted is not None:
             await self.noted("running")
 
@@ -817,9 +818,9 @@ class Run:
         store = TurnStore(self.ledger, self.stores.blobs)
         self.gateway = Gateway(store, keyring, self.channels, self.routes, models, hooks=[feed], hosted=self.on_apis)
         await self._pods_spent(0.0)  # (what its pods cost before it had a gateway)
-        port = _free_port()
-        self.recorder = GatewayEndpoints.of(self.gateway, f"http://127.0.0.1:{port}")
-        _background(stack, _serve(self.gateway, port))
+        listening = _listening()
+        self.recorder = GatewayEndpoints.of(self.gateway, f"http://127.0.0.1:{listening.getsockname()[1]}")
+        _background(stack, _serve(self.gateway, listening), self.fail)
         for name, tool in self.cluster.tools.items():
             self.tool_bindings[name] = ToolBinding(url=tool.url)
         pools = await self._pools(stack)
@@ -834,7 +835,7 @@ class Run:
         await self.runner.prepare()
         await runner.launch()
         stack.push_async_callback(runner.close)
-        _background(stack, self.runner.serve())
+        _background(stack, self.runner.serve(), self.fail)
 
     async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
         """A pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes]`: one
@@ -861,7 +862,7 @@ class Run:
                 admits=admits(self.ledger, beats),
             )  # fmt: skip
             stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
-            _background(stack, keep(pool, self.ledger, presence_of(self.ledger)))
+            _background(stack, keep(pool, self.ledger, presence_of(self.ledger)), self.fail)
             pools[kind] = pool
             self.pool_bindings[kind] = PoolBinding(local=kind)
         return pools
@@ -914,9 +915,9 @@ class Run:
             fallback=fallback,
         )  # fmt: skip
         stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
-        _background(stack, keep(pool, self.ledger, beats))
+        _background(stack, keep(pool, self.ledger, beats), self.fail)
         if fallback is None:  # (no pool of the cluster's to fall back on: the run waits for its pods, but not for ever)
-            _background(stack, self._served_by_pods(kind, pool))
+            _background(stack, self._served_by_pods(kind, pool), self.fail)
         return pool
 
     def fail(self, error: BaseException) -> None:
@@ -1070,27 +1071,45 @@ def _state(handle: Any) -> str:
     return ""
 
 
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+def _listening() -> socket.socket:
+    """A socket bound to a free port on this node: bound before the gateway serves on it, so that no other process
+    takes the port in between."""
+    listening = socket.socket()
+    listening.bind(("127.0.0.1", 0))
+    return listening
 
 
-async def _serve(gateway: Gateway, port: int) -> None:
-    """The run's gateway over HTTP on this node, for harnesses."""
+async def _serve(gateway: Gateway, listening: socket.socket) -> None:
+    """The run's gateway over HTTP on this node, for harnesses, on a socket bound for it (`_listening`)."""
     import uvicorn
 
     from rollout_train.gateway import create_app
 
-    config = uvicorn.Config(create_app(gateway), host="127.0.0.1", port=port, log_level="warning", lifespan="off")
-    await uvicorn.Server(config).serve()
+    server = uvicorn.Server(uvicorn.Config(create_app(gateway), log_level="warning", lifespan="off"))
+    try:
+        await server.serve(sockets=[listening])
+    finally:  # (cancelled, it stops listening as it does when it shuts down)
+        for each in getattr(server, "servers", ()):
+            each.close()
+        listening.close()
 
 
-def _background(stack: contextlib.AsyncExitStack, work: Coroutine[Any, Any, None]) -> None:
-    """Run `work` until the stack is closed."""
+def _background(
+    stack: contextlib.AsyncExitStack,
+    work: Coroutine[Any, Any, None],
+    failed: Callable[[BaseException], None] | None = None,
+) -> None:
+    """Run `work` until the stack is closed; where it ends with an error before then, tell `failed` (`Run.fail`)."""
     task = asyncio.ensure_future(work)
 
+    def ended(done: "asyncio.Future[None]") -> None:
+        if failed is not None and not done.cancelled() and (error := done.exception()) is not None:
+            failed(error)
+
+    task.add_done_callback(ended)
+
     async def stop() -> None:
+        task.remove_done_callback(ended)  # (what it raises as it is stopped fails nothing)
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
@@ -1292,8 +1311,9 @@ async def _within_limits[T](live: Run, work: Coroutine[Any, Any, T]) -> T:
     `limits.spend` (`SpendReached`: their turns on hosted APIs, and its pods' hours at their price), or it has run for
     `limits.hours` since it began (`HoursReached`). The run ends stopped, with the reason (`ending`), and the parts it
     played end failed with the same reason. A run that something it runs beside its loop fails (`Run.fail`: its pods'
-    leases lost to it, or its pods serving none of a kind of sandbox it needs for `UNSERVED` seconds) ends failed with
-    that error. Without a limit or anything to fail it, just do it."""
+    leases lost to it, its pods serving none of a kind of sandbox it needs for `UNSERVED` seconds, or its runner, its
+    gateway's server or a pool's keeper ending with an error) ends failed with that error. Without a limit or anything
+    to fail it, just do it."""
 
     def number(value: Any) -> float | None:
         return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
@@ -1442,12 +1462,12 @@ async def _check(run: Run) -> None:
         run.started["directory"] = str(live.directory)
         episodes = run.settings["check.episodes"]
         async with ending(run.ledger, run.run.id):
-            found = await played(
+            found = await _within_limits(live, played(
                 environment, run.ledger, run.stores.blobs, run=run.run.id, binding=live.binding(environment),
                 groups=int(cast(int, run.settings["groups"])),
                 episodes=episodes if isinstance(episodes, int) else Grpo().group_size,
                 seed=int(cast(int, run.settings["seed"])), started=run.started,
-            )  # fmt: skip
+            ))  # fmt: skip
     for each in found:
         print(each, flush=True)
     if not all(each.passed for each in found):
