@@ -21,6 +21,8 @@ rollout tools FACTORY               serve an environment's tool set over HTTP: F
 rollout pool FACTORY                serve a pool of an environment's sandboxes over HTTP: FACTORY makes their provider
 rollout gateway                     serve a replica of the gateway: every channel a run's start names on the cluster's
                                     providers, and every turn recorded
+rollout runner --run RUN            play a run's episodes on this machine, beside its driver's runner
+                                    (`rollout_train.runners`)
 rollout cluster check               read the cluster config (`rollout_train.cluster`) and say what does not resolve here
 rollout preset list|show|save|load|delete
                                     presets: named, versioned run settings beside the ledger (`rollout_train.presets`)
@@ -913,6 +915,31 @@ def _asks(command: argparse.ArgumentParser, *, channels: bool = True, trains: bo
     doing.add_argument("--here", action="store_true", help="run the job in this process, on the cluster's Ray")
 
 
+def _places(text: str) -> int:
+    number = int(text)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"a runner plays at least 1 episode at once, not {number}")
+    return number
+
+
+def runner_options(command: argparse.ArgumentParser) -> None:
+    """What a runner of its own takes (`rollout runner`, `python -m rollout_train.runners`): the cluster config, the
+    runs it plays (`--run`, at least one), its places and its name."""
+    command.add_argument("--cluster", **_cluster_option("the cluster config: its stores, providers and pools"))
+    command.add_argument(
+        "--run", action="append", required=True, metavar="RUN",
+        help="a run it plays, with its evals, by its name or its id (repeatable; at least one: a pool made here, the "
+        "environment's code and the blob store are a run's, so a runner plays the runs it is given, never every run "
+        "of the ledger)",
+    )  # fmt: skip
+    command.add_argument(
+        "--places", type=_places, help="the most episodes it plays at once (by default the runs' episodes_at_once)"
+    )
+    command.add_argument(
+        "--name", help="what it claims and beats as, unique among the runners (by default runner/HOST/PID)"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="rollout", description="Ask for runs on a cluster, train, and watch.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1128,6 +1155,10 @@ def main() -> None:
     gateway.add_argument(
         "--proxied", default="127.0.0.1", help="addresses of proxies whose X-Forwarded-* headers are trusted ('*': any)"
     )
+    running = commands.add_parser(
+        "runner", help="play runs' episodes on this machine, beside their drivers' runners (a runner of its own)"
+    )
+    runner_options(running)
     clusters = commands.add_parser("cluster", help="work with the cluster config")
     cluster_commands = clusters.add_subparsers(dest="cluster_command", required=True)
     cluster_checking = cluster_commands.add_parser(
@@ -1223,6 +1254,10 @@ def main() -> None:
         sys.exit(asyncio.run(until_signalled(work)))
     if arguments.command == "pool":
         sys.exit(asyncio.run(until_signalled(_pool(arguments))))
+    if arguments.command == "runner":
+        from rollout_train.runners import until_stopped
+
+        sys.exit(until_stopped(_cluster_of(arguments.cluster), arguments))
     if arguments.command == "ledger" and arguments.ledger_command == "serve":
         import uvicorn
 

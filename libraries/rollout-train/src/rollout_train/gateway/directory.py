@@ -2,13 +2,14 @@
 providers.
 
 A run's newest start records its run settings (`rollout_train.run_settings.recorded`): for each channel, its
-providers, model, renderer, thinking budget and mode. A `ChannelDirectory` reads them the first time a run is asked
-for (`load`) and builds a `RemoteChannel` for every channel whose providers it knows, over those providers' servers:
-nothing registers a channel with the gateway, and a run's channels exist once its start is written. Each channel asks
-what it should serve of the run's serving records (`rollout_train.serving.serving_of`), so the trained channel serves
-what the run trains, a `follows` channel the followed channel's checkpoint `lag` records back, and a `fixed` channel
-its pinned checkpoint or the base model. A channel served by several providers samples on all of their servers, a
-session's turns going to one of them by its id.
+providers, model, renderer, thinking budget and mode. A scheduled eval's start and an eval part's record none: the run
+it is played for says them (`by`, `part_of`: `started_settings`). A `ChannelDirectory` reads them the first time a run
+is asked for (`load`) and builds a `RemoteChannel` for every channel whose providers it knows, over those providers'
+servers: nothing registers a channel with the gateway, and a run's channels exist once its start is written. Each
+channel asks what it should serve of the run's serving records (`rollout_train.serving.serving_of`), so the trained
+channel serves what the run trains, a `follows` channel the followed channel's checkpoint `lag` records back, and a
+`fixed` channel its pinned checkpoint or the base model. A channel served by several providers samples on all of their
+servers, a session's turns going to one of them by its id.
 
 A channel on a hosted API (a provider of the kind `api`) is an `ApiChannel` instead: it samples the channel's model
 through the endpoint its provider names, at most the provider's `concurrency` requests at once across every run's
@@ -37,7 +38,7 @@ from rollout_train.inference.api import ApiChannel, Hosted
 from rollout_train.inference.channel import MAX_LAG, Limits
 from rollout_train.inference.remote import CheckpointServer, Connection, RemoteChannel
 from rollout_train.ledger import Ledger
-from rollout_train.record import recorded_settings
+from rollout_train.record import STARTS, newest_record, recorded_settings, table
 from rollout_train.run_settings import RunSettings
 from rollout_train.serving import Serving, qualified, serving_of
 
@@ -75,9 +76,21 @@ def _renderer(renderer: str, model: str) -> "Renderer":
 
 
 async def started_settings(ledger: Ledger, run: str) -> RunSettings | None:
-    """The run settings a run's newest start records (none: it records none)."""
-    recorded = await recorded_settings(ledger, run)
-    return RunSettings(recorded) if recorded is not None else None
+    """The run settings a run's newest start records; where it records none, those of the run it is played for, as
+    that start says: the eval it is a part of (`part_of`), the training run whose schedule asked for it (`by`). None
+    where none of them records any."""
+    seen: set[str] = set()
+    while run not in seen:
+        seen.add(run)
+        recorded = await recorded_settings(ledger, run)
+        if recorded is not None:
+            return RunSettings(recorded)
+        newest = newest_record(await ledger.read(table(run, STARTS)))
+        played_for = next((str(newest[key]) for key in ("part_of", "by") if newest.get(key)), None)
+        if played_for is None:
+            return None
+        run = played_for
+    return None
 
 
 class ChannelDirectory:

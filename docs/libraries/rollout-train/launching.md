@@ -17,6 +17,7 @@ job's driver builds the run from its settings and claims what it needs.
 | `rollout_train.submitting` | `submit`: records a launch and starts its job, as a Ray job or a RayJob; `followed`, `stopped` |
 | `rollout_train.launches` | The launches table: what was asked, the run it is, the job it became, its state |
 | `rollout_train.jobs` | The job's entrypoint: the run built from the cluster config and its settings (`Run`), and the loop of its kind |
+| `rollout_train.runners` | What a runner is built with, the driver's and one of its own: its pools (`pools_of`) and its gateway served for harnesses; and a runner of its own (`rollout runner`, [a runner of its own](rollouts.md#a-runner-of-its-own)) |
 | `rollout_train.demand` | What a run's scheduled parts need (`demand`), the placement group that reserves them (`reserve`), and the pods of its Ray cluster (`pods`) |
 
 ## Asking for a run

@@ -24,6 +24,7 @@ do not edit by hand.
 - **[`rollout_train.recorder`](#rollout_trainrecorder)** — What recording a trainable channel takes: renderers, the thinking budget, segments. [`BEHAVIOUR`](#behaviour), [`ChatTemplateRenderer`](#chattemplaterenderer), [`JsonToolCalls`](#jsontoolcalls), [`rendered`](#rollout_trainrecorderrendered), [`Renderer`](#renderer), [`renders`](#renders), [`sample_turn`](#sample_turn), [`Segment`](#segment), [`segments_of`](#segments_of), [`Span`](#span), [`TeacherScores`](#teacherscores), [`ThinkingFormat`](#thinkingformat), [`TOKEN_LEVEL`](#token_level), [`tokenizer_of`](#tokenizer_of), [`ToolCallFormat`](#toolcallformat), [`XmlFunctionCalls`](#xmlfunctioncalls)
 - **[`rollout_train.gateway`](#rollout_traingateway)** — The stateless gateway: samples channels for harnesses and records every turn. [`Attempt`](#attempt), [`ChannelDirectory`](#channeldirectory), [`create_app`](#create_app), [`Gateway`](#gateway), [`GatewayEndpoint`](#gatewayendpoint), [`GatewayEndpoints`](#gatewayendpoints), [`Grant`](#grant), [`KeyRefused`](#keyrefused), [`Keyring`](#keyring), [`Link`](#link), [`Provided`](#provided), [`Refused`](#rollout_traingatewayrefused), [`Reply`](#reply), [`ScoreRequest`](#scorerequest), [`TurnRecord`](#turnrecord), [`turns_table`](#turns_table), [`TurnStore`](#turnstore), [`unaccepted`](#unaccepted)
 - **[`rollout_train.jobs`](#rollout_trainjobs)** — A run's job: built from its settings and the cluster config, claiming what it needs. [`driven`](#driven), [`HoursReached`](#hoursreached), [`imitated`](#imitated), [`main`](#main), [`NotEnoughMemory`](#notenoughmemory), [`owed`](#owed), [`ran`](#ran), [`Run`](#rollout_trainjobsrun), [`run_directory`](#run_directory), [`SpendReached`](#spendreached), [`Stepping`](#stepping), [`taken_by`](#taken_by), [`TrainerActor`](#traineractor), [`TrainerClient`](#trainerclient)
+- **[`rollout_train.runners`](#rollout_trainrunners)** — Episode runners as the cluster config builds them: their pools, and one of its own. [`background`](#background), [`Considered`](#considered), [`considered`](#considered), [`listening`](#listening), [`Played`](#played), [`played`](#played), [`pools_of`](#pools_of), [`RUNNER`](#runner), [`runner_directory`](#runner_directory), [`runner_of`](#runner_of), [`serve`](#serve), [`unreachable`](#unreachable), [`until_stopped`](#until_stopped)
 - **[`rollout_train.demand`](#rollout_traindemand)** — What a run's scheduled parts need, and the placement group that reserves them together. [`BRIDGE`](#bridge), [`bridge_asks`](#bridge_asks), [`Bundle`](#bundle), [`colocating`](#colocating), [`Demand`](#demand), [`demand`](#demand), [`HEADROOM`](#headroom), [`Part`](#part), [`placed`](#placed), [`played_channel`](#played_channel), [`Pod`](#pod), [`pods`](#pods), [`requested`](#requested), [`reserve`](#reserve), [`Resources`](#resources), [`SUBMITTER`](#submitter), [`TRAINER`](#trainer)
 - **[`rollout_train.launching`](#rollout_trainlaunching)** — Asking for a run: its settings in layers, the facts validation reads, the offers. [`capacity_of`](#capacity_of), [`checked`](#checked), [`checkpoints_at`](#checkpoints_at), [`declared`](#declared), [`environment_facts`](#environment_facts), [`Examined`](#examined), [`examined`](#examined), [`free_name`](#free_name), [`ledger_facts`](#ledger_facts), [`offers`](#offers), [`ray_free`](#ray_free), [`Refused`](#rollout_trainlaunchingrefused), [`settled`](#settled)
 - **[`rollout_train.submitting`](#rollout_trainsubmitting)** — Starting a run's job as a Ray job or a RayJob, and reading how it goes. [`ask`](#ask), [`Backend`](#backend), [`backend_of`](#backend_of), [`demand_of`](#demand_of), [`entrypoint_of`](#entrypoint_of), [`followed`](#followed), [`job_name`](#job_name), [`JobState`](#jobstate), [`KubernetesApi`](#kubernetesapi), [`POD_SECURITY`](#pod_security), [`pod_security`](#pod_security), [`RayJobResources`](#rayjobresources), [`RayJobs`](#rayjobs), [`rendered`](#rollout_trainsubmittingrendered), [`runtime_env_of`](#rollout_trainsubmittingruntime_env_of), [`sized`](#sized), [`start`](#start), [`stopped`](#stopped), [`submit`](#submit)
@@ -5453,6 +5454,186 @@ time that changed.
 - `@property def changeable(self) -> Mapping[str, JsonValue]`
 - `def change(self, settings: Mapping[str, JsonValue]) -> None`
 - `async def step(self, batch: Sequence[Item], *, seed: int, parent: Files | None, into: Path) -> Step`
+
+## `rollout_train.runners`
+
+Episode runners as the cluster config builds them: their pools, and one of its own.
+
+### `background`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+def background(stack: contextlib.AsyncExitStack, work: Coroutine[Any, Any, None], failed: Callable[[BaseException], None] | None = None) -> None
+```
+
+Run `work` until the stack is closed; where it ends with an error before then, tell `failed` (`Run.fail`).
+
+### `Considered`
+
+*class* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+class Considered
+```
+
+A run a runner of its own is given, as it finds it at start: its id, the settings its start records, the kinds
+of sandbox its environment declares, and why it cannot play it here (none: it can).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `run` | `str` | required |  |
+| `settings` | `RunSettings \| None` | `None` |  |
+| `kinds` | `frozenset[str]` | `frozenset()` |  |
+| `why` | `tuple[str, ...]` | `()` |  |
+
+### `considered`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+async def considered(cluster: Cluster, ledger: Ledger, who: str) -> Considered
+```
+
+A run by its name or id, as a runner of its own finds it: its settings as its newest start records them, its
+channels each one this process reaches (`unreachable`), and its environment imported here as its driver imports it
+(a published one from its version), for the kinds of sandbox it declares.
+
+### `listening`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+def listening() -> socket.socket
+```
+
+A socket bound to a free port on this node: bound before the gateway serves on it, so that no other process
+takes the port in between.
+
+### `Played`
+
+*class* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+class Played(Collection[str])
+```
+
+The runs a runner of its own plays: those it is given, and their evals', as their drivers name them
+(`rollout_train.jobs.Run.eval_run`): a training run's scheduled evals (`RUN-eval-STEP`) and their parts
+(`RUN-eval-STEP-PART`), and an eval's parts (`RUN-PART`). It lists those it is given, and holds their evals' too.
+
+**Methods**
+
+- `def __init__(self, runs: Collection[str]) -> None`
+
+### `played`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+async def played(cluster: Cluster, runs: Sequence[str], *, name: str | None = None, places: int | None = None, stores: Stores | None = None, directory: ChannelDirectory | None = None) -> int
+```
+
+Play `runs` with a runner of its own (`runner_of`, over `stores` and `directory`: by default the cluster's) until
+cancelled, which closes it: what it plays then is cut short, noted, and played again. 1 once it, its gateway's
+server or a pool's keeper ends with an error, which is logged. Raises `ValueError` where it can play none of
+`runs`.
+
+### `pools_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+def pools_of(cluster: Cluster, ledger: Ledger, run: str, kinds: Collection[str], directory: Path, stack: contextlib.AsyncExitStack, failed: Callable[[BaseException], None], *, held: Collection[str] = (), apart: str | None = None, unserved: Callable[[str, Pool], Coroutine[Any, Any, None]] | None = None) -> tuple[dict[str, Pool], dict[str, PoolBinding]]
+```
+
+The pools a runner of `run` leases the sandboxes of `kinds` from (those its environment's programs declare), by
+kind, and how the run binds each kind, from the cluster's `[sandboxes]`: one served from the run's pods (`on_pods`,
+where it holds a pod of a provider in `held` that serves the kind) is reached on the pods that serve it, the pool at
+the section's `url` behind them for when they are full (where several serve it, those as one); one several pools
+serve elsewhere (`pools`) is reached on each, through one pool here; one served elsewhere (`url`) is bound to its
+URL, and is no pool here; any other is made here (its provider made with `directory`, `size` and its settings), its
+leases kept beside the ledger.
+
+A pool here is named `KIND@RUN` (`KIND@RUN/APART` with `apart`: a runner of its own names its pools apart from the
+run's driver's, so that neither's keeper takes the other's fence or sweeps the other's leases), keeps where its
+leases are in `directory`, is swept by a keeper of its own, and is closed with `stack` (after a runner registered
+later: its runs release theirs first). A keeper that ends with an error tells `failed`. `unserved` is given each
+kind its pods serve with no pool of the cluster's behind them, with its pool, to watch (a run's driver ends the run
+once no pod of its has served the kind for long).
+
+### `RUNNER`
+
+*constant* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+RUNNER = 'runner'
+```
+
+What a runner of its own is named after, unless named: `runner/HOST/PID`.
+
+### `runner_directory`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+def runner_directory(cluster: Cluster, name: str) -> Path
+```
+
+Where a runner of its own keeps its files on its machine (`[scratch]/runners/NAME`): for each run it plays, what
+the providers of its pools keep, and where their leases are.
+
+### `runner_of`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+async def runner_of(cluster: Cluster, stores: Stores, runs: Sequence[str], stack: contextlib.AsyncExitStack, failed: Callable[[BaseException], None], *, name: str | None = None, places: int | None = None, directory: ChannelDirectory | None = None, told: Callable[[str], None] = print) -> EpisodeRunner
+```
+
+A runner of its own, serving in the background until `stack` is closed: it plays those of `runs` (each by its
+name or id, `considered`) it can, and their evals' (`Played`), as `name` (by default `runner/HOST/PID`), at most
+`places` episodes at once (by default the most `episodes_at_once` of those runs). It samples through a gateway in
+this process over `directory` (by default `ChannelDirectory.of` the cluster), served on this machine for
+harnesses, records in the blob store the runs' blobs go to, and leases sandboxes from pools of its own
+(`pools_of`, named apart from the runs' drivers', kept under `[scratch]/runners/NAME`). `told` is given a line for
+each of `runs`: whether it plays it, and why not. What it runs beside (its runner, its gateway's server, a pool's
+keeper) ending with an error tells `failed`. Raises `ValueError` where it can play none of `runs`.
+
+### `serve`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+async def serve(gateway: Gateway, bound: socket.socket) -> None
+```
+
+A runner's gateway over HTTP on this node, for harnesses, on a socket bound for it (`listening`).
+
+### `unreachable`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+def unreachable(cluster: Cluster, settings: RunSettings) -> list[str]
+```
+
+Why a runner of its own cannot sample a run's channels, one reason for each channel it cannot (none: it can): a
+channel on a provider this cluster config lacks; on a `vllm` provider, whose engines are engine hosts in the run's
+driver's Ray cluster; on Tinker, whose engines are in its driver's process; on a hosted API while the run has a
+`limits.spend`, which its driver's gateway counts from the turns it records itself. A channel no slot samples (no
+provider, model or renderer) needs nothing.
+
+### `until_stopped`
+
+*function* · `libraries/rollout-train/src/rollout_train/runners.py`
+
+```python
+def until_stopped(cluster: Cluster, given: argparse.Namespace) -> int
+```
+
+Play what `given` says (`rollout_train.cli.runner_options`) until interrupted, terminated or hung up; the exit
+status. Exits saying why where it can play none of the runs.
 
 ## `rollout_train.demand`
 

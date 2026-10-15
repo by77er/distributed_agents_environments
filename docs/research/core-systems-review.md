@@ -594,6 +594,28 @@ A second review (of Rollout, Iso and Inframe, taken at the same commit) made fiv
 | Temperature and top-p are not tied to the trainer | Confirmed, latent; refused at the gateway now (G7), proposed in full (R4) |
 | Adapters kept can exceed the engine's LoRA slots | Confirmed (G11, low), fixed in part: a channel keeps `max_lag + 1` adapters and `VLLM_MAX_LORAS` (or `VllmEngine(max_loras=2)`) was set apart from it, and nothing checked it, so raising `max_lag` past it makes vLLM swap adapters (throughput, not correctness). A run's own engine host is now started with room for its window, a follower says when the windows on an engine exceed its slots, and validation notes a RunPod provider whose pods hold fewer; starting pods with the run's window is proposed |
 
+## Built beside the fixes
+
+Two small structural changes, new wiring over what existed rather than a redesign:
+
+- **More episode runners.** The claim protocol let several runners share a run's episodes, and was tested with two,
+  but only a run's driver started one. `rollout runner --cluster --run RUN` (`RT/runners.py`) starts one on its own:
+  a gateway in its process over the channels the run's start records (`ChannelDirectory.of`), pools of its own made
+  as the driver makes them and named apart from the driver's (`KIND@RUN/NAME`), so neither's keeper fences or sweeps
+  the other's, and an `EpisodeRunner` under a unique name. It plays the runs it is given and their evals, and refuses,
+  saying why, a run whose channels its driver alone reaches (engine hosts in the driver's Ray cluster, Tinker) or
+  whose `limits.spend` the driver's gateway counts. The driver builds its pools with the same function
+  (`pools_of`), so the two cannot drift. A scheduled eval's start records no settings, so the directory now takes
+  those of the run it is played for (`by`, `part_of`); the cluster's gateway serves those evals' channels too. More
+  runners help only where the run asks for more episodes at once than its driver's runner plays (`episodes_at_once`).
+- **Sandbox scale-out on Kubernetes.** Each kind of sandbox was one pod behind one Service; replicas behind it would
+  have broken a lease's later calls (they must reach the pod that made its sandbox) and the pools' cleanup (pools of
+  one name fence each other out). The chart now runs each kind as a StatefulSet (`replicas`), each pod a pool named
+  `KIND-N` at its own address through a headless Service, and a cluster config's `pools` and `url` (with `{pool}`)
+  name them. A run reaches them as one pool through the router RunPod's pods use (`PodPools`, over `ClusterPools`,
+  which finds the pools whose keepers beat): each new lease on the pool with the most room, each lease's calls on the
+  pool that holds it.
+
 ## What to do next
 
 In order of payoff over effort:

@@ -250,17 +250,19 @@ The gateway samples a channel through its `Sampler` ([channels](channels.md)):
 
 - **A channel a run's start names** with a provider the gateway's
   [`ChannelDirectory`](../../guide/reference.md#channeldirectory) knows is built the first time a key of that run is
-  shown (or the runner asks whether the run's channels can be sampled): from the run settings its newest start records,
-  the channel's providers, model, renderer and thinking budget, as a `RemoteChannel` over those providers' servers
-  (closed once the run has not been asked for in an hour, and built again if it is). Nothing registers it, and it serves what its mode says ([what a channel should
-  serve](channels.md#what-a-channel-should-serve)): the trained channel what the run trains, a `follows` channel the
-  followed channel's checkpoint `lag` records back, a `fixed` one its pinned checkpoint or the base model. The directory
-  knows providers by name with the servers each is reached at (`Provided`): `ChannelDirectory.of(cluster, ledger)` takes
-  every provider of the [cluster config](../../guide/cluster.md) whose servers answer vLLM's API at its endpoints
-  (`vllm`, `vllm-servers`), and every provider on RunPod's pods (`runpod-inference`, `runpod-host`), whose channel's
-  servers are found at each look: the pods the run's leases name for it that beat ready, each reached over mutual TLS at
-  the address its lease says (RunPod's) with the gateway's certificate and checked by the identity named for it
-  (`LeasedServers`). A run's channel takes precedence over a channel of the same name in the gateway's own process.
+  shown (or the runner asks whether the run's channels can be sampled): from the run settings its newest start records
+  (a scheduled eval's start and an eval part's record none, and those of the run it is played for, `by` or `part_of`,
+  are taken), the channel's providers, model, renderer and thinking budget, as a `RemoteChannel` over those providers'
+  servers (closed once the run has not been asked for in an hour, and built again if it is). Nothing registers it, and
+  it serves what its mode says ([what a channel should serve](channels.md#what-a-channel-should-serve)): the trained
+  channel what the run trains, a `follows` channel the followed channel's checkpoint `lag` records back, a `fixed` one
+  its pinned checkpoint or the base model. The directory knows providers by name with the servers each is reached at
+  (`Provided`): `ChannelDirectory.of(cluster, ledger)` takes every provider of the [cluster
+  config](../../guide/cluster.md) whose servers answer vLLM's API at its endpoints (`vllm`, `vllm-servers`), and every
+  provider on RunPod's pods (`runpod-inference`, `runpod-host`), whose channel's servers are found at each look: the
+  pods the run's leases name for it that beat ready, each reached over mutual TLS at the address its lease says
+  (RunPod's) with the gateway's certificate and checked by the identity named for it (`LeasedServers`). A run's channel
+  takes precedence over a channel of the same name in the gateway's own process.
 - **A routed channel** (`Routes`: a run's channel on its engine hosts, or on servers at addresses, or a router in front
   of them) is sampled per run, as a `RemoteChannel`. It reads what the run says its channel should serve
   ([what a channel should serve](channels.md#what-a-channel-should-serve)), and asks the servers for that checkpoint
@@ -328,7 +330,9 @@ uv run rollout gateway --cluster --listen 0.0.0.0:8900     # a replica: start as
 (`ChannelDirectory.of`): every channel a run's start names on a provider whose servers answer vLLM's API at its
 endpoints, on RunPod's pods or on a hosted API, a judge's channel or one that follows the trained channel among them.
 Replicas share nothing but the ledger and the blob store. A replica reads a hosted API's key from its environment (on
-Kubernetes, the Secret `providers`: [provider keys](../../deploy/helm.md#provider-keys)).
+Kubernetes, the Secret `providers`: [provider keys](../../deploy/helm.md#provider-keys)). A runner of its own
+(`rollout runner`) samples through a gateway of the same kind in its own process
+([a runner of its own](rollouts.md#a-runner-of-its-own)).
 
 - **Behind a proxy.** A proxy in front of the replicas terminates TLS, checks its own credentials, and may serve them
   under a path of its own (`https://models.example/gw/v1`). The gateway builds no URL from a request. It trusts

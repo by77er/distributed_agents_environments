@@ -66,12 +66,12 @@ from pydantic import JsonValue
 
 from rollout.environment import Environment, binding_for
 from rollout.harness.imports import ToolBinding
-from rollout.harness.sandboxes import MemoryLeases, Pool, PoolBinding, SandboxPool
+from rollout.harness.sandboxes import Pool, PoolBinding
 from rollout.local import LocalRunner
 from rollout.names import named
 from rollout_train.bridges import AUTO, Bridge, NoBridge, format_of, on_ray, path
 from rollout_train.checkpoints import Checkpoint, Checkpoints, Manifest
-from rollout_train.cluster import Cluster, SandboxesSection, located
+from rollout_train.cluster import Cluster, located
 from rollout_train.colocated import Colocated
 from rollout_train.demand import BRIDGE, TRAINER, Demand, Resources, colocating, demand, placed, played_channel, reserve
 from rollout_train.evals import Fetched
@@ -102,7 +102,7 @@ from rollout_train.record import FAILED as RUN_FAILED
 from rollout_train.registry import Entry, registry_of, resolved
 from rollout_train.rollouts.scheduler import EpisodeRunner
 from rollout_train.run_settings import KINDS, RunSettings, is_trainers, objective_in, recorded
-from rollout_train.sandboxes import ClusterPools, admits, keep, leases_of
+from rollout_train.runners import background, listening, pools_of, serve
 from rollout_train.stores import Stores, blobs_at, ledger_at
 from rollout_train.trainer import Budget, Files, Item, Progress, Progressing, Step, Trainer, objective_of
 
@@ -503,7 +503,7 @@ class Run:
         self.trainer_need = next((each for each in needs if each.role == TRAINING_POD), None)
         await pods.claim([each for each in needs if each is not self.trainer_need])
         await self._pods_spent(earlier)
-        _background(stack, self._renewing(pods), self.fail)
+        background(stack, self._renewing(pods), self.fail)
         if self.noted is not None:
             await self.noted("running")
 
@@ -831,9 +831,9 @@ class Run:
         store = TurnStore(self.ledger, self.stores.blobs)
         self.gateway = Gateway(store, keyring, self.channels, self.routes, models, hooks=[feed], hosted=self.on_apis)
         await self._pods_spent(0.0)  # (what its pods cost before it had a gateway)
-        listening = _listening()
-        self.recorder = GatewayEndpoints.of(self.gateway, f"http://127.0.0.1:{listening.getsockname()[1]}")
-        _background(stack, _serve(self.gateway, listening), self.fail)
+        bound = listening()
+        self.recorder = GatewayEndpoints.of(self.gateway, f"http://127.0.0.1:{bound.getsockname()[1]}")
+        background(stack, serve(self.gateway, bound), self.fail)
         for name, tool in self.cluster.tools.items():
             self.tool_bindings[name] = ToolBinding(url=tool.url)
         pools = await self._pools(stack)
@@ -848,57 +848,22 @@ class Run:
         await self.runner.prepare()
         await runner.launch()
         stack.push_async_callback(runner.close)
-        _background(stack, self.runner.serve(), self.fail)
+        background(stack, self.runner.serve(), self.fail)
 
     async def _pools(self, stack: contextlib.AsyncExitStack) -> dict[str, Pool]:
-        """A pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes]`: one
-        served from the run's pods (`on_pods`) is reached on the pods that serve it, with its keeper here; one served
-        elsewhere (`url`) is reached there, and where several pools serve it (`pools`), on each, through a pool here
-        with its keeper (`_served`); any other is made here, with its keeper, its leases kept beside the ledger."""
-        pools: dict[str, Pool] = {}
-        for kind in sorted(self.sandboxes):
-            section = self.cluster.sandboxes.get(kind)
-            if section is None:
-                continue  # (validation refused a run whose environment needs it)
-            if section.on_pods is not None and (served := self._on_pods(stack, kind, section)) is not None:
-                pools[kind] = served
-                self.pool_bindings[kind] = PoolBinding(local=kind)
-                continue
-            if section.pools > 1:
-                pools[kind] = self._served(stack, kind, section, f"{kind}@{self.run.id}")
-                self.pool_bindings[kind] = PoolBinding(local=kind)
-                continue
-            if section.url is not None:
-                self.pool_bindings[kind] = PoolBinding(url=section.url)
-                continue
-            assert section.provider is not None
-            provider = named(section.provider)(self.directory, size=section.size, **dict(section.settings))
-            beats = presence_of(self.ledger)
-            pool = SandboxPool(
-                provider, name=f"{kind}@{self.run.id}", leases=leases_of(self.ledger) or MemoryLeases(),
-                admits=admits(self.ledger, beats),
-            )  # fmt: skip
-            stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
-            _background(stack, keep(pool, self.ledger, presence_of(self.ledger)), self.fail)
-            pools[kind] = pool
-            self.pool_bindings[kind] = PoolBinding(local=kind)
+        """A pool of each kind of sandbox the environment's programs declare, from the cluster's `[sandboxes]`
+        (`rollout_train.runners.pools_of`): one served from the run's pods (`on_pods`) is reached on the pods that
+        serve it, with its keeper here; one served elsewhere (`url`) is reached there, and where several pools serve it
+        (`pools`), on each, through a pool here with its keeper; any other is made here, with its keeper, its leases
+        kept beside the ledger. Each is named `KIND@RUN`; how the run binds each kind is kept (`pool_bindings`), and a
+        kind its pods serve with no pool of the cluster's behind them is watched (`_served_by_pods`)."""
+        held = {each.provider for each in self.pods.leases.values()} if self.pods is not None else set[str]()
+        pools, bindings = pools_of(
+            self.cluster, self.ledger, self.run.id, self.sandboxes, self.directory, stack, self.fail, held=held,
+            unserved=self._served_by_pods,
+        )  # fmt: skip
+        self.pool_bindings.update(bindings)
         return pools
-
-    def _served(self, stack: contextlib.AsyncExitStack, kind: str, section: SandboxesSection, name: str) -> Pool:
-        """The pools that serve `kind` elsewhere (the section's `urls`), as one pool named `name`
-        (`rollout_train.pods.pools.PodPools` over `rollout_train.sandboxes.ClusterPools`): a new lease on the one with
-        the most room whose keeper beats, each lease's calls on the one that holds it, where each is kept in the run's
-        directory; swept here by a keeper as a pool of the run's own."""
-        from rollout_train.pods.pools import FilePlacements, PodPools
-
-        beats = presence_of(self.ledger)
-        discover = ClusterPools(section.urls, beats)
-        stack.push_async_callback(discover.aclose)
-        placements = FilePlacements(self.directory / "pools" / f"{kind}.json")
-        pool = PodPools(kind, discover, name=name, placements=placements, admits=admits(self.ledger, beats))
-        stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
-        _background(stack, keep(pool, self.ledger, beats), self.fail)
-        return pool
 
     async def _with_sandboxes(self, needs: Sequence[Any]) -> list[Any]:
         """`needs`, those of providers whose pods serve kinds of sandboxes the environment declares given those kinds'
@@ -923,39 +888,6 @@ class Run:
                     if asyncio.iscoroutine(done := closing()):
                         await done
         return with_sandboxes(needs, self.cluster, {kind: each.to_json() for kind, each in sources.items()})
-
-    def _on_pods(self, stack: contextlib.AsyncExitStack, kind: str, section: SandboxesSection) -> Pool | None:
-        """The pools of `kind` the run's pods serve, as one (`rollout_train.pods.pools`), the pool at the section's
-        `url` behind them for when they are full (where several serve it, those as one: `_served`); swept here by a
-        keeper as a pool of the run's own. None where the run leases no pod that serves the kind (validation refused
-        such a run unless the pool at `url` serves it)."""
-        from rollout.harness.remote import RemotePool
-        from rollout_train.pods.pools import FilePlacements, PodPools
-        from rollout_train.pods.routing import LeasedPools
-
-        providers = serving(self.cluster, kind)
-        if self.pods is None or not any(each.provider in providers for each in self.pods.leases.values()):
-            return None
-        auth = self.cluster.inference[providers[0]].auth
-        discover = LeasedPools(self.ledger, self.run.id, kind, providers, auth, self.cluster.tls)
-        stack.push_async_callback(discover.aclose)
-        fallback: Pool | None = None
-        if section.pools > 1:  # (named apart from the pool of its pods: each keeper takes its own pool's fence)
-            fallback = self._served(stack, kind, section, f"{kind}@{self.run.id}/cluster")
-        elif section.url is not None:
-            fallback = RemotePool(section.url)
-            stack.push_async_callback(fallback.aclose)
-        beats = presence_of(self.ledger)
-        placements = FilePlacements(self.directory / "pods" / f"{kind}.json")
-        pool = PodPools(
-            kind, discover, name=f"{kind}@{self.run.id}", placements=placements, admits=admits(self.ledger, beats),
-            fallback=fallback,
-        )  # fmt: skip
-        stack.push_async_callback(pool.close)  # (after the runner: its runs release theirs first)
-        _background(stack, keep(pool, self.ledger, beats), self.fail)
-        if fallback is None:  # (no pool of the cluster's to fall back on: the run waits for its pods, but not for ever)
-            _background(stack, self._served_by_pods(kind, pool), self.fail)
-        return pool
 
     def fail(self, error: BaseException) -> None:
         """End the run failed with `error` (`failing`), from something it runs beside its loop."""
@@ -1106,51 +1038,6 @@ def _state(handle: Any) -> str:
         if found is not None and found.state != "ALIVE":
             return f": {str(found.state).lower().replace('_', ' ')}"
     return ""
-
-
-def _listening() -> socket.socket:
-    """A socket bound to a free port on this node: bound before the gateway serves on it, so that no other process
-    takes the port in between."""
-    listening = socket.socket()
-    listening.bind(("127.0.0.1", 0))
-    return listening
-
-
-async def _serve(gateway: Gateway, listening: socket.socket) -> None:
-    """The run's gateway over HTTP on this node, for harnesses, on a socket bound for it (`_listening`)."""
-    import uvicorn
-
-    from rollout_train.gateway import create_app
-
-    server = uvicorn.Server(uvicorn.Config(create_app(gateway), log_level="warning", lifespan="off"))
-    try:
-        await server.serve(sockets=[listening])
-    finally:  # (cancelled, it stops listening as it does when it shuts down)
-        for each in getattr(server, "servers", ()):
-            each.close()
-        listening.close()
-
-
-def _background(
-    stack: contextlib.AsyncExitStack,
-    work: Coroutine[Any, Any, None],
-    failed: Callable[[BaseException], None] | None = None,
-) -> None:
-    """Run `work` until the stack is closed; where it ends with an error before then, tell `failed` (`Run.fail`)."""
-    task = asyncio.ensure_future(work)
-
-    def ended(done: "asyncio.Future[None]") -> None:
-        if failed is not None and not done.cancelled() and (error := done.exception()) is not None:
-            failed(error)
-
-    task.add_done_callback(ended)
-
-    async def stop() -> None:
-        task.remove_done_callback(ended)  # (what it raises as it is stopped fails nothing)
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-
-    stack.push_async_callback(stop)
 
 
 @contextlib.asynccontextmanager

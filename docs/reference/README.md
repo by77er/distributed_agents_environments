@@ -32,6 +32,7 @@ Every command that asks for a run (`train`, `eval`, `imitate`, `env check`, `res
 | `rollout pause`, `rollout resume` | [pausing and resuming](../libraries/rollout-train/training.md#pausing-and-resuming) |
 | `rollout monitor` | [the monitor](../libraries/rollout-train/monitor.md) |
 | `rollout gateway` | [the gateway](../libraries/rollout-train/gateway.md#running-it) |
+| `rollout runner` | [a runner of its own](../libraries/rollout-train/rollouts.md#a-runner-of-its-own), [more runners](../guide/deploying.md#more-runners) |
 | `rollout pool`, `rollout tools` | [sandboxes over HTTP](../libraries/rollout/sandboxes.md#over-http), [serving a tool set over HTTP](../guide/tools.md#serving-a-tool-set-over-http) |
 | `rollout cluster check` | [the cluster config](../guide/cluster.md) |
 | `rollout preset` | [presets](../guide/cluster.md#presets) |

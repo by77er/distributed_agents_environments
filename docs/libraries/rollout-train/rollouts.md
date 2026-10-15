@@ -21,8 +21,9 @@ async with playing(EpisodeRunner("host/train", ledger, LocalRunner(gateway=endpo
 ```
 
 The [training loop](training.md) writes the plan and the groups; a run's driver starts a runner beside it
-([launching runs](launching.md#the-driver)). Everything goes through the ledger, so the run and its runners may be in one process or on different
-machines.
+([launching runs](launching.md#the-driver)), and `rollout runner` starts more, on other machines
+([a runner of its own](#a-runner-of-its-own)). Everything goes through the ledger, so the run and its runners may be in
+one process or on different machines.
 
 ## What a run writes
 
@@ -154,6 +155,54 @@ claims it held lapse, and their episodes are open again for any runner with room
 `serve()` runs until cancelled; `async with playing(runner):` serves while a block runs.
 [`episodes_of(ledger, blobs, run, group, count)`](../../guide/reference.md#episodes_of) waits until all `count`
 episodes of a group have records and returns them, trajectories and all.
+
+### A runner of its own
+
+A run's driver plays its episodes with a runner in its own process (`run/RUN`). `rollout runner` (`python -m
+rollout_train.runners`) starts another, on any machine that reaches the ledger, the blob store and the run's channels,
+and it shares the run's work with the driver's as any two runners do:
+
+```sh
+uv run rollout runner --cluster --run first                        # first's episodes, and its evals'
+uv run rollout runner --cluster --run first --places 8 --name runner/big-box
+```
+
+- **What it is made of** (`rollout_train.runners.runner_of`). The cluster's stores, the run's blobs going to the store
+  its driver writes them to; a gateway in its own process over the channels the run's start names
+  (`ChannelDirectory.of`, [the gateway](gateway.md#which-checkpoint)), served on `127.0.0.1` for the harnesses it
+  starts; a `LocalRunner`; and a pool of each kind of sandbox the run's environment declares, made as its driver makes
+  it (`pools_of`, which the driver uses too): one of its own from the kind's provider, one over the cluster's several
+  pools, or one over the run's pods, each named apart from the driver's (`KIND@RUN/NAME`, the driver's `KIND@RUN`), so
+  that its keeper takes a fence of its own and sweeps only its own leases, with what it keeps in its own directory
+  (`[scratch]/runners/NAME`). A kind served at a `url` alone needs no pool here. It claims, plays and records as
+  `NAME` (`--name`, by default `runner/HOST/PID`: unique, since runners' names fence each other), at most `--places`
+  episodes at once (by default the run's `episodes_at_once`), beating as any runner does, with the runs it plays
+  (`runs`) and the channels it samples, and never a `run`, by which the monitor takes a run's driver to be alive.
+- **Which runs.** Those it is given (`--run`, by name or id, at least one) and their evals': a training run's scheduled
+  evals (`RUN-eval-STEP`, their parts `RUN-eval-STEP-PART`) and an eval's parts (`RUN-PART`), as its driver names them.
+  Never every run of the ledger: a pool made for a run is the run's (its pods, its directory), a runner holds one pool
+  of each kind, and the environment's code and the blob store are the run's; two runs that each need a pool of their
+  own of one kind, or whose blobs go to different stores, need a runner each.
+- **What it plays.** It says at start, for each run it is given, whether it plays it and why not, and plays none of
+  these: a run with no start that records its settings yet; one with a channel on a `vllm` provider (its engine hosts
+  are actors in its driver's Ray cluster) or on Tinker (its engines are in its driver's process); one that samples a
+  hosted API under a `limits.spend` (its driver's gateway counts the run's spend from the turns it records itself, and
+  would not see another's); one whose environment does not import where the runner runs (a published one, outside its
+  version's environment). Where it can play none, it exits saying so. A channel on servers at addresses
+  (`vllm-servers`), on the run's pods (`runpod-inference`, `runpod-host`, reached with the cluster's `[tls]`
+  certificate) or on a hosted API (its key in the runner's environment) it samples as the cluster's gateway does; a
+  run whose servers its machine cannot reach (addresses on `127.0.0.1` of another machine, say) it never claims, as
+  `reaches` says.
+- **How much it adds.** A training run keeps `episodes_at_once` episodes' work asked for, in whole groups
+  ([training](training.md)), and its driver's runner has as many places, so a runner of its own plays what that one
+  leaves: the rest of the groups asked for, and what the driver's runner has no room for in its pools or its memory
+  (`[guards] runs_gib`). A run meant to be played by more runners is asked for with a larger `episodes_at_once` (fixed
+  once the run starts), as the command says of a training run. An eval or a check asks for all its episodes at once.
+- **Stopping.** It serves until it is interrupted or terminated: closing cuts short what it plays and notes it, and
+  the episodes are played again by any runner with room. Its runner, its gateway's server or a pool's keeper ending
+  with an error (another runner taking its name, say) ends it, logged, with status 1.
+- **Where its episodes show.** In the ledger, as any; the run's live feed, in its driver's directory, shows only what
+  the driver's runner plays.
 
 ### Heartbeats
 

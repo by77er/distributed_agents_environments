@@ -23,6 +23,10 @@ deployment.
   environments imported from git: a head that runs no tasks, a GPU worker group and a CPU worker group, each started
   from zero by the autoscaler when a check waits for it and removed when idle. Its pods hold no store's key and no
   Secret. On one machine, runs and checks share the machine's Ray head.
+- **More episode runners.** Optional: a run's episodes played on other machines too, beside its driver's runner
+  (`rollout runner --cluster --run RUN`), each with a gateway of its own over the run's channels and pools of its own;
+  for a run whose channels are on servers at addresses, on RunPod's pods or on hosted APIs, since a run's own engine
+  hosts are reached by its driver alone ([more runners](../guide/deploying.md#more-runners)).
 - **The sandbox pools.** One pod for each kind of sandbox the cluster serves (the Minecraft worlds' pool), outside the
   runs' Ray clusters, from which runs acquire their episodes' sandboxes
   ([Where sandboxes run](../research/sandbox-placement.md)). Runs that lease GPU pods on RunPod may also play

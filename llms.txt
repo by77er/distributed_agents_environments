@@ -95,7 +95,7 @@ with what it covers and who it is for, then "Read first" and "Next" links.
 - [Troubleshooting](docs/deploy/troubleshooting.md): problems seen in real deployments, and their fixes
 - [Local Postgres and S3 for development](docs/development/local-services.md): both stores in Docker Compose
 - [Deploy with the rollout command](docs/guide/deploying.md): asking for runs and evals from a shell, what a run's
-  job starts, engines elsewhere, the gateway and Ray
+  job starts, more runners on other machines (`rollout runner`), engines elsewhere, the gateway and Ray
 
 ## Operate the platform
 

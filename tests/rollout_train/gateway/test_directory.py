@@ -16,6 +16,7 @@ from rollout.harness.blobs import FileBlobStore
 from rollout_train.checkpoints import Checkpoint, Checkpoints, new_id
 from rollout_train.following import Follower
 from rollout_train.gateway import ChannelDirectory, Gateway, GatewayEndpoints, Provided, TurnStore, create_app
+from rollout_train.gateway.directory import started_settings
 from rollout_train.inference import Generation, Limits, Scores
 from rollout_train.inference.channel import Channel, NotLoaded
 from rollout_train.ledger import Fence, FileLedger
@@ -201,6 +202,30 @@ async def test_a_runner_learns_a_runs_channels_from_a_gateway_elsewhere(tmp_path
         request = sample_request([Message.user("Score it.")], "r_1:judge:0", session_id="r_1/judge")
         assert remote.endpoint(judge).describe("r_1/judge").context_limit == 4096
         assert (await remote.endpoint(judge).sample(request)).message.text.strip() == "judge-model"
+
+
+async def test_a_scheduled_evals_channels_and_its_parts_are_those_of_the_run_it_is_played_for(tmp_path: Path) -> None:
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    await started(ledger, "r", SETTINGS)
+    said: dict[str, dict[str, JsonValue]] = {
+        "r-eval-2": {"by": "r", "step": 2},  # (as a training run's loop starts its scheduled eval: no settings)
+        "r-eval-2-1": {"by": "r", "step": 2, "part_of": "r-eval-2"},  # (and a part of it)
+        "loop": {"by": "loop"},  # (a start that names itself: nothing to follow)
+    }
+    for run, start in said.items():
+        fence = await ledger.take(scope(run))
+        await ledger.append(table(run, STARTS), str(fence.number), {**start_header(), **start}, fence)
+    providers = {"local": Provided((Held("local", "base"),)), "judging": Provided((Held("judging", "judge-model"),))}
+    directory = ChannelDirectory(ledger, providers, every=0.01)
+    gateway = Gateway(TurnStore(ledger, blobs), keyring(), directory=directory)
+    binding = bind(ProgramReference(program=register(Matched)), "policy", slots={"judge": "judge"})
+    for run in ("r-eval-2", "r-eval-2-1"):
+        assert set(await directory.load(run)) == {"policy", "opponent", "judge"}
+        assert await GatewayEndpoints.of(gateway).reaches(run, binding)
+    assert await directory.load("loop") == {} and await started_settings(ledger, "loop") is None
+    settings = await started_settings(ledger, "r-eval-2-1")
+    assert settings is not None and settings.providers("judge") == ("judging",)
+    directory.close()
 
 
 async def test_a_directory_keeps_nothing_of_a_run_with_no_start_and_forgets_a_run_not_asked_for(

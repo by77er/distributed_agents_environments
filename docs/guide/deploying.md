@@ -93,6 +93,7 @@ uv run rollout report RUN_DIRECTORY ENVIRONMENT --watch                 # charts
 uv run rollout pool --kind minecraft --cluster --host 0.0.0.0 --port 8710   # [sandboxes.minecraft], served apart
 uv run rollout tools FACTORY --directory DATA --port 8700               # a tool set on a machine of its own
 uv run rollout gateway --cluster --listen 0.0.0.0:8900                  # a replica of the cluster's gateway
+uv run rollout runner --cluster --run first                             # first's episodes, played here too
 uv run rollout ledger serve --cluster --listen 0.0.0.0:8840             # the ledger service, for pods outside
 uv run rollout ledger copy RUN_DIRECTORY sqlite:///ledger.db            # a ledger copied into a database
 uv run rollout pods list --cluster                                      # every RunPod pod's lease and who holds it
@@ -161,6 +162,37 @@ machine's memory, GPUs and disk, what each channel serves and how fast, and how 
 beating for 90 seconds is taken to be gone. A run's start records where its blob store is (its kind and settings; a
 store's credentials come from its environment and are never written), so a monitor anywhere reads the run's finished
 episodes back.
+
+### More runners
+
+`rollout runner` plays a run's episodes on another machine, beside its driver's runner
+([a runner of its own](../libraries/rollout-train/rollouts.md#a-runner-of-its-own)):
+
+```bash
+uv run rollout runner --cluster --run first                # first's episodes and its evals', until interrupted
+uv run rollout runner --cluster --run first --places 8     # at most 8 at once (by default first's episodes_at_once)
+```
+
+It opens the cluster config's stores, samples the run's channels through a gateway of its own built from what the
+run's start records, makes the run's pools as its driver does, named apart from the driver's (`KIND@RUN/NAME`), and
+claims, plays and records episodes as `runner/HOST/PID` (or `--name`). It says at start, for each `--run`, whether it
+plays it and why not, and exits 1 where it plays none; it serves until interrupted or terminated, and exits 1 once
+something it runs ends with an error (another runner taking its name, say).
+
+- **When it helps.** A training run keeps `episodes_at_once` episodes' work asked for, in whole groups, and its
+  driver's runner has as many places: another runner plays what that one leaves, and what it has no room for in its
+  pools or its memory. Ask for a run that more runners will play with a larger `episodes_at_once` (`--set
+  episodes_at_once=32`; it cannot change once the run starts). Where the driver's machine holds the episodes' sandboxes,
+  a runner on another machine brings that machine's CPUs and memory, with pools of its own; an eval or a check asks
+  for all its episodes at once.
+- **What it reaches.** A channel on servers at addresses (`vllm-servers`, from where the runner runs), on the run's
+  pods on RunPod (with the cluster's `[tls]` certificate) or on a hosted API (with its key in the runner's environment,
+  where the run has no `limits.spend`); the ledger, the blob store, the pools at `[sandboxes.KIND] url`, and the run's
+  environment, imported where the runner runs.
+- **What it cannot.** A channel on a `vllm` provider (its engine hosts are actors in the run's Ray cluster) or on Tinker
+  (its engines are in the driver's process): such a run is played by its driver alone. Nor a run on a hosted API whose
+  `limits.spend` its driver's gateway counts, nor every run of the ledger at once: it plays the runs it is given and
+  their evals, each run needing pools of its own.
 
 ## Engines on other machines
 
@@ -248,9 +280,9 @@ gateway](../libraries/rollout-train/gateway.md#a-runner-served-by-the-gateway)).
 `rollout gateway --cluster` serves a replica of the cluster's [gateway](../libraries/rollout-train/gateway.md): it
 samples every channel a run's start names on the cluster's providers whose servers answer vLLM's API at their endpoints
 (`vllm-servers`, and a `vllm` provider's `listen`), are the pods the run leases (`runpod-inference`, `runpod-host`) or
-are hosted APIs (`api`), for programs and harnesses that hold a signed key, and records every turn in the cluster's
-ledger and blob store before it replies. Replicas keep no session, so as many as wanted stand behind one proxy, and any
-of them may stop at any moment.
+are hosted APIs (`api`), and the channels of a training run's scheduled evals and of their parts, for programs and
+harnesses that hold a signed key, and records every turn in the cluster's ledger and blob store before it replies.
+Replicas keep no session, so as many as wanted stand behind one proxy, and any of them may stop at any moment.
 
 - **Keys.** The secrets are read from `[gateway] keys_file` or `keys_env`, else from the environment
   (`ROLLOUT_GATEWAY_KEYS`, or a file named by `ROLLOUT_GATEWAY_KEYS_FILE`), and never from the ledger. Whoever mints
@@ -293,6 +325,13 @@ serves; and the cluster config, the RayJob template and the presets in a ConfigM
 - **The presets** in `files/presets` are saved beside the ledger by a hook Job at every install and upgrade (`rollout
   preset load /etc/rollout/presets --cluster`): a new version only where a preset's newest says otherwise.
 - **The gateway** runs `rollout gateway --cluster`.
+- **More runners** for a run are not in the chart: run `rollout runner --cluster --run RUN` in a Deployment of its own,
+  made from the gateway's (`kubectl get deployment gateway -o yaml`: the same image, environment, cluster config and
+  volumes, its TLS among them), renamed, its pods labelled `app: run` (the label the namespace's network policies let
+  reach the stores and the sandbox pools, as a run's pods do), without the gateway's ports, probes and Service, and
+  with the command `rollout runner --cluster --run RUN`. It is worth it for a run whose channels are on servers at
+  addresses, on RunPod's pods or on a hosted API: a channel on the run's own engine hosts is reached by its driver
+  alone ([more runners](#more-runners)). Delete the Deployment once the run ends.
 
 Its cluster config names the ledger and the blob store at their addresses in the cluster, and every pod mounts one
 volume for run directories and other local state. On a single node it can run in K3s; `deploy/k3s/README.md` installs it
