@@ -25,7 +25,7 @@ from rollout_train.gateway import GatewayEndpoints
 from rollout_train.inference import Channel
 from rollout_train.ledger import FileLedger
 from rollout_train.recorder import Segment, Span
-from rollout_train.recorder.renderers import Tokenizer
+from rollout_train.recorder.renderers import Tokenizer, XmlFunctionCalls
 from rollout_train.testing import ScriptedEngine, admitted, gateway_endpoints, plain_channel, sample_request
 from tests.rollout_qwen.support import channel, qwen_tokenizer
 
@@ -83,6 +83,17 @@ def test_qwen35_parses_reasoning_and_typed_xml_tool_calls(tokenizer: Tokenizer) 
     assert (call.name, dict(call.arguments)) == ("mine", {"x": 3, "y": -58, "z": 7})
 
 
+def test_an_xml_integer_parameter_that_is_not_an_integer_is_kept_as_its_text() -> None:
+    def parameters(x: str, y: str, z: str) -> str:
+        said = "".join(f"<parameter={key}>\n{value}\n</parameter>\n" for key, value in (("x", x), ("y", y), ("z", z)))
+        return f"<tool_call>\n<function=mine>\n{said}</function>\n</tool_call>"
+
+    (call,) = XmlFunctionCalls().parse(parameters("3.0", "1e2", "-7"), [MINE])[1]
+    assert dict(call.arguments) == {"x": 3, "y": 100, "z": -7}
+    (call,) = XmlFunctionCalls().parse(parameters("1.9", "inf", "1e999"), [MINE])[1]
+    assert dict(call.arguments) == {"x": "1.9", "y": "inf", "z": "1e999"}  # (not cut to 1, and no OverflowError)
+
+
 def test_thinking_that_goes_on_after_it_was_closed_is_still_thinking(tokenizer: Tokenizer) -> None:
     renderer = qwen35(tokenizer)
     sampled = "\n</think>\n\nI should note the ore.\n</think>\n\nOre at (1, 2, 3).<|im_end|>"  # closed by force first
@@ -113,7 +124,7 @@ async def test_thinking_over_budget_is_closed_unsampled_and_the_answer_follows(
         tokenizer, [("I should look around first and then decide which way", "length"), (CALL, "stop")]
     )
     served = channel(engine, thinking=8)
-    served.adapter, served.version = "step-3", 3
+    await served.publish("step-3", "/adapters/step-3", 3)
     recorder = await recorded(served, tmp_path)
     endpoint = recorder.endpoint(POLICY)
     messages = [Message.system("You mine."), Message.user("Go.")]

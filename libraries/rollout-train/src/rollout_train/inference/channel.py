@@ -285,11 +285,12 @@ class Channel:
         top: int = 0,
     ) -> Generation:
         """Sample from one of the engines: the same one for a session every time, where its prompts' shared
-        beginnings are cached. `version` and `request` (the version the caller stamps the tokens with, and a name for
-        the request) are for samplers elsewhere: this process's own callers read what it publishes."""
+        beginnings are cached. `NotLoaded` where what the turn began with (`adapter`, at `version`: what `weights` said)
+        is no longer served once the gate is open: the adapter was dropped, or the full weights were replaced. `request`
+        (a name for the request) is for samplers elsewhere."""
         return await self._sampled(
             prompt, max_tokens=max_tokens, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids,
-            adapter=lambda: adapter, session=session, thinking_budget=thinking_budget, top=top,
+            adapter=lambda: self._still(adapter, version), session=session, thinking_budget=thinking_budget, top=top,
         )  # fmt: skip
 
     async def sample(
@@ -328,7 +329,9 @@ class Channel:
         request: str | None = None,
     ) -> Scores:
         """Score tokens on the session's engine (`Engine.score`), as `generate` samples there."""
-        return await self._scored(tokens, start=start, end=end, top=top, adapter=lambda: adapter, session=session)
+        return await self._scored(
+            tokens, start=start, end=end, top=top, adapter=lambda: self._still(adapter, version), session=session
+        )
 
     async def scored(
         self,
@@ -356,6 +359,16 @@ class Channel:
         if self.held is None and name in (None, self.model):
             return None
         raise NotLoaded(f"{name or 'the model'} is not served here")
+
+    def _still(self, adapter: str | None, version: int | None) -> str | None:
+        """`adapter`, if a turn that began with it at `version` (None: at any) can go on with it: `NotLoaded` where the
+        adapter was dropped, or where the weights the engines hold were replaced by full weights published since."""
+        if adapter is not None and adapter not in self._loaded:
+            raise NotLoaded(f"{adapter} is no longer served here")
+        held = self._depths.get(self.held, 0) if self.held is not None else 0  # (the version they were published as)
+        if adapter is None and version is not None and held > version:
+            raise NotLoaded(f"the weights of version {version} are no longer served here")
+        return adapter
 
     async def _sampled(
         self,
@@ -456,17 +469,16 @@ class Channel:
             await self.pause()  # (no turn may be half sampled when the weights under it change)
             try:
                 await asyncio.gather(*(engine.load_weights(path) for engine in self.engines))
-                self.held = adapter
             finally:
                 self.resume()
-            await self.dropped()
+            self.held = adapter
         else:
             await asyncio.gather(*(engine.load_adapter(adapter, path) for engine in self.engines))
-            self.adapter = adapter
             self._loaded.append(adapter)
         self._depths[adapter] = served_as
-        await self.keeping(self.keep)
+        self.adapter = None if full else adapter  # (what is served, and its version, change together)
         self.serving, self.version = adapter, served_as
+        await (self.dropped() if full else self.keeping(self.keep))
         return self.version
 
     async def keeping(self, keep: int) -> None:
@@ -479,11 +491,10 @@ class Channel:
 
     async def dropped(self) -> None:
         """Remove every adapter of this channel from the engines (other channels' on the same engines stay)."""
-        for name in self._loaded:
+        names, self._loaded, self.adapter = self._loaded, [], None  # (no turn begins with one being removed)
+        for name in names:
             self._depths.pop(name, None)
             await asyncio.gather(*(engine.remove_adapter(name) for engine in self.engines))
-        self._loaded.clear()
-        self.adapter = None
 
     def forget(self, names: Collection[str]) -> None:
         """Take it that the engines no longer hold the adapters `names` (a server elsewhere that started again): they

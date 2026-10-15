@@ -1,6 +1,8 @@
 """A turn's room under each combination of budgets: none, only the answer's, only the thinking's, and both."""
 
+import asyncio
 import math
+import time
 from collections.abc import Sequence
 from typing import Any, cast
 
@@ -152,6 +154,29 @@ async def test_a_prompt_that_leaves_less_than_the_least_answer_is_refused() -> N
     small = Scripted("answer\n")  # a request that caps its output below the least answer needs only its cap
     await sampled(Opened(), Limits(), small, cap=10, limit=PROMPT + 20)
     assert small.rooms == [10]
+
+
+class Slow(PlainRenderer):
+    """Takes a while to parse, as a family's tool-call parser may on what a model wrote."""
+
+    def parse(self, completion: Sequence[int], tools: Sequence[Any]) -> Message:
+        time.sleep(0.3)
+        return super().parse(completion, tools)
+
+
+async def test_a_turn_is_parsed_off_the_event_loop() -> None:
+    ticks = 0
+
+    async def ticking() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    beside = asyncio.create_task(ticking())
+    turn = await sampled(Slow(), Limits(), Scripted("answer\n"))
+    beside.cancel()
+    assert turn.result.message.text == "answer" and ticks >= 10  # (the loop went on while the reply was parsed)
 
 
 class Prompted(Opened):

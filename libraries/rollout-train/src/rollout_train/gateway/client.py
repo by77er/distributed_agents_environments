@@ -163,8 +163,16 @@ class GatewayEndpoints:
         return attempt
 
     def key(self, session_id: str, binding: RecordedModel) -> str:
-        """A key for a session of an admitted run."""
+        """A key for a session of an admitted run. `ValueError` for a trained binding that samples at a temperature or
+        top-p other than 1: a turn records neither, and the trainer scores its tokens at 1 (a slot sampled otherwise is
+        bound untrained)."""
         identity = SessionIdentity.parse(session_id)
+        sampling = binding.sampling
+        if binding.trained and (sampling.temperature != 1.0 or sampling.top_p != 1.0):
+            raise ValueError(
+                f"slot {identity.model_slot} is trained on, so it samples at temperature 1 and top-p 1, not at "
+                f"temperature {sampling.temperature} and top-p {sampling.top_p}"
+            )
         attempt = self.attempt(identity.owner)
         grant = Grant(
             run=attempt.run,

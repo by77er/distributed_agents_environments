@@ -26,6 +26,7 @@ The answer's room is reserved first: `Limits.answer`, or with no answer budget, 
 the request's cap). A prompt that leaves less than that, and room for a forced close, is refused (`ContextOverflow`).
 """
 
+import asyncio
 import math
 import time
 from collections.abc import Sequence
@@ -177,7 +178,7 @@ async def sample_turn(
         await phase(prompt, min(room, limits.thinking + limits.answer), stops)
     else:  # no budget: everything the context leaves
         await phase(prompt, room, stops)
-    message = renderer.parse(completion, request.tools)
+    message = await asyncio.to_thread(renderer.parse, completion, request.tools)  # (off the loop: what the model wrote)
     finished = bool(completion) and completion[-1] in stops
     reason = FinishReason.TOOL_USE if message.tool_calls else FinishReason.STOP if finished else FinishReason.LENGTH
     result = SampleResult(

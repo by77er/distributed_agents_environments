@@ -230,6 +230,111 @@ async def test_a_turn_whose_weights_stop_being_served_is_sampled_again_and_a_mis
     assert await gateway.store.turns("train", "r_2") == []
 
 
+class Holding(EchoEngine):
+    """Holds adapters by name, as vLLM's and Tinker's engines do (asked for one it does not hold: `KeyError`), and
+    full weights by path. A turn's thinking (a prompt that ends in its open, `<`) waits until it is let go
+    (`go`); an adapter's removal, until `removed` is."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.adapters: dict[str, str] = {}
+        self.weights = "base"
+        self.sampled: list[tuple[str | None, str]] = []
+        """The adapter and the full weights each generation sampled."""
+        self.thinking, self.go = asyncio.Event(), asyncio.Event()
+        self.removing, self.removed = asyncio.Event(), asyncio.Event()
+        self.removed.set()
+
+    async def generate(
+        self,
+        prompt: Sequence[int],
+        *,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_token_ids: Sequence[int],
+        adapter: str | None,
+        thinking_budget: int | None = None,
+        top: int = 0,
+    ) -> Generation:
+        if adapter is not None:
+            self.adapters[adapter]  # (KeyError where it was removed, as VllmEngine and TinkerEngine raise)
+        self.sampled.append((adapter, self.weights))
+        if prompt[-1] == ord("<"):
+            self.thinking.set()
+            await self.go.wait()
+            return Generation([ord(each) for each in "hmm>"], [-0.5] * 4, "stop")
+        return Generation([ord(each) for each in "ok\n"], [-0.5] * 3, "stop")
+
+    async def load_adapter(self, name: str, path: str) -> None:
+        self.adapters[name] = path
+
+    async def remove_adapter(self, name: str) -> None:
+        self.removing.set()
+        await self.removed.wait()
+        self.adapters.pop(name, None)
+
+    async def load_weights(self, path: str) -> None:
+        self.weights = path
+
+
+class Opened(PlainRenderer):
+    """Thinking the prompt opens (`<`) and the model closes (`>`): a turn with a thinking budget has two phases."""
+
+    thinking = ThinkingFormat(open="<", close=">", prompt_opens=True, forced_close=">")  # type: ignore[assignment]
+
+    def render(self, messages: Sequence[Message], tools: Sequence[Any]) -> list[int]:
+        return [*super().render(messages, tools), ord("<")]
+
+    def thinking_end_token_ids(self) -> list[int]:
+        return [ord(">")]
+
+
+async def test_a_turn_that_begins_while_a_publish_drops_an_old_adapter_is_stamped_with_what_it_sampled(
+    tmp_path: Path,
+) -> None:
+    ledger, blobs = stores(tmp_path)
+    engine = Holding()
+    channel = Channel("policy", [engine], cast(Renderer, PlainRenderer()), keep=1)
+    await channel.publish("aaa", "/checkpoints/aaa", 1)
+    gateway = gateway_over(channel, ledger, blobs)
+    engine.removed.clear()
+    publishing = asyncio.create_task(channel.publish("bbb", "/checkpoints/bbb", 2))
+    await engine.removing.wait()  # (bbb is loaded, and aaa is being removed)
+    reply = await gateway.sample(await grant(ledger), asked("r_1:0:0"))
+    engine.removed.set()
+    await publishing
+    assert engine.sampled == [("bbb", "base")] and (reply.checkpoint, reply.depth) == ("bbb", 2)
+
+
+@pytest.mark.parametrize("full", [False, True])
+async def test_a_turn_whose_weights_go_between_its_phases_is_sampled_again_on_what_is_served(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, full: bool
+) -> None:
+    monkeypatch.setattr("rollout_train.gateway.service.BACKOFF", 0.0)
+    ledger, blobs = stores(tmp_path)
+    engine = Holding()
+    channel = Channel("policy", [engine], cast(Renderer, Opened()), Limits(thinking=50, answer=20))
+    await channel.publish("aaa", "/checkpoints/aaa", 1, full=full)
+    gateway = gateway_over(channel, ledger, blobs)
+    turn = asyncio.create_task(gateway.sample(await grant(ledger), asked("r_1:0:0")))
+    await engine.thinking.wait()
+    if full:  # (full weights are loaded once the phase in flight ends: the turn's next phase would sample them)
+        publishing = asyncio.create_task(channel.publish("bbb", "/checkpoints/bbb", 2, full=True))
+        await asyncio.sleep(0.01)
+        engine.go.set()
+        await publishing
+    else:  # (with two adapters kept, the turn's is dropped two publishes on)
+        await channel.publish("bbb", "/checkpoints/bbb", 2)
+        await channel.publish("ccc", "/checkpoints/ccc", 3)
+        engine.go.set()
+    reply = await turn
+    (recorded,) = await gateway.store.turns("train", "r_1")
+    assert (reply.checkpoint, reply.depth) == (("bbb", 2) if full else ("ccc", 3)) and recorded.timings["attempt"] == 2
+    sampled = [(None, "/checkpoints/bbb")] * 2 if full else [("ccc", "base")] * 2
+    assert engine.sampled[1:] == sampled  # (its first phase again, then its second, all on what is served now)
+
+
 async def made(checkpoints: Checkpoints, fence: Fence, tmp_path: Path, parent: Checkpoint | None = None) -> Checkpoint:
     """A checkpoint of run `train`, its weights one small file, that the run says its channel serves from now on."""
     id = new_id()
@@ -276,6 +381,67 @@ async def test_a_routed_channel_samples_the_newest_checkpoint_its_server_has_wit
         assert [(turn.effect_id, turn.checkpoint, turn.depth) for turn in turns] == [
             ("a", first.id, 1), ("b", second.id, 2)
         ]  # fmt: skip
+
+
+class Unasked:
+    """A server whose limit is known only once it is asked what it has, as a `RemoteEngine`'s; it refuses a request for
+    no tokens, as vLLM does."""
+
+    address = "unasked"
+    max_model_len = 0
+
+    def __init__(self) -> None:
+        self.asked: list[int] = []
+
+    async def models(self, within: float = 2.0) -> dict[str, Any]:
+        self.max_model_len = 4096
+        return {MODEL: {"id": MODEL, "max_model_len": 4096}}
+
+    async def generate(self, prompt: Sequence[int], *, max_tokens: int, **options: Any) -> Generation:
+        self.asked.append(max_tokens)
+        if max_tokens < 1:
+            raise RuntimeError(f"400: max_tokens must be at least 1, got {max_tokens}")
+        return Generation([ord(each) for each in "ok\n"], [-0.5] * 3, "stop", model=MODEL)
+
+    def close(self) -> None: ...
+
+
+async def test_a_routed_channel_asks_for_a_requests_cap_before_its_servers_say_their_limit_and_after_one_missed_a_look(
+    tmp_path: Path,
+) -> None:
+    ledger, blobs = stores(tmp_path)
+    server = Unasked()
+    route = Route(cast(Renderer, PlainRenderer()), MODEL, (cast(Any, server),))
+    routes = Routes({"policy": route}, ledger, every=0.05, patience=0.5)
+    gateway = gateway_over(None, ledger, blobs, routes)
+    key = keyring().mint(await grant(ledger))
+    body = {"model": "x", "max_tokens": 100, "messages": [{"role": "user", "content": "Go."}]}
+    async with client(create_app(gateway)) as http:
+        first = await http.post("/v1/messages", json=body, headers=bearer(key, "a"))  # (no server asked yet)
+        routes.channel("train", "policy")._has.clear()  # pyright: ignore[reportPrivateUsage]  (it missed a look)
+        assert routes.channel("train", "policy").context_limit == 4096  # (what it last said)
+        second = await http.post("/v1/messages", json=body, headers=bearer(key, "b"))
+    assert (first.status_code, second.status_code) == (200, 200) and server.asked == [100, 100]
+
+
+class Broken(EchoEngine):
+    async def generate(self, prompt: Sequence[int], **options: Any) -> Generation:
+        raise RuntimeError("the engine broke")
+
+
+async def test_a_failure_outside_the_contract_is_answered_in_the_apis_own_shape(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    ledger, blobs = stores(tmp_path)
+    gateway = gateway_over(Channel("policy", [Broken()], cast(Renderer, PlainRenderer())), ledger, blobs)
+    key = keyring().mint(await grant(ledger))
+    body = {"model": "x", "max_tokens": 10, "messages": [{"role": "user", "content": "Go."}]}
+    async with client(create_app(gateway)) as http:
+        openai_said = await http.post("/v1/chat/completions", json=body, headers=bearer(key, "a"))
+        anthropic_said = await http.post("/v1/messages", json=body, headers=bearer(key, "b"))
+    assert (openai_said.status_code, openai_said.json()["error"]["type"]) == (503, "server_error")
+    assert (anthropic_said.status_code, anthropic_said.json()["error"]["type"]) == (500, "api_error")
+    assert "the engine broke" in caplog.text  # (why is in the gateway's log)
 
 
 async def test_links_a_request_declares_are_recorded_and_can_decide_what_is_trained(tmp_path: Path) -> None:

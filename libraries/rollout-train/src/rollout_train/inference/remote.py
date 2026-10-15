@@ -132,7 +132,8 @@ class CheckpointServer(Protocol):
 class Connection:
     """How servers are reached: a bearer token read from an environment variable (`token_env`) or a file
     (`token_file`), never written down; TLS verified against a CA bundle (`ca`), and a client certificate and its key
-    (`certificate`, `key`) for servers that ask for one. Nothing: plain HTTP, no token."""
+    (`certificate`, `key`) for servers that ask for one, read again when their files change (a renewed certificate is
+    presented from the next connection on). Nothing: plain HTTP, no token."""
 
     token_env: str | None = None
     token_file: str | None = None
@@ -161,7 +162,7 @@ class Connection:
             verify = ssl.create_default_context(cafile=str(Path(self.ca).expanduser()) if self.ca else None)
             if self.certificate is not None:
                 key = str(Path(self.key).expanduser()) if self.key else None
-                verify.load_cert_chain(str(Path(self.certificate).expanduser()), key)
+                verify = _Renewing.presenting(verify, str(Path(self.certificate).expanduser()), key)
             if self.identity is not None:
                 verify = requiring(verify, self.identity)
         hooks: dict[str, list[Callable[[httpx.Request], Awaitable[None]]]] = {}
@@ -169,6 +170,40 @@ class Connection:
             hooks["request"] = [_https_only(self.identity)]
         limits = httpx.Limits(max_connections=CONNECTIONS, max_keepalive_connections=CONNECTIONS)
         return httpx.AsyncClient(timeout=timeout, headers=headers, verify=verify, event_hooks=hooks, limits=limits)
+
+
+class _Renewing(ssl.SSLContext):
+    """A client's context whose certificate is read again from its files before a connection's handshake once they
+    changed: the Secret they are mounted from is rewritten with a renewed certificate (every 6 hours, each good for
+    24), and a client kept for a run (a pod's, a trainer's) must present the one it holds now."""
+
+    pair: tuple[str, str | None] = ("", None)
+    """The certificate's file, and its key's (None: the certificate's file holds it)."""
+    read: tuple[tuple[int, int], ...] = ()
+    """Each file as it was when the pair was last read: its inode and when it was last changed."""
+
+    @classmethod
+    def presenting(cls, context: ssl.SSLContext, certificate: str, key: str | None) -> "_Renewing":
+        """`context` (as `ssl.create_default_context` made it, verifying as it verifies), presenting the certificate in
+        `certificate` and its key."""
+        context.__class__ = cls
+        renewing = cast(_Renewing, context)
+        renewing.pair = (certificate, key)
+        renewing.renewed()
+        return renewing
+
+    def renewed(self) -> None:
+        """Read the pair again, if either file changed since it was last read."""
+        certificate, key = self.pair
+        stamp = tuple((each.st_ino, each.st_mtime_ns) for each in map(os.stat, filter(None, (certificate, key))))
+        if stamp != self.read:
+            self.load_cert_chain(certificate, key)
+            self.read = stamp
+
+    def wrap_bio(self, *args: Any, **kwargs: Any) -> ssl.SSLObject:
+        with contextlib.suppress(OSError):  # (a pair caught being rewritten: read again at the next connection)
+            self.renewed()
+        return super().wrap_bio(*args, **kwargs)
 
 
 def https_only(address: str, connection: Connection | None) -> None:
@@ -508,7 +543,9 @@ class RemoteChannel:
 
     @property
     def context_limit(self) -> int:
-        accepted = [engine.max_model_len for address, engine in self._engines.items() if address in self._has]
+        """The longest turn it takes: the least of what its servers last said they accept (whether or not they answered
+        the last look) and the longest the trainer trains on; 0 while neither is known."""
+        accepted = [engine.max_model_len for engine in self._engines.values() if engine.max_model_len]
         sequence = self.limits.sequence
         if not accepted:
             return sequence or 0

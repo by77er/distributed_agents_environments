@@ -21,9 +21,13 @@ certificate and checked by its own identity (`rollout_train.pods.routing.LeasedS
 Providers are known by name with the servers each is reached at (`Provided`): from the cluster config (`of`: every
 provider whose servers answer vLLM's API at its endpoints, every `api` provider, `Hosted`, and every provider on pods),
 or given (a test's scripted servers).
+
+A run not asked for in a while (`IDLE`: one that ended) is forgotten, its channels closed; nothing is kept of a run
+with no start.
 """
 
 import asyncio
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -42,7 +46,7 @@ if TYPE_CHECKING:
     from rollout_train.providers import Auth, Tls
     from rollout_train.recorder.renderers import Renderer
 
-__all__ = ["ON_PODS", "SERVED_AT_ENDPOINTS", "ChannelDirectory", "Provided", "started_settings"]
+__all__ = ["IDLE", "ON_PODS", "SERVED_AT_ENDPOINTS", "ChannelDirectory", "Provided", "started_settings"]
 
 type Built = RemoteChannel | ApiChannel
 """A run's channel as the directory builds it: on servers elsewhere, or on a hosted API."""
@@ -52,6 +56,9 @@ SERVED_AT_ENDPOINTS = ("vllm", "vllm-servers")
 ON_PODS = ("runpod-inference", "runpod-host")
 """The kinds whose servers are RunPod's pods: a run's channel on one is served by the pods the run's leases name, found
 by their beats (`rollout_train.pods.routing.LeasedServers`)."""
+IDLE = 3600.0
+"""Seconds a run's channels are kept after it was last asked for (far longer than a turn waits): then they are closed,
+and built again if it is asked for again."""
 
 
 @dataclass(frozen=True)
@@ -78,7 +85,8 @@ class ChannelDirectory:
     providers in `providers`, rendered with the renderer each channel names (`renderers`, given its `module:name` and
     the model; by default the renderer itself, called with the model), and over the hosted APIs in `hosted`. What each
     channel should serve and what its servers have are asked again every `every` seconds; a turn waits up to
-    `patience` seconds for a server with a checkpoint close enough."""
+    `patience` seconds for a server with a checkpoint close enough. A run not asked for in `idle` seconds is
+    forgotten."""
 
     def __init__(
         self,
@@ -91,6 +99,7 @@ class ChannelDirectory:
         renderers: Callable[[str, str], "Renderer"] = _renderer,
         every: float | None = None,
         patience: float = 300.0,
+        idle: float = IDLE,
     ) -> None:
         self.ledger = ledger
         self.providers = dict(providers)
@@ -101,8 +110,12 @@ class ChannelDirectory:
         self.renderers = renderers
         self._every = every
         self._patience = patience
+        self._idle = idle
         self._runs: dict[str, dict[str, Built]] = {}
-        self._loading: dict[str, asyncio.Lock] = {}
+        self._asked: dict[str, float] = {}
+        """When each run of `_runs` was last asked for."""
+        self._loading: dict[str, asyncio.Future[None]] = {}
+        """The loads in progress, by run: whoever asks for the run meanwhile waits for its load."""
 
     @classmethod
     def of(cls, cluster: "Cluster", ledger: Ledger, **options: Any) -> "ChannelDirectory":
@@ -119,27 +132,43 @@ class ChannelDirectory:
 
     async def load(self, run: str) -> dict[str, Built]:
         """A run's channels, by name, built from its newest start the first time (a run whose start names no
-        provider this directory knows has none; one with no start yet is asked again next time)."""
+        provider this directory knows has none; one with no start yet is asked again next time). Runs not asked for
+        in `idle` seconds are forgotten, their channels closed."""
+        now = time.monotonic()
+        for idle in [each for each, asked in self._asked.items() if now - asked > self._idle and each != run]:
+            del self._asked[idle]
+            for channel in self._runs.pop(idle, {}).values():
+                channel.close()
+        if run not in self._runs:
+            if run not in self._loading:
+                loading = asyncio.ensure_future(self._loaded(run))
+                loading.add_done_callback(lambda _: self._loading.pop(run, None))
+                self._loading[run] = loading
+            await asyncio.shield(self._loading[run])
         if run in self._runs:
-            return self._runs[run]
-        async with self._loading.setdefault(run, asyncio.Lock()):
-            if run in self._runs:
-                return self._runs[run]
-            settings = await started_settings(self.ledger, run)
-            if settings is None:
-                return {}
+            self._asked[run] = time.monotonic()
+        return self._runs.get(run, {})
+
+    async def _loaded(self, run: str) -> None:
+        """Build a run's channels from its newest start, if it has one."""
+        settings = await started_settings(self.ledger, run)
+        if settings is not None:
             self._runs[run] = {
                 name: channel for name in settings.channels if (channel := self._built(run, name, settings)) is not None
             }
-            return self._runs[run]
+            self._asked[run] = time.monotonic()
 
     def channel(self, run: str, name: str) -> Built | None:
         """A run's channel, once the run is loaded."""
+        if run in self._runs:
+            self._asked[run] = time.monotonic()
         return self._runs.get(run, {}).get(name)
 
     def channels(self) -> dict[str, Built]:
         """Every channel built so far, by its name within its run (`RUN/NAME`)."""
-        return {qualified(run, name): channel for run, built in self._runs.items() for name, channel in built.items()}
+        return {
+            qualified(run, name): channel for run, built in list(self._runs.items()) for name, channel in built.items()
+        }  # (a beat reads it in a thread: the runs are listed at once)
 
     def _built(self, run: str, name: str, settings: RunSettings) -> Built | None:
         """A channel of a run, over its providers' servers or on its hosted API; none where it names a provider this

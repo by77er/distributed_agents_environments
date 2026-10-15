@@ -502,6 +502,9 @@ def create_app(gateway: Gateway) -> Starlette:
                 return format.error(error.failure, str(error))
             except ModelEndpointError as error:
                 return refused(format, error)
+            except Exception:  # (a failure outside the contract: answered as the API answers one, and logged here)
+                logger.exception("a request to %s failed", request.url.path)
+                return format.error(Failure.ENDPOINT, "the gateway failed to answer: its log says why")
             return replied(format, reply.result, sample.effect_id, body, said(reply))
 
         return answer

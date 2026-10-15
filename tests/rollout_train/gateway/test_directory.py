@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 from pydantic import JsonValue
 
 from rollout.contracts import Message
@@ -200,6 +201,28 @@ async def test_a_runner_learns_a_runs_channels_from_a_gateway_elsewhere(tmp_path
         request = sample_request([Message.user("Score it.")], "r_1:judge:0", session_id="r_1/judge")
         assert remote.endpoint(judge).describe("r_1/judge").context_limit == 4096
         assert (await remote.endpoint(judge).sample(request)).message.text.strip() == "judge-model"
+
+
+async def test_a_directory_keeps_nothing_of_a_run_with_no_start_and_forgets_a_run_not_asked_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, blobs = FileLedger(tmp_path / "ledger"), FileBlobStore(tmp_path / "blobs")
+    await started(ledger, "r", SETTINGS)
+    providers = {"local": Provided((Held("local", "base"),)), "judging": Provided((Held("judging", "judge-model"),))}
+    directory = ChannelDirectory(ledger, providers, every=0.01, idle=0.2)
+    gateway = Gateway(TurnStore(ledger, blobs), keyring(), directory=directory)
+    async with client(create_app(gateway)) as http:
+        for number in range(50):  # (anyone may ask for any run's channels)
+            assert (await http.get("/v1/models", params={"run": f"nothing-{number}"})).json()["data"] == []
+    built, again = await asyncio.gather(directory.load("r"), directory.load("r"))  # (built once)
+    assert built is again and set(built) == {"policy", "opponent", "judge"}
+    assert directory._loading == {} and set(directory._runs) == {"r"}  # pyright: ignore[reportPrivateUsage]
+    closed: list[str] = []
+    for name, channel in built.items():
+        monkeypatch.setattr(channel, "close", lambda name=name: closed.append(name))
+    await asyncio.sleep(0.25)
+    assert await directory.load("another") == {} and sorted(closed) == ["judge", "opponent", "policy"]
+    assert directory.channel("r", "policy") is None and set(await directory.load("r")) == set(built)  # (built again)
 
 
 async def test_a_following_channel_serves_the_followed_records_lag_behind_and_a_fixed_one_its_checkpoint(

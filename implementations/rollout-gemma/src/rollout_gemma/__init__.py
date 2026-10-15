@@ -107,7 +107,7 @@ def _value(text: str, at: int) -> tuple[JsonValue, int]:
         at += 1
         while at < len(text):
             at = _skip(text, at)
-            if at >= len(text) or text[at] == "]":
+            if at >= len(text) or text[at] in "]}":  # (a stray brace ends the list too)
                 return items, at + 1
             item, at = _value(text, at)
             items.append(item)

@@ -1,5 +1,7 @@
 """Gemma 4's token format: what a prompt holds, what ends a turn, and what a sampled turn says."""
 
+import random
+import signal
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,7 +21,7 @@ from rollout.contracts import (
 )
 from rollout.harness import RecordedModel
 from rollout.harness.blobs import FileBlobStore
-from rollout_gemma import arguments, gemma4
+from rollout_gemma import QUOTE, arguments, gemma4
 from rollout_train.inference import Channel, Limits
 from rollout_train.ledger import FileLedger
 from rollout_train.recorder.renderers import Tokenizer
@@ -105,6 +107,33 @@ def test_arguments_read_strings_numbers_flags_objects_and_lists() -> None:
         "nested": {"k": "v", "m": [1, "x"]}, "items": [{"a": 1}, [2]],
     }  # fmt: skip
     assert arguments("") == {}
+
+
+@pytest.mark.skipif(not hasattr(signal, "setitimer"), reason="no interval timer to bound each read by")
+def test_arguments_are_read_in_time_whatever_the_model_wrote() -> None:
+    def late(*_: object) -> None:
+        raise TimeoutError
+
+    def read(said: str) -> dict[str, Any]:
+        signal.setitimer(signal.ITIMER_REAL, 1.0)
+        try:
+            return arguments(said)
+        except TimeoutError:
+            pass
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        pytest.fail(f"arguments({said!r}) did not end")
+
+    before = signal.signal(signal.SIGALRM, late)
+    try:
+        assert read("a:[1},b:2") == {"a": [1], "b": 2}  # (a stray brace ends the list)
+        assert read("a:{b:[1}},c:3") == {"a": {"b": [1]}, "c": 3}
+        pieces = ["a", ":", ",", "{", "}", "[", "]", "1", " ", QUOTE, "true"]
+        chance = random.Random(0)
+        for _ in range(3000):
+            read("".join(chance.choice(pieces) for _ in range(chance.randrange(1, 30))))
+    finally:
+        signal.signal(signal.SIGALRM, before)
 
 
 async def test_a_thinking_budget_closes_the_channel_and_the_turn_is_recorded(

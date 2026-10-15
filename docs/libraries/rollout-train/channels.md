@@ -97,7 +97,9 @@ nothing.
 
 - The adapters before stay loaded, so that a turn in progress (a thought, then its answer) finishes under the
   weights it began with: `Channel.keep` in all with the one served (`max_lag + 1`, two for the default `max_lag` of
-  one; a follower sets it to its run's, `keeping(n)`). Older ones are dropped.
+  one; a follower sets it to its run's, `keeping(n)`). Older ones are dropped. What is served and the version it is
+  served as change together, and a turn whose adapter was dropped, or whose full weights were replaced, before its
+  answer is sampled is `NotLoaded` there, and sampled again from what is served then.
 - Every sampled span records the version it was sampled at
   ([what a session exports](recorder.md#what-a-session-exports)).
 - `publish(…, full=True)` serves a full checkpoint ([full weights](checkpoints.md#full-weights-and-merges)): the

@@ -25,9 +25,11 @@ from rollout.contracts import (
 )
 from rollout_train.gateway import TurnRecord, TurnStore, turns_table
 from rollout_train.recorder.segments import segments_of
-from tests.rollout_qwen.support import qwen_tokenizer
 from tests.rollout_train.gateway.support import stores
 
+qwen_tokenizer = pytest.importorskip(
+    "tests.rollout_qwen.support", reason="Qwen's renderers come with the gpu and tinker extras"
+).qwen_tokenizer
 prompts = pytest.importorskip("minecraft_team.prompts")
 tasks = pytest.importorskip("minecraft_team.tasks")
 SAID = (

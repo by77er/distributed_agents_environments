@@ -8,6 +8,7 @@ that family's `ToolCallFormat` and `ThinkingFormat`. A run's settings name the f
 function may say which models it renders (`renders`).
 """
 
+import contextlib
 import json
 import re
 import uuid
@@ -309,12 +310,16 @@ def _properties(tools: Sequence[ToolSpecification], name: str) -> Mapping[str, A
 
 
 def _typed(value: str, schema: Any) -> JsonValue:
-    """A parameter's text as its schema's type (XML parameters are text)."""
+    """A parameter's text as its schema's type (XML parameters are text); the text itself where it is not one (an
+    integer written `1.9`, or `inf`)."""
     kind = cast(dict[str, Any], schema).get("type") if isinstance(schema, dict) else None
     text = value.strip()
     try:
         if kind == "integer":
-            return int(float(text))
+            with contextlib.suppress(ValueError):
+                return int(text)
+            number = float(text)  # (`3.0`, `1e3`)
+            return int(number) if number.is_integer() else text
         if kind == "number":
             return float(text)
         if kind == "boolean":
@@ -322,7 +327,7 @@ def _typed(value: str, schema: Any) -> JsonValue:
         if kind in ("object", "array"):
             parsed: JsonValue = json.loads(text)
             return parsed
-    except ValueError:
+    except (ValueError, OverflowError):
         return text
     return text
 

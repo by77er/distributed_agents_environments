@@ -32,7 +32,8 @@ content and records the turn.
 
 - **A retried effect is not sampled twice.** A request whose `effect_id` was recorded is answered with the recorded
   result.
-- **The binding decides how it samples**: the temperature and `top_p` of its `SamplingParameters`.
+- **The binding decides how it samples**: the temperature and `top_p` of its `SamplingParameters`. A trained binding
+  samples at 1 and 1, as the trainer scores its tokens: a key is refused (`ValueError`) for one that says otherwise.
 - **One turn, one set of weights.** The [checkpoint](checkpoints.md) is chosen when the sample starts (where the
   channel's engines are elsewhere, the checkpoint the run says, or the newest close enough that the session's server
   has), and both of its phases sample it. Where the checkpoint is not served there after all, the server is gone, or an
@@ -103,6 +104,7 @@ segments ([`Segment`](../../guide/reference.md#segment)), each the tokens of a c
 | The context only grew: each prompt is the last one, the reply, and more | One segment for the whole conversation, with a sampled span per turn. It is trained in one pass: the prompt is run once, not once per turn. |
 | The context was edited: a compaction, an observation replaced by a shorter form, a chat template that drops earlier thinking | The edited turn begins a new segment. |
 | A prompt was repeated exactly: a client retried | The later sample replaces the earlier one. |
+| Two turns each went on from the same earlier one: a compaction attempt, and the conversation going on without it | A segment for each, both holding the earlier turn: what it sampled is trained in the first, and is context in the other. |
 
 - **Spans** ([`Span`](../../guide/reference.md#span)) mark the tokens the policy sampled. Each carries the weights
   version that sampled it, so a segment that spans a weight update says so token by token.

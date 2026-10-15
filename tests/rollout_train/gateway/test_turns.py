@@ -163,9 +163,13 @@ def test_a_compaction_attempt_is_trained_on_only_if_its_harness_went_on_from_it(
     assert unaccepted(turns) == {"t3"}
     every = segments_of(turns)
     accepted = segments_of(turns, untrained=unaccepted(turns))
-    assert [len(segment.spans) for segment in every] == [2, 2, 1]  # (t2 and t3 each continue t1)
-    assert [[span.effect_id for span in segment.spans] for segment in accepted] == [["t1", "t2"], ["t1"], ["t4"]]
-    assert accepted[1].tokens == every[1].tokens  # (what t3 sampled is kept as context)
+    assert [[span.effect_id for span in segment.spans] for segment in every] == [["t1", "t2"], ["t3"], ["t4"]]
+    assert every[1].tokens == [1, 2, 3, 4, 9, 9, 6]  # (t2 and t3 each continue t1: in t3's segment, t1 is context)
+    assert every[1].logprobs == abandoned.logprobs and every[0].logprobs == [*conversation.logprobs, *attempt.logprobs]
+    assert [[span.effect_id for span in segment.spans] for segment in accepted] == [["t1", "t2"], ["t4"]]
+    for segments in (every, accepted):  # (each sampled span is trained once)
+        spans = [(span.effect_id, span.start, span.end) for segment in segments for span in segment.spans]
+        assert len(spans) == len(set(spans))
 
 
 async def test_a_turn_says_what_it_was_sampled_with_and_a_segment_what_all_its_turns_were(tmp_path: Path) -> None:

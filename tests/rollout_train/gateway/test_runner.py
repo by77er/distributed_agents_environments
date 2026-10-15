@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
+import pytest
 
 from rollout.contracts import CapabilityContract, Message, RunEvent
 from rollout.harness import (
@@ -18,6 +19,7 @@ from rollout.harness import (
     RunBinding,
     RunContext,
     RunSpecification,
+    SamplingParameters,
     Task,
     agent_program,
 )
@@ -148,3 +150,15 @@ async def test_the_links_a_program_declares_are_kept_with_its_turns(tmp_path: Pa
     links = [[(link.type, link.source) for link in turn.links] for turn in turns]
     assert links == [[], [], [], [("compaction_attempt", turns[2].effect_id)], [("compaction", turns[3].effect_id)]]
     assert unaccepted(turns) == set()  # (it went on from its summary: what it sampled for it is trained on)
+
+
+async def test_a_trained_binding_samples_at_temperature_one_and_top_p_one(tmp_path: Path) -> None:
+    ledger, blobs = stores(tmp_path)
+    endpoints = gateway_endpoints(echo_channel(), ledger=ledger, blobs=blobs)
+    await admitted(endpoints, "r_1")
+    for sampling in (SamplingParameters(temperature=0.7), SamplingParameters(top_p=0.9)):
+        with pytest.raises(ValueError, match="trained on, so it samples at temperature 1 and top-p 1"):
+            endpoints.key("r_1/policy", RecordedModel(channel="policy", sampling=sampling))
+    untrained = RecordedModel(channel="policy", sampling=SamplingParameters(temperature=0.7), trained=False)
+    assert endpoints.keyring.verify(endpoints.key("r_1/judge", untrained)).temperature == 0.7  # (never trained on)
+    assert endpoints.key("r_1/policy", POLICY)

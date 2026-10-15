@@ -5,7 +5,9 @@ the weights that sampled them (the served checkpoint's depth). A turn whose prom
 turn held (its prompt and what it sampled) continues that turn's segment: an append-only conversation is one segment,
 however many turns it has, and is trained in one pass. A turn whose context was edited (a compaction, a chat template
 that drops earlier thinking, an observation replaced by a shorter form) begins a new segment. A turn that repeats an
-earlier prompt exactly (a client's retry) replaces it.
+earlier prompt exactly (a client's retry) replaces it. A turn that two later turns each continue (a compaction attempt,
+and the conversation going on without it) is in both their segments, and is trained in the first only (in the other,
+its tokens are context).
 
 A segment also says what its turns were sampled with (`sampled_with`: the capabilities every one of them had, of
 `TOKEN_LEVEL`). A segment is trained on with an importance weight only if its tokens are the exact ones sampled and
@@ -18,7 +20,7 @@ gateway's turn store reads a session's turns back and exports them with it.
 """
 
 from collections.abc import Collection, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 TOKEN_LEVEL = ("token_exact", "sampled_logprobs", "honours_sampling")
@@ -128,7 +130,8 @@ class Turn(Protocol):
 
 def segments_of(turns: Sequence[Turn], *, untrained: Collection[str] = ()) -> list[Segment]:
     """The segments of a session's turns, oldest first, each with at least one sampled span. What the turns named in
-    `untrained` (by effect id) sampled is kept as context, with no span: it is not trained on."""
+    `untrained` (by effect id) sampled is kept as context, with no span: it is not trained on. Each span is trained
+    once, in the first segment that holds it."""
     segments: list[Segment] = []
     dropped: set[int] = set()  # continued by a later turn, or retried
     for index, turn in enumerate(turns):
@@ -157,4 +160,25 @@ def segments_of(turns: Sequence[Turn], *, untrained: Collection[str] = ()) -> li
         held_with = parent.sampled_with if parent else TOKEN_LEVEL
         sampled_with = tuple(each for each in held_with if each in turn.sampled_with)
         segments.append(Segment([*turn.prompt, *turn.completion], spans, logprobs, turn.channel, sampled_with))
-    return [segment for index, segment in enumerate(segments) if index not in dropped and segment.spans]
+    return _once([segment for index, segment in enumerate(segments) if index not in dropped])
+
+
+def _once(segments: Sequence[Segment]) -> list[Segment]:
+    """`segments`, each span trained in the first that holds it (in a later one, its tokens are context), and those
+    left with no span left out."""
+    trained: set[tuple[str, int, int]] = set()
+    kept: list[Segment] = []
+    for segment in segments:
+        spans: list[Span] = []
+        logprobs: list[float] = []
+        at = 0  # (where a span's logprobs begin: a segment's are its spans', in order)
+        for span in segment.spans:
+            size = span.end - span.start
+            if (span.effect_id, span.start, span.end) not in trained:
+                trained.add((span.effect_id, span.start, span.end))
+                spans.append(span)
+                logprobs += segment.logprobs[at : at + size]
+            at += size
+        if spans:
+            kept.append(replace(segment, spans=spans, logprobs=logprobs))
+    return kept

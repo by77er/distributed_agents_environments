@@ -48,8 +48,8 @@ async def requested(
     request: Request, format: Format, session_id: str, allowed: int, effect: str
 ) -> tuple[dict[str, Any], SampleRequest]:
     """A request's body, and the sample it asks for in a session: under its `Idempotency-Key` if it has one, else
-    under `effect`, with its cap on the output kept within `allowed`. Raises `KeyError`, `TypeError` or `ValueError`
-    when it cannot be read."""
+    under `effect`, with its cap on the output kept within `allowed` (0: not known yet, and not kept within). Raises
+    `KeyError`, `TypeError` or `ValueError` when it cannot be read."""
     body = await request.json()
     if not isinstance(body, dict):
         raise TypeError("the body is not a JSON object")
@@ -64,7 +64,7 @@ async def requested(
         session_id=session_id,
         context=ContextDelta(append=prompt.messages, digest=context_digests(prompt.messages)[-1]),
         tools=prompt.tools,
-        max_output_tokens=min(cap, allowed) if cap else None,
+        max_output_tokens=min(cap, allowed) if cap and allowed else cap or None,
     )
     return body, sample
 

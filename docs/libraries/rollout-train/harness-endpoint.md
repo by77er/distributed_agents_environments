@@ -95,4 +95,4 @@ Each API's errors come in its own shape: `{"error": {"message", "type", "code"}}
 | the key is refused: malformed, forged, expired, or its attempt taken over | 401 `invalid_api_key` | 401 `authentication_error` |
 | the request could not be read | 400 `invalid_request_error` | 400 `invalid_request_error` |
 | the context is too long for the model. Harnesses compact on it | 400 `context_length_exceeded` | 400 `invalid_request_error`, "prompt is too long: ..." |
-| the model endpoint failed | 503 `server_error` | 500 `api_error` |
+| the model endpoint failed, or the gateway did (which its log says) | 503 `server_error` | 500 `api_error` |

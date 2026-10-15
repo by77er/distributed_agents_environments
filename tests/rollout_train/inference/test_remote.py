@@ -4,10 +4,17 @@ says, stamping each token with the depth of the checkpoint its answer names. The
 OpenAI-compatible server."""
 
 import asyncio
+import os
+import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from starlette import routing
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from rollout.contracts import Message, ModelEndpointError
 from rollout.harness import RecordedModel
@@ -19,12 +26,14 @@ from rollout_train.gateway import GatewayEndpoints
 from rollout_train.inference import Channel, Connection, Limits, RemoteChannel, RemoteEngine, Route, Routes
 from rollout_train.inference.remote import ENGINES, NotLoaded, Unreachable
 from rollout_train.ledger import Fence, FileLedger
+from rollout_train.pods import GATEWAY_IDENTITY, pod_identity
 from rollout_train.presence import FilePresence
 from rollout_train.record import scope
 from rollout_train.recorder import Renderer
 from rollout_train.serving import Serving, qualified, record_serving, wanted
 from rollout_train.testing import PlainRenderer, admitted, gateway_endpoints, sample_request
 from tests.rollout_train.machines import MODEL, Saying, engine_host, fake_vllm, passing_on, served
+from tests.rollout_train.pods.authority import Authority, Issued, served_tls, server_context
 
 OPTIONS: dict[str, Any] = {"max_tokens": 20, "temperature": 1.0, "top_p": 1.0, "stop_token_ids": [10]}
 
@@ -383,3 +392,36 @@ async def test_an_eval_plays_its_checkpoint_and_no_other(tmp_path: Path) -> None
         await until(lambda: host.channel.serving == second.id)
         await routes.channel("e", "policy").refresh(now=True)
         assert await said(recorder, "r_1/policy", run="e") == [(second.id, 2)]
+
+
+async def test_a_client_kept_for_a_run_presents_the_certificate_its_files_hold_now(tmp_path: Path) -> None:
+    """The gateway's certificate is rewritten in its files as it is renewed (a Secret, every 6 hours): a client kept
+    for a run's length presents the one they hold at its next connection, and still checks the server's identity."""
+    authority = Authority(tmp_path / "authority")
+    pod = authority.issue("pod", pod_identity("p1"), ips=["127.0.0.1"])
+    certificate, key = tmp_path / "gateway.crt", tmp_path / "gateway.key"
+
+    def presenting(issued: Issued) -> None:  # (written beside, then moved over, as a Secret's files are replaced)
+        for source, target in ((issued.certificate, certificate), (issued.key, key)):
+            shutil.copy(source, tmp_path / "renewed")
+            os.replace(tmp_path / "renewed", target)
+
+    presenting(authority.issue("other", "spiffe://rollout/someone-else"))  # (a certificate the pod does not take)
+
+    def models(_: Request) -> JSONResponse:
+        return JSONResponse({"data": [{"id": "m"}]})
+
+    listing = Starlette(routes=[routing.Route("/v1/models", models)])
+    connection = Connection(ca=str(authority.root), certificate=str(certificate), key=str(key))
+    async with (
+        served_tls(listing, server_context(authority, pod, client=GATEWAY_IDENTITY)) as url,
+        replace(connection, identity=pod_identity("p1")).client() as kept,
+        replace(connection, identity=pod_identity("p2")).client() as mistaken,
+    ):
+        engine = RemoteEngine("m", address=url, client=kept)
+        with pytest.raises(Unreachable):
+            await engine.models(within=5)
+        presenting(authority.issue("gateway", GATEWAY_IDENTITY))
+        assert list(await engine.models(within=5)) == ["m"]
+        with pytest.raises(Unreachable, match="is not spiffe://rollout/pod/p2"):
+            await RemoteEngine("m", address=url, client=mistaken).models(within=5)

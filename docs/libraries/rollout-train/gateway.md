@@ -251,8 +251,8 @@ The gateway samples a channel through its `Sampler` ([channels](channels.md)):
 - **A channel a run's start names** with a provider the gateway's
   [`ChannelDirectory`](../../guide/reference.md#channeldirectory) knows is built the first time a key of that run is
   shown (or the runner asks whether the run's channels can be sampled): from the run settings its newest start records,
-  the channel's providers, model, renderer and thinking budget, as a `RemoteChannel` over those providers' servers.
-  Nothing registers it, and it serves what its mode says ([what a channel should
+  the channel's providers, model, renderer and thinking budget, as a `RemoteChannel` over those providers' servers
+  (closed once the run has not been asked for in an hour, and built again if it is). Nothing registers it, and it serves what its mode says ([what a channel should
   serve](channels.md#what-a-channel-should-serve)): the trained channel what the run trains, a `follows` channel the
   followed channel's checkpoint `lag` records back, a `fixed` one its pinned checkpoint or the base model. The directory
   knows providers by name with the servers each is reached at (`Provided`): `ChannelDirectory.of(cluster, ledger)` takes
